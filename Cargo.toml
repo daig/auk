@@ -20,3 +20,12 @@ missing_debug_implementations = "warn"
 [workspace.lints.clippy]
 dbg_macro = "warn"
 todo = "warn"
+
+# Optimize dependencies in dev builds. Luau, wgpu and Vello at -O0 are slow enough to trip plugin
+# budgets and skew rendering in debug test runs; our own crates stay unoptimized for fast rebuilds.
+[profile.dev.package."*"]
+opt-level = 2
+
+# Line numbers in backtraces from release test runs (scripts/verify.sh runs everything in release).
+[profile.release]
+debug = "line-tables-only"

@@ -1,0 +1,13 @@
+# Test-runner settings for scripts/verify.sh (GOAL.md). They're part of the gate: don't loosen them
+# to make a test pass.
+#
+# nextest rejects any filter that matches no test binary, so add a suite's overrides (a longer
+# timeout it really needs, the `screen` group) only once the suite exists.
+
+[profile.default]
+# A test still running after 5 minutes is killed and fails, so a hang can't stall the loop.
+slow-timeout = { period = "60s", terminate-after = 5 }
+
+[test-groups]
+# Suites that drive GUI apps or Safari, or post key events, take turns: give them this group.
+screen = { max-threads = 1 }
