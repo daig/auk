@@ -35,6 +35,9 @@ pub enum PaneKind {
     Shell,
     /// `$SHELL -l -c <line>`.
     Command { line: String },
+    /// An agent pane (§5.1): a command pane running `agent_command` (default `omp`) through the
+    /// login shell, which windows badge with the agent icon.
+    Agent { line: String },
     /// A plugin block (§9.5): its kind `<plugin>.<block>`, its launch args and its last `save`
     /// (JSON text), which a restore starts it from.
     Block {
@@ -44,6 +47,27 @@ pub enum PaneKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         saved: Option<String>,
     },
+}
+
+impl PaneKind {
+    /// The kind every window sees in the layout (§5.1).
+    pub fn tag(&self) -> auk_mirror::layout::PaneTag {
+        use auk_mirror::layout::PaneTag;
+        match self {
+            PaneKind::Shell => PaneTag::Shell,
+            PaneKind::Command { .. } => PaneTag::Command,
+            PaneKind::Agent { .. } => PaneTag::Agent,
+            PaneKind::Block { .. } => PaneTag::Block,
+        }
+    }
+
+    /// The command line a command or agent pane runs.
+    pub fn line(&self) -> Option<&str> {
+        match self {
+            PaneKind::Command { line } | PaneKind::Agent { line } => Some(line),
+            PaneKind::Shell | PaneKind::Block { .. } => None,
+        }
+    }
 }
 
 /// One `C`…`D` span (§5.3): the daemon measures the duration itself.
@@ -227,6 +251,13 @@ pub struct Pane {
     pub plugin: Option<crate::plugins::PaneLink>,
     /// The resume variables set since the last prompt (§5.4, D19), for the state file.
     pub resume: crate::persist::ResumeVars,
+    /// The pane stays in the layout when its program exits 0 (`--keep-open`, §5.1).
+    pub keep_open: bool,
+    /// A close was asked for: the pane leaves the layout when its process ends, whatever its
+    /// status.
+    pub closing: bool,
+    /// A block pane whose block couldn't start shows a card with Retry (§9.5).
+    pub block_failed: Option<crate::plugins::FailedBlock>,
 }
 
 impl Pane {
@@ -259,6 +290,9 @@ impl Pane {
             stand_in: false,
             plugin: None,
             resume: Default::default(),
+            keep_open: false,
+            closing: false,
+            block_failed: None,
         };
         // No client shows the pane yet.
         pane.apply_primary_facts();
@@ -421,6 +455,16 @@ impl Pane {
                 io.gate.dropped.load(Ordering::Relaxed),
             )
         })
+    }
+
+    /// Whether the pane leaves the layout now that its program ended with `status` (§5.1): a
+    /// program that exits 0 closes its pane unless it was opened with `--keep-open`; any other
+    /// status keeps the pane open, showing how it ended, until it is closed. A pane being closed,
+    /// and a plugin block, always leave.
+    pub fn closes_on_exit(&self, status: i32) -> bool {
+        self.closing
+            || matches!(self.kind, PaneKind::Block { .. })
+            || (status == 0 && !self.keep_open)
     }
 
     /// The process ended.

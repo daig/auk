@@ -58,6 +58,21 @@ impl WinState {
             }
         }
         model.status = self.plugins.status.clone();
+        model.card = self.plugins.block_card.as_ref().map(|c| crate::chrome::CardView {
+            title: "Could not start the block".to_owned(),
+            sub: c.error.clone(),
+            retry: "card:retry".to_owned(),
+        });
+        // Presence (§10.1): who else is attached to the host.
+        if let Some(text) = self.presence_text() {
+            model.status.push(crate::chrome::StatusItem {
+                plugin: "auk.presence".to_owned(),
+                text,
+                icon: Some("users".to_owned()),
+                tone: Some("muted".to_owned()),
+                command: None,
+            });
+        }
         model.status_title = self
             .focused_pane()
             .map(|p| {
@@ -120,6 +135,18 @@ impl WinState {
                 });
             }
         }
+        // "New <title> block" for each Ready plugin's palette block types (§9.5).
+        self.plugins_catalog();
+        for (p, b) in self.plugins.catalog.block_types() {
+            if b.palette {
+                rows.push(Row {
+                    label: format!("New {} block", b.title),
+                    group: p.name.clone(),
+                    icon: b.icon.clone(),
+                    action: RowAction::Block(format!("{}.{}", p.id, b.id)),
+                });
+            }
+        }
         rows
     }
 
@@ -147,6 +174,16 @@ impl WinState {
             }
             RowAction::Open(path) => {
                 self.open_path_from_palette(&path);
+            }
+            RowAction::Block(kind) => {
+                let cwd = self.focused_cwd();
+                self.open_block(
+                    &kind,
+                    &[],
+                    auk_plugins::window::How::Tab,
+                    auk_plugins::window::Reveal { focus: true },
+                    cwd,
+                );
             }
         }
     }
@@ -286,7 +323,7 @@ impl WinState {
     }
 
     /// The focused field's native selection text.
-    fn field_selection_text(&mut self, pane: PaneId) -> Option<String> {
+    pub(super) fn field_selection_text(&self, pane: PaneId) -> Option<String> {
         let sf = self.surfaces.get(&pane)?;
         let shared = self.conn.shared();
         let tsp = shared.panes.get(&pane)?.replica.tsp();
@@ -362,7 +399,9 @@ impl WinState {
         let overlay = self.overlays.any();
         let in_bars = m.y < BAR_HEIGHT || m.y > height - STATUS_HEIGHT;
         let toast = matches!(action, Some(ChromeAction::Toast(_)));
-        if !(overlay || in_bars || toast) {
+        // The block card's buttons (§9.5).
+        let card = matches!(&action, Some(ChromeAction::Run(n)) if n.starts_with("card:"));
+        if !(overlay || in_bars || toast || card) {
             return false;
         }
         if button == MouseButton::Left
@@ -384,7 +423,7 @@ impl WinState {
         };
         match action {
             ChromeAction::Run(name) => {
-                if let Err(e) = self.run_action_named(&name) {
+                if let Err(e) = self.run_keymap_action(&name) {
                     eprintln!("auk: status line: {e}");
                 }
             }
@@ -433,7 +472,7 @@ impl WinState {
     }
 
     /// A pane-relative press point in its surfaces' document, if a surface is under it.
-    fn surface_point(&self, pane: PaneId, x: f64, y: f64) -> Option<(f32, f32)> {
+    pub(super) fn surface_point(&self, pane: PaneId, x: f64, y: f64) -> Option<(f32, f32)> {
         let scale = self.size.map_or(2.0, |s| s.scale);
         let view = self.views.get(&pane)?;
         let px = ((x - view.grid_origin.0) * scale) as f32;
@@ -443,6 +482,20 @@ impl WinState {
         }
         let sf = self.surfaces.get(&pane)?;
         sf.doc_point(&view.arranged, px, py, view.content_px, scale as f32)
+    }
+
+    /// The command-block document point under a window point, if a command block is there.
+    fn lens_point(&self, pane: PaneId, x: f64, y: f64) -> Option<(f32, f32)> {
+        let scale = self.size.map_or(2.0, |s| s.scale);
+        let view = self.views.get(&pane)?;
+        let px = ((x - view.grid_origin.0) * scale) as f32;
+        let py = ((y - view.grid_origin.1) * scale) as f32;
+        if px < 0.0 || py < 0.0 {
+            return None;
+        }
+        self.surfaces
+            .get(&pane)?
+            .lens_point(&view.arranged, px, py, scale as f32)
     }
 
     /// A secondary press over a surface opens its context menu (§7.8 `menu`). Returns whether
@@ -522,14 +575,16 @@ impl WinState {
         let mut changed = false;
         let panes: Vec<PaneId> = self.surfaces.keys().copied().collect();
         for pane in panes {
-            let point = if Some(pane) == over {
-                self.surface_point(pane, x, y)
+            let (point, lens_point) = if Some(pane) == over {
+                (self.surface_point(pane, x, y), self.lens_point(pane, x, y))
             } else {
-                None
+                (None, None)
             };
             let Some(sf) = self.surfaces.get_mut(&pane) else {
                 continue;
             };
+            // Command blocks show their toolbar on hover (§9.6).
+            changed |= sf.lens_hover(lens_point);
             let (doc, pv) = sf.parts();
             let (hx, hy) = point.unwrap_or((-1.0e6, -1.0e6));
             let before = pv.hovered().to_vec();

@@ -1650,6 +1650,16 @@ pub fn parse_longhand<'i>(prop: Prop, p: &mut Parser<'i>) -> PResult<SV> {
             if p.try_parse(|p| p.expect_ident_matching("none")).is_ok() {
                 return Ok(SV::Kw("none"));
             }
+            // `url()` reaches here only from sheets that may load (plugin and built-in sheets;
+            // program sheets drop it earlier), and only `data:` URLs: plugin files are inlined
+            // as `data:` when the sheet is installed (§9.8 CSS).
+            if let Ok(url) = p.try_parse(|p| p.expect_url().map(|u| u.to_string())) {
+                return if url.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("data:")) {
+                    Ok(SV::Str(Arc::from(url.as_str())))
+                } else {
+                    Err(ParseError::custom(ValueError::Url))
+                };
+            }
             // Gradients are accepted; their arguments aren't drawn yet.
             let name = p.expect_function()?.to_ascii_lowercase();
             if !matches!(
@@ -2085,6 +2095,7 @@ fn parse_shorthand<'i>(name: &str, p: &mut Parser<'i>) -> PResult<Vec<(Prop, SV)
         }
         "background" => {
             let mut color = SV::Color(SColor::Rgba(crate::css::values::Color::TRANSPARENT));
+            let mut image = SV::Kw("none");
             loop {
                 if p.is_exhausted() {
                     break;
@@ -2093,7 +2104,8 @@ fn parse_shorthand<'i>(name: &str, p: &mut Parser<'i>) -> PResult<Vec<(Prop, SV)
                     color = SV::Color(c);
                     continue;
                 }
-                if p.try_parse(|p| parse_longhand(BackgroundImage, p)).is_ok() {
+                if let Ok(i) = p.try_parse(|p| parse_longhand(BackgroundImage, p)) {
+                    image = i;
                     continue;
                 }
                 match p.next()?.clone() {
@@ -2103,13 +2115,13 @@ fn parse_shorthand<'i>(name: &str, p: &mut Parser<'i>) -> PResult<Vec<(Prop, SV)
                     | Token::Number { .. } => {}
                     Token::Delim('/') | Token::Comma => {}
                     Token::UnquotedUrl(_) => return Err(ParseError::custom(ValueError::Url)),
+                    Token::Function(f) if f.eq_ignore_ascii_case("url") => {
+                        return Err(ParseError::custom(ValueError::Url));
+                    }
                     _ => return Err(ParseError::unexpected_token()),
                 }
             }
-            Ok(vec![
-                (BackgroundColor, color),
-                (BackgroundImage, SV::Kw("none")),
-            ])
+            Ok(vec![(BackgroundColor, color), (BackgroundImage, image)])
         }
         "text-decoration" => {
             let mut line = None;

@@ -307,6 +307,12 @@ impl Painter<'_> {
                 [l.border.top, l.border.right, l.border.bottom, l.border.left],
             );
         }
+        if let Some(url) = &s.background_image
+            && let Some(image) = doc.url_image(url)
+            && s.visibility == Visibility::Visible
+        {
+            self.paint_background_image(image, s, r, l, xf);
+        }
         if let Some(image) = n.image.as_deref()
             && s.visibility == Visibility::Visible
         {
@@ -370,6 +376,38 @@ impl Painter<'_> {
         if layered {
             self.scene.pop_layer();
         }
+    }
+
+    /// A `background-image` picture: at its own size (times the zoom), from the padding box's
+    /// top-left corner, repeated over the border box and clipped to it (CSS initial
+    /// `background-size`, `-position`, `-repeat` and `-clip`).
+    fn paint_background_image(
+        &mut self,
+        image: &ImageContent,
+        s: &ComputedStyle,
+        r: Rect,
+        l: &taffy::Layout,
+        xf: Affine,
+    ) {
+        let (iw, ih) = (image.data.width, image.data.height);
+        let (pw, ph) = image.picture_size();
+        let (tw, th) = (pw * s.zoom, ph * s.zoom);
+        if r.w <= 0.0 || r.h <= 0.0 || iw == 0 || ih == 0 || tw <= 0.0 || th <= 0.0 {
+            return;
+        }
+        let origin = (r.x + l.border.left, r.y + l.border.top);
+        let brush = image
+            .brush(s.image_rendering)
+            .with_extend(vello::peniko::Extend::Repeat);
+        let place = Affine::translate((origin.0 as f64, origin.1 as f64))
+            * Affine::scale_non_uniform(tw as f64 / iw as f64, th as f64 / ih as f64);
+        self.scene.fill(
+            Fill::NonZero,
+            xf,
+            &brush,
+            Some(place),
+            &RoundedRect::from_rect(kr(r), radii(s, r)),
+        );
     }
 
     /// Replaced content: the picture placed in the content box by `object-fit`, clipped to the

@@ -6,55 +6,14 @@ use auk_ui::{Document, NodeId, SheetKind};
 
 use crate::geometry::Rect;
 
-/// The tab bar's height, in points.
-pub const BAR_HEIGHT: f64 = 30.0;
-
-/// Width of the line between split panes, in points.
-pub const DIVIDER: f64 = 1.0;
-
-/// The status line's height, in points (§9.8 "Chrome formatters").
-pub const STATUS_HEIGHT: f64 = 22.0;
+// The portable widgets (tab bar, dividers and focus ring, status line, palette) live in auk-views
+// so the browser client draws the same ones (§22, D3); this module adds the app's own overlays.
+pub use auk_views::chrome::{BAR_HEIGHT, DIVIDER, PaletteView, STATUS_HEIGHT, StatusItem};
+use auk_views::chrome as widgets;
 
 const CSS: &str = r#"
 html { font-family: system-ui, sans-serif; font-size: 12px; color: #d4d7db; }
 body { margin: 0; }
-.bar {
-  position: absolute; left: 0; top: 0; right: 0; height: 30px; box-sizing: border-box;
-  display: flex; align-items: center; gap: 8px; padding: 0 10px;
-  background-color: #1b1d20; border-bottom: 1px solid #2c2f33;
-}
-.sessions, .tabs { display: flex; align-items: center; gap: 3px; }
-.tabs { flex: 1 1 auto; min-width: 0; overflow: hidden; }
-.session, .tab, .add {
-  padding: 3px 9px; border-radius: 5px; white-space: nowrap; color: #8d939a;
-}
-.tab { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
-.session.active { background-color: #34383d; color: #eceef0; }
-.tab.active { background-color: #2a2d31; color: #eceef0; }
-.add { padding: 3px 7px; }
-.zoomed { color: #e2b45d; }
-.sep { width: 1px; height: 16px; background-color: #34373b; }
-.divider { position: absolute; background-color: #2c2f33; }
-.focus { position: absolute; box-sizing: border-box; border: 1px solid #4f7fd8; }
-html.light { color: #2a2d31; }
-html.light .bar { background-color: #ececea; border-bottom-color: #d5d5d2; }
-html.light .session, html.light .tab, html.light .add { color: #6d7177; }
-html.light .session.active { background-color: #d7d8d6; color: #1b1d20; }
-html.light .tab.active { background-color: #fbfbfa; color: #1b1d20; }
-html.light .sep, html.light .divider { background-color: #d5d5d2; }
-#statusline {
-  position: absolute; left: 0; right: 0; height: 22px; box-sizing: border-box;
-  display: flex; align-items: center; gap: 10px; padding: 0 10px; font-size: 11px;
-  background-color: #1b1d20; border-top: 1px solid #2c2f33; color: #8d939a;
-}
-#statusline .sl-left { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-#statusline .sl-right { display: flex; gap: 10px; }
-#statusline .sl-plugin { white-space: nowrap; color: #c3c7cc; }
-#statusline .sl-plugin[data-tone="muted"] { color: #8d939a; }
-#statusline .sl-plugin[data-tone="error"] { color: #e5534b; }
-#statusline .sl-plugin[data-tone="success"] { color: #57ab5a; }
-html.light #statusline { background-color: #ececea; border-top-color: #d5d5d2; color: #6d7177; }
-html.light #statusline .sl-plugin { color: #2a2d31; }
 .toasts { position: absolute; right: 12px; top: 40px; width: 300px; display: flex; flex-direction: column; gap: 6px; }
 .toast {
   padding: 8px 10px; border-radius: 7px; background-color: #2a2d31; border: 1px solid #3a3e44;
@@ -64,23 +23,17 @@ html.light #statusline .sl-plugin { color: #2a2d31; }
 .toast.toast-success { border-color: #3f7e44; }
 .toast .t-sub { color: #9da3a9; font-size: 11px; margin-top: 2px; }
 html.light .toast { background-color: #fbfbfa; border-color: #d5d5d2; color: #1b1d20; }
-.backdrop { position: absolute; left: 0; top: 0; }
-.backdrop.dim { background-color: rgba(0, 0, 0, 0.6); }
-.palette {
-  position: absolute; left: 50%; top: 60px; width: 520px; margin-left: -260px;
-  background-color: #23262a; border: 1px solid #3a3e44; border-radius: 9px; padding: 6px;
-  box-sizing: border-box;
+.card {
+  position: absolute; left: 50%; top: 80px; width: 360px; margin-left: -180px; padding: 12px 14px;
+  border-radius: 9px; background-color: #2a2d31; border: 1px solid #a1403a; color: #eceef0;
+  box-sizing: border-box; display: flex; flex-direction: column; gap: 6px;
 }
-.palette .p-query { padding: 6px 8px; color: #eceef0; border-bottom: 1px solid #34373b; margin-bottom: 4px; min-height: 16px; }
-.palette .p-query.empty { color: #6d7177; }
-.palette .p-row { display: flex; padding: 5px 8px; border-radius: 5px; color: #c3c7cc; }
-.palette .p-row.selected { background-color: #34507e; color: #ffffff; }
-.palette .p-label { flex: 1 1 auto; }
-.palette .p-group { color: #8d939a; font-size: 11px; }
-html.light .palette { background-color: #fbfbfa; border-color: #d5d5d2; }
-html.light .palette .p-query { color: #1b1d20; border-bottom-color: #e2e2df; }
-html.light .palette .p-row { color: #2a2d31; }
-html.light .palette .p-row.selected { background-color: #cddcf5; color: #1b1d20; }
+.card .c-title { font-weight: 600; }
+.card .c-sub { color: #9da3a9; font-size: 11px; }
+.card .c-buttons { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+.card .c-button { padding: 3px 10px; border-radius: 5px; border: 1px solid #3a3e44; }
+.card .c-button.primary { background-color: #3a3e44; }
+html.light .card { background-color: #fbfbfa; color: #1b1d20; }
 .ctxmenu {
   position: absolute; min-width: 160px; padding: 4px; box-sizing: border-box;
   background-color: #23262a; border: 1px solid #3a3e44; border-radius: 7px;
@@ -93,6 +46,21 @@ html.light .ctxmenu .ctx-item { color: #1b1d20; }
 .viewer .v-bar { display: flex; gap: 12px; align-items: center; color: #eceef0; padding: 6px 0; }
 .viewer .v-btn { padding: 2px 9px; border-radius: 5px; background-color: #34383d; color: #eceef0; }
 .viewer .v-title { color: #eceef0; }
+.linkhint {
+  position: absolute; left: 8px; max-width: 70%; padding: 2px 8px; box-sizing: border-box;
+  border-radius: 5px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background-color: #23262a; border: 1px solid #3a3e44; color: #c3c7cc;
+}
+.findbar {
+  position: absolute; right: 14px; top: 38px; width: 300px; display: flex; gap: 8px; align-items: center;
+  padding: 5px 8px; box-sizing: border-box; border-radius: 7px;
+  background-color: #23262a; border: 1px solid #3a3e44;
+}
+.findbar .f-query { flex: 1 1 auto; min-width: 0; color: #eceef0; white-space: nowrap; overflow: hidden; }
+.findbar .f-query.empty { color: #6d7177; }
+.findbar .f-count { color: #8d939a; font-size: 11px; white-space: nowrap; }
+html.light .linkhint, html.light .findbar { background-color: #fbfbfa; border-color: #d5d5d2; color: #2a2d31; }
+html.light .findbar .f-query { color: #1b1d20; }
 "#;
 
 /// What the chrome shows. The document is rebuilt when this changes.
@@ -116,18 +84,35 @@ pub struct ChromeModel {
     pub palette: Option<PaletteView>,
     pub menu: Option<MenuView>,
     pub viewer: Option<ViewerView>,
+    /// The program a tab's focused pane reports (`app` of its hello), by tab id: only while a
+    /// listening surface is open (§7.2, §12.2).
+    pub tab_apps: std::collections::BTreeMap<u64, String>,
+    /// The focused pane's reporting program, in the status line.
+    pub pane_app: Option<String>,
+    /// The target of the link under the pointer (§7.14).
+    pub hover_link: Option<String>,
+    pub find: Option<FindView>,
+    /// A problem card with a retry ("Could not start the block", §9.5).
+    pub card: Option<CardView>,
 }
 
-/// A status line segment (`tern.chrome.status`).
+/// A card over the panes: a title, what went wrong, and Retry (runs `retry`) or Dismiss.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct StatusItem {
-    pub plugin: String,
-    pub text: String,
-    pub icon: Option<String>,
-    pub tone: Option<String>,
-    /// The action a click runs.
-    pub command: Option<String>,
+pub struct CardView {
+    pub title: String,
+    pub sub: String,
+    /// The action Retry runs.
+    pub retry: String,
 }
+
+/// The find bar: the query and "current of count".
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FindView {
+    pub query: String,
+    pub current: Option<usize>,
+    pub count: usize,
+}
+
 
 /// A toast on screen.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -138,13 +123,6 @@ pub struct ToastItem {
     pub sub: Option<String>,
 }
 
-/// The palette as drawn: the query and the shown rows `(label, group)`.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct PaletteView {
-    pub query: String,
-    pub rows: Vec<(String, String)>,
-    pub selected: usize,
-}
 
 /// A context menu (§7.8 `menu` actions) at a point, in points.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -211,6 +189,8 @@ impl std::fmt::Debug for Chrome {
 impl Chrome {
     pub fn new(scale: f32) -> Chrome {
         let mut doc = Document::new();
+        let errors = doc.set_stylesheet("chrome-widgets", SheetKind::BuiltIn, None, widgets::CSS);
+        debug_assert!(errors.is_empty(), "{errors:?}");
         let errors = doc.set_stylesheet("chrome", SheetKind::BuiltIn, None, CSS);
         debug_assert!(errors.is_empty(), "{errors:?}");
         doc.set_device_scale(scale);
@@ -271,58 +251,30 @@ impl Chrome {
         for child in self.doc.children(self.body).to_vec() {
             self.doc.remove(child);
         }
-        let bar = self.child(self.body, "div", "bar", None);
-        self.doc.set_attribute(bar, "role", "toolbar");
-        let sessions = self.child(bar, "div", "sessions", None);
-        self.doc.set_attribute(sessions, "role", "tablist");
-        self.doc.set_attribute(sessions, "aria-label", "Sessions");
-        for (id, name, active) in &model.sessions {
-            let class = if *active { "session active" } else { "session" };
-            let s = self.child(sessions, "div", class, Some(name));
-            self.doc
-                .set_attribute(s, "data-action", &format!("session:{id}"));
-            self.doc.set_attribute(s, "role", "tab");
-            if *active {
-                self.doc.set_attribute(s, "aria-selected", "true");
-            }
-        }
-        let add = self.child(sessions, "div", "add", Some("+"));
-        self.doc.set_attribute(add, "data-action", "new-session");
-        self.doc.set_attribute(add, "role", "button");
-        self.doc.set_attribute(add, "aria-label", "New Session");
-        self.child(bar, "div", "sep", None);
-        let tabs = self.child(bar, "div", "tabs", None);
-        self.doc.set_attribute(tabs, "role", "tablist");
-        self.doc.set_attribute(tabs, "aria-label", "Tabs");
-        for (id, title, active, zoomed) in &model.tabs {
-            let class = match (*active, *zoomed) {
-                (true, true) => "tab active zoomed",
-                (true, false) => "tab active",
-                (false, true) => "tab zoomed",
-                (false, false) => "tab",
-            };
-            let t = self.child(tabs, "div", class, Some(title));
-            self.doc
-                .set_attribute(t, "data-action", &format!("tab:{id}"));
-            self.doc.set_attribute(t, "role", "tab");
-            if *active {
-                self.doc.set_attribute(t, "aria-selected", "true");
-            }
-        }
-        let add = self.child(tabs, "div", "add", Some("+"));
-        self.doc.set_attribute(add, "data-action", "new-tab");
-        self.doc.set_attribute(add, "role", "button");
-        self.doc.set_attribute(add, "aria-label", "New Tab");
-        for d in &model.dividers {
-            let div = self.child(self.body, "div", "divider", None);
-            self.place(div, d);
-        }
-        if let Some(f) = &model.focus
-            && !model.dividers.is_empty()
-        {
-            let ring = self.child(self.body, "div", "focus", None);
-            self.place(ring, f);
-        }
+        let sessions: Vec<widgets::SessionItem> = model
+            .sessions
+            .iter()
+            .map(|(id, name, active)| widgets::SessionItem {
+                id: *id,
+                name: name.clone(),
+                active: *active,
+            })
+            .collect();
+        let tabs: Vec<widgets::TabItem> = model
+            .tabs
+            .iter()
+            .map(|(id, title, active, zoomed)| widgets::TabItem {
+                id: *id,
+                title: title.clone(),
+                active: *active,
+                zoomed: *zoomed,
+                app: model.tab_apps.get(id).cloned(),
+            })
+            .collect();
+        widgets::tab_bar(&mut self.doc, self.body, &sessions, &tabs);
+        let rect = |r: &Rect| auk_ui::Rect::new(r.x as f32, r.y as f32, r.w as f32, r.h as f32);
+        let lines: Vec<auk_ui::Rect> = model.dividers.iter().map(rect).collect();
+        widgets::dividers(&mut self.doc, self.body, &lines, model.focus.as_ref().map(rect));
         self.overlays(model);
         self.doc.update();
         self.model = Some(model.clone());
@@ -333,27 +285,38 @@ impl Chrome {
     fn overlays(&mut self, model: &ChromeModel) {
         // Boxes that span the window are placed in px: the document's own height is its content.
         let (w, h) = (model.width, model.height);
-        let line = self.child(self.body, "div", "statusline", None);
-        self.doc.set_attribute(line, "id", "statusline");
-        self.doc
-            .set_inline_style(line, &format!("top: {}px", h - STATUS_HEIGHT));
-        self.doc.set_attribute(line, "role", "status");
-        self.child(line, "div", "sl-left", Some(&model.status_title));
-        let right = self.child(line, "div", "sl-right", None);
-        for seg in &model.status {
-            let s = self.child(right, "div", "sl-plugin", Some(&seg.text));
-            self.doc.set_attribute(s, "data-plugin", &seg.plugin);
-            if let Some(tone) = &seg.tone {
-                self.doc.set_attribute(s, "data-tone", tone);
-            }
-            if let Some(icon) = &seg.icon {
-                self.doc.set_attribute(s, "data-icon", icon);
-            }
-            if let Some(cmd) = &seg.command {
-                self.doc
-                    .set_attribute(s, "data-action", &format!("run:{cmd}"));
-                self.doc.set_attribute(s, "role", "button");
-            }
+        widgets::status_line(
+            &mut self.doc,
+            self.body,
+            h - STATUS_HEIGHT,
+            model.pane_app.as_deref(),
+            &model.status_title,
+            &model.status,
+        );
+        if let Some(link) = &model.hover_link {
+            let hint = self.child(self.body, "div", "linkhint", Some(link));
+            self.doc.set_attribute(hint, "role", "tooltip");
+            self.doc
+                .set_inline_style(hint, &format!("top: {}px", h - STATUS_HEIGHT - 26.0));
+        }
+        if let Some(f) = &model.find {
+            let bar = self.child(self.body, "div", "findbar", None);
+            self.doc.set_attribute(bar, "role", "search");
+            self.doc.set_attribute(bar, "aria-label", "Find");
+            let (class, text) = if f.query.is_empty() {
+                ("f-query empty", "Find")
+            } else {
+                ("f-query", f.query.as_str())
+            };
+            let q = self.child(bar, "div", class, Some(text));
+            self.doc.set_attribute(q, "role", "textbox");
+            let count = match (f.count, f.current) {
+                (0, _) if f.query.is_empty() => String::new(),
+                (0, _) => "No matches".to_owned(),
+                (n, Some(i)) => format!("{} of {n}", i + 1),
+                (n, None) => format!("{n}"),
+            };
+            self.child(bar, "div", "f-count", Some(&count));
         }
         if !model.toasts.is_empty() {
             let stack = self.child(self.body, "div", "toasts", None);
@@ -368,37 +331,20 @@ impl Chrome {
                 }
             }
         }
+        if let Some(c) = &model.card {
+            let card = self.child(self.body, "div", "card", None);
+            self.doc.set_attribute(card, "role", "alertdialog");
+            self.child(card, "div", "c-title", Some(&c.title));
+            self.child(card, "div", "c-sub", Some(&c.sub));
+            let row = self.child(card, "div", "c-buttons", None);
+            let retry = self.child(row, "div", "c-button primary", Some("Retry"));
+            self.doc
+                .set_attribute(retry, "data-action", &format!("run:{}", c.retry));
+            let dismiss = self.child(row, "div", "c-button", Some("Dismiss"));
+            self.doc.set_attribute(dismiss, "data-action", "run:card:dismiss");
+        }
         if let Some(p) = &model.palette {
-            let back = self.child(self.body, "div", "backdrop", None);
-            self.doc.set_attribute(back, "data-action", "dismiss");
-            self.doc
-                .set_inline_style(back, &format!("width: {w}px; height: {h}px"));
-            let box_ = self.child(self.body, "div", "palette", None);
-            self.doc.set_attribute(box_, "role", "dialog");
-            self.doc
-                .set_attribute(box_, "aria-label", "Command Palette");
-            let (class, text) = if p.query.is_empty() {
-                ("p-query empty", "Type a command, or a path to open")
-            } else {
-                ("p-query", p.query.as_str())
-            };
-            let q = self.child(box_, "div", class, Some(text));
-            self.doc.set_attribute(q, "role", "textbox");
-            let rows = self.child(box_, "div", "p-rows", None);
-            self.doc.set_attribute(rows, "role", "listbox");
-            for (i, (label, group)) in p.rows.iter().enumerate().take(14) {
-                let class = if i == p.selected {
-                    "p-row selected"
-                } else {
-                    "p-row"
-                };
-                let r = self.child(rows, "div", class, None);
-                self.doc.set_attribute(r, "role", "option");
-                self.doc
-                    .set_attribute(r, "data-action", &format!("palette:{i}"));
-                self.child(r, "span", "p-label", Some(label));
-                self.child(r, "span", "p-group", Some(group));
-            }
+            widgets::palette(&mut self.doc, self.body, w, h, p);
         }
         if let Some(m) = &model.menu {
             let back = self.child(self.body, "div", "backdrop", None);
@@ -504,16 +450,6 @@ impl Chrome {
         }
         self.doc.append_child(parent, e);
         e
-    }
-
-    fn place(&mut self, id: NodeId, r: &Rect) {
-        self.doc.set_inline_style(
-            id,
-            &format!(
-                "left: {}px; top: {}px; width: {}px; height: {}px",
-                r.x, r.y, r.w, r.h
-            ),
-        );
     }
 
     /// The action under a point (in points), if any.

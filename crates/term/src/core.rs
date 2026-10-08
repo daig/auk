@@ -682,6 +682,10 @@ impl Core {
             return;
         }
         end_anchor(row, events);
+        if from == 0 && to >= cols {
+            // The whole row went: so did any prompt on it.
+            row.prompt = false;
+        }
         if bg != Color::Default {
             row.touch(to);
         }

@@ -5,8 +5,9 @@
 //! | --- | --- |
 //! | `ping`, `version` | liveness and the daemon's versions |
 //! | `ls` | panes and the layout |
-//! | `new [session\|tab] [--window K] [--session ID] [--name N] [--cwd DIR] [--size CxR] [-- CMD…]` | spawns a pane |
-//! | `split TARGET right\|down [--cwd DIR] [-- CMD…]` | splits a pane |
+//! | `new [session\|tab] [--window K] [--session ID] [--name N] [--cwd DIR] [--size CxR] [--agent] [--keep-open] [-- CMD…]` | spawns a pane: a login shell, a command, or with `--agent` an agent pane (§5.1) |
+//! | `split TARGET right\|down [--cwd DIR] [--agent] [--keep-open] [-- CMD…]` | splits a pane |
+//! | `lock SESSION [on\|off\|toggle]` | locks or unlocks a session (default: toggles); SESSION is an id, a name or `@focused` |
 //! | `run TARGET WORD…` | types the words and Enter |
 //! | `send TARGET text\|paste WORD…`, `send TARGET keys KEY…` | sends input |
 //! | `capture TARGET [--ansi\|--html] [--scrollback] [--surfaces]` | the pane's content (`capture.rs`) |
@@ -21,7 +22,8 @@
 //! | `settings [--native-surfaces on\|off] [--command-lenses on\|off] [--scrollback N] [--retention BYTES]` | host settings (§15.2); changes reach every pane as a record |
 //! | `surface-play [--pane TARGET] FILE [from N] [until N] [paced [TIMES]]` | plays a TSP recording into a pane (§7.15) |
 //! | `effect [--window K] toast\|open\|copy TEXT` | asks the windows showing a window key to perform an effect |
-//! | `kill TARGET`, `close TARGET` | hangs up and closes a pane |
+//! | `close TARGET` | closes a pane as a user does: refused with a toast while its session is locked |
+//! | `kill TARGET` | hangs up and closes a pane, lock or not |
 //! | `open PATH [--window K]` | asks the windows showing the window key to open a file (their `route.open`, then their opener); `delivered` 0 means no window took it |
 //! | `events [--filter k,…]` | turns the connection into an event stream (`events.rs`) |
 //! | `checkpoint` | writes the state file now (§16) |
@@ -45,7 +47,7 @@ use serde_json::{Value, json};
 use crate::control::{self, error, ok};
 use crate::events::{Actor, as_actor};
 use crate::pane::{Pane, PaneKind};
-use crate::server::{Daemon, NewPane, Place, lock};
+use crate::server::{Closed, Daemon, NewPane, Place, lock};
 
 type Reply = Result<Value, String>;
 
@@ -101,11 +103,21 @@ impl Daemon {
             }),
             "surface-play" => return self.cmd_play(args).await,
             "effect" => self.cmd_effect(args),
-            "kill" | "close" => as_actor(Actor::Cli, || {
+            "kill" => as_actor(Actor::Cli, || {
                 self.target(args.first()).and_then(|id| self.kill(id))
             })
             .map(|()| Value::Null),
-            "plugin" | "block" | "blocks" | "pane-list" => {
+            "close" => as_actor(Actor::Cli, || {
+                let id = self.target(args.first())?;
+                Ok(match self.close(id)? {
+                    Closed::Closing => json!({"pane": id, "closed": true}),
+                    Closed::Locked { session } => {
+                        json!({"pane": id, "closed": false, "locked": session})
+                    }
+                })
+            }),
+            "lock" => self.cmd_lock(args),
+            "plugin" | "block" | "blocks" | "block-retry" | "pane-list" => {
                 as_actor(Actor::Cli, || self.plugin_command(cmd, args))
             }
             "lens" => self.with_pane(args, |p| {
@@ -186,7 +198,7 @@ impl Daemon {
                         (p.primary() == Some(*id)).then_some(p.id)
                     })
                     .collect();
-                json!({"id": id, "kind": c.kind, "window": c.window_key, "primary_for": primary_for})
+                json!({"id": id, "kind": c.kind, "window": c.window_key, "primary_for": primary_for, "identity": c.identity})
             })
             .collect();
         json!(clients)
@@ -217,7 +229,7 @@ impl Daemon {
             .map(|p| {
                 let p = lock(p);
                 let line = match &p.kind {
-                    PaneKind::Command { line } => Some(line.clone()),
+                    PaneKind::Command { line } | PaneKind::Agent { line } => Some(line.clone()),
                     PaneKind::Shell if p.shell.running => {
                         p.shell.marks.last().and_then(|m| m.cmdline.clone())
                     }
@@ -298,6 +310,8 @@ impl Daemon {
             place,
             cwd: opts.take("cwd").map(PathBuf::from),
             command: opts.command(),
+            agent: opts.switch("agent"),
+            keep_open: opts.switch("keep-open"),
             size: opts.size()?,
         })?;
         Ok(json!({"pane": id}))
@@ -320,9 +334,47 @@ impl Daemon {
             place: Place::Split { pane: at, dir },
             cwd,
             command: opts.command(),
+            agent: opts.switch("agent"),
+            keep_open: opts.switch("keep-open"),
             size: opts.size()?,
         })?;
         Ok(json!({"pane": id}))
+    }
+
+    /// `lock SESSION [on|off|toggle]`: a locked session refuses closing (§4.3).
+    fn cmd_lock(&self, args: &[String]) -> Reply {
+        let word = args.first().ok_or("lock: expected a session")?;
+        let session = {
+            let st = self.state();
+            let sessions: Vec<_> = st
+                .layout
+                .windows
+                .values()
+                .flat_map(|w| &w.sessions)
+                .collect();
+            let found = if word == "@focused" {
+                st.focused.and_then(|p| st.layout.session_of(p))
+            } else if let Ok(id) = word.parse::<u64>() {
+                sessions.iter().find(|s| s.id == id).map(|s| s.id)
+            } else {
+                sessions
+                    .iter()
+                    .find(|s| s.name == *word)
+                    .or_else(|| sessions.iter().find(|s| s.name.eq_ignore_ascii_case(word)))
+                    .map(|s| s.id)
+            };
+            let id = found.ok_or_else(|| format!("no session named {word}"))?;
+            let locked = st.layout.session(id).is_some_and(|s| s.locked);
+            (id, locked)
+        };
+        let locked = match args.get(1).map(String::as_str) {
+            None | Some("toggle") => !session.1,
+            Some("on") => true,
+            Some("off") => false,
+            Some(other) => return Err(format!("lock: expected on, off or toggle, got `{other}`")),
+        };
+        self.edit_layout(|l| l.lock_session(session.0, locked))?;
+        Ok(json!({"session": session.0, "locked": locked}))
     }
 
     fn cmd_run(&self, args: &[String]) -> Reply {
@@ -600,6 +652,9 @@ fn write(p: &mut Pane, bytes: Vec<u8>) -> Reply {
     }
 }
 
+/// Flags that take no value.
+const SWITCHES: [&str; 2] = ["agent", "keep-open"];
+
 /// `--flag value` options, positional words, and a command after `--`.
 struct Opts {
     flags: Vec<(String, String)>,
@@ -629,6 +684,7 @@ impl Opts {
                     {
                         opts.flags.push((name.into(), String::new()))
                     }
+                    None if SWITCHES.contains(&name) => opts.flags.push((name.into(), String::new())),
                     None => {
                         let value = it.next().ok_or_else(|| format!("--{name} needs a value"))?;
                         opts.flags.push((name.into(), value.clone()));
@@ -638,6 +694,11 @@ impl Opts {
             }
         }
         Ok(opts)
+    }
+
+    /// Whether a switch (`--agent`) was given.
+    fn switch(&self, name: &str) -> bool {
+        self.flags.iter().any(|(n, _)| n == name)
     }
 
     fn get(&self, name: &str) -> Option<&str> {
@@ -762,6 +823,10 @@ mod tests {
         assert_eq!(o.take("cwd").as_deref(), Some("/tmp"));
         assert_eq!(o.size().unwrap(), Some((100, 30)));
         assert_eq!(o.command().as_deref(), Some("echo hi"));
+        let o = Opts::parse(&["--agent".to_owned(), "--keep-open".to_owned(), "tab".to_owned()])
+            .unwrap();
+        assert!(o.switch("agent") && o.switch("keep-open") && !o.switch("cwd"));
+        assert_eq!(o.positional, ["tab"]);
         assert!(Opts::parse(&["--cwd".to_owned()]).is_err());
         let bad = Opts::parse(&["--size".to_owned(), "0x3".to_owned()]).unwrap();
         assert!(bad.size().is_err());

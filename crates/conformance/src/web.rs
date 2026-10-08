@@ -696,6 +696,25 @@ impl Safari {
         self.command("POST", &format!("/element/{element}/click"), &json!({}));
     }
 
+    /// Clicks the mouse at a point of the viewport, in CSS pixels.
+    pub fn click_at(&self, x: f64, y: f64) {
+        let (x, y) = (x.round() as i64, y.round() as i64);
+        self.command(
+            "POST",
+            "/actions",
+            &json!({"actions": [{
+                "type": "pointer",
+                "id": "mouse",
+                "parameters": {"pointerType": "mouse"},
+                "actions": [
+                    {"type": "pointerMove", "origin": "viewport", "x": x, "y": y},
+                    {"type": "pointerDown", "button": 0},
+                    {"type": "pointerUp", "button": 0},
+                ],
+            }]}),
+        );
+    }
+
     /// Presses and releases each character of `text` as a key, into whatever has focus
     /// (WebDriver key codes such as `\u{E007}`, Enter, included).
     pub fn press_keys(&self, text: &str) {

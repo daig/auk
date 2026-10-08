@@ -112,7 +112,7 @@ pub fn copy_prop(d: &mut ComputedStyle, s: &ComputedStyle, p: Prop) {
         GridColumnStart => grid_column_start;
         GridColumnEnd => grid_column_end;
         BackgroundColor => background_color;
-        BackgroundImage => has_background_image;
+        BackgroundImage => background_image;
         Opacity => opacity;
         ZIndex => z_index;
         VerticalAlign => vertical_align;
@@ -819,7 +819,13 @@ pub fn compute_prop(
             }
             None => false,
         },
-        P::BackgroundImage => true,
+        P::BackgroundImage => {
+            cs.background_image = match sv {
+                SV::Str(url) => Some(url.clone()),
+                _ => None,
+            };
+            true
+        }
         P::Opacity => match sv {
             SV::Num(n) => {
                 cs.opacity = *n;

@@ -891,3 +891,247 @@ fn running_lens_captures_finish_on_the_old_worker_after_a_reload() {
     let done = common::wait_for(&host, Duration::from_secs(5), &mut seen, |o| text(o).filter(|t| t.ends_with("done")));
     assert_eq!(done, "new 0 done");
 }
+
+fn block_package(root: &common::Root, id: &str, host: &str) -> PathBuf {
+    root.package(
+        id,
+        &[
+            (
+                "plugin.toml",
+                &format!("schema = 1\nid = \"{id}\"\nname = \"P {id}\"\nversion = \"1\"\nhost = \"host.luau\"\n[[blocks]]\nid = \"b\"\ntitle = \"B\"\n"),
+            ),
+            ("host.luau", host),
+        ],
+    )
+}
+
+#[test]
+fn a_retiring_worker_gets_3_s_to_let_go_of_its_blocks() {
+    let root = common::Root::new();
+    let dir = block_package(
+        &root,
+        "stuck",
+        r#"tern.block.define("b", {
+            init = function(cx) return {} end,
+            view = function() return {main = tern.ui.col({tern.ui.text("up")})} end,
+            -- A native read of a FIFO: no budget check runs until a writer comes.
+            key = function(s, key) if key.name == "s" then tern.fs.read("fifo") end return true end,
+        })"#,
+    );
+    let fifo = dir.join("fifo");
+    let made = std::process::Command::new("mkfifo").arg(&fifo).status().expect("mkfifo");
+    assert!(made.success());
+    let mut host = root.host(None);
+    let mut pane = common::BlockPane::new(1, 20, 5);
+    host.start_block(pane.launch("stuck.b", &[], None, None)).expect("type");
+    let mut others = Vec::new();
+    pane.until(&host, Duration::from_secs(5), &mut others, |p| p.text().contains("up"));
+    // The worker is now stuck in its handler and can't let go of the block.
+    pane.keys(&host, b"s");
+    std::thread::sleep(Duration::from_millis(200));
+    let started = Instant::now();
+    host.reload();
+    let took = started.elapsed();
+    assert!(
+        took >= auk_plugins::RETIRE_WAIT - Duration::from_millis(50) && took < auk_plugins::RETIRE_WAIT + Duration::from_secs(2),
+        "the reload waited {took:?}"
+    );
+    // The block moved to the new worker anyway, and re-ran `init`.
+    pane.until(&host, Duration::from_secs(5), &mut others, |p| {
+        p.surface().is_some_and(|(id, _)| id == "s2") && p.text().contains("up")
+    });
+    // Let the old worker's read finish.
+    std::fs::write(&fifo, b"x").expect("write the fifo");
+}
+
+#[test]
+fn hooks_timers_and_callbacks_die_with_the_old_vm_but_processes_run_to_completion() {
+    let root = common::Root::new();
+    let dir = root.package(
+        "gen",
+        &[
+            ("plugin.toml", "schema = 1\nid = \"gen\"\nname = \"Gen\"\nversion = \"1\"\nhost = \"host.luau\"\n"),
+            (
+                "host.luau",
+                r#"
+                tern.on("title", function(ev, cx) cx:toast("info", "v1 " .. ev.title) end)
+                local function tick() print("v1 tick") tern.timer(50, tick) end
+                tern.timer(50, tick)
+                tern.process.run({"sh", "-c", "sleep 1; echo done > done.txt"}, function(r)
+                    print("v1 process callback " .. r.status)
+                end)
+                "#,
+            ),
+        ],
+    );
+    let mut host = root.host(None);
+    let logs = || root.logs.lock().expect("logs").clone();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !logs().iter().any(|l| l == "v1 tick") {
+        assert!(Instant::now() < deadline, "no tick: {:?}", logs());
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    std::fs::write(
+        dir.join("host.luau"),
+        r#"tern.on("title", function(ev, cx) cx:toast("info", "v2 " .. ev.title) end)
+           print("v2 loaded")"#,
+    )
+    .expect("write");
+    host.reload();
+    let at = logs().len();
+    // The process the old VM started runs to its end; its callback, the old timer and the old
+    // hook don't run any more.
+    let done = dir.join("done.txt");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !done.exists() {
+        assert!(Instant::now() < deadline, "the process didn't finish");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    std::thread::sleep(Duration::from_millis(500));
+    let after = logs()[at..].to_vec();
+    assert!(
+        !after.iter().any(|l| l.starts_with("v1 ")),
+        "the old VM ran after the reload: {after:?}"
+    );
+    assert!(logs().iter().any(|l| l == "v2 loaded"));
+    host.dispatch(HostEvent::Title {
+        pane: 1,
+        title: "t".into(),
+    });
+    assert_eq!(
+        next(&host, Duration::from_secs(2)).effect,
+        toast("v2 t", None, ToastLevel::Info)
+    );
+    assert!(host.outputs().recv_timeout(Duration::from_millis(300)).is_err(), "only the new hook ran");
+}
+
+/// Applies a block pane's output for `quiet`, keeping the saves it carried, in order.
+fn pump_saves(
+    pane: &mut common::BlockPane,
+    host: &PluginHost,
+    quiet: Duration,
+    saves: &mut Vec<String>,
+    others: &mut Vec<HostOutput>,
+) {
+    while let Ok(out) = host.outputs().recv_timeout(quiet) {
+        if let HostOutput::Block(auk_plugins::BlockOutput::Saved { pane: p, saved }) = &out
+            && *p == pane.pane
+        {
+            saves.push(saved.clone());
+        }
+        if !pane.apply(host, &out) {
+            others.push(out);
+        }
+    }
+}
+
+#[test]
+fn a_raising_view_keeps_the_last_good_view_and_save_is_stored_only_when_it_changed() {
+    let root = common::Root::new();
+    block_package(
+        &root,
+        "views",
+        r#"tern.block.define("b", {
+            init = function(cx) return {n = 0, bad = false} end,
+            view = function(s)
+                if s.bad then error("view broke") end
+                return {main = tern.ui.col({tern.ui.text("n=" .. s.n)})}
+            end,
+            key = function(s, key)
+                if key.name == "x" then s.bad = true
+                elseif key.name == "y" then s.bad = false
+                elseif key.name == "n" then s.n += 1 end
+                return true
+            end,
+            save = function(s) return {n = s.n} end,
+        })"#,
+    );
+    let mut host = root.host(None);
+    let mut pane = common::BlockPane::new(1, 20, 5);
+    host.start_block(pane.launch("views.b", &[], None, None)).expect("type");
+    let (mut saves, mut others) = (Vec::new(), Vec::new());
+    let quiet = Duration::from_millis(300);
+    pump_saves(&mut pane, &host, quiet, &mut saves, &mut others);
+    assert_eq!(pane.text(), "n=0\n");
+    assert_eq!(saves, [r#"{"n":0}"#]);
+
+    // `view` raises: the last good view stays on screen, and the failure toasts.
+    pane.keys(&host, b"x");
+    pump_saves(&mut pane, &host, quiet, &mut saves, &mut others);
+    assert_eq!(pane.text(), "n=0\n");
+    assert!(
+        others.iter().any(|o| o.effect().is_some_and(|e| matches!(&e.effect, Effect::Toast { text, .. } if text == "Plugin P views: b.view failed"))),
+        "{others:?}"
+    );
+    // Handlers that leave `save`'s JSON as it was store nothing.
+    pane.keys(&host, b"y");
+    pump_saves(&mut pane, &host, quiet, &mut saves, &mut others);
+    assert_eq!(pane.text(), "n=0\n");
+    assert_eq!(saves, [r#"{"n":0}"#]);
+    pane.keys(&host, b"n");
+    pump_saves(&mut pane, &host, quiet, &mut saves, &mut others);
+    assert_eq!(pane.text(), "n=1\n");
+    assert_eq!(saves, [r#"{"n":0}"#, r#"{"n":1}"#]);
+}
+
+#[test]
+fn after_the_block_ends_render_save_exit_frame_and_blob_are_ignored() {
+    let root = common::Root::new();
+    block_package(
+        &root,
+        "ended",
+        r#"tern.block.define("b", {
+            init = function(cx) return {cx = cx, n = 0} end,
+            view = function(s) return {main = tern.ui.col({tern.ui.text("n=" .. s.n)})} end,
+            key = function(s, key, cx)
+                if key.name == "q" then
+                    cx:exit(0)
+                    tern.timer(50, function()
+                        s.n += 1
+                        s.cx:render()
+                        s.cx:save()
+                        s.cx:frame({{"set", "main.0", {role = "late"}}})
+                        local id = s.cx:blob("late bytes", "text/plain")
+                        s.cx:exit(9)
+                        -- Not guarded: these still reach the windows.
+                        s.cx:copy(id)
+                        s.cx:toast("info", "after the end")
+                    end)
+                end
+                return true
+            end,
+            save = function(s) return {n = s.n} end,
+        })"#,
+    );
+    let mut host = root.host(None);
+    let mut pane = common::BlockPane::new(1, 20, 5);
+    host.start_block(pane.launch("ended.b", &[], None, None)).expect("type");
+    let mut others = Vec::new();
+    pane.until(&host, Duration::from_secs(5), &mut others, |p| p.text() == "n=0\n");
+    pane.keys(&host, b"q");
+    pane.until(&host, Duration::from_secs(5), &mut others, |p| p.exited.is_some());
+    assert_eq!(pane.exited, Some((0, None)));
+    let frames = pane.frames;
+    let saved = pane.saved.clone();
+    // Everything after the end: only effects come out.
+    let mut later = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !later.iter().any(|o: &HostOutput| o.effect().is_some_and(|e| matches!(&e.effect, Effect::Toast { text, .. } if text == "after the end"))) {
+        let left = deadline.saturating_duration_since(Instant::now());
+        later.push(host.outputs().recv_timeout(left).expect("the late toast"));
+    }
+    later.extend(common::drain(&host, Duration::from_millis(300)));
+    for out in &later {
+        assert!(!matches!(out, HostOutput::Block(_)), "block output after the end: {out:?}");
+        pane.apply(&host, out);
+    }
+    assert_eq!((pane.frames, &pane.saved, &pane.exited), (frames, &saved, &Some((0, None))));
+    let copied = later
+        .iter()
+        .find_map(|o| match o.effect().map(|e| &e.effect) {
+            Some(Effect::Copy(text)) => Some(text.clone()),
+            _ => None,
+        })
+        .expect("the copy");
+    assert_eq!(copied.len(), 64, "blob still returns its id: {copied}");
+}

@@ -603,24 +603,190 @@ fn pane_socket_greets_and_answers_by_id() {
         .to_owned();
     let mut s = UnixStream::connect(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
     s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
-    let mut frame = |msg: &Value| -> Value {
-        let bytes = serde_json::to_vec(msg).unwrap();
-        s.write_all(&(bytes.len() as u32).to_le_bytes()).unwrap();
-        s.write_all(&bytes).unwrap();
-        let mut len = [0; 4];
-        s.read_exact(&mut len).unwrap();
-        let mut buf = vec![0; u32::from_le_bytes(len) as usize];
-        s.read_exact(&mut buf).unwrap();
-        serde_json::from_slice(&buf).unwrap()
-    };
     assert_eq!(
-        frame(&json!({"hello": {}})),
+        socket_frame(&mut s, &json!({"hello": {}})),
         json!({"welcome": {"ops": []}})
     );
     // v1 offers no ops; unknown members are skipped and the request still gets its answer.
-    let reply = frame(&json!({"id": 7, "fork": {"block": 1, "dir": "right"}, "extra": true}));
+    let reply = socket_frame(
+        &mut s,
+        &json!({"id": 7, "fork": {"block": 1, "dir": "right"}, "extra": true}),
+    );
     assert_eq!(reply["id"], 7);
     assert_eq!(reply["fork"]["error"]["kind"], "unsupported", "{reply}");
+    // The answer is keyed by the request's kind, even behind an unknown member that sorts first.
+    let reply = socket_frame(&mut s, &json!({"aaa": [1], "id": 8, "browser": {"op": "open"}}));
+    assert_eq!(reply["id"], 8, "{reply}");
+    assert_eq!(reply["browser"]["error"]["kind"], "unsupported", "{reply}");
+    assert!(reply.get("aaa").is_none(), "{reply}");
+    // An unknown kind is skipped: no answer, so the next answer is the next request's.
+    socket_send(&mut s, &json!({"id": 9, "teleport": {}}));
+    assert_eq!(socket_frame(&mut s, &json!({"id": 10, "fork": {}}))["id"], 10);
+    // Frames are capped at 256 MiB: a longer one closes the connection.
+    s.write_all(&((256u32 << 20) + 1).to_le_bytes()).unwrap();
+    let mut rest = Vec::new();
+    assert_eq!(s.read_to_end(&mut rest).unwrap_or(0), 0, "the connection closes");
+    // A fresh connection is served as before.
+    let mut s = UnixStream::connect(&path).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    assert_eq!(
+        socket_frame(&mut s, &json!({"hello": {}})),
+        json!({"welcome": {"ops": []}})
+    );
+}
+
+fn socket_send(s: &mut UnixStream, msg: &Value) {
+    let bytes = serde_json::to_vec(msg).unwrap();
+    s.write_all(&(bytes.len() as u32).to_le_bytes()).unwrap();
+    s.write_all(&bytes).unwrap();
+}
+
+/// Sends one pane-socket frame and reads the next answer.
+fn socket_frame(s: &mut UnixStream, msg: &Value) -> Value {
+    socket_send(s, msg);
+    let mut len = [0; 4];
+    s.read_exact(&mut len).unwrap();
+    let mut buf = vec![0; u32::from_le_bytes(len) as usize];
+    s.read_exact(&mut buf).unwrap();
+    serde_json::from_slice(&buf).unwrap()
+}
+
+#[test]
+fn agent_panes_run_agent_command_through_the_login_shell_with_an_agent_badge() {
+    let env = TestEnv::new(AUK, "cli-agent");
+    // `agent_command` from the settings file (`$AUK_CONFIG_DIR/settings.json`).
+    std::fs::write(
+        env.state.join("settings.json"),
+        json!({"agent_command": "echo agent-$((6*7)); sleep 300; echo end", "theme": "System"}).to_string(),
+    )
+    .unwrap();
+    let _d = env.start_daemon();
+    let first = new_shell(&env, &[]);
+    let agent = cli_json(&env, &["split", &first.to_string(), "right", "--agent"])["pane"]
+        .as_u64()
+        .expect("split prints the new pane");
+    // The login shell expands the command: it ran through `$SHELL -l -c`.
+    wait_screen(&env, agent, "agent-42");
+    let l = ls(&env);
+    let info = pane_of(&l, agent).unwrap();
+    assert_eq!(
+        info["kind"],
+        json!({"kind": "agent", "line": "echo agent-$((6*7)); sleep 300; echo end"}),
+        "{l:#}"
+    );
+    let pid = info["pid"].as_u64().unwrap();
+    let args = Command::new("ps")
+        .args(["-o", "args=", "-p", &pid.to_string()])
+        .output()
+        .unwrap();
+    let args = String::from_utf8_lossy(&args.stdout);
+    assert!(args.contains("zsh -l -c echo agent-"), "{args}");
+    // Every window sees the kind in the layout, for the agent icon (§5.1).
+    assert_eq!(
+        l["layout"]["main"]["kinds"],
+        json!({agent.to_string(): "agent"}),
+        "{l:#}"
+    );
+
+    // Without the setting, the default is `omp`; changing it doesn't touch running agents.
+    std::fs::remove_file(env.state.join("settings.json")).unwrap();
+    let out = env.cli(&["--json", "new", "tab", "--agent", "--cwd", &env.home.to_string_lossy()]);
+    let omp: Value = serde_json::from_slice(&out.stdout).expect("new prints JSON");
+    let omp = omp["pane"].as_u64().unwrap();
+    let l = ls(&env);
+    assert_eq!(pane_of(&l, omp).unwrap()["kind"]["line"], "omp", "{l:#}");
+    assert_eq!(pane_of(&l, agent).unwrap()["kind"]["line"], info["kind"]["line"]);
+    assert_eq!(l["layout"]["main"]["kinds"][omp.to_string()], "agent", "{l:#}");
+
+    // A window opens one with a layout edit: split right of its focused pane.
+    use auk_mirror::{Client, ClientFacts, ClientKind, ClientMsg, Hello, LayoutEdit};
+    let stream = UnixStream::connect(&env.socket).unwrap();
+    let hello = Hello::new(ClientKind::Headless, ClientFacts::default());
+    let (mut client, _) = Client::handshake(stream, &hello).unwrap();
+    client
+        .send(&ClientMsg::LayoutEdit(LayoutEdit::Agent { pane: Some(first) }))
+        .unwrap();
+    let third = wait_for("the window's agent pane", || {
+        let l = ls(&env);
+        let kinds = l["layout"]["main"]["kinds"].as_object()?.clone();
+        kinds
+            .iter()
+            .filter(|(_, k)| *k == "agent")
+            .filter_map(|(p, _)| p.parse::<u64>().ok())
+            .find(|p| *p != agent && *p != omp)
+    });
+    let l = ls(&env);
+    let root = &l["layout"]["main"]["sessions"][0]["tabs"][0]["root"];
+    assert_eq!(root["node"], "split", "{root:#}");
+    assert_eq!(root["first"]["dir"], "right", "{root:#}");
+    assert_eq!(root["first"]["second"]["pane"], third, "{root:#}");
+}
+
+#[test]
+fn a_locked_session_refuses_closing_its_panes_with_a_toast() {
+    let env = TestEnv::new(AUK, "cli-lock");
+    let _d = env.start_daemon();
+    let window = env.start_headless("w", &[]);
+    let a = new_shell(&env, &[]);
+    let b = cli_json(&env, &["split", &a.to_string(), "down"])["pane"]
+        .as_u64()
+        .unwrap();
+    let session = ls(&env)["layout"]["main"]["sessions"][0]["id"]
+        .as_u64()
+        .unwrap();
+    assert_eq!(ls(&env)["layout"]["main"]["sessions"][0]["locked"], false, "new sessions start unlocked");
+
+    cli(&env, &["lock", &session.to_string()]);
+    assert_eq!(ls(&env)["layout"]["main"]["sessions"][0]["locked"], true);
+    // Closing is refused, without failing the script, and the windows say why.
+    let out = env.cli(&["close", &a.to_string()]);
+    assert!(out.status.success(), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stdout).contains("locked"), "{out:?}");
+    let refused = cli_json(&env, &["close", &b.to_string()]);
+    assert_eq!(refused["closed"], false, "{refused}");
+    assert_eq!(refused["locked"], session, "{refused}");
+    let toast = wait_for("the lock's toast", || {
+        window
+            .request("effects")
+            .as_array()?
+            .iter()
+            .find(|e| e["effect"] == "toast")
+            .cloned()
+    });
+    assert_eq!(toast["text"], "Session 1 is locked", "{toast}");
+    // A window's close is refused too.
+    use auk_mirror::{Client, ClientFacts, ClientKind, ClientMsg, Hello, LayoutEdit};
+    let stream = UnixStream::connect(&env.socket).unwrap();
+    let hello = Hello::new(ClientKind::Headless, ClientFacts::default());
+    let (mut client, _) = Client::handshake(stream, &hello).unwrap();
+    client
+        .send(&ClientMsg::Attach { window_key: "main".into() })
+        .unwrap();
+    client
+        .send(&ClientMsg::LayoutEdit(LayoutEdit::Close { pane: a }))
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(500));
+    let l = ls(&env);
+    for p in [a, b] {
+        assert!(pane_of(&l, p).unwrap()["exit"].is_null(), "pane {p} closed: {l:#}");
+    }
+    // The window's lock edit unlocks it (the layout reaches every window); now closing works.
+    client
+        .send(&ClientMsg::LayoutEdit(LayoutEdit::LockSession { session, locked: false }))
+        .unwrap();
+    wait_for("the session unlocked", || {
+        (window.request("layout")["sessions"][0]["locked"] == false).then_some(())
+    });
+    cli(&env, &["close", &b.to_string()]);
+    wait_for("the closed pane to leave the layout", || {
+        let l = ls(&env);
+        (!l["layout"]["main"].to_string().contains(&format!("\"pane\":{b}}}"))).then_some(())
+    });
+    // Locking again reaches the window with the layout.
+    cli(&env, &["lock", &session.to_string()]);
+    wait_for("the window to see the lock", || {
+        (window.request("layout")["sessions"][0]["locked"] == true).then_some(())
+    });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -958,6 +1124,99 @@ fn serve_control_endpoint_takes_harness_control_and_terminal_commands() {
     });
     assert!(status.success(), "{status}");
     assert!(!serve.control.exists());
+}
+
+#[test]
+fn css_lists_sheets_in_cascade_order_with_program_sheets_as_tsp_scope_name() {
+    let env = TestEnv::new(AUK, "cli-css");
+    let out = env.root.join("shots");
+    let serve = Serve::start(&env, &out);
+    serve.ctl(&env, &["ready"]);
+    let rec = repo_root().join("fixtures/tsp/docs-ask.jsonl");
+    serve.ctl(&env, &["surface-play", &rec.to_string_lossy()]);
+    let listed = serve.ctl(&env, &["css"]);
+    let sheets = listed["sheets"].as_array().expect("a sheets list");
+    let names: Vec<&str> = sheets.iter().map(|s| s["name"].as_str().unwrap()).collect();
+    assert_eq!(names.first(), Some(&"ua"), "the user-agent sheet first: {names:?}");
+    // The recording's sheet `main`, under its surface's scope token, after the built-in sheets.
+    let (at, program) = sheets
+        .iter()
+        .enumerate()
+        .find(|(_, s)| s["name"].as_str().unwrap().starts_with("tsp:"))
+        .unwrap_or_else(|| panic!("no program sheet in {names:?}"));
+    let name = program["name"].as_str().unwrap();
+    let scope = name
+        .strip_prefix("tsp:")
+        .and_then(|r| r.strip_suffix(":main"))
+        .unwrap_or_else(|| panic!("{name} is not tsp:<scope>:main"));
+    assert!(scope.starts_with("sf"), "{name}");
+    assert!(program["rules"].as_u64().unwrap() > 0, "{program}");
+    assert_eq!(at, sheets.len() - 1, "program sheets cascade last: {names:?}");
+}
+
+#[test]
+fn serve_plugins_fixtures_loads_the_sdk_examples_into_the_private_daemon() {
+    let env = TestEnv::new(AUK, "cli-fixtures");
+    let out = env.root.join("shots");
+    let serve = Serve::start(&env, &out);
+    // No plugins unless fixtures load them (§11.3).
+    let none = serve.ctl(&env, &["plugins", "list", "--json"]);
+    assert_eq!(none["plugins"].as_array().map(Vec::len), Some(0), "{none}");
+    let loaded = serve.ctl(&env, &["plugins", "fixtures"]);
+    let examples = repo_root().join("third_party/tern-sdk/plugins/examples");
+    let linked: Vec<String> = loaded["linked"]
+        .as_array()
+        .expect("linked")
+        .iter()
+        .filter_map(|d| d.as_str().map(str::to_owned))
+        .collect();
+    for name in ["dirvars", "review-queue", "terraform", "jsonx"] {
+        assert!(
+            linked.contains(&examples.join(name).to_string_lossy().into_owned()),
+            "{name} not linked: {linked:?}"
+        );
+    }
+    let list = &loaded["list"]["plugins"];
+    let status = |id: &str| {
+        list.as_array()
+            .and_then(|p| p.iter().find(|p| p["id"] == id))
+            .map(|p| p["status"].clone())
+            .unwrap_or(Value::Null)
+    };
+    for id in ["dirvars", "review-queue", "terraform"] {
+        assert_eq!(status(id), "ready", "{id}: {list:#}");
+    }
+    // The window holds the new catalog: block types with their titles for the palette's
+    // "New <title> block" rows, and the lens rules.
+    let catalog = serve.ctl(&env, &["catalog"]);
+    let blocks: Vec<(String, String)> = catalog["plugins"]
+        .as_array()
+        .expect("plugins")
+        .iter()
+        .flat_map(|p| {
+            let id = p["id"].as_str().unwrap_or_default().to_owned();
+            p["blocks"].as_array().cloned().unwrap_or_default().into_iter().map(move |b| {
+                (format!("{id}.{}", b["id"].as_str().unwrap_or_default()), b["title"].as_str().unwrap_or_default().to_owned())
+            })
+        })
+        .collect();
+    assert!(
+        blocks.iter().any(|(kind, title)| kind == "review-queue.queue" && !title.is_empty()),
+        "{blocks:?}"
+    );
+    // A fixture plugin runs in the private daemon: the terraform lens claims a plan.
+    let plan = repo_root().join("crates/plugins/tests/fixtures/terraform-plan.txt");
+    let tf = env.root.join("bin/terraform");
+    std::fs::create_dir_all(tf.parent().unwrap()).unwrap();
+    std::fs::write(&tf, format!("#!/bin/sh\ncat '{}'\n", plan.display())).unwrap();
+    std::fs::set_permissions(&tf, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let pane = serve.ctl(&env, &["ready"])["pane"].as_u64().unwrap();
+    serve.ctl(&env, &["run", &tf.to_string_lossy(), "plan"]);
+    let lens = wait_for("the terraform lens's view", || {
+        let l = serve.ctl(&env, &["lens", &pane.to_string()]);
+        (!l["blocks"][0]["view"].is_null()).then_some(l)
+    });
+    assert_eq!(lens["blocks"][0]["plugin"], "terraform", "{lens:#}");
 }
 
 #[test]

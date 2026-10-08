@@ -102,6 +102,9 @@ impl Writer<'_> {
         if row.cells[cols - 1].flags.has(Flags::LEADING_SPACER) {
             bits |= 2;
         }
+        if row.prompt {
+            bits |= 4;
+        }
         if bits != 0 {
             self.osc(&format!("6464;row;{bits}"));
         }
@@ -234,9 +237,12 @@ fn color(s: &mut String, c: Color, base: u8, bright: u8, extended: u8) {
 }
 
 fn screen_is_blank(s: &Screen) -> bool {
-    s.buf
-        .iter()
-        .all(|r| !r.wrapped && r.anchor.is_none() && r.cells.iter().all(|c| *c == Cell::default()))
+    s.buf.iter().all(|r| {
+        !r.wrapped
+            && r.anchor.is_none()
+            && !r.prompt
+            && r.cells.iter().all(|c| *c == Cell::default())
+    })
 }
 
 pub(crate) fn snapshot(core: &Core) -> Vec<u8> {

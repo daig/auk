@@ -92,6 +92,89 @@ fn palettes_become_variables_with_the_setting() {
     assert_ne!(c2, c);
 }
 
+/// A `#rrggbb` variable's value in an inline style.
+fn var_color(style: &str, var: &str) -> [u8; 3] {
+    let v = style
+        .split(&format!("{var}: #"))
+        .nth(1)
+        .unwrap_or_else(|| panic!("no {var} in {style}"));
+    let n = u32::from_str_radix(&v[..6], 16).unwrap();
+    [(n >> 16) as u8, (n >> 8) as u8, n as u8]
+}
+
+#[test]
+fn palette_quiet_tokens_get_3_to_1_and_the_light_variant_follows_the_appearance() {
+    use auk_views::palette::{PAGE_DARK, PAGE_LIGHT, contrast};
+    let mut h = Harness::new();
+    h.hello(&[]);
+    h.apc("o", r#"{"id":"s1"}"#);
+    // Dim text tokens on both variants, and a fill whose tint the text must also clear.
+    h.apc(
+        "t",
+        r##"{"dark":{"muted":"#3a3a3a","text":"#3a3a3a","cardBg":"#202020"},"light":{"muted":"#e0e0e0","text":"#e0e0e0","accent":"#ffeeaa"}}"##,
+    );
+    h.frame_ops(
+        "s1",
+        1,
+        json!([["add", "main", "s1", null, {"id": "main", "k": "col", "c": [{"id": "t", "k": "text", "p": {"text": "x"}}]}]]),
+    );
+    h.frame();
+    let main = h.view.region(key(&h, "s1"), Region::Main).unwrap();
+    let style = h.view.written().style(main).unwrap().to_owned();
+    let tint = {
+        // cardBg at 60% over the dark page.
+        let m = |a: u8, b: u8| (f64::from(a) + (f64::from(b) - f64::from(a)) * 0.6).round() as u8;
+        [
+            m(PAGE_DARK[0], 0x20),
+            m(PAGE_DARK[1], 0x20),
+            m(PAGE_DARK[2], 0x20),
+        ]
+    };
+    let muted = var_color(&style, "--sf-p-muted");
+    let text = var_color(&style, "--sf-p-text");
+    for bg in [PAGE_DARK, tint] {
+        let quiet = contrast(muted, bg);
+        assert!(quiet >= 3.0, "quiet token at {quiet}:1");
+        assert!(
+            contrast(text, bg) >= 4.5,
+            "body text at {}:1",
+            contrast(text, bg)
+        );
+    }
+    // Quiet tokens are corrected only as far as 3:1, so they stay quieter than body text.
+    assert!(contrast(muted, PAGE_DARK) < 4.5, "{muted:?}");
+    assert!(contrast(muted, PAGE_DARK) < contrast(text, PAGE_DARK));
+    assert!(
+        !style.contains("--sf-p-accent"),
+        "dark has no accent: {style}"
+    );
+
+    // Light appearance: the light variant, corrected against the light page.
+    let light = ViewSettings {
+        dark: false,
+        ..Default::default()
+    };
+    h.view.set_settings(&mut h.doc, &h.pane, light);
+    h.frame();
+    let style = h.view.written().style(main).unwrap().to_owned();
+    assert!(style.contains("--sf-p-accent"), "{style}");
+    assert!(
+        !style.contains("--sf-tint-neutral"),
+        "dark's fill is gone: {style}"
+    );
+    let muted = var_color(&style, "--sf-p-muted");
+    let text = var_color(&style, "--sf-p-text");
+    let accent = var_color(&style, "--sf-p-accent");
+    assert!(
+        (3.0..4.5).contains(&contrast(muted, PAGE_LIGHT)),
+        "{muted:?}"
+    );
+    assert!(contrast(text, PAGE_LIGHT) >= 4.5);
+    assert!(contrast(accent, PAGE_LIGHT) >= 4.5);
+    // Corrected toward black on a light page.
+    assert!(muted.iter().all(|&c| c < 0xe0), "{muted:?}");
+}
+
 #[test]
 fn program_sheets_are_scoped_and_report_terns_errors() {
     let mut h = Harness::new();
@@ -212,6 +295,68 @@ fn motion_is_clocked_by_the_view() {
     h.view.tick(&mut h.doc, &h.pane, h.now + 400.0);
     assert_eq!(h.view.written().style(fill), Some("width: 80%"));
     assert_ne!(mid, "width: 80%");
+}
+
+#[test]
+fn md_streaming_caret_and_tool_and_agent_timers_run_on_the_view_clock() {
+    let mut h = Harness::new();
+    h.hello(&[]);
+    h.surface(
+        "s1",
+        "inline",
+        json!([
+            {"id": "md", "k": "md", "p": {"text": "Thinking about it", "stream": true}},
+            {"id": "tl", "k": "tool", "p": {"name": "bash", "title": "Run", "status": "running", "age": 2500}},
+            {"id": "ag", "k": "agent", "p": {"name": "worker", "status": "running",
+                "stats": {"age": 61000},
+                "tool": {"name": "read", "intent": "Reading", "age": 300},
+                "retry": {"attempt": 2, "max": 5, "delay": 4000, "age": 1000}}}
+        ]),
+    );
+    h.frame();
+    let t0 = h.now;
+    // The md caret sits at the end of the streaming block and pulses on the view's clock.
+    let md = h.el("s1", "md");
+    let caret = h.find_class(md, "md-caret");
+    assert_eq!(caret.len(), 1, "one caret while streaming");
+    let caret = caret[0];
+    let opacity = |h: &Harness| h.view.written().style(caret).map(str::to_owned);
+    assert_eq!(opacity(&h).as_deref(), Some("opacity: 1"));
+    let next = h.view.tick(&mut h.doc, &h.pane, t0 + 600.0);
+    assert!(next.is_some(), "the caret asks for frames");
+    assert_eq!(opacity(&h).as_deref(), Some("opacity: 0.25"));
+    h.view.tick(&mut h.doc, &h.pane, t0 + 1100.0);
+    assert_eq!(opacity(&h).as_deref(), Some("opacity: 1"));
+    // Timers: start = receive − age, ticking with the clock; the retry counts down to zero.
+    let tool_time = h.find_class(h.el("s1", "tl"), "sf-tool-time")[0];
+    assert_eq!(h.attr(tool_time, "role").as_deref(), Some("timer"));
+    assert_eq!(h.text(tool_time), "3.6s");
+    let ag = h.el("s1", "ag");
+    let times = h.find_class(ag, "time");
+    let texts = |h: &Harness| times.iter().map(|&t| h.text(t)).collect::<Vec<_>>();
+    assert_eq!(texts(&h), ["1m 02s", "1.4s", "in 1.9s"]);
+    h.view.tick(&mut h.doc, &h.pane, t0 + 5000.0);
+    assert_eq!(h.text(tool_time), "7.5s");
+    assert_eq!(texts(&h), ["1m 06s", "5.3s", "in 0.0s"]);
+    // Finished: `took` freezes the tool's time, and the md caret goes when the stream ends.
+    h.now = t0 + 5000.0;
+    h.frame_ops(
+        "s1",
+        2,
+        json!([
+            ["set", "tl", {"status": "done", "took": 1200}],
+            ["set", "md", {"stream": false}]
+        ]),
+    );
+    h.frame();
+    let tool_time = h.find_class(h.el("s1", "tl"), "sf-tool-time")[0];
+    assert_eq!(h.text(tool_time), "1.2s");
+    h.view.tick(&mut h.doc, &h.pane, t0 + 9000.0);
+    assert_eq!(h.text(tool_time), "1.2s", "frozen");
+    assert!(h.find_class(h.el("s1", "md"), "md-caret").is_empty());
+    // A hidden pane pauses all of it.
+    h.view.set_visible(&mut h.doc, &h.pane, false);
+    assert!(h.view.tick(&mut h.doc, &h.pane, t0 + 9100.0).is_none());
 }
 
 #[test]
@@ -435,6 +580,105 @@ fn long_containers_virtualize_around_the_view() {
     assert!(laid < 400, "only the window lays out: {laid}");
 }
 
+/// Whether anything under `el` has had its text laid out.
+fn text_laid_out(h: &Harness, el: auk_ui::NodeId) -> bool {
+    let mut stack = vec![el];
+    while let Some(n) = stack.pop() {
+        if h.doc.node(n).is_element() && h.doc.line_count(n) > 0 {
+            return true;
+        }
+        stack.extend(h.doc.element_children(n));
+    }
+    false
+}
+
+#[test]
+fn long_lists_code_ansi_md_kv_tables_and_trees_virtualize() {
+    let n = 600;
+    let lines: Vec<String> = (0..n).map(|i| format!("line {i}")).collect();
+    let cases: Vec<(&str, serde_json::Value, &str)> = vec![
+        (
+            "list",
+            json!({"id": "x", "k": "list", "c": (0..n).map(|i| json!({"id": format!("i{i}"), "k": "item", "p": {"label": format!("item {i}")}})).collect::<Vec<_>>()}),
+            "sf-item",
+        ),
+        (
+            "code",
+            json!({"id": "x", "k": "code", "p": {"text": lines.join("\n"), "lang": "txt"}}),
+            "sf-ln",
+        ),
+        (
+            "ansi",
+            json!({"id": "x", "k": "ansi", "p": {"text": lines.join("\r\n")}}),
+            "ln",
+        ),
+        (
+            "md",
+            json!({"id": "x", "k": "md", "p": {"text": lines.join("\n\n")}}),
+            "md",
+        ),
+        (
+            "kv",
+            json!({"id": "x", "k": "kv", "p": {"items": (0..n).map(|i| json!({"k": format!("key{i}"), "v": format!("value {i}")})).collect::<Vec<_>>()}}),
+            "sf-kv-item",
+        ),
+        (
+            "table",
+            json!({"id": "x", "k": "table", "p": {"cols": [{"id": "a", "head": "A"}, {"id": "b", "head": "B"}], "rows": (0..n).map(|i| json!({"id": i, "cells": {"a": format!("a{i}"), "b": format!("b{i}")}})).collect::<Vec<_>>()}}),
+            "sf-tbl-row",
+        ),
+        (
+            "tree",
+            json!({"id": "x", "k": "tree", "p": {"nodes": (0..n).map(|i| json!({"id": format!("n{i}"), "label": format!("node {i}")})).collect::<Vec<_>>()}}),
+            "sf-tree-node",
+        ),
+        (
+            "tree group",
+            json!({"id": "x", "k": "tree", "p": {"nodes": [{"id": "root", "label": "root", "open": true, "children": (0..n).map(|i| json!({"id": format!("n{i}"), "label": format!("node {i}")})).collect::<Vec<_>>()}]}}),
+            "sf-tree-node",
+        ),
+    ];
+    for (name, node, row_class) in cases {
+        let mut h = Harness::new();
+        h.hello(&[]);
+        h.surface("s1", "inline", json!([node]));
+        h.frame();
+        let x = h.el("s1", "x");
+        let rows = h.find_class(x, row_class);
+        let rows: Vec<_> = if name == "tree group" {
+            rows[1..].to_vec()
+        } else {
+            rows
+        };
+        assert!(rows.len() >= n, "{name}: {} rows", rows.len());
+        let (first, last) = (rows[0], *rows.last().unwrap());
+        // Near the view: laid out. Far below it: an estimate, not laid out.
+        assert!(
+            text_laid_out(&h, first),
+            "{name}: the first row is laid out"
+        );
+        assert!(
+            !text_laid_out(&h, last),
+            "{name}: the last row is only estimated"
+        );
+        let laid = h.doc.last_update_stats().laid_out;
+        assert!(laid < n, "{name}: only the window lays out ({laid} boxes)");
+        // Ops on off-screen rows still apply: they lay out when they come into view.
+        let pane = h.doc.border_box(h.view.element()).unwrap();
+        h.view
+            .set_view_rect(Some(auk_ui::Rect::new(0.0, pane.h - 800.0, 960.0, 800.0)));
+        h.view.layout(&mut h.doc);
+        let rows = h.find_class(x, row_class);
+        let last = *rows.last().unwrap();
+        assert!(
+            text_laid_out(&h, last),
+            "{name}: the last row lays out in view"
+        );
+        // The copy text still has every row (§8.3: Copy sees everything).
+        assert!(h.text(x).contains(&format!("{}", n - 1)), "{name}");
+    }
+}
+
 #[test]
 fn accessibility_tree_has_roles() {
     let mut h = Harness::new();
@@ -565,4 +809,145 @@ fn updates_are_incremental() {
     assert_eq!(kids, ["c.a", "c.b"]);
     assert!(h.class(h.el("s1", "c.a")).starts_with("sf sf-badge"));
     assert!(h.errors().is_empty(), "{:?}", h.errors());
+}
+
+#[test]
+fn code_highlights_a_screenful_on_render_and_the_rest_in_the_background() {
+    // Under one APC string (262 144 bytes).
+    let n = 12_000;
+    let text: Vec<String> = (0..n).map(|i| format!("let x{i}=1;//c")).collect();
+    let mut h = Harness::new();
+    h.hello(&[]);
+    h.surface(
+        "s1",
+        "inline",
+        json!([{"id": "c", "k": "code", "p": {"text": text.join("\n"), "lang": "rust"}}]),
+    );
+    let lines = |h: &Harness| h.find_class(h.el("s1", "c"), "sf-ln");
+    let keyword = |h: &Harness, ln: auk_ui::NodeId| !h.find_class(ln, "tk-keyword").is_empty();
+    // Right after the render: every line is drawn, the first screenful highlighted, the tail
+    // still plain.
+    let ls = lines(&h);
+    assert_eq!(ls.len(), n);
+    assert!(keyword(&h, ls[0]) && keyword(&h, ls[100]));
+    assert!(!keyword(&h, ls[n - 1]), "the tail waits for the background");
+    assert_eq!(h.text(ls[n - 1]), format!("let x{}=1;//c", n - 1));
+    // The view's clock draws the rest in as the worker finishes it.
+    let started = std::time::Instant::now();
+    loop {
+        h.now += 16.0;
+        let more = h.view.tick(&mut h.doc, &h.pane, h.now);
+        if more.is_none() {
+            break;
+        }
+        assert!(
+            started.elapsed().as_secs() < 60,
+            "highlighting never finished"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let ls = lines(&h);
+    assert!(keyword(&h, ls[n - 1]), "the tail highlighted");
+    assert!(!h.find_class(ls[n / 2], "tk-comment").is_empty());
+    // Incremental: an append keeps the drawn lines and highlights the new one at once.
+    let kept = ls[n - 2];
+    h.frame_ops("s1", 2, json!([["text", "c", "append", "\nlet tail = 1;"]]));
+    let ls = lines(&h);
+    assert_eq!(ls.len(), n + 1);
+    assert_eq!(ls[n - 2], kept, "unchanged lines stay");
+    assert!(keyword(&h, ls[n]));
+    assert!(
+        h.view.tick(&mut h.doc, &h.pane, h.now + 16.0).is_none(),
+        "nothing left to do"
+    );
+}
+
+#[test]
+fn fold_and_overlay_transitions_run_on_the_view_clock() {
+    let mut h = Harness::new();
+    h.hello(&[]);
+    h.surface(
+        "s1",
+        "inline",
+        json!([
+            {"id": "c", "k": "card", "p": {"head": "Folded", "collapsible": true, "collapsed": true},
+             "c": [{"id": "ct", "k": "text", "p": {"text": "inside"}}]},
+            {"id": "o", "k": "card", "p": {"head": "Open", "collapsible": true},
+             "c": [{"id": "ot", "k": "text", "p": {"text": "inside"}}]}
+        ]),
+    );
+    h.frame();
+    let t0 = h.now;
+    let body = |h: &Harness, id: &str| h.find_class(h.el("s1", id), "sf-card-body")[0];
+    let opacity = |h: &Harness, el| h.doc.computed_style(el).unwrap().opacity;
+    // What the first draw shows doesn't animate.
+    assert!(!h.class(h.el("s1", "o")).contains("sf-unfold"));
+    assert_eq!(opacity(&h, body(&h, "o")), 1.0);
+    // The program unfolds a card: its body fades in on the view's clock.
+    h.frame_ops("s1", 2, json!([["set", "c", {"collapsed": false}]]));
+    h.frame();
+    assert!(h.class(h.el("s1", "c")).contains("sf-unfold"));
+    let b = body(&h, "c");
+    assert!(opacity(&h, b) < 0.2, "{}", opacity(&h, b));
+    assert!(
+        h.view.tick(&mut h.doc, &h.pane, t0 + 90.0).is_some(),
+        "it asks for frames"
+    );
+    h.view.layout(&mut h.doc);
+    let mid = opacity(&h, b);
+    assert!(mid > 0.2 && mid < 1.0, "{mid}");
+    // A hidden pane pauses it without resetting.
+    h.view.set_visible(&mut h.doc, &h.pane, false);
+    assert!(h.view.tick(&mut h.doc, &h.pane, t0 + 5000.0).is_none());
+    h.view.set_visible(&mut h.doc, &h.pane, true);
+    h.view.tick(&mut h.doc, &h.pane, t0 + 5000.0);
+    h.view.layout(&mut h.doc);
+    assert!((opacity(&h, b) - mid).abs() < 0.05, "resumed where it was");
+    h.view.tick(&mut h.doc, &h.pane, t0 + 5300.0);
+    h.view.layout(&mut h.doc);
+    assert_eq!(opacity(&h, b), 1.0);
+
+    // An overlay that opens later pops in; the card under it scales from 0.96.
+    h.now = t0 + 6000.0;
+    h.frame_ops(
+        "s1",
+        3,
+        json!([["add", "layer", "s1", null, {"id": "layer", "k": "col", "c": [
+            {"id": "ov", "k": "overlay", "p": {"head": "Ask"}, "c": [{"id": "q", "k": "text", "p": {"text": "?"}}]}
+        ]}]]),
+    );
+    h.frame();
+    let ov = h.el("s1", "ov");
+    assert!(h.class(ov).contains("sf-pop"));
+    let card = h.find_class(ov, "sf-ov-card")[0];
+    assert!(opacity(&h, card) < 0.2);
+    assert!(h.doc.computed_style(card).unwrap().transform.is_some());
+    h.view.tick(&mut h.doc, &h.pane, h.now + 300.0);
+    h.view.layout(&mut h.doc);
+    assert_eq!(opacity(&h, card), 1.0);
+    assert!(
+        h.view.tick(&mut h.doc, &h.pane, h.now + 316.0).is_none(),
+        "settled"
+    );
+
+    // Reduce Motion: still equivalents.
+    let mut h = Harness::with(
+        auk_tsp::Config::default(),
+        ViewSettings {
+            reduce_motion: true,
+            ..Default::default()
+        },
+    );
+    h.hello(&[]);
+    h.surface(
+        "s1",
+        "inline",
+        json!([{"id": "c", "k": "card", "p": {"head": "F", "collapsible": true, "collapsed": true},
+                "c": [{"id": "ct", "k": "text", "p": {"text": "x"}}]}]),
+    );
+    h.frame();
+    h.frame_ops("s1", 2, json!([["set", "c", {"collapsed": false}]]));
+    h.frame();
+    assert_eq!(opacity(&h, body(&h, "c")), 1.0);
+    assert!(h.view.tick(&mut h.doc, &h.pane, h.now + 16.0).is_none());
 }

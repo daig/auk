@@ -22,8 +22,9 @@ use vello::peniko::Fill;
 use crate::compose::{self, Block, Composed, Flow, Hit, Scroll};
 use crate::{PaneView, Region, ViewSettings};
 
-/// The host's own CSS around a pane's surfaces.
-const HOST_CSS: &str = "body { margin: 0; }";
+/// The host's own CSS around a pane's surfaces. The pane fills the content area at least, so a
+/// screen surface or a layer (absolutely placed over the pane) covers it and takes its clicks.
+const HOST_CSS: &str = "body { margin: 0; } .auk-pane { min-height: 100vh; }";
 
 /// The pane container's children, in paint order.
 const CONTAINERS: [&str; 4] = ["auk-flow", "auk-docks", "auk-screen", "auk-layers"];
@@ -32,6 +33,10 @@ const CONTAINERS: [&str; 4] = ["auk-flow", "auk-docks", "auk-screen", "auk-layer
 pub struct PaneSurfaces {
     doc: Document,
     view: PaneView,
+    /// The pane's command blocks (§9.6), once it has any.
+    lens: Option<crate::lenses::LensLayer>,
+    /// Plugin sheets (§8.4 cascade step 3), installed after the built-in ones.
+    plugin_sheets: Vec<(String, String)>,
 }
 
 impl std::fmt::Debug for PaneSurfaces {
@@ -127,7 +132,98 @@ impl PaneSurfaces {
         let view = PaneView::new(&mut doc, settings);
         let el = view.element();
         doc.append_child(body, el);
-        PaneSurfaces { doc, view }
+        PaneSurfaces {
+            doc,
+            view,
+            lens: None,
+            plugin_sheets: Vec::new(),
+        }
+    }
+
+    /// Installs plugin sheets (manifest styles and `tern.css`, §8.4 cascade step 3) into the
+    /// pane's documents, replacing the last set. Returns whether anything changed.
+    pub fn set_plugin_sheets(&mut self, sheets: &[(String, String)]) -> bool {
+        if self.plugin_sheets == sheets {
+            return false;
+        }
+        for (name, _) in &self.plugin_sheets {
+            self.doc.remove_stylesheet(name, None);
+        }
+        for (name, css) in sheets {
+            self.doc.set_stylesheet(name, SheetKind::Plugin, None, css);
+        }
+        if let Some(l) = &mut self.lens {
+            l.set_plugin_sheets(sheets);
+        }
+        self.plugin_sheets = sheets.to_vec();
+        true
+    }
+
+    /// The plugin sheets installed, in order.
+    pub fn plugin_sheets(&self) -> Vec<String> {
+        self.plugin_sheets.iter().map(|(n, _)| n.clone()).collect()
+    }
+
+    /// Takes the replica's command blocks (§9.6): each draws at its anchor row as a `block`.
+    /// Returns whether the drawn blocks changed.
+    pub fn sync_lenses(&mut self, blocks: &[crate::lenses::LensInput], now: f64) -> bool {
+        if blocks.is_empty() && self.lens.as_ref().is_none_or(|l| l.is_empty()) {
+            return false;
+        }
+        let settings = self.view.settings().clone();
+        let scale = self.doc.device_scale();
+        let sheets = self.plugin_sheets.clone();
+        let layer = self.lens.get_or_insert_with(|| {
+            let mut l = crate::lenses::LensLayer::new(settings, scale);
+            l.set_plugin_sheets(&sheets);
+            l
+        });
+        layer.sync(blocks, now)
+    }
+
+    /// The command blocks' layer, once the pane has had any.
+    pub fn lenses(&self) -> Option<&crate::lenses::LensLayer> {
+        self.lens.as_ref()
+    }
+
+    /// A press in a command block, at a point [`PaneSurfaces::lens_point`] found.
+    pub fn lens_click(&mut self, ev: crate::PointerEvent) -> Vec<crate::Outcome> {
+        self.lens.as_mut().map(|l| l.click(ev)).unwrap_or_default()
+    }
+
+    /// Hover in the command blocks at a lens document point (`None`: nowhere over them).
+    /// Returns whether the hover changed.
+    pub fn lens_hover(&mut self, at: Option<(f32, f32)>) -> bool {
+        let Some(l) = &mut self.lens else {
+            return false;
+        };
+        let (x, y) = at.unwrap_or((-1.0, -1.0));
+        l.hover(x, y)
+    }
+
+    /// Whether a flow block is a command block (and which).
+    fn lens_block(&self, b: &SurfaceBlock) -> Option<u64> {
+        let id: u64 = b.sf.strip_prefix(crate::lenses::LENS_PREFIX)?.parse().ok()?;
+        let l = self.lens.as_ref()?;
+        (l.element(&format!("lens{id}")) == Some(b.el)).then_some(id)
+    }
+
+    /// The command-block document point under `(x, y)` (pixels from the content area's top-left),
+    /// if a command block is there.
+    pub fn lens_point(
+        &self,
+        arranged: &Arranged,
+        x: f32,
+        y: f32,
+        scale: f32,
+    ) -> Option<(f32, f32)> {
+        let Some(Hit::Block(i, off)) = arranged.hit(y) else {
+            return None;
+        };
+        let b = arranged.blocks.get(i)?;
+        self.lens_block(b)?;
+        let top = self.lens.as_ref()?.doc().border_box(b.el)?.y;
+        Some((x / scale, top + off / scale))
     }
 
     /// Makes a font (a TTF/OTF file's bytes) every generic family of the document: for hosts
@@ -180,6 +276,9 @@ impl PaneSurfaces {
 
     /// Applies window settings (appearance, cell size) and the scale; re-renders on a change.
     pub fn configure(&mut self, tsp: &TspPane, settings: ViewSettings, scale: f32) {
+        if let Some(l) = &mut self.lens {
+            l.configure(settings.clone(), scale);
+        }
         if self.view.settings() != &settings {
             crate::sheets::set_theme(&mut self.doc, settings.dark);
             self.view.set_settings(&mut self.doc, tsp, settings);
@@ -202,7 +301,15 @@ impl PaneSurfaces {
         self.doc.set_viewport(size.0, size.1);
         let next = self.view.tick(&mut self.doc, tsp, now);
         self.view.layout(&mut self.doc);
-        next
+        let lens_next = self
+            .lens
+            .as_mut()
+            .filter(|l| !l.is_empty())
+            .and_then(|l| l.layout(term.cols(), size.0, now));
+        match (next, lens_next) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
     }
 
     /// The pane container's child with this class (`auk-flow`, `auk-docks`, …).
@@ -248,6 +355,16 @@ impl PaneSurfaces {
     ) -> Arranged {
         let main_screen = !term.modes().alt_screen;
         let mut blocks = Vec::new();
+        // Stray output under a live inline surface stays hidden until the surface closes or
+        // suspends (§7.3): the lines below its anchor take no space.
+        let hide_from = tsp
+            .surfaces()
+            .iter()
+            .filter(|sf| main_screen && sf.mode() == Mode::Inline && sf.is_live())
+            .filter(|sf| !sf.suspended())
+            .filter_map(|sf| term.anchor_line(sf.anchor()?))
+            .max()
+            .map(|line| line + 1);
         for sf in tsp.surfaces() {
             if sf.mode() == Mode::Screen || !main_screen {
                 continue;
@@ -268,6 +385,16 @@ impl PaneSurfaces {
                 el,
                 height: b.h * scale,
             });
+        }
+        if main_screen && let Some(l) = &self.lens {
+            for p in l.placed(term, scale) {
+                blocks.push(SurfaceBlock {
+                    sf: format!("{}{}", crate::lenses::LENS_PREFIX, p.id),
+                    line: p.line,
+                    el: p.el,
+                    height: p.height,
+                });
+            }
         }
         blocks.sort_by_key(|b| b.line);
         // One block per line: the first surface anchored there wins.
@@ -300,7 +427,7 @@ impl PaneSurfaces {
             cell: cell_px,
             view: flow_px,
             blocks: &flow_blocks,
-            hide_from: None,
+            hide_from,
         };
         Arranged {
             composed: compose::compose(&flow, scroll),
@@ -324,9 +451,16 @@ impl PaneSurfaces {
         let content = KRect::new(place.x, place.y, place.x + place.w, place.y + place.h);
         let flow_bottom = content.y1 - f64::from(arranged.dock_px);
         let mut flow_ops: Vec<Op> = Vec::new();
+        let mut lens_ops: Vec<Op> = Vec::new();
         for &(i, y) in &arranged.composed.blocks {
             let b = &arranged.blocks[i];
-            let el_top = self.doc.border_box(b.el).map_or(0.0, |r| r.y);
+            let lens = self.lens_block(b).is_some();
+            let el_top = if lens {
+                self.lens.as_ref().and_then(|l| l.doc().border_box(b.el))
+            } else {
+                self.doc.border_box(b.el)
+            }
+            .map_or(0.0, |r| r.y);
             let at = place.y + f64::from(y);
             let clip = KRect::new(
                 content.x0,
@@ -335,7 +469,28 @@ impl PaneSurfaces {
                 (at + f64::from(b.height)).min(flow_bottom),
             );
             if clip.y1 > clip.y0 {
-                flow_ops.push((el_top, at, clip));
+                if lens {
+                    lens_ops.push((el_top, at, clip));
+                } else {
+                    flow_ops.push((el_top, at, clip));
+                }
+            }
+        }
+        // Command blocks paint from their own document.
+        let lens_painted = !lens_ops.is_empty();
+        if let Some(l) = self.lens.as_ref().filter(|_| lens_painted) {
+            for (el_top, at, clip) in lens_ops {
+                scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &clip);
+                let xf =
+                    Affine::translate((place.x, at - f64::from(el_top) * s)) * Affine::scale(s);
+                let cull = Rect::new(
+                    ((clip.x0 - place.x) / s) as f32,
+                    el_top + ((clip.y0 - at) / s) as f32,
+                    (clip.width() / s) as f32,
+                    (clip.height() / s) as f32,
+                );
+                auk_ui::paint::paint_except(l.doc(), scene, xf, &[], Some(cull));
+                scene.pop_layer();
             }
         }
         let mut passes: Vec<(&str, Vec<Op>)> = vec![("auk-flow", flow_ops)];
@@ -361,7 +516,7 @@ impl PaneSurfaces {
             passes.push(("auk-layers", vec![(pane_top, content.y0, content)]));
         }
         if passes.iter().all(|(_, ops)| ops.is_empty()) {
-            return false;
+            return lens_painted;
         }
         for (keep, ops) in passes {
             if ops.is_empty() {
@@ -424,7 +579,11 @@ impl PaneSurfaces {
         }
         match arranged.hit(y)? {
             Hit::Block(i, off) => {
-                let el = arranged.blocks.get(i)?.el;
+                let b = arranged.blocks.get(i)?;
+                if self.lens_block(b).is_some() {
+                    return None;
+                }
+                let el = b.el;
                 let top = self.doc.border_box(el)?.y;
                 Some((dx, top + off / scale))
             }

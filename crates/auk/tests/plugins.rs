@@ -1404,3 +1404,476 @@ fn m9_window_budgets_trip_in_the_app_and_reload_on_change_restores_the_hook() {
     palette_run(&app, "spin forever", "plugin.slow.spin");
     wait_toast(&app, "spun");
 }
+
+/// The middle of a rect `[x, y, w, h]`.
+#[cfg(target_os = "macos")]
+fn middle(rect: &Value) -> (f64, f64) {
+    let n = |i: usize| rect[i].as_f64().unwrap_or_default();
+    (n(0) + n(2) / 2.0, n(1) + n(3) / 2.0)
+}
+
+/// Clicks a point in the app: the pointer moves there first (hover shows a block's toolbar).
+#[cfg(target_os = "macos")]
+fn click_at(app: &auk_conformance::app::App, (x, y): (f64, f64)) {
+    app.request(&format!("mouse move {x} {y}"));
+    app.request(&format!("mouse down {x} {y}"));
+    app.request(&format!("mouse up {x} {y}"));
+}
+
+/// §9.6, §8.2 (`block` drawn internally), §8.4 step 3, §10.4 Desktop "lens views": the app draws
+/// a lensed command as a block in the flow, raw until the view arrives, then the view with the
+/// plugin's manifest CSS; Native/Raw is a local toggle; Copy copies the raw output as plain
+/// text; a click in the view is a lens event whose `copy` effect reaches the app's clipboard.
+#[cfg(target_os = "macos")]
+#[test]
+fn m9_lens_blocks_draw_in_the_app_with_native_raw_copy_and_view_events() {
+    use window_half::*;
+    let (env, app, _us) = app_with("m9-lens", &["terraform"], &[]);
+    let tf = terraform(&env);
+    let pane = shell(&env, &app);
+    type_line(&env, &app, pane, &format!("{} plan", tf.display()));
+
+    // The block draws in the window's flow with the lens's view.
+    let block = wait_for("the command block, drawn with its view", || {
+        let b = app.request(&format!("lens {pane}"))["blocks"][0].clone();
+        (b["shown"] == "native" && b["rect"].is_array() && b["text"].as_str()?.contains("2 to add"))
+            .then_some(b)
+    });
+    assert_eq!((block["plugin"].as_str(), block["status"].as_i64()), (Some("terraform"), Some(2)));
+    let parts = block["parts"].as_array().unwrap().clone();
+    let part = |class: &str, name: &str| {
+        parts
+            .iter()
+            .find(|p| p["class"].as_str().unwrap().split(' ').any(|c| c == class) && p["name"] == name)
+            .cloned()
+            .unwrap_or_else(|| panic!("no {class} {name} in {parts:?}"))
+    };
+    // The plugin's manifest sheet styles the view (cascade step 3): the danger rule's padding.
+    assert!(
+        app.request(&format!("surface-sheets {pane}")).as_array().unwrap().iter().any(|s| s == "plugin:local:terraform:styles"),
+        "the manifest styles install into the pane's document"
+    );
+    let style = app.request(&format!("lens-style {pane} terraform.plan.danger"));
+    assert!(style["padding"].as_str().unwrap().contains("10"), "{style}");
+
+    // Raw shows the captured output; Native comes back.
+    click_at(&app, middle(&part("sf-block-opt", "raw")["rect"]));
+    wait_for("the raw output", || {
+        let b = app.request(&format!("lens {pane}"))["blocks"][0].clone();
+        (b["shown"] == "raw").then_some(())
+    });
+    // The raw output is taller than the pane, which follows its tail: scroll back to the
+    // block's toolbar.
+    let raw = block_top_in_view(&app, pane);
+    assert!(raw["text"].as_str().unwrap().contains("Plan: 2 to add, 1 to change, 2 to destroy"), "{raw}");
+
+    // Copy copies the raw text as plain text.
+    app.request("clipboard-set nothing");
+    let raw_parts = raw["parts"].as_array().unwrap().clone();
+    let copy = raw_parts.iter().find(|p| p["class"].as_str().unwrap().contains("sf-block-copy")).unwrap();
+    click_at(&app, middle(&copy["rect"]));
+    let copied = wait_for("the raw output on the clipboard", || {
+        let c = app.request("clipboard");
+        c.as_str().filter(|t| t.contains("Plan: 2 to add")).map(str::to_owned)
+    });
+    assert!(!copied.contains('\x1b'), "plain text: {copied:?}");
+
+    let native = raw_parts.iter().find(|p| p["name"] == "native").unwrap();
+    click_at(&app, middle(&native["rect"]));
+    let block = wait_for("the view again", || {
+        let b = app.request(&format!("lens {pane}"))["blocks"][0].clone();
+        (b["shown"] == "native" && b["parts"].as_array()?.len() >= 3).then_some(b)
+    });
+
+    // A click on a destroy row is a lens event: the lens copies the address, an effect the app
+    // carries out.
+    let row = block["parts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["class"].as_str().unwrap().contains("sf-act") && p["text"].as_str().unwrap().contains("aws_instance.old"))
+        .cloned()
+        .expect("the destroy row");
+    click_at(&app, middle(&row["rect"]));
+    wait_for("the address on the clipboard", || {
+        (app.request("clipboard") == "aws_instance.old").then_some(())
+    });
+}
+
+/// §9.4, §9.8 "CSS": the window's plugin sheets come from the host's catalog, so a plugin whose
+/// host entry failed contributes no styles, while a Ready one does.
+#[cfg(target_os = "macos")]
+#[test]
+fn m9_catalog_drives_plugin_css_and_a_failed_host_contributes_none() {
+    use window_half::*;
+    let env = TestEnv::new(EXE, "m9-catalog-css");
+    package(
+        &env,
+        "good",
+        "schema = 1\nid = \"good\"\nname = \"Good\"\nversion = \"1\"\nhost = \"host.luau\"\nstyles = [\"good.css\"]\n",
+        &[("good.css", ".good { color: red; }"), ("host.luau", "-- nothing to do")],
+    );
+    package(
+        &env,
+        "broken",
+        "schema = 1\nid = \"broken\"\nname = \"Broken\"\nversion = \"1\"\nhost = \"host.luau\"\nstyles = [\"broken.css\"]\n",
+        &[("broken.css", ".broken { color: red; }"), ("host.luau", "error('no')")],
+    );
+    env.start_daemon();
+    let app = auk_conformance::app::App::start(&env, "app", &[]);
+    let pane = shell(&env, &app);
+    let catalog = wait_for("the catalog's styles", || {
+        let c = app.request("catalog");
+        (c["styles"].as_array()?.iter().any(|s| s == "good")).then_some(c)
+    });
+    assert_eq!(catalog["host"], "local");
+    assert!(!catalog["styles"].as_array().unwrap().iter().any(|s| s == "broken"), "{catalog}");
+    let sheets: Vec<String> =
+        catalog["sheets"].as_array().unwrap().iter().filter_map(|s| s.as_str().map(str::to_owned)).collect();
+    assert!(sheets.contains(&"plugin:local:good:styles".to_owned()), "{sheets:?}");
+    assert!(!sheets.iter().any(|s| s.contains("broken")), "a Failed host contributes nothing: {sheets:?}");
+    let chrome = app.request("plugins")["sheets"].clone();
+    assert!(!chrome.to_string().contains("broken"), "{chrome}");
+    wait_for("the sheets in the pane's document", || {
+        let s = app.request(&format!("surface-sheets {pane}"));
+        s.as_array()?.iter().any(|n| n == "plugin:local:good:styles").then_some(())
+    });
+}
+
+/// §9.5 "Opening": the palette offers "New <title> block" for Ready plugins' palette block
+/// types, and an open whose type is gone shows "Could not start the block" with Retry, which
+/// opens it once the type is back.
+#[cfg(target_os = "macos")]
+#[test]
+fn m9_palette_new_block_rows_and_the_could_not_start_card_with_retry() {
+    use window_half::*;
+    let (env, app, _us) = app_with("m9-new-block", &["dirvars"], &[]);
+    shell(&env, &app);
+    wait_for("the block type in the window's catalog", || {
+        let c = app.request("catalog");
+        c["block_types"].as_array()?.iter().any(|b| b["kind"] == "dirvars.approve").then_some(())
+    });
+    palette_run(&app, "new directory variables block", "block:dirvars.approve");
+    let first = wait_for("the block pane", || {
+        blocks(&env).into_iter().find(|(_, k)| k == "dirvars.approve").map(|(p, _)| p)
+    });
+    assert!(app.request("catalog")["card"].is_null());
+
+    // The type goes while the palette is open: the open fails and the card shows.
+    app.request("menu View 'Command Palette…'");
+    wait_for("the palette", || (app.request("palette")["open"] == true).then_some(()));
+    app.request(&format!("text {}", quote("new directory variables block")));
+    wait_for("the row", || {
+        let p = app.request("palette");
+        (p["rows"][0]["action"] == "block:dirvars.approve").then_some(())
+    });
+    let away = env.root.join("dirvars-away");
+    std::fs::rename(plugins_dir(&env).join("dirvars"), &away).expect("move the plugin away");
+    let (code, out, err) = auk(&env, &["plugin", "reload"]);
+    assert_eq!(code, 0, "{out}{err}");
+    wait_for("the type to leave the window's catalog", || {
+        let c = app.request("catalog");
+        (!c["block_types"].as_array()?.iter().any(|b| b["kind"] == "dirvars.approve")).then_some(())
+    });
+    app.request("type return");
+    let card = wait_for("the card", || {
+        let c = app.request("catalog")["card"].clone();
+        (!c.is_null()).then_some(c)
+    });
+    assert_eq!(card["kind"], "dirvars.approve");
+    assert!(card["error"].as_str().unwrap().contains("dirvars.approve"), "{card}");
+    assert!(blocks(&env).iter().all(|(p, _)| *p == first), "nothing opened");
+
+    // The type is back: Retry opens it and the card goes.
+    std::fs::rename(&away, plugins_dir(&env).join("dirvars")).expect("move the plugin back");
+    let (code, out, err) = auk(&env, &["plugin", "reload"]);
+    assert_eq!(code, 0, "{out}{err}");
+    wait_for("the type back in the window's catalog", || {
+        let c = app.request("catalog");
+        c["block_types"].as_array()?.iter().any(|b| b["kind"] == "dirvars.approve").then_some(())
+    });
+    click_chrome(&app, "run:card:retry");
+    wait_for("the retried block pane", || {
+        blocks(&env).iter().any(|(p, k)| *p != first && k == "dirvars.approve").then_some(())
+    });
+    wait_for("the card to go", || app.request("catalog")["card"].is_null().then_some(()));
+}
+
+/// The pane's first command block once its top shows: scrolls the pane back while it is above.
+#[cfg(target_os = "macos")]
+fn block_top_in_view(app: &auk_conformance::app::App, pane: u64) -> Value {
+    let rect = app.state()["visible"]
+        .as_array()
+        .and_then(|v| v.iter().find(|p| p["pane"] == pane).map(|p| p["rect"].clone()))
+        .expect("the pane's rect");
+    let (x, y) = middle(&rect);
+    wait_for("the block's top in view", || {
+        let b = app.request(&format!("lens {pane}"))["blocks"][0].clone();
+        let top = b["rect"][1].as_f64()?;
+        if top < rect[1].as_f64()? + 4.0 {
+            app.request(&format!("scroll 5 {x} {y}"));
+            return None;
+        }
+        (b["parts"].as_array()?.len() >= 3).then_some(b)
+    })
+}
+
+// ---------------------------------------------------------------------------------------------
+// Host hooks through the daemon, settings, and the CLI (§9.1, §9.5, §9.7, §9.11)
+
+/// A plugin whose `title` and `pane_exited` hooks toast what they hear.
+fn hooks_plugin(env: &TestEnv) {
+    package(
+        env,
+        "hooks",
+        "schema = 1\nid = \"hooks\"\nname = \"Hooks\"\nversion = \"1\"\nhost = \"host.luau\"\n",
+        &[(
+            "host.luau",
+            r#"tern.on("title", function(ev, cx) cx:toast("info", "title " .. ev.title, "pane " .. ev.pane) end)
+               tern.on("pane_exited", function(ev, cx) cx:toast("info", "exited " .. ev.pane .. " with " .. ev.status) end)"#,
+        )],
+    );
+}
+
+#[test]
+fn title_and_pane_exited_hooks_run_in_the_daemon_and_effects_reach_only_the_panes_windows() {
+    let env = TestEnv::new(EXE, "hooks");
+    hooks_plugin(&env);
+    let _daemon = env.start_daemon();
+    let main = env.start_headless("main", &[]);
+    let other = env.start_headless("other", &["--window", "other"]);
+    let pane = env.new_pane(&[]);
+    env.wait(pane, "prompt");
+
+    // `title` fires from the daemon's own stream (no window half involved); its toast goes to the
+    // windows showing the pane's window key, and no other.
+    env.run(pane, "printf '\\e]2;%s\\a' hooked-$((40+2))");
+    let toast = wait_effect(&main, "the title hook's toast", |e| e["text"] == "title hooked-42");
+    assert_eq!(toast["sub"], format!("pane {pane}"));
+    // `pane_exited` fires when the program ends, with its status.
+    let quitter = env.new_pane(&["--", "exit 5"]);
+    wait_effect(&main, "the pane_exited hook's toast", |e| {
+        e["text"] == format!("exited {quitter} with 5")
+    });
+
+    // A window key nobody shows: its effects are dropped, not queued for a later window.
+    let lonely = env.new_pane(&["--window", "lonely"]);
+    env.wait(lonely, "prompt");
+    env.run(lonely, "printf '\\e]2;%s\\a' lonely-$((1+1))");
+    // Effects go out in hook order: once a later toast arrived, the earlier one would have too.
+    env.run(pane, "printf '\\e]2;%s\\a' later-$((2+2))");
+    wait_effect(&main, "the later toast", |e| e["text"] == "title later-4");
+    let late = env.start_headless("late", &["--window", "lonely"]);
+    std::thread::sleep(Duration::from_millis(500));
+    for w in [&main, &other, &late] {
+        assert!(
+            !effects(w).iter().any(|e| e["text"] == "title lonely-2"),
+            "{:?}",
+            effects(w)
+        );
+    }
+    assert!(
+        !effects(&other).iter().any(|e| e["text"].as_str().is_some_and(|t| t.starts_with("title "))),
+        "another window key's window got a toast: {:?}",
+        effects(&other)
+    );
+    // The window that attached later does get what happens next.
+    env.run(lonely, "printf '\\e]2;%s\\a' seen-$((3+3))");
+    wait_effect(&late, "the lonely window's toast", |e| e["text"] == "title seen-6");
+}
+
+#[test]
+fn the_settings_file_turns_plugins_off_or_disables_listed_ones() {
+    let env = TestEnv::new(EXE, "settings");
+    hooks_plugin(&env);
+    example(&env, "terraform");
+    let settings = env.state.join("settings.json");
+    std::fs::write(&settings, json!({"plugins_disabled": ["hooks"]}).to_string()).expect("write");
+    let status = |list: &Value, id: &str| {
+        list["plugins"]
+            .as_array()
+            .and_then(|p| p.iter().find(|p| p["id"] == id))
+            .map(|p| p["status"].clone())
+            .unwrap_or(Value::Null)
+    };
+    // Read without a daemon too (`auk plugin list` never starts one).
+    let (code, out, err) = auk(&env, &["plugin", "list", "--json"]);
+    assert_eq!(code, 0, "{err}");
+    let list: Value = serde_json::from_str(&out).expect("json");
+    assert_eq!((status(&list, "hooks"), status(&list, "terraform")), (json!("disabled"), json!("ready")));
+
+    let _daemon = env.start_daemon();
+    let list = env.daemon("plugin list");
+    assert_eq!(status(&list, "hooks"), "disabled", "{list}");
+    assert_eq!(status(&list, "terraform"), "ready", "{list}");
+    // A disabled plugin runs no Lua: its hooks never fire.
+    let window = env.start_headless("w", &[]);
+    let pane = env.new_pane(&[]);
+    env.wait(pane, "prompt");
+    env.run(pane, "printf '\\e]2;%s\\a' quiet");
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(effects(&window).is_empty(), "{:?}", effects(&window));
+
+    // The daemon re-reads the file at every reload: `plugins: false` loads none.
+    std::fs::write(&settings, json!({"plugins": false}).to_string()).expect("write");
+    let (code, out, err) = auk(&env, &["plugin", "reload", "--json"]);
+    assert_eq!(code, 0, "{out}{err}");
+    let list: Value = serde_json::from_str(&out).expect("json");
+    assert_eq!((status(&list, "hooks"), status(&list, "terraform")), (json!("disabled"), json!("disabled")));
+    // The window gets the new catalog.
+    wait_for("the window's catalog", || {
+        (status(&window.request("catalog"), "terraform") == "disabled").then_some(())
+    });
+    // Back to the defaults: everything loads, and the hooks run.
+    std::fs::remove_file(&settings).expect("rm");
+    let (code, _, err) = auk(&env, &["plugin", "reload"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(status(&env.daemon("plugin list"), "hooks"), "ready");
+    env.run(pane, "printf '\\e]2;%s\\a' loud");
+    wait_effect(&window, "the enabled hook's toast", |e| e["text"] == "title loud");
+}
+
+#[test]
+fn a_block_that_cannot_start_shows_a_card_with_retry() {
+    let env = TestEnv::new(EXE, "blockcard");
+    let _daemon = env.start_daemon();
+    let window = env.start_headless("w", &[]);
+    // No plugin defines the type yet: the pane still opens, with the card.
+    let opened = env.daemon("block later.panel");
+    let pane = opened["pane"].as_u64().expect("a pane");
+    assert_eq!(opened["failed"], "no block type later.panel on this host", "{opened}");
+    let (sf, doc) = wait_for("the card in the window", || window_doc(&window, pane));
+    let text = strings(&doc);
+    assert!(text.contains("Could not start the block"), "{text}");
+    assert!(text.contains("no block type later.panel on this host"), "{text}");
+    let tsp = env.daemon(&format!("tsp {pane}"));
+    assert_eq!(tsp["surfaces"][0]["role"], "block.failed", "{tsp}");
+    let (retry, action) = clicks(&doc).into_iter().next().expect("a Retry button");
+    assert_eq!(action, "retry");
+    assert!(env.pane_info(pane)["exit"].is_null(), "the pane stays open");
+
+    // Retry while the type is still missing: the card says so again.
+    window.request(&format!("click {pane} {sf} {}", quote(&retry)));
+    let (sf2, _) = wait_for("the second card", || window_doc(&window, pane).filter(|(s, _)| *s != sf));
+    // Install the plugin; the catalog every window gets names the type and its title, which is
+    // what the palette's "New <title> block" rows read (§9.4, §9.5).
+    package(
+        &env,
+        "later",
+        "schema = 1\nid = \"later\"\nname = \"Later\"\nversion = \"1\"\nhost = \"host.luau\"\n[[blocks]]\nid = \"panel\"\ntitle = \"Panel\"\n",
+        &[(
+            "host.luau",
+            r#"tern.block.define("panel", {
+                init = function(cx) return {} end,
+                view = function() return { main = tern.ui.text("the panel runs") } end,
+            })"#,
+        )],
+    );
+    let (code, _, err) = auk(&env, &["plugin", "reload"]);
+    assert_eq!(code, 0, "{err}");
+    let catalog = wait_for("the type in the window's catalog", || {
+        let c = window.request("catalog");
+        (c["plugins"][0]["blocks"][0]["id"] == "panel").then_some(c)
+    });
+    let block = &catalog["plugins"][0]["blocks"][0];
+    assert_eq!((&block["title"], &block["palette"]), (&json!("Panel"), &json!(true)), "{catalog}");
+    // Retry now starts the block in the same pane.
+    let (_, doc) = window_doc(&window, pane).expect("the card");
+    let (retry, _) = clicks(&doc).into_iter().next().expect("Retry");
+    window.request(&format!("click {pane} {sf2} {}", quote(&retry)));
+    wait_for("the block's own view", || {
+        window_doc(&window, pane).filter(|(_, d)| strings(d).contains("the panel runs"))
+    });
+    let tsp = env.daemon(&format!("tsp {pane}"));
+    let live: Vec<&Value> = tsp["surfaces"].as_array().unwrap().iter().filter(|s| s["state"] == "live").collect();
+    assert_eq!(live.len(), 1, "{tsp}");
+    assert_eq!(live[0]["role"], "plugin.later.panel");
+    assert_eq!(env.daemon("blocks")[pane.to_string()]["kind"], "later.panel");
+}
+
+#[test]
+fn plugin_reload_exits_124_when_the_daemon_does_not_answer_in_60_s() {
+    let env = TestEnv::new(EXE, "reload124");
+    // A daemon that takes the connection and never answers.
+    let listener = std::os::unix::net::UnixListener::bind(env.control_path()).expect("bind");
+    std::thread::spawn(move || {
+        let mut held = Vec::new();
+        for stream in listener.incoming() {
+            held.push(stream);
+        }
+    });
+    let started = Instant::now();
+    let (code, _, err) = auk(&env, &["plugin", "reload"]);
+    let took = started.elapsed();
+    assert_eq!(code, 124, "{err}");
+    assert!(err.contains("the session daemon did not answer"), "{err}");
+    assert!(took >= Duration::from_secs(59) && took < Duration::from_secs(90), "{took:?}");
+}
+
+/// Makes a git repository holding a plugin package at `sub` (or the root), committed.
+fn git_repo(dir: &Path, sub: &str) {
+    let pkg = dir.join(sub);
+    std::fs::create_dir_all(&pkg).expect("mkdir");
+    std::fs::write(
+        pkg.join("plugin.toml"),
+        "schema = 1\nid = \"gitplug\"\nname = \"Git Plug\"\nversion = \"7\"\nhost = \"host.luau\"\n",
+    )
+    .expect("write");
+    std::fs::write(pkg.join("host.luau"), "tern.log('from git')").expect("write");
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .args(["-c", "user.name=t", "-c", "user.email=t@e", "-c", "init.defaultBranch=main"])
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .expect("git (a prerequisite of `auk plugin install` from git)");
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    };
+    git(&["init", "--quiet"]);
+    git(&["add", "-A"]);
+    git(&["commit", "--quiet", "-m", "plugin"]);
+}
+
+#[test]
+fn plugin_install_from_a_git_url_and_from_github_owner_repo() {
+    let env = TestEnv::new(EXE, "gitinstall");
+    // A local repository stands in for the remote one.
+    let repos = env.root.join("repos");
+    git_repo(&repos.join("plain"), "");
+    let url = format!("file://{}", repos.join("plain").display());
+    let (code, out, err) = auk(&env, &["plugin", "install", &url]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(out.starts_with("installed gitplug 7 → "), "{out}");
+    let dir = plugins_dir(&env).join("gitplug");
+    assert!(dir.join("plugin.toml").is_file());
+    assert!(!dir.join(".git").exists(), "the clone's .git isn't installed");
+    // Staged in a dot-named directory, then renamed: nothing else is left in the folder.
+    let names: Vec<String> = std::fs::read_dir(plugins_dir(&env))
+        .expect("ls")
+        .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, ["gitplug"]);
+    let (code, _, err) = auk(&env, &["plugin", "install", &url]);
+    assert_eq!(code, 1);
+    assert!(err.contains("already installed"), "{err}");
+
+    // `github.com/OWNER/REPO/PATH`, with git sending github.com to the local repositories.
+    git_repo(&repos.join("acme/tools"), "plugins/gitplug");
+    let gitconfig = env.root.join("gitconfig");
+    std::fs::write(
+        &gitconfig,
+        format!("[url \"file://{}/\"]\n\tinsteadOf = https://github.com/\n", repos.display()),
+    )
+    .expect("write");
+    let out = env
+        .command()
+        .env("GIT_CONFIG_GLOBAL", &gitconfig)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .args(["plugin", "install", "github.com/acme/tools/plugins/gitplug", "--force"])
+        .output()
+        .expect("auk");
+    assert!(out.status.success(), "{out:?}");
+    let list: Value = serde_json::from_slice(&env.cli(&["plugin", "list", "--json"]).stdout).expect("json");
+    assert_eq!(list["plugins"][0]["id"], "gitplug", "{list}");
+    assert_eq!(list["plugins"][0]["status"], "ready", "{list}");
+}

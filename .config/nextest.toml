@@ -42,3 +42,9 @@ test-group = 'screen'
 [[profile.default.overrides]]
 filter = 'binary_id(auk::plugins) & (test(/^m9_/) | test(/^ac14_window_/))'
 test-group = 'screen'
+
+# The app suite's remote window test may start the Lima VM and build the Linux `auk` in it first,
+# as the remote suite does.
+[[profile.default.overrides]]
+filter = 'binary_id(auk::app) & test(/^remote_window_/)'
+slow-timeout = { period = "60s", terminate-after = 15 }

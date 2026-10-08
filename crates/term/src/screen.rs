@@ -146,6 +146,7 @@ pub(crate) fn blank_row(cols: usize) -> Row {
         cells: vec![Cell::default(); cols],
         wrapped: false,
         anchor: None,
+        prompt: false,
     }
 }
 
@@ -170,6 +171,7 @@ pub(crate) fn end_anchor(row: &mut Row, events: &mut Events) {
 /// Blanks a whole row (ending its anchor): the cells get background `bg`.
 pub(crate) fn reset_row(slot: &mut Slot, bg: Color, events: &mut Events) {
     end_anchor(&mut slot.row, events);
+    slot.row.prompt = false;
     let end = if bg == Color::Default {
         slot.occ
     } else {
@@ -393,6 +395,7 @@ mod tests {
                 .collect(),
             wrapped,
             anchor: None,
+            prompt: false,
         }
     }
 

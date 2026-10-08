@@ -459,3 +459,101 @@ fn the_watcher_reloads_on_change_natively_and_by_polling() {
 fn crossbeam_channel_like() -> (std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>) {
     std::sync::mpsc::channel()
 }
+
+#[test]
+fn process_output_is_capped_at_16_mib_per_stream_and_the_rest_is_drained() {
+    let fx = Fx::new();
+    let vm = fx.vm(Context::Host);
+    eval::<()>(
+        &vm,
+        r#"
+        big = nil
+        -- 17 MB on each stream: the cap keeps 16 MiB of each; the rest is read and dropped, so
+        -- the process isn't blocked on a full pipe and its status comes back.
+        tern.process.run({"sh", "-c", "head -c 17000000 /dev/zero | tr '\\0' a; head -c 17000000 /dev/zero | tr '\\0' b >&2; exit 5"},
+            function(r) big = {status = r.status, out = #r.stdout, err = #r.stderr, timed_out = r.timed_out,
+                tail = string.sub(r.stdout, -1), etail = string.sub(r.stderr, -1)} end)
+        "#,
+    );
+    pump(&vm, Duration::from_secs(30), || eval::<bool>(&vm, "return big ~= nil"));
+    let big = json_of(&vm, "return big");
+    let cap = 16 * 1024 * 1024;
+    assert_eq!(big, json!({"status": 5, "out": cap, "err": cap, "timed_out": false, "tail": "a", "etail": "b"}));
+}
+
+#[test]
+fn fetch_bodies_are_capped_at_16_mib_and_redirects_at_10() {
+    let cap = 16 * 1024 * 1024;
+    let (port, _) = serve(move |path, _| match path {
+        "/exact" => format!("HTTP/1.1 200 OK\r\nContent-Length: {cap}\r\n\r\n{}", "e".repeat(cap)),
+        "/over" => format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}", cap + 1, "o".repeat(cap + 1)),
+        hop => match hop.strip_prefix("/hop/").and_then(|n| n.parse::<u32>().ok()) {
+            Some(0) => "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nend".into(),
+            Some(n) => format!("HTTP/1.1 302 Found\r\nLocation: /hop/{}\r\nContent-Length: 0\r\n\r\n", n - 1),
+            None => "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".into(),
+        },
+    });
+    let fx = Fx::new();
+    let vm = fx.vm(Context::Host);
+    eval::<()>(
+        &vm,
+        &format!(
+            r#"
+            got = {{}}
+            local base = "http://127.0.0.1:{port}"
+            tern.fetch(base .. "/exact", function(r) got.exact = {{status = r.status, len = #r.body, error = r.error}} end)
+            tern.fetch(base .. "/over", function(r) got.over = {{status = r.status, len = #r.body, error = r.error}} end)
+            tern.fetch(base .. "/hop/10", function(r) got.ten = {{status = r.status, body = r.body, error = r.error}} end)
+            tern.fetch(base .. "/hop/11", function(r) got.eleven = {{status = r.status, error = r.error}} end)
+            "#
+        ),
+    );
+    pump(&vm, Duration::from_secs(30), || {
+        eval::<bool>(&vm, "return got.exact ~= nil and got.over ~= nil and got.ten ~= nil and got.eleven ~= nil")
+    });
+    let got = json_of(&vm, "return got");
+    assert_eq!(got["exact"], json!({"status": 200, "len": cap}), "{got}");
+    // Over the cap: an error, never raised.
+    assert_eq!(got["over"]["status"], 0, "{got}");
+    assert_eq!(got["over"]["error"], "the body is over 16 MiB", "{got}");
+    // Ten redirects are followed; the eleventh is an error.
+    assert_eq!(got["ten"], json!({"status": 200, "body": "end"}), "{got}");
+    assert_eq!(got["eleven"]["status"], 0, "{got}");
+    assert!(got["eleven"]["error"].is_string(), "{got}");
+}
+
+#[test]
+fn fetch_times_out_after_30_s_by_default() {
+    // A server that takes the request and never answers.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    std::thread::spawn(move || {
+        let mut held = Vec::new();
+        for stream in listener.incoming() {
+            held.push(stream);
+        }
+    });
+    let fx = Fx::new();
+    let vm = fx.vm(Context::Host);
+    let started = Instant::now();
+    eval::<()>(
+        &vm,
+        &format!(
+            r#"
+            got = {{}}
+            tern.fetch("http://127.0.0.1:{port}/", function(r) got.default = r end)
+            -- ≤0 means the default too.
+            tern.fetch("http://127.0.0.1:{port}/", {{timeout_ms = 0}}, function(r) got.zero = r end)
+            tern.fetch("http://127.0.0.1:{port}/", {{timeout_ms = 200}}, function(r) got.short = r; got.short_at = tern.now() end)
+            "#
+        ),
+    );
+    pump(&vm, Duration::from_secs(45), || eval::<bool>(&vm, "return got.default ~= nil and got.zero ~= nil"));
+    let took = started.elapsed();
+    let got = json_of(&vm, "return got");
+    for key in ["default", "zero", "short"] {
+        assert_eq!(got[key]["timed_out"], true, "{key}: {got}");
+        assert_eq!(got[key]["status"], 0, "{key}: {got}");
+    }
+    assert!(took >= Duration::from_secs(29) && took < Duration::from_secs(40), "{took:?}");
+}

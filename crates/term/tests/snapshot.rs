@@ -308,3 +308,27 @@ fn hash_covers_state() {
         assert_ne!(t.state_hash(), reference, "{v:?} changes the hash");
     }
 }
+
+/// Prompt rows (OSC 133 `A`, §5.3) are replicated state: they survive a snapshot and scrolling
+/// into the scrollback, and erasing the row clears them. The alternate screen has none.
+#[test]
+fn prompt_rows_survive_snapshots_and_go_with_their_row() {
+    let mut t = Terminal::new(20, 4, Config { scrollback: 50 });
+    t.feed(b"\x1b]133;A\x07$ one\r\nout\r\n\x1b]133;A\x07$ two\r\nout\r\nout\r\n\x1b]133;A\x07$ ");
+    assert_eq!(t.prompt_lines(), vec![0, 2, 5]);
+    let mut copy = Terminal::new(20, 4, Config { scrollback: 50 });
+    copy.feed(&t.snapshot());
+    assert_eq!(copy.prompt_lines(), t.prompt_lines());
+    assert_eq!(copy.state_hash(), t.state_hash());
+    // Erasing the screen moves its rows into the scrollback, prompts and all; erasing a prompt's
+    // whole row clears its mark.
+    t.feed(b"\x1b[2J");
+    assert_eq!(t.prompt_lines(), vec![0, 2, 5]);
+    t.feed(b"\x1b]133;A\x07$ \x1b[2K");
+    assert_eq!(t.prompt_lines(), vec![0, 2, 5]);
+    // Prompts on the alternate screen aren't marked.
+    t.feed(b"\x1b[?1049h\x1b]133;A\x07alt");
+    assert!(t.prompt_lines().is_empty());
+    t.feed(b"\x1b[?1049l");
+    assert_eq!(t.prompt_lines(), vec![0, 2, 5]);
+}

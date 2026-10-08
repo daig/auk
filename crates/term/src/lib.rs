@@ -192,6 +192,9 @@ pub struct Row {
     pub wrapped: bool,
     /// Set when the row is an anchor row (§7.4).
     pub anchor: Option<AnchorKey>,
+    /// A prompt started on this row (OSC 133 `A`, §5.3): prompt navigation jumps between these.
+    /// Erasing the whole row clears it.
+    pub prompt: bool,
 }
 
 /// Where a row is: an index into the whole buffer of the active screen, counted from the oldest
@@ -374,6 +377,19 @@ impl Terminal {
     /// A row of the active screen's buffer (see `Line`).
     pub fn line(&self, line: Line) -> Option<&Row> {
         self.core.screen().buf.get(line).map(|slot| &slot.row)
+    }
+
+    /// The active screen's lines where a prompt started (OSC 133 `A`), oldest first (§5.3 prompt
+    /// navigation).
+    pub fn prompt_lines(&self) -> Vec<Line> {
+        self.core
+            .screen()
+            .buf
+            .iter()
+            .enumerate()
+            .filter(|(_, slot)| slot.row.prompt)
+            .map(|(i, _)| i)
+            .collect()
     }
 
     /// The main screen's scrollback length, whichever screen is active.

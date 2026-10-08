@@ -685,3 +685,37 @@ fn a_click_zooms_through_the_parents_blob_images() {
         other => panic!("{other:?}"),
     }
 }
+
+#[test]
+fn plugin_sheet_data_urls_decode_and_style_through_the_built_in_loader() {
+    // base64 PNG, percent-encoded SVG, and garbage.
+    let png = encode(&picture(8, 4), ImageFormat::Png);
+    let png_url = format!("data:image/png;base64,{}", b64(&png));
+    let p = pictures::load_data_url(&png_url, 2.0).expect("a PNG data: URL");
+    assert_eq!((p.data.width, p.data.height), (8, 4));
+    let svg_url = "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='10'%20height='6'%3E%3Crect%20width='10'%20height='6'%20fill='red'/%3E%3C/svg%3E";
+    let s = pictures::load_data_url(svg_url, 2.0).expect("an SVG data: URL");
+    assert_eq!(s.picture_size(), (10.0, 6.0));
+    assert!(pictures::load_data_url("data:image/png;base64,!!!", 2.0).is_none());
+    assert!(pictures::load_data_url("https://example.com/x.png", 2.0).is_none());
+    // The built-in sheets install the loader: a plugin sheet's picture loads on restyle.
+    let mut h = Harness::new();
+    h.hello(&[]);
+    h.surface(
+        "s1",
+        "inline",
+        json!([{"id": "t", "k": "text", "p": {"text": "x"}}]),
+    );
+    let errors = h.doc.set_stylesheet(
+        "plugin:local:p:styles",
+        auk_ui::SheetKind::Plugin,
+        None,
+        &format!(".sf-text {{ background-image: url({png_url}) }}"),
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+    h.frame();
+    let t = h.el("s1", "t");
+    let url = h.doc.computed_style(t).unwrap().background_image.clone();
+    assert_eq!(url.as_deref(), Some(png_url.as_str()));
+    assert!(h.doc.url_image(&png_url).is_some());
+}

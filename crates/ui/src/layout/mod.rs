@@ -396,7 +396,16 @@ impl Document {
             .or(adj(size_style.height, pb.vertical_axis_sum()));
         let inner_w = (width - pb.horizontal_axis_sum()).max(0.0);
         let gap = ts.gap.height.resolve_or_zero(Some(inner_w), resolve_calc);
+        // A container that scrolls itself shows its own height; one an ancestor scrolls (its
+        // window not set yet) shows at most a viewport, even when a flex parent gives it its
+        // full content height.
+        let scrolls = self
+            .node(id)
+            .style
+            .as_ref()
+            .is_some_and(|s| s.is_scroll_container());
         let view_h = height
+            .filter(|_| scrolls)
             .map(|h| h - pb.vertical_axis_sum())
             .unwrap_or(self.viewport.1);
         let overscan = view_h * 0.5;

@@ -11,7 +11,7 @@
 //! | --- | --- |
 //! | `ping`, `version` | |
 //! | `windows` | the open windows |
-//! | `state` | the window's shown session, tab, focus and pane rectangles |
+//! | `state` | the window's shown session, tab, focus and pane rectangles; the IME cursor area |
 //! | `layout` | the window key's sessions, as the daemon replicated them |
 //! | `panes` | the window's replicas: seq, size, exit, primary; stream errors |
 //! | `state-hash PANE`, `capture PANE [--scrollback]` | a replica's hash and text |
@@ -36,6 +36,16 @@
 //! | `opens` | built-in opens (the system opener) and route decisions |
 //! | `chrome` | status segments, tab and window titles, clickable chrome boxes, context menu, viewer |
 //! | `chrome-style PLUGIN` | the computed style of a plugin's status segment (plugin sheets) |
+//! | `lens PANE` | the pane's command blocks as drawn: view shown, toolbar and action rects |
+//! | `presence` | the clients attached to the host, as presence reported them |
+//! | `settings` | the settings the window uses (program colors, links, motion, keymap) |
+//! | `surface-sheets PANE` | the plugin sheets installed in the pane's documents |
+//! | `lens-style PANE ROLE` | the computed padding of a command-block element with that role |
+//! | `menu-key MENU ITEM` | a menu item's key equivalent (the user's keybinds take theirs) |
+//! | `catalog` | the host catalog's block types and styles, the sheets installed, the block card |
+//! | `find` | the find bar: query, matches in flow order, the current one |
+//! | `node-box PANE ID` | where a surface node of the pane was drawn, in window points |
+//! | `field-box PANE` | the pane's focused program field's text box, and the cell size |
 //! | `activate` | brings the app forward |
 //! | `quit` | quits the app |
 
@@ -251,6 +261,7 @@ fn main_command(cmd: &str, mut args: Vec<String>, win: usize) -> Result<Value, S
                 "visible": panes,
                 "key_window": s.key_window,
                 "preedit": s.preedit.as_ref().map(|p| &p.text),
+                "ime_area": s.ime_area.map(|(x, y, w, h)| [x, y, w, h]),
                 "option_as_alt": format!("{:?}", s.option_as_alt),
             }))
         }
@@ -411,8 +422,53 @@ fn main_command(cmd: &str, mut args: Vec<String>, win: usize) -> Result<Value, S
                     json!({"sf": b.sf, "line": b.line, "top": r(y), "height": r(b.height)})
                 })
                 .collect();
+            // Each drawn row: its line, top and height in points (blocks included), the cell
+            // size, the rows where prompts started, and the first drawn line's text.
+            let rows: Vec<Value> = a
+                .composed
+                .slots
+                .iter()
+                .enumerate()
+                .map(|(i, sl)| json!([a.composed.first + i, r(sl.top), r(sl.height)]))
+                .collect();
+            let (prompts, first_text, surfaces) = {
+                let shared = s.conn.shared();
+                let term = shared.panes.get(&pane).map(|p| p.replica.terminal());
+                let surfaces: Vec<Value> = shared
+                    .panes
+                    .get(&pane)
+                    .map(|p| {
+                        p.replica
+                            .tsp()
+                            .surfaces()
+                            .iter()
+                            .map(|sf| json!({"id": sf.id(), "mode": format!("{:?}", sf.mode()), "live": sf.is_live()}))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                (
+                    term.map(|t| t.prompt_lines()).unwrap_or_default(),
+                    term.and_then(|t| t.line(a.composed.first)).map(|row| {
+                        row.cells
+                            .iter()
+                            .map(|c| if c.text.is_empty() { " " } else { c.text.as_str() })
+                            .collect::<String>()
+                            .trim_end()
+                            .to_owned()
+                    }),
+                    surfaces,
+                )
+            };
+            let cell = s.surfaces.get(&pane).map(|sf| sf.view().settings().cell);
             Ok(json!({
                 "origin": [view.grid_origin.0, view.grid_origin.1],
+                "content_height": r(view.content_px),
+                "cell": cell.map(|c| [c.0, c.1]),
+                "rows": rows,
+                "prompts": prompts,
+                "surfaces": surfaces,
+                "first_text": first_text,
+                "selection": view.selection.map(|sel| json!({"anchor": [sel.anchor.0, sel.anchor.1], "head": [sel.head.0, sel.head.1]})),
                 "first_line": a.composed.first,
                 "lines_drawn": a.composed.slots.len(),
                 "following": a.composed.scroll.following(),
@@ -515,6 +571,10 @@ fn main_command(cmd: &str, mut args: Vec<String>, win: usize) -> Result<Value, S
                 .map(|(a, r)| json!({"action": a, "rect": [r.x, r.y, r.w, r.h]}))
                 .collect();
             Ok(json!({
+                "pane_app": s.chrome_pane_app(),
+                "tab_apps": s.chrome_tab_apps(),
+                "hover_link": s.hover_link,
+                "find_bar": s.find.as_ref().is_some_and(|f| f.open),
                 "status": model_status,
                 "tab_titles": s.plugins.tab_titles,
                 "window_title": s.plugins.window_title,
@@ -544,7 +604,33 @@ fn main_command(cmd: &str, mut args: Vec<String>, win: usize) -> Result<Value, S
             }
             Err(format!("no status segment of plugin {plugin}"))
         }
-        other => Err(format!("unknown command `{other}`")),
+        "find" => Ok(state
+            .borrow()
+            .find
+            .as_ref()
+            .map_or_else(|| json!({"open": false, "count": 0}), |f| f.json())),
+        "node-box" => {
+            let pane = pane_arg(&args)?;
+            let id = args.get(1).ok_or("node-box: expected PANE ID")?;
+            let s = state.borrow();
+            let b = s
+                .node_box(pane, id)
+                .ok_or_else(|| format!("node {id} isn't drawn in pane {pane}"))?;
+            Ok(json!([b.x, b.y, b.w, b.h]))
+        }
+        "field-box" => {
+            let pane = pane_arg(&args)?;
+            let s = state.borrow();
+            let (b, cell) = s
+                .field_box(pane)
+                .ok_or_else(|| format!("pane {pane} has no focused field drawn"))?;
+            Ok(json!({"box": [b.x, b.y, b.w, b.h], "cell": [cell.0, cell.1]}))
+        }
+        // Lenses, presence, settings and the other window-half commands (window/extras.rs).
+        other => state
+            .borrow_mut()
+            .extra_command(&window, other, &args)
+            .unwrap_or_else(|| Err(format!("unknown command `{other}`"))),
     }
 }
 

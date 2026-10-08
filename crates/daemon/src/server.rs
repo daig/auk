@@ -53,6 +53,15 @@ impl Config {
     }
 }
 
+/// What a user's close did (§4.3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Closed {
+    /// The pane is closing: its process was hung up, or it had already ended.
+    Closing,
+    /// The pane's session is locked: nothing closed, and the windows got a toast.
+    Locked { session: SessionId },
+}
+
 /// Where a new pane goes in the layout.
 #[derive(Clone, Debug)]
 pub enum Place {
@@ -69,6 +78,10 @@ pub struct NewPane {
     pub cwd: Option<PathBuf>,
     /// A command line for a command pane; a login shell otherwise.
     pub command: Option<String>,
+    /// An agent pane (§5.1): `agent_command` from the settings file, in place of `command`.
+    pub agent: bool,
+    /// Keep the pane in the layout when its program exits 0 (Tern's `--keep-open`, §5.1).
+    pub keep_open: bool,
     pub size: Option<(u16, u16)>,
 }
 
@@ -78,6 +91,8 @@ pub(crate) struct ClientEntry {
     pub window_key: Option<String>,
     pub tx: ClientTx,
     pub facts: ClientFacts,
+    /// Who the client is, for presence (§10.1).
+    pub identity: Vec<auk_mirror::Hop>,
 }
 
 #[derive(Debug, Default)]
@@ -321,6 +336,9 @@ impl Daemon {
         let (cols, rows) = req.size.unwrap_or(DEFAULT_SIZE);
         let id = st.next_pane + 1;
         let kind = match &req.command {
+            _ if req.agent => PaneKind::Agent {
+                line: crate::settings::read().agent_command,
+            },
             Some(line) => PaneKind::Command { line: line.clone() },
             None => PaneKind::Shell,
         };
@@ -344,11 +362,13 @@ impl Daemon {
         )));
         {
             let mut p = lock(&pane);
+            p.keep_open = req.keep_open;
             p.plugin = Some(self.plugins.link());
             self.sync_catalog(&mut p);
         }
         self.start_process(&pane, id, &spec)?;
         st.next_pane = id;
+        let tag = lock(&pane).kind.tag();
 
         match req.place {
             Place::NewSession { name } => {
@@ -361,6 +381,7 @@ impl Daemon {
                 st.layout.split(at, dir, id).map_err(|e| e.to_string())?;
             }
         }
+        st.layout.set_kind(id, tag);
         st.panes.insert(id, pane.clone());
 
         // Clients showing this window key see the new pane.
@@ -529,7 +550,7 @@ impl Daemon {
             }
         }
         let mut args = vec!["-l".into()];
-        if let PaneKind::Command { line } = kind {
+        if let Some(line) = kind.line() {
             args.push("-c".into());
             args.push(line.into());
         }
@@ -551,38 +572,92 @@ impl Daemon {
         let Some(pane) = st.panes.get(&id).cloned() else {
             return;
         };
-        {
+        let close = {
             let mut p = lock(&pane);
             if p.generation != generation {
                 // A replaced process (`surface-play`'s restart): the pane lives on.
                 return;
             }
             p.on_exit(status);
-            p.clear_viewers();
-        }
+            let close = p.closes_on_exit(status);
+            if close {
+                p.clear_viewers();
+            }
+            close
+        };
         crate::events::emit(
             "pane_exited",
             serde_json::json!({"pane": id, "status": status, "by": null}),
         );
-        let window = st.layout.window_of(id).map(str::to_owned);
-        if st.layout.remove_pane(id)
-            && let Some(key) = window
-        {
-            broadcast_layout(&st, &key);
-            crate::events::emit(
-                "layout_changed",
-                serde_json::json!({"window": key, "by": null}),
-            );
+        // A command that exits 0 closes its pane; otherwise the pane stays, showing how its
+        // program ended, until it is closed (§5.1).
+        if close {
+            Self::take_out_of_layout(&mut st, id);
         }
         st.exited.push_back(id);
+        // Exited panes stay in the table for `capture` and `wait`, the oldest going first; one
+        // still in the layout stays until it is closed.
         while st.exited.len() > KEEP_EXITED {
-            if let Some(old) = st.exited.pop_front() {
+            let Some(i) = st
+                .exited
+                .iter()
+                .position(|p| st.layout.window_of(*p).is_none())
+            else {
+                break;
+            };
+            if let Some(old) = st.exited.remove(i) {
                 st.panes.remove(&old);
             }
         }
     }
 
-    /// Hangs up a pane's process group and closes the pane.
+    /// Removes a pane from the layout and tells the windows showing it.
+    fn take_out_of_layout(st: &mut State, id: PaneId) {
+        let window = st.layout.window_of(id).map(str::to_owned);
+        if st.layout.remove_pane(id)
+            && let Some(key) = window
+        {
+            broadcast_layout(st, &key);
+            crate::events::emit(
+                "layout_changed",
+                serde_json::json!({"window": key, "by": null}),
+            );
+        }
+    }
+
+    /// Closes a pane the way a user does (§4.3): refused, with a toast to the windows showing
+    /// it, while its session is locked; otherwise as [`kill`](Self::kill).
+    pub fn close(&self, id: PaneId) -> Result<Closed, String> {
+        let locked = {
+            let st = self.state();
+            if !st.panes.contains_key(&id) {
+                return Err(format!("no pane {id}"));
+            }
+            st.layout
+                .locked_session_of(id)
+                .map(|s| (s.id, s.name.clone(), st.layout.window_of(id).map(str::to_owned)))
+        };
+        if let Some((session, name, window)) = locked {
+            if let Some(key) = window {
+                self.send_effect(
+                    &key,
+                    auk_mirror::Effect::Toast {
+                        level: "info".into(),
+                        text: format!("Session {name} is locked"),
+                        sub: Some("Unlock it to close its blocks".into()),
+                    },
+                );
+            }
+            crate::events::emit(
+                "close_refused",
+                serde_json::json!({"pane": id, "session": session}),
+            );
+            return Ok(Closed::Locked { session });
+        }
+        self.kill(id).map(|()| Closed::Closing)
+    }
+
+    /// Hangs up a pane's process group and closes the pane, whatever its session's lock.
     pub fn kill(&self, id: PaneId) -> Result<(), String> {
         if self.close_block(id) {
             return Ok(());
@@ -593,12 +668,17 @@ impl Daemon {
             .get(&id)
             .cloned()
             .ok_or_else(|| format!("no pane {id}"))?;
-        let p = lock(&pane);
+        let mut p = lock(&pane);
         crate::events::emit("pane_closed", serde_json::json!({"pane": id}));
         match (p.pid, p.exit) {
-            (Some(pid), None) => hang_up(pid),
+            (Some(pid), None) => {
+                p.closing = true;
+                hang_up(pid);
+            }
             _ => {
+                p.clear_viewers();
                 drop(p);
+                Self::take_out_of_layout(&mut st, id);
                 st.panes.remove(&id);
                 st.exited.retain(|e| *e != id);
             }
@@ -622,8 +702,16 @@ impl Daemon {
         &self,
         kind: ClientKind,
         facts: ClientFacts,
+        identity: Vec<auk_mirror::Hop>,
         tx: ClientTx,
     ) -> ClientId {
+        // A client on this machine reached the daemon through its private socket: it is the
+        // daemon's own user, one `local` hop (§10.1). A remote link names its SSH hop itself.
+        let identity = if identity.is_empty() {
+            vec![self.local_hop()]
+        } else {
+            identity
+        };
         let mut st = self.state();
         st.next_client += 1;
         let id = st.next_client;
@@ -647,9 +735,24 @@ impl Daemon {
                 window_key: None,
                 tx,
                 facts,
+                identity,
             },
         );
+        broadcast_presence(&st);
         id
+    }
+
+    /// The hop of a client on the daemon's own machine.
+    fn local_hop(&self) -> auk_mirror::Hop {
+        let me = self.login.identity.clone();
+        let host = me.split_once('@').map_or(me.as_str(), |(_, h)| h).to_owned();
+        auk_mirror::Hop {
+            principal: me.clone(),
+            method: "local".into(),
+            origin: host,
+            acting: me,
+            key: None,
+        }
     }
 
     pub(crate) fn remove_client(&self, id: ClientId) {
@@ -659,6 +762,7 @@ impl Daemon {
         for pane in st.panes.values() {
             lock(pane).remove_viewer(id);
         }
+        broadcast_presence(&st);
     }
 
     /// Shows a window key's sessions to a client: its layout, then a snapshot per pane, then
@@ -690,6 +794,7 @@ impl Daemon {
                 lock(p).add_viewer(id, tx.clone(), facts.clone());
             }
         }
+        broadcast_presence(&st);
     }
 
     pub(crate) fn client_input(&self, id: ClientId, pane: PaneId, bytes: Vec<u8>) {
@@ -721,6 +826,20 @@ impl Daemon {
     ) -> Result<(), String> {
         if let Some(block) = sf.strip_prefix(auk_replica::SF_PREFIX) {
             return self.lens_view_event(id, pane, block, event);
+        }
+        // Retry on a "Could not start the block" card (§9.5).
+        let card = self.pane(pane).is_some_and(|p| {
+            let p = lock(&p);
+            p.has_viewer(id) && p.block_failed.as_ref().is_some_and(|f| f.surface == sf)
+        });
+        if card {
+            if event.get("act").and_then(serde_json::Value::as_str)
+                == Some(crate::plugins::RETRY_ACTION)
+            {
+                // A second failure shows on the card.
+                let _ = self.retry_block(pane);
+            }
+            return Ok(());
         }
         let p = self.pane(pane).ok_or_else(|| format!("no pane {pane}"))?;
         let mut p = lock(&p);
@@ -775,6 +894,8 @@ impl Daemon {
             place,
             cwd: None,
             command: None,
+            agent: false,
+            keep_open: false,
             size: None,
         };
         match edit {
@@ -791,7 +912,29 @@ impl Daemon {
                     ..new(Place::Split { pane, dir })
                 })?;
             }
-            LayoutEdit::Close { pane } => self.kill(pane)?,
+            LayoutEdit::Close { pane } => {
+                self.close(pane)?;
+            }
+            LayoutEdit::LockSession { session, locked } => {
+                self.edit_layout(|l| l.lock_session(session, locked))?
+            }
+            LayoutEdit::Agent { pane } => {
+                // Agent placement's default: a split right of the focused pane (book:16916).
+                let at = pane.filter(|p| self.state().layout.window_of(*p).is_some());
+                let place = match at {
+                    Some(pane) => Place::Split {
+                        pane,
+                        dir: SplitDir::Right,
+                    },
+                    None => Place::NewSession { name: None },
+                };
+                let cwd = at.and_then(|p| self.pane(p)).map(|p| lock(&p).cwd());
+                self.new_pane(NewPane {
+                    cwd,
+                    agent: true,
+                    ..new(place)
+                })?;
+            }
             LayoutEdit::Zoom { tab, pane } => self.edit_layout(|l| l.zoom(tab, pane))?,
             LayoutEdit::RenameSession { session, name } => {
                 self.edit_layout(|l| l.rename_session(session, &name))?
@@ -803,7 +946,7 @@ impl Daemon {
         Ok(())
     }
 
-    fn edit_layout<E: ToString>(
+    pub(crate) fn edit_layout<E: ToString>(
         &self,
         edit: impl FnOnce(&mut Layout) -> Result<(), E>,
     ) -> Result<(), String> {
@@ -834,6 +977,33 @@ impl Daemon {
             n += 1;
         }
         n
+    }
+}
+
+/// The attached clients, with their identities (§10.1).
+pub(crate) fn presence(st: &State) -> Vec<auk_mirror::ClientInfo> {
+    st.clients
+        .iter()
+        .map(|(id, c)| auk_mirror::ClientInfo {
+            id: *id,
+            kind: c.kind,
+            window_key: c.window_key.clone(),
+            identity: c.identity.clone(),
+        })
+        .collect()
+}
+
+/// Tells every client who is attached to the host (§10.1 presence), after a client came, went
+/// or attached.
+fn broadcast_presence(st: &State) {
+    let frame = Bytes::from(
+        DaemonMsg::Presence {
+            clients: presence(st),
+        }
+        .to_bytes(),
+    );
+    for client in st.clients.values() {
+        client.tx.send(frame.clone());
     }
 }
 

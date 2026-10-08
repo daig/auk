@@ -248,7 +248,10 @@ fn handshake(opened: Opened, hello: &Hello) -> Result<(Opened, Welcome), Handsha
         hop,
         bridge,
     } = opened;
-    let (client, welcome) = Client::handshake(Duplex { reader, writer }, hello)?;
+    // The daemon shows this link's hop to every client attached to the host (§10.1 presence).
+    let mut hello = hello.clone();
+    hello.identity = vec![hop.clone().into()];
+    let (client, welcome) = Client::handshake(Duplex { reader, writer }, &hello)?;
     let Duplex { reader, writer } = client.into_inner();
     Ok((
         Opened {

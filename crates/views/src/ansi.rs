@@ -142,7 +142,6 @@ impl AnsiState {
     }
 
     /// The plain text.
-    #[cfg(test)]
     pub fn text(&self) -> String {
         let n = self.line_count();
         self.term.text(0..n)

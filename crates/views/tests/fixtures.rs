@@ -298,5 +298,4 @@ fn omp_session_replays_without_errors() {
         stack.extend(n.children());
     }
     assert!(checked > 50);
-    let _ = h.view.take_reports();
 }

@@ -117,17 +117,78 @@ pub struct Tab {
 pub struct Session {
     pub id: SessionId,
     pub name: String,
+    /// A locked session refuses closing itself, its tabs and its panes (book:16896): the daemon
+    /// answers such a close with a toast instead. New sessions start unlocked.
     pub locked: bool,
     pub tabs: Vec<Tab>,
+}
+
+/// What kind of pane a layout cell holds (§5.1), so every window can badge it: an agent pane is
+/// a command pane that windows show with the agent icon.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PaneTag {
+    Shell,
+    Command,
+    Agent,
+    Block,
+}
+
+impl PaneTag {
+    /// The icon windows show for the pane (an icon name of `auk_plugins::icons`).
+    pub fn icon(self) -> &'static str {
+        match self {
+            PaneTag::Shell | PaneTag::Command => "terminal",
+            PaneTag::Agent => "agent",
+            PaneTag::Block => "puzzle",
+        }
+    }
 }
 
 /// The sessions one window key names.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Window {
     pub sessions: Vec<Session>,
+    /// Each pane's kind, for its badge. Panes missing here are shells. In JSON, an object keyed
+    /// by pane id.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty", with = "kinds_map")]
+    pub kinds: BTreeMap<PaneId, PaneTag>,
+}
+
+/// `kinds` as a JSON object with string keys. Keys go through strings explicitly: a map with
+/// integer keys doesn't read back inside the internally tagged messages that carry layouts.
+mod kinds_map {
+    use std::collections::BTreeMap;
+
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use super::PaneTag;
+    use crate::PaneId;
+
+    pub fn serialize<S: Serializer>(map: &BTreeMap<PaneId, PaneTag>, s: S) -> Result<S::Ok, S::Error> {
+        let named: BTreeMap<String, PaneTag> = map.iter().map(|(k, v)| (k.to_string(), *v)).collect();
+        named.serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<BTreeMap<PaneId, PaneTag>, D::Error> {
+        let named = BTreeMap::<String, PaneTag>::deserialize(d)?;
+        named
+            .into_iter()
+            .map(|(k, v)| {
+                k.parse::<PaneId>()
+                    .map(|k| (k, v))
+                    .map_err(|_| serde::de::Error::custom(format!("bad pane id `{k}`")))
+            })
+            .collect()
+    }
 }
 
 impl Window {
+    /// A pane's kind (shells when unrecorded).
+    pub fn kind(&self, pane: PaneId) -> PaneTag {
+        self.kinds.get(&pane).copied().unwrap_or(PaneTag::Shell)
+    }
+
     pub fn panes(&self) -> Vec<PaneId> {
         self.sessions
             .iter()
@@ -231,8 +292,45 @@ impl Layout {
                 }
             }
             window.sessions.retain(|s| !s.tabs.is_empty());
+            window.kinds.remove(&pane);
         }
         found
+    }
+
+    /// Records the kind of a pane already in the layout. Returns whether it was found.
+    pub fn set_kind(&mut self, pane: PaneId, kind: PaneTag) -> bool {
+        let Some(window) = self.windows.values_mut().find(|w| {
+            w.sessions
+                .iter()
+                .any(|s| s.tabs.iter().any(|t| t.root.contains(pane)))
+        }) else {
+            return false;
+        };
+        if kind == PaneTag::Shell {
+            window.kinds.remove(&pane);
+        } else {
+            window.kinds.insert(pane, kind);
+        }
+        true
+    }
+
+    /// Locks or unlocks a session.
+    pub fn lock_session(&mut self, session: SessionId, locked: bool) -> Result<(), NotFound> {
+        self.session_mut(session)
+            .ok_or(NotFound("session", session))?
+            .locked = locked;
+        Ok(())
+    }
+
+    /// A session by id.
+    pub fn session(&self, id: SessionId) -> Option<&Session> {
+        self.sessions().find(|s| s.id == id)
+    }
+
+    /// The locked session holding `pane`, if its session is locked.
+    pub fn locked_session_of(&self, pane: PaneId) -> Option<&Session> {
+        self.sessions()
+            .find(|s| s.locked && s.tabs.iter().any(|t| t.root.contains(pane)))
     }
 
     /// Zooms a pane in its tab, or unzooms the tab with `None`.
@@ -355,6 +453,33 @@ mod tests {
         assert_eq!(l.window("w").unwrap().sessions.len(), 1);
         assert!(!l.remove_pane(2));
         assert_eq!(l.window_of(3), Some("w"));
+    }
+
+    #[test]
+    fn sessions_lock_and_panes_carry_their_kind() {
+        let mut l = Layout::default();
+        let s = l.new_session("w", None, 1);
+        l.split(1, SplitDir::Right, 2).unwrap();
+        assert!(!l.session(s).unwrap().locked, "new sessions start unlocked");
+        assert!(l.locked_session_of(1).is_none());
+        l.lock_session(s, true).unwrap();
+        assert_eq!(l.locked_session_of(2).map(|s| s.id), Some(s));
+        assert_eq!(l.lock_session(99, true), Err(NotFound("session", 99)));
+        l.lock_session(s, false).unwrap();
+        assert!(l.locked_session_of(2).is_none());
+
+        assert!(l.set_kind(2, PaneTag::Agent));
+        assert!(!l.set_kind(7, PaneTag::Agent));
+        let w = l.window("w").unwrap();
+        assert_eq!((w.kind(1), w.kind(2)), (PaneTag::Shell, PaneTag::Agent));
+        assert_eq!(PaneTag::Agent.icon(), "agent");
+        let json = serde_json::to_value(w).unwrap();
+        assert_eq!(json["kinds"], serde_json::json!({"2": "agent"}));
+        l.remove_pane(2);
+        assert!(l.window("w").unwrap().kinds.is_empty());
+        // Older layouts without kinds still read.
+        let old: Window = serde_json::from_str(r#"{"sessions":[]}"#).unwrap();
+        assert!(old.kinds.is_empty());
     }
 
     #[test]

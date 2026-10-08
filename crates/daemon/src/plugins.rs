@@ -32,8 +32,8 @@ use auk_mirror::{DaemonMsg, Effect, Message, PaneId};
 use auk_plugins::capture::LensLine;
 use auk_plugins::{
     BlockLaunch, BlockOutput, BlockRecord, Catalog, Claim, EffectTarget, HostConfig, HostEvent,
-    HostOutput, LensRecord, LensRun, PaneInfo, PaneTable, PluginHost, PluginSettings, SpawnSpec,
-    ToastLevel, Watcher,
+    HostOutput, LensRecord, LensRun, PaneInfo, PaneTable, PluginHost, SpawnSpec, ToastLevel,
+    Watcher,
 };
 use auk_replica::{LensNote, Record, Replica, Role, claim_catalog};
 use bytes::Bytes;
@@ -147,7 +147,8 @@ impl Plugins {
         let config = HostConfig {
             plugins_dir: plugins_dir.clone(),
             state_dir,
-            settings: PluginSettings::default(),
+            // `plugins` and `plugins_disabled` from the settings file (§9.1), read at every load.
+            settings: crate::settings::read().plugins,
             waker: None,
             log: Arc::new(|r: &auk_plugins::LogRecord<'_>| {
                 eprintln!("plugin {} [{:?}]: {}", r.plugin, r.level, r.message);
@@ -330,6 +331,7 @@ fn serve_host(
                 host.lens_event(block, pane, event, *record)
             }
             Cmd::Reload(reply) => {
+                host.set_settings(crate::settings::read().plugins);
                 let new = host.reload().clone();
                 for p in &new.plugins {
                     if let auk_plugins::Status::Failed(e) = &p.status {
@@ -361,6 +363,58 @@ fn serve_host(
             }
         }
     }
+}
+
+/// A block that couldn't start (§9.5): its pane shows a card saying so, with Retry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FailedBlock {
+    /// The card's surface.
+    pub surface: String,
+    pub reason: String,
+    /// Starts tried so far.
+    pub tries: u32,
+}
+
+/// The action the card's Retry button sends.
+pub const RETRY_ACTION: &str = "retry";
+
+/// One TSP message as a program writes it: `ESC _ tsp;<verb>;<json> ESC \`.
+fn tsp_message(verb: &str, body: &Value) -> Vec<u8> {
+    let mut out = format!("\x1b_tsp;{verb};{body}").into_bytes();
+    out.extend_from_slice(b"\x1b\\");
+    out
+}
+
+/// Shows (or updates) the "Could not start the block" card in a block pane: a screen surface
+/// with the reason and a Retry button, written into the pane's stream like a program's output,
+/// so every window shows it.
+fn show_failure(p: &mut Pane, reason: String) {
+    let tries = p.block_failed.as_ref().map_or(0, |f| f.tries) + 1;
+    let surface = format!("failed{tries}");
+    let mut out = Vec::new();
+    if let Some(old) = p.block_failed.as_ref().filter(|f| !f.surface.is_empty()) {
+        out.extend(tsp_message("x", &json!({"id": old.surface, "keep": false})));
+    }
+    out.extend(tsp_message(
+        "o",
+        &json!({"id": surface, "mode": "screen", "title": "Could not start the block", "role": "block.failed"}),
+    ));
+    let card = json!({"id": "main", "k": "col", "c": [
+        {"id": "title", "k": "text", "p": {"text": "Could not start the block"}},
+        {"id": "reason", "k": "text", "p": {"text": reason}},
+        {"id": "retry", "k": "el", "p": {"tag": "button", "text": "Retry", "actions": {"click": RETRY_ACTION}}},
+    ]});
+    out.extend(tsp_message(
+        "f",
+        &json!({"sf": surface, "s": 1, "ops": [["add", "main", surface, null, card]]}),
+    ));
+    eprintln!("auk daemon: pane {}: could not start the block: {reason}", p.id);
+    p.on_output(&out);
+    p.block_failed = Some(FailedBlock {
+        surface,
+        reason,
+        tries,
+    });
 }
 
 /// Where a new block pane goes.
@@ -399,12 +453,10 @@ impl Daemon {
     }
 
     /// Opens a block pane: a daemon pane with no process whose output is the block worker's TSP
-    /// bytes (§9.5, §15.1). Fails with `no block type KIND on this host` when no Ready plugin
-    /// defines it.
+    /// bytes (§9.5, §15.1). When the block can't start (no Ready plugin defines its type, say),
+    /// the pane still opens and shows a "Could not start the block" card with Retry; the answer
+    /// then carries the reason in `failed`.
     pub fn new_block_pane(self: &Arc<Self>, req: NewBlock) -> Result<PaneId, String> {
-        if self.plugins.catalog().block_type(&req.kind).is_none() {
-            return Err(format!("no block type {} on this host", req.kind));
-        }
         let cwd = match &req.cwd {
             Some(dir) if dir.is_dir() => dir.clone(),
             Some(dir) => return Err(format!("{} is not a directory", dir.display())),
@@ -458,6 +510,7 @@ impl Daemon {
                 st.layout.split(at, dir, id).map_err(|e| e.to_string())?;
             }
         }
+        st.layout.set_kind(id, auk_mirror::layout::PaneTag::Block);
         st.next_pane = id;
         st.panes.insert(id, pane.clone());
         let viewers: Vec<(u64, ClientTx, auk_mirror::ClientFacts)> = st
@@ -473,26 +526,83 @@ impl Daemon {
             serde_json::json!({"pane": id, "window": window_key, "kind": "block"}),
         );
         crate::events::emit("layout_changed", serde_json::json!({"window": window_key}));
-        let started = self.plugins.start_block(BlockLaunch {
-            pane: id,
-            kind: req.kind,
-            args: req.args,
-            saved: None,
-            cwd: Some(cwd.to_string_lossy().into_owned()),
-            cols,
-            rows,
-        });
-        if let Err(e) = started {
-            let generation = lock(&pane).generation;
-            self.pane_exited(id, generation, 1);
-            return Err(e);
-        }
+        let started = match self.plugins.catalog().block_type(&req.kind) {
+            None => Err(format!("no block type {} on this host", req.kind)),
+            Some(_) => self.plugins.start_block(BlockLaunch {
+                pane: id,
+                kind: req.kind,
+                args: req.args,
+                saved: None,
+                cwd: Some(cwd.to_string_lossy().into_owned()),
+                cols,
+                rows,
+            }),
+        };
         let mut p = lock(&pane);
+        if let Err(reason) = started {
+            show_failure(&mut p, reason);
+        }
         p.link_info();
         for (client, tx, facts) in viewers {
             p.add_viewer(client, tx, facts);
         }
         Ok(id)
+    }
+
+    /// Retry on a "Could not start the block" card: starts the block again in its pane, with
+    /// the same args, cwd and size. A second failure updates the card.
+    pub fn retry_block(&self, pane: PaneId) -> Result<(), String> {
+        let p = self.pane(pane).ok_or_else(|| format!("no pane {pane}"))?;
+        let launch = {
+            let p = lock(&p);
+            let PaneKind::Block { block, args, saved } = &p.kind else {
+                return Err(format!("pane {pane} is not a plugin block"));
+            };
+            if p.block_failed.is_none() || p.exit.is_some() {
+                return Err(format!("pane {pane}'s block is running"));
+            }
+            let term = p.replica.terminal();
+            BlockLaunch {
+                pane,
+                kind: block.clone(),
+                args: args.clone(),
+                saved: saved.clone(),
+                cwd: Some(p.spawn_cwd.to_string_lossy().into_owned()),
+                cols: term.cols(),
+                rows: term.rows(),
+            }
+        };
+        let started = match self.plugins.catalog().block_type(&launch.kind) {
+            None => Err(format!("no block type {} on this host", launch.kind)),
+            Some(_) => {
+                // The card goes before the block's own surface opens.
+                let mut p = lock(&p);
+                let close = p
+                    .block_failed
+                    .as_ref()
+                    .map(|f| tsp_message("x", &json!({"id": f.surface, "keep": false})));
+                if let Some(close) = close {
+                    p.on_output(&close);
+                }
+                if let Some(f) = p.block_failed.as_mut() {
+                    f.surface.clear();
+                }
+                drop(p);
+                self.plugins.start_block(launch)
+            }
+        };
+        let mut p = lock(&p);
+        match started {
+            Ok(()) => {
+                p.block_failed = None;
+                p.link_info();
+                Ok(())
+            }
+            Err(reason) => {
+                show_failure(&mut p, reason.clone());
+                Err(reason)
+            }
+        }
     }
 
     /// Restarts a block pane from the state file (§5.4, §9.5 "Survival"): same pane id, same
@@ -765,6 +875,7 @@ impl Daemon {
     /// | `plugin reload` | reloads every host half and answers with the new catalog |
     /// | `block KIND [--window K] [--tab SESSION] [--split TARGET right\|down] [--cwd DIR] [--size CxR] [-- ARG…]` | opens a block pane |
     /// | `blocks` | the running blocks: kind, args, last save, size |
+    /// | `block-retry TARGET` | Retry on a "Could not start the block" card |
     /// | `lens TARGET` | the pane's command blocks and their views |
     /// | `pane-list` | what `tern.pane.list` returns |
     pub(crate) fn plugin_command(self: &Arc<Self>, cmd: &str, args: &[String]) -> Result<Value, String> {
@@ -775,6 +886,13 @@ impl Daemon {
                 .ok_or_else(|| "the session daemon did not answer".into()),
             ("plugin", _) => Err("plugin: expected list or reload".into()),
             ("block", _) => self.cmd_block(args),
+            ("block-retry", _) => {
+                let pane: PaneId = args
+                    .first()
+                    .and_then(|a| a.parse().ok())
+                    .ok_or("block-retry: expected a pane")?;
+                self.retry_block(pane).map(|()| json!({"pane": pane}))
+            }
             ("blocks", _) => {
                 let blocks: BTreeMap<String, Value> = self
                     .plugins
@@ -862,7 +980,13 @@ impl Daemon {
             cwd,
             size,
         })?;
-        Ok(json!({"pane": id}))
+        let failed = self
+            .pane(id)
+            .and_then(|p| lock(&p).block_failed.as_ref().map(|f| f.reason.clone()));
+        Ok(match failed {
+            Some(reason) => json!({"pane": id, "failed": reason}),
+            None => json!({"pane": id}),
+        })
     }
 }
 
@@ -975,7 +1099,9 @@ impl Pane {
         }
         let program = match &self.kind {
             PaneKind::Block { block, .. } => block.clone(),
-            PaneKind::Command { line } => line.split_whitespace().next().unwrap_or("").to_owned(),
+            PaneKind::Command { line } | PaneKind::Agent { line } => {
+                line.split_whitespace().next().unwrap_or("").to_owned()
+            }
             PaneKind::Shell if self.shell.running => self
                 .shell
                 .marks

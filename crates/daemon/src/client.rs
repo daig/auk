@@ -120,7 +120,7 @@ pub async fn serve(daemon: Arc<Daemon>, stream: UnixStream) {
         })
     };
 
-    let id = daemon.add_client(hello.kind, hello.facts, client_tx);
+    let id = daemon.add_client(hello.kind, hello.facts, hello.identity, client_tx);
     loop {
         let msg = tokio::select! {
             msg = frames.next() => msg,

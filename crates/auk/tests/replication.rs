@@ -2,12 +2,17 @@
 //! attaches get the live state, and mismatched versions are refused (X9).
 
 use std::os::unix::net::UnixStream;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use auk_conformance::harness::{Headless, TestEnv, wait_for};
+use auk_conformance::probe::{Probe, events, frame, hello as tsp_hello, open_with};
 use auk_mirror::{
-    Client, ClientFacts, ClientKind, DaemonMsg, HandshakeError, Hello, Versions, read_msg,
+    Client, ClientFacts, ClientKind, ClientMsg, DaemonMsg, HandshakeError, Hello, Versions,
+    read_msg, write_msg,
 };
 use auk_replica::{Item, Record, Replica, Role, Settings};
+use serde_json::{Value, json};
 
 fn env(name: &str) -> TestEnv {
     TestEnv::new(env!("CARGO_BIN_EXE_auk"), name)
@@ -323,4 +328,213 @@ fn ac02_replicas_fed_the_same_stream_and_records_agree_under_fuzzing() {
             "seed {seed}: snapshot replica"
         );
     }
+}
+
+/// A client on the daemon's wire, attached to `main`: it sends what the test says (focus, acks)
+/// and keeps every message the daemon sends it.
+struct RawClient {
+    id: u64,
+    stream: UnixStream,
+    got: Arc<Mutex<Vec<DaemonMsg>>>,
+}
+
+impl RawClient {
+    fn attach(env: &TestEnv, facts: ClientFacts) -> RawClient {
+        let stream = UnixStream::connect(&env.socket).unwrap();
+        let hello = Hello::new(ClientKind::Headless, facts);
+        let (client, welcome) = Client::handshake(stream, &hello).unwrap();
+        let stream = client.into_inner();
+        let got = Arc::new(Mutex::new(Vec::new()));
+        let mut reader = stream.try_clone().unwrap();
+        let sink = got.clone();
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            while let Ok(Some(msg)) = read_msg::<DaemonMsg>(&mut reader, &mut buf) {
+                sink.lock().unwrap().push(msg);
+            }
+        });
+        let raw = RawClient {
+            id: welcome.client,
+            stream,
+            got,
+        };
+        raw.send(&ClientMsg::Attach {
+            window_key: "main".into(),
+        });
+        raw
+    }
+
+    fn send(&self, msg: &ClientMsg) {
+        write_msg(&mut &self.stream, msg).unwrap();
+    }
+
+    /// The last presence message, once one satisfies `done`.
+    fn presence(&self, done: impl Fn(&[auk_mirror::ClientInfo]) -> bool) -> Vec<auk_mirror::ClientInfo> {
+        wait_for("a presence message", || {
+            self.got.lock().unwrap().iter().rev().find_map(|m| match m {
+                DaemonMsg::Presence { clients } => Some(clients.clone()),
+                _ => None,
+            })
+            .filter(|c| done(c))
+        })
+    }
+}
+
+impl Drop for RawClient {
+    fn drop(&mut self) {
+        let _ = self.stream.shutdown(std::net::Shutdown::Both);
+    }
+}
+
+/// Waits until the daemon names `client` as the pane's primary.
+fn wait_primary(env: &TestEnv, pane: u64, client: u64) {
+    wait_for(&format!("client {client} to be pane {pane}'s primary"), || {
+        env.daemon("clients")
+            .as_array()?
+            .iter()
+            .any(|c| {
+                c["id"] == client
+                    && c["primary_for"]
+                        .as_array()
+                        .is_some_and(|p| p.contains(&json!(pane)))
+            })
+            .then_some(())
+    });
+}
+
+fn acks(bodies: &[Value]) -> Vec<u64> {
+    events(bodies, "ack").iter().filter_map(|a| a["s"].as_u64()).collect()
+}
+
+#[test]
+fn only_the_primary_clients_acks_count_and_client_facts_follow_the_primary() {
+    let env = env("primaryacks");
+    env.start_daemon();
+    let probe = Probe::start(&env, &[]);
+    let pane = probe.pane;
+    let x = RawClient::attach(&env, ClientFacts::default());
+    let y = RawClient::attach(
+        &env,
+        ClientFacts {
+            cell_px: [10, 20],
+            dark: true,
+            ..ClientFacts::default()
+        },
+    );
+    x.send(&ClientMsg::Focus { pane });
+    wait_primary(&env, pane, x.id);
+    probe.write(&tsp_hello(&[]));
+    probe.write(&open_with("s1", "flow", json!([{"id": "t", "k": "text", "p": {"text": "hi"}}])));
+    // The hello's reply, then nothing more: neither client has drawn frame 1.
+    let bodies = probe.fence_tsp();
+    assert!(acks(&bodies).is_empty(), "{bodies:?}");
+
+    // A client that isn't the pane's primary acks: the program hears nothing (§4.5, §7.10).
+    y.send(&ClientMsg::Ack { pane, sf: "s1".into(), s: 1 });
+    std::thread::sleep(Duration::from_millis(500));
+    let bodies = probe.fence_tsp();
+    assert!(acks(&bodies).is_empty(), "a non-primary ack reached the program: {bodies:?}");
+    // The primary's ack does.
+    x.send(&ClientMsg::Ack { pane, sf: "s1".into(), s: 1 });
+    let input = probe.read_until("the primary's ack", |b| {
+        let items = auk_conformance::probe::split_input(b);
+        !acks(&auk_conformance::probe::tsp_bodies(&items)).is_empty()
+    });
+    let bodies = auk_conformance::probe::tsp_bodies(&auk_conformance::probe::split_input(&input));
+    assert_eq!(acks(&bodies), [1]);
+
+    // Y becomes the primary: the program now sees Y's facts (dark, its cell size)...
+    y.send(&ClientMsg::Focus { pane });
+    wait_primary(&env, pane, y.id);
+    let input = probe.read_until("Y's theme", |b| {
+        let bodies = auk_conformance::probe::tsp_bodies(&auk_conformance::probe::split_input(b));
+        events(&bodies, "theme").iter().any(|t| t["dark"] == true)
+    });
+    let bodies = auk_conformance::probe::tsp_bodies(&auk_conformance::probe::split_input(&input));
+    assert!(events(&bodies, "theme").contains(&&json!({"ev": "theme", "dark": true})), "{bodies:?}");
+    // ...and only Y's acks count.
+    probe.write(&frame("s1", 2, json!([["set", "t", {"text": "two"}]])));
+    x.send(&ClientMsg::Ack { pane, sf: "s1".into(), s: 2 });
+    std::thread::sleep(Duration::from_millis(500));
+    let bodies = probe.fence_tsp();
+    assert!(acks(&bodies).is_empty(), "the old primary's ack reached the program: {bodies:?}");
+    y.send(&ClientMsg::Ack { pane, sf: "s1".into(), s: 2 });
+    probe.read_until("the new primary's ack", |b| {
+        let bodies = auk_conformance::probe::tsp_bodies(&auk_conformance::probe::split_input(b));
+        acks(&bodies) == [2]
+    });
+
+    // X again: its facts come back.
+    x.send(&ClientMsg::Focus { pane });
+    wait_primary(&env, pane, x.id);
+    probe.read_until("X's theme", |b| {
+        let bodies = auk_conformance::probe::tsp_bodies(&auk_conformance::probe::split_input(b));
+        events(&bodies, "theme").iter().any(|t| t["dark"] == false)
+    });
+}
+
+#[test]
+fn an_older_client_is_refused_and_offered_an_upgrade() {
+    let env = env("older");
+    env.start_daemon();
+    let mut hello = Hello::new(ClientKind::App, ClientFacts::default());
+    hello.versions.auk = "0.0.0-older".into();
+    // An older client never upgrades the daemon to itself.
+    hello.exe = None;
+    let stream = UnixStream::connect(&env.socket).unwrap();
+    let err = match Client::handshake(stream, &hello) {
+        Err(err @ HandshakeError::Refused(_)) => err,
+        other => panic!("expected a refusal, got {other:?}"),
+    };
+    let HandshakeError::Refused(refusal) = &err else {
+        unreachable!()
+    };
+    assert!(!refusal.upgrading, "{refusal:?}");
+    assert!(refusal.reason.contains("0.0.0-older"), "{}", refusal.reason);
+    // What the client shows: the refusal, and the release to upgrade to.
+    let shown = err.to_string();
+    let offer = format!("upgrade to Auk {}", Versions::current().auk);
+    assert!(shown.contains(&offer), "{shown}");
+    assert!(shown.starts_with("the daemon refused this client"), "{shown}");
+    // The daemon is unchanged and keeps serving current clients.
+    let stream = UnixStream::connect(&env.socket).unwrap();
+    let hello = Hello::new(ClientKind::Headless, ClientFacts::default());
+    assert!(Client::handshake(stream, &hello).is_ok());
+}
+
+#[test]
+fn presence_lists_the_attached_clients_with_their_identity() {
+    let env = env("presence");
+    env.start_daemon();
+    let x = RawClient::attach(&env, ClientFacts::default());
+    let y = RawClient::attach(&env, ClientFacts::default());
+    // Every client hears who is attached to the host, itself included (§10.1).
+    let seen = x.presence(|c| c.len() == 2 && c.iter().all(|c| c.window_key.is_some()));
+    let ids: Vec<u64> = seen.iter().map(|c| c.id).collect();
+    assert_eq!(ids, [x.id, y.id]);
+    let user = std::process::Command::new("id").arg("-un").output().unwrap();
+    let user = String::from_utf8_lossy(&user.stdout).trim().to_owned();
+    for c in &seen {
+        assert_eq!(c.kind, ClientKind::Headless);
+        assert_eq!(c.window_key.as_deref(), Some("main"));
+        let [hop] = c.identity.as_slice() else {
+            panic!("one local hop: {c:?}")
+        };
+        assert_eq!(hop.method, "local");
+        assert!(hop.acting.starts_with(&format!("{user}@")), "{hop:?}");
+        assert_eq!(hop.principal, hop.acting);
+    }
+    // A headless window shows the same, and the control endpoint lists identities too.
+    let w = env.start_headless("w", &[]);
+    let shown = wait_for("the window's presence", || {
+        let p = w.request("presence");
+        (p.as_array()?.len() == 3).then_some(p)
+    });
+    assert_eq!(shown[2]["identity"][0]["method"], "local", "{shown}");
+    let clients = env.daemon("clients");
+    assert_eq!(clients[0]["identity"][0]["method"], "local", "{clients}");
+    // A client that leaves is gone from the next presence message.
+    drop(y);
+    let seen = x.presence(|c| c.len() == 2 && !c.iter().any(|c| c.id == ids[1]));
+    assert!(seen.iter().any(|c| c.id == x.id));
 }

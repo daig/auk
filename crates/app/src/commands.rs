@@ -30,6 +30,13 @@ pub enum Cmd {
     ToggleFullScreen,
     CommandPalette,
     ReloadPlugins,
+    ReloadSettings,
+    LockSession,
+    Find,
+    FindNext,
+    FindPrevious,
+    PreviousPrompt,
+    NextPrompt,
 }
 
 /// One registry entry: where the command sits in the menu bar and its key equivalent.
@@ -87,9 +94,13 @@ pub const REGISTRY: &[Entry] = &[
     grouped(entry(Cmd::SplitRight, "Shell", "Split Right", "d", CMD)),
     entry(Cmd::SplitDown, "Shell", "Split Down", "d", CMD_SHIFT),
     grouped(entry(Cmd::ClosePane, "Shell", "Close Pane", "w", CMD)),
+    entry(Cmd::LockSession, "Shell", "Lock Session", "", NONE),
     entry(Cmd::Copy, "Edit", "Copy", "c", CMD),
     entry(Cmd::Paste, "Edit", "Paste", "v", CMD),
     entry(Cmd::SelectAll, "Edit", "Select All", "a", CMD),
+    grouped(entry(Cmd::Find, "Edit", "Find…", "f", CMD)),
+    entry(Cmd::FindNext, "Edit", "Find Next", "g", CMD),
+    entry(Cmd::FindPrevious, "Edit", "Find Previous", "g", CMD_SHIFT),
     grouped(entry(
         Cmd::ClearScrollback,
         "Edit",
@@ -112,6 +123,20 @@ pub const REGISTRY: &[Entry] = &[
         "\u{F72B}",
         CMD,
     ),
+    entry(
+        Cmd::PreviousPrompt,
+        "View",
+        "Jump to Previous Prompt",
+        "\u{F700}",
+        CMD,
+    ),
+    entry(
+        Cmd::NextPrompt,
+        "View",
+        "Jump to Next Prompt",
+        "\u{F701}",
+        CMD,
+    ),
     grouped(entry(
         Cmd::CommandPalette,
         "View",
@@ -120,6 +145,7 @@ pub const REGISTRY: &[Entry] = &[
         CMD_SHIFT,
     )),
     entry(Cmd::ReloadPlugins, "View", "Reload Plugins", "", NONE),
+    entry(Cmd::ReloadSettings, "View", "Reload Settings", "", NONE),
     grouped(entry(
         Cmd::ToggleFullScreen,
         "View",
@@ -231,6 +257,13 @@ pub fn builtin_id(cmd: Cmd) -> String {
         Cmd::ToggleFullScreen => "toggle_full_screen".into(),
         Cmd::CommandPalette => "command_palette".into(),
         Cmd::ReloadPlugins => "reload_plugins".into(),
+        Cmd::ReloadSettings => "reload_settings".into(),
+        Cmd::LockSession => "lock_session".into(),
+        Cmd::Find => "find".into(),
+        Cmd::FindNext => "find_next".into(),
+        Cmd::FindPrevious => "find_previous".into(),
+        Cmd::PreviousPrompt => "previous_prompt".into(),
+        Cmd::NextPrompt => "next_prompt".into(),
     }
 }
 
@@ -250,10 +283,12 @@ pub fn builtin_ids() -> Vec<String> {
 /// The key equivalents the menu binds, as chords (`cmd+shift+p`): the default keymap layer a
 /// plugin bind may not take (§9.8 "Binds").
 pub fn default_chords() -> Vec<String> {
-    REGISTRY
-        .iter()
-        .filter(|e| !e.key.is_empty())
-        .filter_map(|e| {
+    REGISTRY.iter().filter_map(entry_chord).collect()
+}
+
+/// A registry entry's key equivalent as a chord.
+fn entry_chord(e: &Entry) -> Option<String> {
+    Some(e).filter(|e| !e.key.is_empty()).and_then(|e| {
             let key = match e.key {
                 "\r" => "enter".to_owned(),
                 "\u{F729}" => "home".to_owned(),
@@ -281,7 +316,6 @@ pub fn default_chords() -> Vec<String> {
             }
             Some(format!("{}+{key}", parts.join("+")))
         })
-        .collect()
 }
 
 /// The command a menu title names (for the automation endpoint).
@@ -304,6 +338,17 @@ fn standard(title: &str, action: StandardAction, key: &str, mods: KeyMods) -> Me
 /// The menu bar: the app menu, then the registry's menus in order, with AppKit's standard items
 /// where they belong.
 pub fn menu_bar() -> Menu {
+    menu_bar_without(&[])
+}
+
+/// The menu bar with the key equivalents of `taken` left out: chords the user's `keybinds`
+/// rebind or unbind (§9.8: the user layer always wins), so those keys reach the keymap.
+pub fn menu_bar_without(taken: &[auk_plugins::chord::Chord]) -> Menu {
+    let free = |e: &Entry| {
+        entry_chord(e)
+            .and_then(|c| auk_plugins::chord::Chord::parse(&c).ok())
+            .is_none_or(|c| !taken.contains(&c))
+    };
     let app_menu = Menu {
         title: "Auk".into(),
         windows_menu: false,
@@ -328,11 +373,16 @@ pub fn menu_bar() -> Menu {
             if e.group && !items.is_empty() {
                 items.push(MenuItem::Separator);
             }
+            let (key, mods) = if free(e) {
+                (e.key, e.mods)
+            } else {
+                ("", NONE)
+            };
             items.push(MenuItem::Command {
                 title: e.title.into(),
                 command: id_of(e.cmd),
-                key: e.key.into(),
-                mods: e.mods,
+                key: key.into(),
+                mods,
             });
         }
         if name == "Window" {

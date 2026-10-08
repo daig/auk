@@ -56,6 +56,10 @@ pub struct Hello {
     /// (§15.7); `None` where there is none (the browser).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exe: Option<std::path::PathBuf>,
+    /// How the client reached the daemon, for presence (§10.1): a remote link names its SSH hop.
+    /// Empty for a client on the daemon's machine, which the daemon shows as a `local` hop.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub identity: Vec<Hop>,
 }
 
 impl Hello {
@@ -66,6 +70,7 @@ impl Hello {
             kind,
             facts,
             exe: std::env::current_exe().ok(),
+            identity: Vec::new(),
         }
     }
 }
@@ -92,6 +97,12 @@ pub enum LayoutEdit {
     Zoom { tab: TabId, pane: Option<PaneId> },
     RenameSession { session: SessionId, name: String },
     RenameTab { tab: TabId, title: Option<String> },
+    /// Locks or unlocks a session (`session lock` toggles: the window sends the opposite of
+    /// what its layout shows).
+    LockSession { session: SessionId, locked: bool },
+    /// Opens an agent pane (§5.1): `agent_command` through the login shell, split right of
+    /// `pane` (the window's focused pane), or in a new session when there is none.
+    Agent { pane: Option<PaneId> },
 }
 
 /// Client to daemon.
@@ -173,12 +184,33 @@ fn info() -> String {
     "info".to_owned()
 }
 
-/// An attached client, as presence reports it.
+/// An attached client, as presence reports it (§10.1).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientInfo {
     pub id: u64,
     pub kind: ClientKind,
     pub window_key: Option<String>,
+    /// Who the client is: its identity chain, nearest hop last (§10.1). A local client has one
+    /// `local` hop.
+    #[serde(default)]
+    pub identity: Vec<Hop>,
+}
+
+/// One hop of an identity chain (§10.1): a principal reached by a method from a machine, acting
+/// as a user, as in "can@github via tailscale from laptop as can@build-box". The same shape as
+/// `auk_remote::Hop`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Hop {
+    pub principal: String,
+    /// `local`, `ssh-key` or `tailscale`.
+    pub method: String,
+    /// The machine the hop started from.
+    pub origin: String,
+    /// The user it acts as on the host, `user@host`.
+    pub acting: String,
+    /// The key's type and fingerprint, for a key hop.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
 }
 
 /// Daemon to client.

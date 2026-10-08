@@ -2,6 +2,7 @@
 //! classes, attributes and generated parts, and routes its children into slots.
 
 pub(crate) mod agent;
+pub(crate) mod block;
 pub(crate) mod data;
 pub(crate) mod el;
 pub(crate) mod input;
@@ -121,6 +122,8 @@ pub(crate) fn route(node: NodeRef, child: NodeRef) -> Route {
             }
         }
         "seg" | "overlay" | "list" | "tool" | "agent" | "image" => Route::Slot(0),
+        // The native child, else the raw one (§9.6): the block mounts only the one it shows.
+        "block" => Route::Slot(usize::from(block::is_raw(node, child))),
         _ => Route::Direct,
     }
 }
@@ -240,6 +243,7 @@ pub(crate) fn render(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
         "checklist" => agent::checklist(cx, node, m, look),
         "effort" => agent::effort(cx, node, m, look),
         "el" => el::el(cx, node, m, look),
+        "block" => block::block(cx, node, m, look),
         _ => generic(cx, node, m, look),
     }
 }
@@ -271,6 +275,7 @@ pub(crate) fn tick(cx: &mut Cx, node: NodeRef, m: &mut Mount) -> bool {
             crate::motion::tick(cx, node, m)
         }
         "md" => rich::tick_md(cx, node, m),
+        "code" => rich::tick_code(cx, node, m),
         "text" | "card" | "section" | "seg" | "item" | "kv" | "table" | "status" => {
             crate::motion::tick_fx(cx, m)
         }

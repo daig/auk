@@ -523,7 +523,9 @@ pub struct ComputedStyle {
     pub grid_column_start: GridLine,
     pub grid_column_end: GridLine,
     pub background_color: Color,
-    pub has_background_image: bool,
+    /// A `background-image: url(data:…)` picture: its URL, loaded through the document's URL
+    /// loader ([`crate::Document::set_url_loader`]).
+    pub background_image: Option<Arc<str>>,
     pub opacity: f32,
     pub z_index: Option<i32>,
     pub vertical_align: VerticalAlign,
@@ -638,7 +640,7 @@ impl Default for ComputedStyle {
             grid_column_start: GridLine::Auto,
             grid_column_end: GridLine::Auto,
             background_color: Color::TRANSPARENT,
-            has_background_image: false,
+            background_image: None,
             opacity: 1.0,
             z_index: None,
             vertical_align: VerticalAlign::Baseline,

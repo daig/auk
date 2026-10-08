@@ -687,6 +687,63 @@ pub fn load_blob(blob: &auk_tsp::Blob, density: f32) -> Loaded {
     }
 }
 
+/// The bytes and media type of a `data:` URL (`data:[<type>][;base64],<data>`, RFC 2397): base64
+/// or percent-encoded.
+pub fn data_url(url: &str) -> Option<(Vec<u8>, Option<String>)> {
+    use base64::Engine as _;
+    let rest = url.get(..5).filter(|s| s.eq_ignore_ascii_case("data:"))?;
+    let rest = &url[rest.len()..];
+    let (meta, data) = rest.split_once(',')?;
+    let mut params = meta.split(';');
+    let mime = params
+        .next()
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .map(str::to_ascii_lowercase);
+    let base64 = params.any(|p| p.trim().eq_ignore_ascii_case("base64"));
+    let bytes = if base64 {
+        use base64::engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
+        let engine = GeneralPurpose::new(
+            &base64::alphabet::STANDARD,
+            GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent),
+        );
+        let clean: String = data.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+        engine.decode(clean).ok()?
+    } else {
+        let mut out = Vec::with_capacity(data.len());
+        let b = data.as_bytes();
+        let mut i = 0;
+        while i < b.len() {
+            if b[i] == b'%'
+                && let Some(v) = data
+                    .get(i + 1..i + 3)
+                    .and_then(|h| u8::from_str_radix(h, 16).ok())
+            {
+                out.push(v);
+                i += 3;
+            } else {
+                out.push(b[i]);
+                i += 1;
+            }
+        }
+        out
+    };
+    Some((bytes, mime))
+}
+
+/// The picture of a `data:` URL, for a plugin sheet's `background-image` (§9.8 CSS): PNG, JPEG,
+/// GIF, WebP (their first frame) or sanitized SVG drawn at `density`, at most 4096 px a side.
+pub fn load_data_url(url: &str, density: f32) -> Option<ImageContent> {
+    let (bytes, mime) = data_url(url)?;
+    if bytes.len() > auk_tsp::blob::MAX_BLOB {
+        return None;
+    }
+    let id = auk_tsp::blob::blob_id(&bytes);
+    let blob = auk_tsp::Blob { id, mime, bytes };
+    let picture = load_blob(&blob, density).ok()?;
+    picture.frames.first().map(|f| f.content.clone())
+}
+
 /// A built-in picture at `density`.
 pub fn load_builtin(name: &str, density: f32) -> Loaded {
     let d = bucket(density);

@@ -5,7 +5,7 @@
 use auk_ui::{Document, SheetKind};
 
 /// `(name, css)` in cascade order.
-pub const BUILTIN: [(&str, &str); 12] = [
+pub const BUILTIN: [(&str, &str); 13] = [
     ("base", include_str!("css/base.css")),
     ("theme", include_str!("css/theme.css")),
     ("highlight", include_str!("css/highlight.css")),
@@ -17,6 +17,7 @@ pub const BUILTIN: [(&str, &str); 12] = [
     ("surface-input", include_str!("css/surface-input.css")),
     ("surface-agent", include_str!("css/surface-agent.css")),
     ("surface-el", include_str!("css/surface-el.css")),
+    ("surface-lens", include_str!("css/surface-lens.css")),
     ("chrome", include_str!("css/chrome.css")),
 ];
 
@@ -30,6 +31,9 @@ pub fn install_sheets(doc: &mut Document, dark: bool) -> Vec<String> {
         }
     }
     set_theme(doc, dark);
+    // Plugin sheets' `background-image: url(data:…)` pictures (§9.8 CSS), drawn for a Retina
+    // display.
+    doc.set_url_loader(Box::new(|url| crate::image::load_data_url(url, 2.0)));
     errors
 }
 

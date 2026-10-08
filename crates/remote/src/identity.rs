@@ -45,6 +45,18 @@ impl Hop {
     }
 }
 
+impl From<Hop> for auk_mirror::Hop {
+    fn from(h: Hop) -> Self {
+        auk_mirror::Hop {
+            principal: h.principal,
+            method: h.method,
+            origin: h.origin,
+            acting: h.acting,
+            key: h.key,
+        }
+    }
+}
+
 impl fmt::Display for Hop {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(

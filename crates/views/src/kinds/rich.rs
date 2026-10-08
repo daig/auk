@@ -65,10 +65,15 @@ pub(crate) fn tick_md(cx: &mut Cx, _node: NodeRef, m: &mut Mount) -> bool {
 /// A `code` node's incremental state.
 #[derive(Debug, Default)]
 pub(crate) struct CodeState {
-    pub hl: Option<Highlighter>,
+    /// Highlighting, done in the background past the first screenful (§8.5).
+    pub hl: Option<highlight::Background>,
     pub key: String,
     pub body: Option<NodeId>,
     pub lines: Vec<NodeId>,
+    /// Each line's text element and emphasized ranges, for drawing highlighting in later.
+    pub texts: Vec<(NodeId, Vec<std::ops::Range<usize>>)>,
+    /// Lines drawn with their highlighting; the rest are drawn plain until it arrives.
+    pub hl_drawn: usize,
     pub text: String,
     /// Lines re-rendered by the last update.
     pub redrawn: usize,
@@ -181,7 +186,7 @@ pub(crate) fn code(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
         begin(cx, m);
         let mut st = CodeState {
             key,
-            hl: highlight::find(lang, path).map(Highlighter::new),
+            hl: highlight::find(lang, path).map(highlight::Background::new),
             ..Default::default()
         };
         if let Some(path) = path {
@@ -206,7 +211,7 @@ pub(crate) fn code(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
     };
     let body = st.body.expect("body");
     let new_lines: Vec<&str> = text.split('\n').collect();
-    let first = match &mut st.hl {
+    let first = match &st.hl {
         Some(h) => h.update(&text),
         None => {
             let old: Vec<&str> = st.text.split('\n').collect();
@@ -228,6 +233,8 @@ pub(crate) fn code(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
             cx.dom.doc.remove(el);
         }
     }
+    st.texts.truncate(first);
+    let guard = st.hl.as_ref().map(|h| h.lock());
     for (i, line) in new_lines.iter().enumerate().skip(first) {
         let no = start + i as u64;
         let mark = marks.iter().find(|mk| mk.0 == no);
@@ -244,16 +251,50 @@ pub(crate) fn code(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
             cx.dom.attr(g, "aria-hidden", "true");
         }
         let lt = cx.dom.child(ln, "span", "sf-lt");
-        let runs = st.hl.as_ref().map(|h| h.line(i).1);
-        let em: &[std::ops::Range<usize>] = mark.map(|m| m.2.as_slice()).unwrap_or(&[]);
-        line_into(&mut cx.dom, lt, line, runs, em);
+        let runs = guard
+            .as_ref()
+            .filter(|h| i < h.highlighted())
+            .map(|h| h.line(i).1);
+        let em: Vec<std::ops::Range<usize>> = mark.map(|m| m.2.clone()).unwrap_or_default();
+        line_into(&mut cx.dom, lt, line, runs, &em);
         st.lines.push(ln);
+        st.texts.push((lt, em));
     }
+    st.hl_drawn = guard.as_ref().map_or(new_lines.len(), |h| h.highlighted());
+    let pending = guard.is_some_and(|h| !h.done()) || st.hl_drawn < new_lines.len();
     st.redrawn = new_lines.len() - first;
     st.text = text;
     // Long code virtualizes (§8.3: over 400 lines).
     let long = st.lines.len() > 400;
     super::virtualize(cx, node.id(), body, long.then_some(17.0));
+    // Highlighting still on its way: the clock draws it in.
+    m.clock = pending;
+}
+
+/// Draws in the highlighting the background has finished since the last render or tick.
+/// Returns whether more is on its way.
+pub(crate) fn tick_code(cx: &mut Cx, _node: NodeRef, m: &mut Mount) -> bool {
+    let Extra::Code(st) = &mut m.extra else {
+        return false;
+    };
+    let Some(bg) = st.hl.clone() else {
+        return false;
+    };
+    let more = bg.pump();
+    let h = bg.lock();
+    let ready = h.highlighted().min(st.texts.len());
+    for i in st.hl_drawn..ready {
+        let (lt, em) = &st.texts[i];
+        let lt = *lt;
+        if cx.dom.doc.try_node(lt).is_none() {
+            continue;
+        }
+        cx.dom.clear(lt);
+        let (line, runs) = h.line(i);
+        line_into(&mut cx.dom, lt, line, Some(runs), em);
+    }
+    st.hl_drawn = st.hl_drawn.max(ready);
+    more || st.hl_drawn < st.texts.len()
 }
 
 /// Whether the nearest collapsible card or section up the tree is open (previews give way).

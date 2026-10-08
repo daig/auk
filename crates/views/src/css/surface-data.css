@@ -5,6 +5,9 @@
 .sf-kv-k { color: var(--t3); white-space: pre; overflow: hidden; }
 .sf-kv-v { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
 .sf-kv.inline { display: block; }
+/* Virtualized (§8.3): a stack of rows, each a grid on the shared columns. */
+.sf-kv.virt { display: flex; flex-direction: column; row-gap: 2px; }
+.sf-kv.virt > .sf-kv-item { display: grid; grid-template-columns: var(--sf-kv-cols); column-gap: 16px; min-width: 0; }
 .sf-kv.inline .sf-kv-item { display: inline; white-space: nowrap; }
 .sf-kv.inline .sf-kv-sep { display: inline; color: var(--t4); margin: 0 6px; }
 .sf-kv.inline .sf-kv-item.first .sf-kv-sep { display: none; }
@@ -14,6 +17,8 @@
 .sf-table { min-width: 0; overflow: hidden; }
 .sf-tbl { display: grid; min-width: 0; }
 .sf-tbl-row { display: contents; }
+.sf-tbl.virt { display: flex; flex-direction: column; }
+.sf-tbl.virt > .sf-tbl-row { display: grid; grid-template-columns: var(--sf-tbl-cols); min-width: 0; }
 .sf-tbl-h, .sf-tbl-c { padding: 3px 14px 3px 0; white-space: pre; overflow: hidden; text-overflow: ellipsis; min-width: 0; border-bottom: 1px solid var(--l1); }
 .sf-tbl-h { font-family: var(--sans); font-size: 11px; color: var(--t3); font-weight: 600; }
 .sf-tbl-row.last > .sf-tbl-c { border-bottom: 0; }

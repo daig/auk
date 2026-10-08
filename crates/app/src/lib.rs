@@ -44,6 +44,8 @@ pub mod s1;
 #[cfg(target_os = "macos")]
 pub mod select;
 #[cfg(target_os = "macos")]
+pub mod settings;
+#[cfg(target_os = "macos")]
 pub mod window;
 
 use std::path::PathBuf;
@@ -65,6 +67,17 @@ pub struct Options {
     pub window_keys: Vec<String>,
     /// Which Option keys act as Alt: `none`, `left`, `right` or `both`.
     pub option_as_alt: OptionAsAltSetting,
+    /// Attach every window to this host's daemon over SSH instead (§10.2, §10.4 "Remote window").
+    pub remote: Option<RemoteHost>,
+}
+
+/// A remote host to attach to: `ssh [-F CONFIG] DESTINATION <remote command>`.
+#[derive(Clone, Debug, Default)]
+pub struct RemoteHost {
+    pub destination: String,
+    pub ssh_config: Option<PathBuf>,
+    /// The command the remote shell runs (default `auk attach --stdio`).
+    pub remote_command: Option<String>,
 }
 
 /// The Option-as-Alt setting (§19), portable.
@@ -92,15 +105,14 @@ impl OptionAsAltSetting {
 /// Runs the app until it quits.
 #[cfg(target_os = "macos")]
 pub fn run(opts: Options) -> ExitCode {
-    use auk_mirror::ClientFacts;
-
-    use crate::conn::Connection;
-
-    if let Err(err) = auk_daemon::spawn::ensure(&opts.exe, &opts.socket, &opts.state_dir) {
+    // A remote window's daemon is the host's; `auk attach --stdio` starts it there.
+    if opts.remote.is_none()
+        && let Err(err) = auk_daemon::spawn::ensure(&opts.exe, &opts.socket, &opts.state_dir)
+    {
         eprintln!("auk: starting the daemon: {err}");
         return ExitCode::FAILURE;
     }
-    let (first, welcome) = match Connection::open(&opts.socket, ClientFacts::default()) {
+    let (first, welcome) = match app::connect(&opts) {
         Ok(opened) => opened,
         Err(err) => {
             eprintln!("auk: connecting to the daemon: {err}");
@@ -130,7 +142,10 @@ pub fn run(opts: Options) -> ExitCode {
         }
     };
     auk_platform_macos::run(move |ctx| {
-        ctx.set_main_menu(&commands::menu_bar());
+        // The user's keybinds take their keys from the menu (§9.8).
+        ctx.set_main_menu(&commands::menu_bar_without(
+            &settings::Settings::load().user_chords(),
+        ));
         // Menu commands no key window took (the app isn't active): the window used last.
         ctx.set_command_handler(|_, id| match commands::by_id(id) {
             Some(commands::Cmd::NewWindow) => app::new_window(),
@@ -149,7 +164,7 @@ pub fn run(opts: Options) -> ExitCode {
         for key in &keys {
             let conn = match first.take() {
                 Some(c) => Ok(c),
-                None => Connection::open(&opts.socket, ClientFacts::default()).map(|(c, _)| c),
+                None => app::connect(&opts).map(|(c, _)| c),
             };
             match conn.and_then(|mut c| c.attach(key).map(|()| c)) {
                 Ok(conn) => app::open_window(conn),

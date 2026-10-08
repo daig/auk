@@ -254,6 +254,9 @@ impl Replica {
         replica.tsp.take_output();
         replica.replies.clear();
         replica.lens = lens::Lenses::restore(&snapshot.lens);
+        // The engine counts the finished command blocks from the start, as the live replica's
+        // does (§7.10); the state fits its budget already, so nothing is evicted here.
+        replica.enforce_retention();
         replica.seq = snapshot.seq;
         replica
     }
@@ -276,6 +279,8 @@ impl Replica {
             Item::Output(bytes) => self.feed(bytes, false, &mut events),
             Item::Record(record) => self.apply_record(record, &mut events),
         }
+        self.enforce_retention();
+        self.drain_events(false, &mut events);
         self.seq = seq;
         Ok(events)
     }

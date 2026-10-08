@@ -1,6 +1,8 @@
 //! Syntax highlighting into the 11 coarse `tk-*` classes (§8.5, §18.4): syntect with the
 //! two-face grammar set, incremental by line (a changed line re-highlights from there on; an
-//! append keeps the highlighting of unchanged lines).
+//! append keeps the highlighting of unchanged lines), and in the background ([`Background`]): a
+//! render highlights at most a screenful of changed lines and a worker thread does the rest,
+//! which the view draws in as it arrives.
 
 use std::sync::OnceLock;
 use syntect::parsing::{ParseState, Scope, ScopeStack, ScopeStackOp, SyntaxReference, SyntaxSet};
@@ -190,6 +192,8 @@ pub struct Highlighter {
     runs: Vec<Runs>,
     /// Parser state at the start of each line.
     states: Vec<(ParseState, ScopeStack)>,
+    /// The text's lines after `lines`, not highlighted yet.
+    pending: std::collections::VecDeque<String>,
 }
 
 impl std::fmt::Debug for Highlighter {
@@ -208,6 +212,7 @@ impl Highlighter {
             lines: Vec::new(),
             runs: Vec::new(),
             states: Vec::new(),
+            pending: Default::default(),
         }
     }
 
@@ -218,30 +223,67 @@ impl Highlighter {
     /// Bring the highlighting up to `text`. Returns the first line whose highlighting changed;
     /// lines before it are unchanged.
     pub fn update(&mut self, text: &str) -> usize {
+        let first = self.begin(text);
+        self.step(usize::MAX);
+        first
+    }
+
+    /// Takes `text` as the text to highlight without highlighting anything yet: lines up to the
+    /// first changed one keep their highlighting, the rest wait for [`step`](Self::step).
+    /// Returns the first line whose highlighting will change.
+    pub fn begin(&mut self, text: &str) -> usize {
         let new: Vec<&str> = text.split('\n').collect();
         let first = self
             .lines
             .iter()
+            .chain(self.pending.iter())
             .zip(&new)
             .take_while(|(a, b)| a.as_str() == **b)
             .count();
         // The last old line may have been incomplete; re-highlight from it.
-        let first = first.min(self.lines.len().saturating_sub(1)).min(new.len());
-        self.lines.truncate(first);
-        self.runs.truncate(first);
-        self.states.truncate(first);
+        let total = self.lines.len() + self.pending.len();
+        let first = first.min(total.saturating_sub(1)).min(new.len());
+        let keep = first.min(self.lines.len());
+        self.lines.truncate(keep);
+        self.runs.truncate(keep);
+        self.states.truncate(keep);
+        self.pending = new[keep..].iter().map(|l| (*l).to_owned()).collect();
+        first
+    }
+
+    /// Highlights up to `max` waiting lines. Returns how many it did.
+    pub fn step(&mut self, max: usize) -> usize {
+        if self.pending.is_empty() || max == 0 {
+            return 0;
+        }
+        let n = self.lines.len();
         let (mut ps, mut stack) = match self.states.last() {
-            Some(_) if first > 0 => self.after(first - 1),
+            Some(_) if n > 0 => self.after(n - 1),
             _ => (ParseState::new(self.syntax), ScopeStack::new()),
         };
-        for line in &new[first..] {
+        let mut done = 0;
+        while done < max {
+            let Some(line) = self.pending.pop_front() else {
+                break;
+            };
             self.states.push((ps.clone(), stack.clone()));
             let with_nl = format!("{line}\n");
             let ops = ps.parse_line(&with_nl, syntaxes()).unwrap_or_default();
-            self.runs.push(runs_for(line, &ops, &mut stack));
-            self.lines.push((*line).to_owned());
+            self.runs.push(runs_for(&line, &ops, &mut stack));
+            self.lines.push(line);
+            done += 1;
         }
-        first
+        done
+    }
+
+    /// Whether every line of the text is highlighted.
+    pub fn done(&self) -> bool {
+        self.pending.is_empty()
+    }
+
+    /// The highlighted lines: the text's first lines, up to where the work has reached.
+    pub fn highlighted(&self) -> usize {
+        self.lines.len()
     }
 
     /// The parser state after line `i` (re-parsing it from its saved start state).
@@ -261,6 +303,85 @@ impl Highlighter {
 
     pub fn line(&self, i: usize) -> (&str, &Runs) {
         (&self.lines[i], &self.runs[i])
+    }
+}
+
+/// Lines a render highlights itself before handing the rest to the background: about a
+/// screenful, so what shows first is highlighted.
+pub const RENDER_LINES: usize = 120;
+/// Lines the worker highlights per turn of its lock.
+const WORKER_CHUNK: usize = 256;
+
+/// A text highlighted in the background (§8.5 "background, incremental"). [`Background::update`]
+/// runs on the render path and does at most [`RENDER_LINES`] lines; a worker thread highlights
+/// the rest a chunk at a time, and the view draws them in on its clock ([`Background::lines`]).
+/// Without threads (the browser) [`Background::pump`] does the chunks from the view's clock.
+#[derive(Clone, Debug)]
+pub struct Background(std::sync::Arc<std::sync::Mutex<Highlighter>>);
+
+impl Background {
+    pub fn new(syntax: &'static SyntaxReference) -> Background {
+        Background(std::sync::Arc::new(std::sync::Mutex::new(
+            Highlighter::new(syntax),
+        )))
+    }
+
+    /// Locks the highlighter (to read lines).
+    pub fn lock(&self) -> std::sync::MutexGuard<'_, Highlighter> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Takes a new text: highlights the first changed lines now and queues the rest. Returns the
+    /// first changed line.
+    pub fn update(&self, text: &str) -> usize {
+        let (first, done) = {
+            let mut h = self.lock();
+            let first = h.begin(text);
+            h.step(RENDER_LINES);
+            (first, h.done())
+        };
+        if !done {
+            self.queue();
+        }
+        first
+    }
+
+    /// Without a worker, highlights a chunk on the caller's thread. Returns whether work is left.
+    pub fn pump(&self) -> bool {
+        let mut h = self.lock();
+        if cfg!(target_arch = "wasm32") {
+            h.step(WORKER_CHUNK);
+        }
+        !h.done()
+    }
+
+    fn queue(&self) {
+        if cfg!(target_arch = "wasm32") {
+            return;
+        }
+        static WORKER: OnceLock<
+            std::sync::mpsc::Sender<std::sync::Weak<std::sync::Mutex<Highlighter>>>,
+        > = OnceLock::new();
+        let tx = WORKER.get_or_init(|| {
+            let (tx, rx) =
+                std::sync::mpsc::channel::<std::sync::Weak<std::sync::Mutex<Highlighter>>>();
+            std::thread::Builder::new()
+                .name("auk-highlight".into())
+                .spawn(move || {
+                    for job in rx {
+                        // A text dropped meanwhile is skipped; each turn holds the lock briefly.
+                        while let Some(h) = job.upgrade() {
+                            let mut h = h.lock().unwrap_or_else(|e| e.into_inner());
+                            if h.step(WORKER_CHUNK) == 0 {
+                                break;
+                            }
+                        }
+                    }
+                })
+                .expect("the highlight worker");
+            tx
+        });
+        let _ = tx.send(std::sync::Arc::downgrade(&self.0));
     }
 }
 

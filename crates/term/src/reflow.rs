@@ -374,6 +374,7 @@ impl Screen {
                     cells: wrapped,
                     wrapped: wrapped_flag,
                     anchor: None,
+                    prompt: false,
                 };
             }
         }

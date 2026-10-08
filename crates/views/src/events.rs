@@ -264,6 +264,29 @@ impl PaneView {
                 self.refresh(doc, pane, key, &[node.id().to_owned()]);
                 return Some(vec![Outcome::Redraw]);
             }
+            // A lens block's Native/Raw control and Copy (§9.6): local, no events.
+            if has("sf-block-opt") && node.kind() == "block" {
+                let raw = doc.attribute(p, "data-view") == Some("raw");
+                let k = crate::kinds::block::view_key(node);
+                let sv = self.surfaces.iter_mut().find(|s| s.key == key)?;
+                sv.st.more.insert(k, raw);
+                self.refresh(doc, pane, key, &[node.id().to_owned()]);
+                return Some(vec![Outcome::Redraw]);
+            }
+            if has("sf-block-copy") && node.kind() == "block" {
+                let raw = node
+                    .children()
+                    .find(|c| crate::kinds::block::is_raw(node, *c));
+                let text = raw
+                    .and_then(|r| r.prop("text").and_then(Value::as_str).map(str::to_owned))
+                    .unwrap_or_default();
+                let cols = raw
+                    .and_then(|r| r.prop("cols").and_then(Value::as_u64))
+                    .map_or(self.cols, |c| c.clamp(2, u64::from(u16::MAX)) as u16);
+                return Some(vec![Outcome::Copy(crate::kinds::block::raw_text(
+                    &text, cols,
+                ))]);
+            }
             if has("code-copy") {
                 // The fence's text: its `pre`.
                 let holder = doc.parent(doc.parent(p)?)?;
@@ -401,7 +424,7 @@ impl PaneView {
     ) -> Vec<Outcome> {
         match act {
             "toggle" => self.toggle_fold(doc, pane, surface.key(), node),
-            "copy" => vec![Outcome::Copy(copy_text(node))],
+            "copy" => vec![Outcome::Copy(self.copy_text(node))],
             "open" => match str_prop(node.props(), "href").or(str_prop(node.props(), "path")) {
                 Some(h) => vec![Outcome::Open(h.to_owned())],
                 None => Vec::new(),
@@ -448,7 +471,7 @@ impl PaneView {
         let Some(surface) = pane.surface(key) else {
             return Vec::new();
         };
-        if !matches!(node.kind(), "card" | "section" | "tool" | "agent") {
+        if !matches!(node.kind(), "card" | "section" | "tool" | "agent" | "checklist") {
             return Vec::new();
         }
         let Some(sv) = self.surfaces.iter_mut().find(|s| s.key == key) else {
@@ -950,7 +973,55 @@ fn first_control(node: NodeRef) -> Option<NodeRef> {
     None
 }
 
-/// What `copy` copies: md source, raw code or ansi, the `href`, or the node's text.
+impl PaneView {
+    /// What `copy` copies (§7.8): a block's raw output, an `ansi` node's text as drawn (no
+    /// escapes), md source, raw code, the `href`, or the node's text.
+    fn copy_text(&self, node: NodeRef) -> String {
+        let ansi = |n: NodeRef| {
+            let text = n.prop("text").and_then(Value::as_str).unwrap_or_default();
+            let cols = n
+                .prop("cols")
+                .and_then(Value::as_u64)
+                .map_or(self.cols, |c| c.clamp(2, u64::from(u16::MAX)) as u16);
+            crate::kinds::block::raw_text(text, cols)
+        };
+        match node.kind() {
+            "block" => node
+                .children()
+                .find(|c| crate::kinds::block::is_raw(node, *c))
+                .map(ansi)
+                .unwrap_or_default(),
+            "ansi" => ansi(node),
+            _ => copy_text(node),
+        }
+    }
+
+    /// The UTF-16 offset in the focused field nearest a document point, when the point is over
+    /// that field: where a drag that selects in the field (§7.9) has got to.
+    pub fn field_offset_at(&self, doc: &Document, pane: &TspPane, x: f32, y: f32) -> Option<u64> {
+        let (surface, node) = self.focused_field(pane)?;
+        let el = self.node_element(surface.key(), node.id())?;
+        let r = doc.border_box(el)?;
+        if x < r.x || x > r.x + r.w || y < r.y || y > r.y + r.h {
+            return None;
+        }
+        self.offset_at(doc, surface.key(), node, x, y)
+    }
+
+    /// The focused field's text box in document coordinates, and the cell size: where a drag
+    /// should go to select its characters.
+    pub fn field_text_box(&self, doc: &Document, pane: &TspPane) -> Option<auk_ui::Rect> {
+        let (surface, node) = self.focused_field(pane)?;
+        let el = self.node_element(surface.key(), node.id())?;
+        let text_el = doc
+            .children(doc.children(el).first().copied()?)
+            .first()
+            .copied()?;
+        doc.border_box(text_el)
+    }
+}
+
+/// What `copy` copies for other kinds: md source, raw code, the `href`, or the node's text.
 fn copy_text(node: NodeRef) -> String {
     if let Some(h) = str_prop(node.props(), "href") {
         return h.to_owned();

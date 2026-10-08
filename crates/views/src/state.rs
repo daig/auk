@@ -46,6 +46,13 @@ pub struct Preedit {
 pub(crate) struct SurfaceState {
     /// Folds of card, section, tool, agent and checklist phases, by state key.
     pub folds: HashMap<String, Flip>,
+    /// Folds as last drawn, by state key: whether collapsed, and whether it is unfolding
+    /// (opened since, drawn with the fold transition, §7.13).
+    pub drawn_folds: HashMap<String, (bool, bool)>,
+    /// The surface has been drawn once.
+    pub drawn: bool,
+    /// Overlays by node id: whether each opened after the first draw (and pops in).
+    pub overlays: HashMap<String, bool>,
     /// `el` checkbox and radio flips, by node id.
     pub checks: HashMap<String, Flip>,
     /// Expanded previews ("N more lines"), by state key.
@@ -76,9 +83,6 @@ pub(crate) struct SurfaceState {
     pub truncs: HashMap<String, crate::kinds::data::Trunc>,
     /// Tables fitted after layout.
     pub tables: HashMap<String, crate::kinds::data::TableInfo>,
-    /// `(node id, message)` errors for the program (`unknown el tag`), and those already sent.
-    pub reports: Vec<(String, String)>,
-    pub reported: HashSet<(String, String)>,
     /// `ansi` with `follow` and `max.h`: the clip that follows the tail, and where it was left.
     pub follow: HashMap<String, NodeId>,
     pub follow_at: HashMap<NodeId, f32>,
@@ -147,6 +151,22 @@ impl SurfaceState {
         Self::flip(&mut self.folds, &key, node.prop("collapsed"), default)
     }
 
+    /// Whether a fold drawn now as `collapsed` opened after it was drawn collapsed: it takes the
+    /// fold transition (`.sf-unfold`) until it collapses again. A fold first drawn open doesn't.
+    pub fn unfolding(&mut self, node: NodeRef, collapsed: bool) -> bool {
+        self.unfolding_key(state_key(node), collapsed)
+    }
+
+    /// [`SurfaceState::unfolding`] for a fold known by `key` (a tree item).
+    pub fn unfolding_key(&mut self, key: String, collapsed: bool) -> bool {
+        let unfolding = match self.drawn_folds.get(&key) {
+            Some(&(was, unf)) => !collapsed && (was || unf),
+            None => false,
+        };
+        self.drawn_folds.insert(key, (collapsed, unfolding));
+        unfolding
+    }
+
     /// A node's state went away with it. Folds are kept by key so a re-added node keeps them.
     pub fn forget(&mut self, id: &str) {
         self.checks.remove(id);
@@ -167,8 +187,26 @@ impl SurfaceState {
         if let Some((el, _)) = self.virt.remove(id) {
             self.virt_window.remove(&el);
         }
+        self.forget_virtual_under(id);
+        self.overlays.remove(id);
         if self.preedit.as_ref().is_some_and(|p| p.id == id) {
             self.preedit = None;
+        }
+    }
+
+    /// Forgets the virtualized containers a node registered under `<id>/…` (a tree's groups).
+    pub fn forget_virtual_under(&mut self, id: &str) {
+        let prefix = format!("{id}/");
+        let gone: Vec<String> = self
+            .virt
+            .keys()
+            .filter(|k| k.starts_with(&prefix))
+            .cloned()
+            .collect();
+        for k in gone {
+            if let Some((el, _)) = self.virt.remove(&k) {
+                self.virt_window.remove(&el);
+            }
         }
     }
 }

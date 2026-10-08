@@ -1838,6 +1838,60 @@ fn e3_listen_false_surfaces_get_no_acks() {
 }
 
 #[test]
+fn unknown_el_tags_are_reported_to_the_program_once_per_node_version() {
+    let (_env, probe) = setup("el-tags");
+    exchange(&probe, &hello(&[]));
+    let marquee = json!({"id": "m", "k": "el", "p": {"tag": "marquee", "text": "hi"}});
+    let bodies = exchange(&probe, &open_with("s1", "flow", json!([marquee])));
+    assert_eq!(
+        errors(&bodies),
+        [&json!({"ev": "error", "sf": "s1", "id": "m", "msg": "unknown el tag marquee"})]
+    );
+    // A change elsewhere sends nothing; a change to the node sends it again.
+    let bodies = exchange(
+        &probe,
+        &frame(
+            "s1",
+            2,
+            json!([["add", "d", "main", null, {"id": "d", "k": "el", "p": {"tag": "div"}}]]),
+        ),
+    );
+    assert!(errors(&bodies).is_empty(), "{bodies:?}");
+    let bodies = exchange(&probe, &frame("s1", 3, json!([["set", "m", {"class": "x"}]])));
+    assert_eq!(errors(&bodies).len(), 1, "{bodies:?}");
+    // Inputs other than checkboxes and radios, typed or not.
+    let bodies = exchange(
+        &probe,
+        &frame(
+            "s1",
+            4,
+            json!([
+                ["add", "i1", "main", null, {"id": "i1", "k": "el", "p": {"tag": "input", "type": "text"}}],
+                ["add", "i2", "main", null, {"id": "i2", "k": "el", "p": {"tag": "input"}}],
+                ["add", "i3", "main", null, {"id": "i3", "k": "el", "p": {"tag": "input", "type": "radio"}}]
+            ]),
+        ),
+    );
+    let msgs: Vec<&Value> = errors(&bodies).iter().map(|e| &e["msg"]).collect();
+    assert_eq!(
+        msgs,
+        [&json!("unknown el tag input type text"), &json!("unknown el tag input")]
+    );
+    // A surface that doesn't listen hears nothing.
+    let quiet = tsp_json("o", &json!({"id": "q", "mode": "inline", "listen": false}));
+    probe.write(&quiet);
+    let bodies = exchange(
+        &probe,
+        &frame(
+            "q",
+            1,
+            json!([["add", "main", "q", null, {"id": "main", "k": "col", "c": [{"id": "b", "k": "el", "p": {"tag": "blink"}}]}]]),
+        ),
+    );
+    assert!(bodies.is_empty(), "{bodies:?}");
+}
+
+#[test]
 fn e4_no_acks_while_no_window_shows_the_pane_and_an_attaching_window_acks() {
     let (env, probe) = setup("e4");
     probe.write(&open_with("s1", "flow", text_doc()));
@@ -3130,6 +3184,40 @@ fn surface_play_feeds_recordings_into_a_stand_in_program() {
     let docs = played_docs(&env, shell);
     let want = replay_fixture(&progress, Some(3));
     assert_eq!(docs.last(), want.last());
+    // `from` continues that play after the named frame (`s`, or `<sf>#<s>`), as a second play.
+    let path = quote(&progress.to_string_lossy());
+    let more = env.daemon(&format!(
+        "surface-play --pane {shell} {path} from 3 until s1#6"
+    ));
+    assert_eq!(more["frames"], 3, "{more}");
+    let docs = played_docs(&env, shell);
+    assert_eq!(docs.last(), replay_fixture(&progress, Some(6)).last());
+    let rest = env.daemon(&format!("surface-play --pane {shell} {path} from s1#6"));
+    assert_eq!(rest["frames"], 3, "{rest}");
+    let docs = played_docs(&env, shell);
+    assert_eq!(docs.last(), replay_fixture(&progress, None).last());
+    // `from` needs a frame the recording has, and an earlier play in the pane.
+    let missing = env
+        .control()
+        .send(&format!("surface-play --pane {shell} {path} from s9#1"));
+    assert_eq!(missing["ok"], false, "{missing}");
+    assert!(missing.to_string().contains("no frame s9#1"), "{missing}");
+    let fresh = env.new_pane(&[]);
+    env.wait(fresh, "prompt");
+    let refused = env
+        .control()
+        .send(&format!("surface-play --pane {fresh} {path} from 2"));
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert!(
+        refused.to_string().contains("continues an earlier play"),
+        "{refused}"
+    );
+    assert_ne!(
+        env.daemon(&format!("tsp {fresh}"))["stand_in"],
+        true,
+        "a refused play leaves the pane alone"
+    );
+
     // Answers went to the stand-in, never onto a shell's command line.
     let screen = env.daemon(&format!("capture {shell}"))["text"]
         .as_str()

@@ -106,6 +106,8 @@ struct View {
     reset: std::collections::BTreeSet<PaneId>,
     /// Blobs asked of the daemon, or sent by it after a snapshot (§7.12), per pane.
     asked: BTreeMap<PaneId, std::collections::BTreeSet<String>>,
+    /// The clients attached to the host, from the daemon's last presence message (§10.1).
+    presence: Vec<auk_mirror::ClientInfo>,
 }
 
 /// Work for the draw thread.
@@ -272,6 +274,7 @@ impl Headless {
                 }
             }
             DaemonMsg::Catalog { catalog } => view.catalog = catalog,
+            DaemonMsg::Presence { clients } => view.presence = clients,
             DaemonMsg::LensView { pane, block, node } => {
                 if let Ok(block) = block.parse::<u64>() {
                     let node = (!node.is_null()).then_some(node);
@@ -344,6 +347,8 @@ impl Headless {
                 None => Err("facts: expected a JSON object".into()),
             },
             "effects" => Ok(json!(self.view().effects)),
+            // The clients attached to the host, with their identities (§10.1).
+            "presence" => Ok(json!(self.view().presence)),
             "catalog" => Ok(self.view().catalog.clone()),
             "lens" => self.with_replica(args, |r| {
                 let blocks: Vec<Value> = r
@@ -775,7 +780,18 @@ pub fn run(opts: &Options) -> io::Result<()> {
     let window = start(opts)?;
     window.serve(&opts.control)?;
     println!("ready {}", opts.control.display());
+    let headless = window.headless.clone();
     let result = window.join();
+    // A remote window whose link failed stays up, showing `failed` (§10.1), until `quit`.
+    if let Err(err) = &result
+        && opts.remote.is_some()
+        && headless.link().status().label.starts_with("failed")
+    {
+        eprintln!("auk headless: {err}; the window stays, failed, until `quit`");
+        loop {
+            thread::park();
+        }
+    }
     let _ = std::fs::remove_file(&opts.control);
     result
 }

@@ -371,3 +371,111 @@ fn measure_then_layout_loop() {
     assert_eq!(min, 100.0, "the fixed width");
     assert_eq!(max, 100.0);
 }
+
+#[test]
+fn transitions_and_keyframe_animations_run_on_the_document_clock() {
+    let mut doc = doc_with(
+        ".a { opacity: 1; transition: opacity 100ms linear }
+         .a.off { opacity: 0 }
+         .c { color: rgb(0, 0, 0); transition: color 100ms linear }
+         .c.on { color: rgb(200, 100, 0) }
+         .d { transition: transform 100ms linear 50ms }
+         .d.moved { transform: translateX(100px) }
+         @keyframes glow { from { background-color: rgb(0, 0, 0) } to { background-color: rgb(200, 0, 0) } }
+         .b { animation: glow 1s linear 2 alternate }
+         .f { opacity: 0.2; animation: fade 200ms linear forwards }
+         @keyframes fade { to { opacity: 1 } }
+         .p { animation: glow 1s linear infinite; animation-play-state: paused }",
+    );
+    let root = doc.root();
+    let body = el(&mut doc, root, "body", "", None);
+    let a = el(&mut doc, body, "div", "a", Some("x"));
+    let c = el(&mut doc, body, "div", "c", None);
+    let span = el(&mut doc, c, "span", "", Some("inherits"));
+    let d = el(&mut doc, body, "div", "d", Some("x"));
+    doc.set_time(0.0);
+    doc.update();
+    assert!(!doc.animating());
+    let opacity = |doc: &Document| doc.computed_style(a).unwrap().opacity;
+    // A transition starts from the value shown when the style changes.
+    doc.set_attribute(a, "class", "a off");
+    doc.set_attribute(c, "class", "c on");
+    doc.set_attribute(d, "class", "d moved");
+    doc.update();
+    assert_eq!(opacity(&doc), 1.0);
+    assert!(doc.animating());
+    doc.set_time(50.0);
+    doc.update();
+    assert!((opacity(&doc) - 0.5).abs() < 0.01, "{}", opacity(&doc));
+    // Color moves too, and descendants inherit what is shown.
+    assert_eq!(color(&doc, span), [100, 50, 0, 255]);
+    // A delayed transition holds its start value through the delay.
+    let tx = |doc: &Document| format!("{:?}", doc.computed_style(d).unwrap().transform);
+    assert!(tx(&doc).contains("Px(0.0)"), "{}", tx(&doc));
+    doc.set_time(100.0);
+    doc.update();
+    assert!(tx(&doc).contains("Px(50.0)"), "{}", tx(&doc));
+    // Reversing mid-way starts from where it is.
+    doc.set_attribute(a, "class", "a");
+    doc.update();
+    assert_eq!(opacity(&doc), 0.0, "the opacity transition had finished");
+    doc.set_time(150.0);
+    doc.update();
+    assert!((opacity(&doc) - 0.5).abs() < 0.01);
+    doc.set_time(400.0);
+    doc.update();
+    assert_eq!(opacity(&doc), 1.0);
+    assert_eq!(color(&doc, span), [200, 100, 0, 255]);
+    assert!(!doc.animating(), "everything settled");
+
+    // Keyframes: two alternating iterations, then the cascaded value; `forwards` keeps the end.
+    let b = el(&mut doc, body, "div", "b", None);
+    let f = el(&mut doc, body, "div", "f", None);
+    let p = el(&mut doc, body, "div", "p", None);
+    doc.set_time(1000.0);
+    doc.update();
+    let bg = |doc: &Document, id| doc.computed_style(id).unwrap().background_color.to_rgba8();
+    assert_eq!(bg(&doc, b), [0, 0, 0, 255]);
+    assert_eq!(bg(&doc, p), [0, 0, 0, 255], "paused at its start");
+    doc.set_time(1250.0);
+    doc.update();
+    assert_eq!(bg(&doc, b), [50, 0, 0, 255]);
+    assert_eq!(bg(&doc, p), [0, 0, 0, 255]);
+    doc.set_time(1750.0);
+    doc.update();
+    assert_eq!(bg(&doc, b), [150, 0, 0, 255]);
+    assert_eq!(
+        doc.computed_style(f).unwrap().opacity,
+        1.0,
+        "filled forwards"
+    );
+    // The second iteration runs backwards.
+    doc.set_time(2250.0);
+    doc.update();
+    assert_eq!(bg(&doc, b), [150, 0, 0, 255]);
+    doc.set_time(3100.0);
+    doc.update();
+    assert!(
+        doc.computed_style(b)
+            .unwrap()
+            .background_color
+            .is_transparent(),
+        "done"
+    );
+    assert_eq!(doc.computed_style(f).unwrap().opacity, 1.0);
+
+    // Reduce Motion: transitions jump and animations don't run.
+    doc.set_media_preferences(true, false, false);
+    doc.update();
+    doc.set_attribute(a, "class", "a off");
+    let g = el(&mut doc, body, "div", "b", None);
+    doc.update();
+    assert_eq!(opacity(&doc), 0.0);
+    assert!(
+        doc.computed_style(g)
+            .unwrap()
+            .background_color
+            .is_transparent()
+    );
+    assert!(!doc.animating());
+}

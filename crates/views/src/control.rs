@@ -64,6 +64,8 @@ impl PaneView {
     /// shows).
     pub fn tick(&mut self, doc: &mut Document, pane: &TspPane, now: f64) -> Option<f64> {
         self.last_now = now;
+        // CSS transitions and animations, on the same clock (§7.13, §8.4).
+        doc.set_time(self.css_clock(now));
         // Toasts the last sync asked for.
         let mut next: Option<f64> = None;
         let mut dom = Dom {
@@ -123,6 +125,9 @@ impl PaneView {
                 }
             }
         }
+        if doc.animating() {
+            any = true;
+        }
         if any {
             // Display rate: the host paces frames; ask for the next one.
             let frame = now + 1000.0 / 60.0;
@@ -167,6 +172,14 @@ impl PaneView {
     /// The pane was hidden or shown: motion pauses (`.sf-paused`).
     pub fn set_visible(&mut self, doc: &mut Document, pane: &TspPane, visible: bool) {
         if visible != self.visible {
+            let now = self.last_now;
+            if visible {
+                if let Some(at) = self.hidden_at.take() {
+                    self.paused_ms += (now - at).max(0.0);
+                }
+            } else {
+                self.hidden_at = Some(now);
+            }
             self.visible = visible;
             for i in 0..self.surfaces.len() {
                 self.write_regions_pub(doc, pane, i);
@@ -182,20 +195,6 @@ impl PaneView {
                 self.write_regions_pub(doc, pane, i);
             }
         }
-    }
-
-    /// Errors the view found that the program should hear (`unknown el tag`), as
-    /// `(surface, node id, message)`.
-    pub fn take_reports(&mut self) -> Vec<(SurfaceKey, String, String)> {
-        let mut out = Vec::new();
-        for sv in &mut self.surfaces {
-            for (id, msg) in std::mem::take(&mut sv.st.reports) {
-                if sv.st.reported.insert((id.clone(), msg.clone())) {
-                    out.push((sv.key, id, msg));
-                }
-            }
-        }
-        out
     }
 
     /// A `reveal` the surface couldn't scroll itself (the pane scrolls): the element and where.

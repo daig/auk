@@ -841,3 +841,841 @@ fn ac01_the_shell_outlives_the_app_and_a_new_window_shows_its_scrollback() {
         "the replica matches the daemon"
     );
 }
+
+// -------------------------------------------------------------------------------------------
+// Find, prompt navigation, links, the reporting app, native editing, and the mixed layout (§5.3,
+// §6.2, §7.2, §7.3, §7.8, §7.9, §7.14, §8.3, §12.2), and view state per window (§4.4, §4.5).
+
+/// The pane's flow as last drawn, once `done` holds for it.
+fn pane_layout(app: &App, pane: u64, what: &str, done: impl Fn(&Value) -> bool) -> Value {
+    wait_for(what, || {
+        let l = app.send(&format!("pane-layout {pane}"));
+        (l["ok"] == true && done(&l["value"])).then(|| l["value"].clone())
+    })
+}
+
+/// A drawn line's top and height, in window points.
+fn line_top(layout: &Value, line: u64) -> Option<(f64, f64)> {
+    let oy = layout["origin"][1].as_f64()?;
+    layout["rows"].as_array()?.iter().find_map(|r| {
+        (r[0].as_u64()? == line).then(|| (oy + r[1].as_f64().unwrap(), r[2].as_f64().unwrap()))
+    })
+}
+
+/// The window box of a drawn surface node, if it is drawn.
+fn node_box(app: &App, pane: u64, id: &str) -> Option<[f64; 4]> {
+    let r = app.send(&format!("node-box {pane} {id}"));
+    let v = r["value"].as_array().filter(|_| r["ok"] == true)?;
+    Some([0, 1, 2, 3].map(|i| v[i].as_f64().unwrap()))
+}
+
+/// Shows and focuses `pane` in `app`'s window, once the window knows it.
+fn show(app: &App, pane: u64) {
+    wait_for("the window to show the pane", || {
+        (app.send(&format!("focus {pane}"))["ok"] == true).then_some(())
+    });
+}
+
+fn center(b: [f64; 4]) -> (f64, f64) {
+    (b[0] + b[2] / 2.0, b[1] + b[3] / 2.0)
+}
+
+fn click(app: &App, (x, y): (f64, f64)) {
+    app.request(&format!("mouse down {x} {y}"));
+    app.request(&format!("mouse up {x} {y}"));
+}
+
+/// Waits for the ack of frame `s` (of any surface).
+fn acked(probe: &Probe, s: u64) {
+    probe.read_until(&format!("the ack of frame {s}"), |b| {
+        events(&tsp_bodies(&split_input(b)), "ack")
+            .iter()
+            .any(|a| a["s"] == s)
+    });
+}
+
+/// The first TSP event of kind `ev` the program reads.
+fn program_event(probe: &Probe, ev: &str) -> Value {
+    let input = probe.read_until(&format!("the {ev} event"), |b| {
+        !events(&tsp_bodies(&split_input(b)), ev).is_empty()
+    });
+    events(&tsp_bodies(&split_input(&input)), ev)[0].clone()
+}
+
+#[test]
+fn find_sees_the_grid_and_surfaces_virtualized_content_too_and_steps_through_the_flow() {
+    let env = env("find");
+    let app = App::start(&env, "a", &[]);
+    let probe = focused_probe(&env, &app);
+    probe.write(&hello(&[]));
+    let mut out = String::new();
+    for i in 0..80 {
+        if i == 10 || i == 70 {
+            out.push_str(&format!("row {i} Needle-grid\r\n"));
+        } else {
+            out.push_str(&format!("row {i}\r\n"));
+        }
+    }
+    probe.write(out.as_bytes());
+    // A column of 300 rows virtualizes (§8.3): rows far from the view aren't laid out.
+    let rows: Vec<Value> = (0..300)
+        .map(|i| {
+            let text = if i == 250 { "the needle-item here".to_owned() } else { format!("item {i}") };
+            json!({"id": format!("t{i}"), "k": "text", "p": {"text": text}})
+        })
+        .collect();
+    probe.write(&open_with("s1", "inline", json!([{"id": "big", "k": "col", "c": rows}])));
+    acked(&probe, 1);
+    probe.write(&auk_conformance::probe::tsp_json("x", &json!({"id": "s1"})));
+    probe.write(b"tail needle-tail\r\n");
+    caught_up(&env, &app, probe.pane);
+    pane_layout(&app, probe.pane, "the block", |l| l["blocks"].as_array().is_some_and(|b| b.len() == 1));
+
+    menu(&app, "Edit", "Find…");
+    app.request("text needle");
+    let find = wait_for("four matches", || {
+        let f = app.request("find");
+        (f["count"] == 4).then_some(f)
+    });
+    // In flow order: the two grid rows, the surface row at its anchor, the tail.
+    let kinds: Vec<&str> = find["matches"].as_array().unwrap().iter().map(|m| m["kind"].as_str().unwrap()).collect();
+    assert_eq!(kinds, ["grid", "grid", "surface", "grid"], "{find}");
+    assert_eq!(find["matches"][2]["id"], "t250", "{find}");
+    assert_eq!(find["matches"][2]["sf"], "s1");
+    assert_eq!(find["current"], 3, "Find starts at the match nearest the tail");
+    assert_eq!(app.request("chrome")["find_bar"], true);
+    // The current grid match is the selection (smart case: `needle` matched `Needle`).
+    assert_eq!(app.request("selection"), "needle");
+
+    // ⇧Return: the surface match, scrolled into view and marked.
+    app.request("type shift+return");
+    wait_for("the surface match", || (app.request("find")["current"] == 2).then_some(()));
+    let pane = probe.pane;
+    wait_for("the found row in view", || {
+        let l = app.request(&format!("pane-layout {pane}"));
+        let top = l["origin"][1].as_f64()?;
+        let bottom = top + l["content_height"].as_f64()?;
+        let b = node_box(&app, pane, "t250")?;
+        (b[1] >= top && b[1] + b[3] <= bottom).then_some(())
+    });
+    assert!(app.request("find")["marked"].as_u64().unwrap() >= 1);
+
+    // The grid match above it: selected and on screen, through the mixed layout.
+    app.request("type shift+return");
+    let m = wait_for("the second grid match", || {
+        let f = app.request("find");
+        (f["current"] == 1).then(|| f["match"].clone())
+    });
+    let line = m["line"].as_u64().unwrap();
+    pane_layout(&app, pane, "the grid match on screen", |l| line_top(l, line).is_some());
+    assert_eq!(app.request("selection"), "Needle");
+    // Previous again, then past the first match it wraps to the last.
+    app.request("type shift+return");
+    let first = wait_for("the first match", || {
+        let f = app.request("find");
+        (f["current"] == 0).then(|| f["match"].clone())
+    });
+    let line0 = first["line"].as_u64().unwrap();
+    pane_layout(&app, pane, "the first match on screen", |l| line_top(l, line0).is_some());
+    app.request("type shift+return");
+    wait_for("the wrap", || (app.request("find")["current"] == 3).then_some(()));
+    // ⌘G steps forward and wraps to the first.
+    menu(&app, "Edit", "Find Next");
+    wait_for("the next match", || (app.request("find")["current"] == 0).then_some(()));
+    // Editing the query searches again.
+    app.request("type backspace");
+    app.request("text e-item");
+    wait_for("one match", || (app.request("find")["count"] == 1).then_some(()));
+    // Escape closes the bar; nothing reached the program.
+    app.request("type esc");
+    wait_for("the bar to close", || (app.request("chrome")["find_bar"] == false).then_some(()));
+    let (bodies, bytes) = program_input(&probe, Duration::from_millis(300));
+    assert!(bodies.is_empty() && bytes.is_empty(), "{bodies:?} {bytes:?}");
+}
+
+#[test]
+fn prompt_navigation_jumps_between_command_marks_in_every_window() {
+    let env = env("prompts");
+    let app = App::start(&env, "a", &[]);
+    let probe = focused_probe(&env, &app);
+    let mut out = String::new();
+    for cmd in 1..=3 {
+        out.push_str(&format!("\x1b]133;A\x07$ cmd-{cmd}\r\n"));
+        for i in 0..60 {
+            out.push_str(&format!("output {cmd}.{i}\r\n"));
+        }
+    }
+    out.push_str("\x1b]133;A\x07$ ");
+    probe.write(out.as_bytes());
+    caught_up(&env, &app, probe.pane);
+    let pane = probe.pane;
+    let layout = pane_layout(&app, pane, "the four prompts", |l| {
+        l["prompts"].as_array().is_some_and(|p| p.len() == 4)
+    });
+    let prompts: Vec<u64> = layout["prompts"].as_array().unwrap().iter().map(|p| p.as_u64().unwrap()).collect();
+    // Drawn with the last prompt at the tail.
+    let layout = pane_layout(&app, pane, "the tail drawn", |l| line_top(l, prompts[3]).is_some());
+    assert_eq!(layout["following"], true);
+
+    let jump = |item: &str, line: u64, text: &str| {
+        menu(&app, "View", item);
+        let l = pane_layout(&app, pane, &format!("{item} to line {line}"), |l| l["first_line"] == line);
+        assert_eq!(l["first_text"], text, "{l}");
+        assert_eq!(l["following"], false);
+    };
+    jump("Jump to Previous Prompt", prompts[2], "$ cmd-3");
+    jump("Jump to Previous Prompt", prompts[1], "$ cmd-2");
+    jump("Jump to Previous Prompt", prompts[0], "$ cmd-1");
+    jump("Jump to Next Prompt", prompts[1], "$ cmd-2");
+    jump("Jump to Next Prompt", prompts[2], "$ cmd-3");
+    // The last prompt is at the tail: the view follows it again.
+    menu(&app, "View", "Jump to Next Prompt");
+    pane_layout(&app, pane, "the view to follow the tail", |l| l["following"] == true);
+
+    // The marks are pane state: a window that attaches later has them too.
+    let late = App::start(&env, "b", &[]);
+    show(&late, pane);
+    let l = pane_layout(&late, pane, "the late window's prompts", |l| l["prompts"].is_array());
+    assert_eq!(l["prompts"], json!(prompts));
+}
+
+#[test]
+fn hover_shows_a_links_target_on_the_grid_and_on_surfaces_and_a_plain_click_opens_nothing() {
+    let env = env("hover");
+    let app = App::start(&env, "a", &[]);
+    let probe = focused_probe(&env, &app);
+    probe.write(&hello(&[]));
+    probe.write(b"see \x1b]8;;https://example.com/grid\x1b\\the grid link\x1b]8;;\x1b\\ here\r\n");
+    probe.write(&open_with(
+        "s1",
+        "inline",
+        json!([{"id": "lnk", "k": "text", "p": {"text": "the docs", "href": "https://example.com/docs"}}]),
+    ));
+    acked(&probe, 1);
+    caught_up(&env, &app, probe.pane);
+    let pane = probe.pane;
+    let layout = pane_layout(&app, pane, "the link's row", |l| line_top(l, 0).is_some());
+    let cw = layout["cell"][0].as_f64().unwrap();
+    let (top, h) = line_top(&layout, 0).unwrap();
+    let x = layout["origin"][0].as_f64().unwrap() + cw * 7.5;
+    let y = top + h / 2.0;
+    app.request(&format!("mouse move {x} {y}"));
+    wait_for("the grid link's target", || {
+        (app.request("chrome")["hover_link"] == "https://example.com/grid").then_some(())
+    });
+    // A plain click on it opens nothing: links need ⌘-click (§7.14).
+    click(&app, (x, y));
+    assert_eq!(app.request("opens")["opened"], json!([]));
+
+    let b = wait_for("the surface link", || node_box(&app, pane, "lnk"));
+    let (lx, ly) = center(b);
+    app.request(&format!("mouse move {lx} {ly}"));
+    wait_for("the surface link's target", || {
+        (app.request("chrome")["hover_link"] == "https://example.com/docs").then_some(())
+    });
+    // Off the links, the readout goes.
+    app.request(&format!("mouse move {x} {}", ly + 200.0));
+    wait_for("no readout", || app.request("chrome")["hover_link"].is_null().then_some(()));
+}
+
+#[test]
+fn the_chrome_names_the_reporting_app_only_while_a_listening_surface_is_open() {
+    let env = env("app-name");
+    let app = App::start(&env, "a", &[]);
+    let probe = focused_probe(&env, &app);
+    // A hello alone names nothing.
+    probe.write(&hello(&[]));
+    caught_up(&env, &app, probe.pane);
+    let chrome = app.request("chrome");
+    assert!(chrome["pane_app"].is_null(), "{chrome}");
+    // A listening surface: the pane's tab and the status line name the program.
+    probe.write(&open_with("s1", "inline", json!([{"id": "t", "k": "text", "p": {"text": "hi"}}])));
+    acked(&probe, 1);
+    let chrome = wait_for("the app in the chrome", || {
+        let c = app.request("chrome");
+        (c["pane_app"] == "probe").then_some(c)
+    });
+    let tab = app.state()["tab"].as_u64().unwrap().to_string();
+    assert_eq!(chrome["tab_apps"][&tab], "probe", "{chrome}");
+    // Closed: gone again.
+    probe.write(&auk_conformance::probe::tsp_json("x", &json!({"id": "s1"})));
+    caught_up(&env, &app, probe.pane);
+    wait_for("the app to leave the chrome", || {
+        let c = app.request("chrome");
+        (c["pane_app"].is_null() && c["tab_apps"] == json!({})).then_some(())
+    });
+    // A surface that doesn't listen names nothing.
+    probe.write(&auk_conformance::probe::tsp_json(
+        "o",
+        &json!({"id": "s2", "mode": "inline", "listen": false}),
+    ));
+    caught_up(&env, &app, probe.pane);
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(app.request("chrome")["pane_app"].is_null());
+}
+
+#[test]
+fn native_editing_drag_selects_in_a_field_and_copy_and_paste_go_through_it() {
+    let env = env("field-drag");
+    let app = App::start(&env, "a", &[]);
+    let probe = focused_probe(&env, &app);
+    probe.write(&hello(&["edit"]));
+    probe.write(&open_with(
+        "s1",
+        "inline",
+        json!([{"id": "ed", "k": "editor", "p": {"text": "hello world", "cursor": 0}}]),
+    ));
+    probe.write(&auk_conformance::probe::frame("s1", 2, json!([["focus", "ed"]])));
+    acked(&probe, 2);
+    caught_up(&env, &app, probe.pane);
+    let pane = probe.pane;
+    let field = wait_for("the field's box", || {
+        let r = app.send(&format!("field-box {pane}"));
+        (r["ok"] == true).then(|| r["value"].clone())
+    });
+    let (bx, by) = (field["box"][0].as_f64().unwrap(), field["box"][1].as_f64().unwrap());
+    let (cw, ch) = (field["cell"][0].as_f64().unwrap(), field["cell"][1].as_f64().unwrap());
+    let y = by + ch / 2.0;
+    let (x0, x5) = (bx + 1.0, bx + 5.0 * cw + 1.0);
+    // The press places the caret (an edit with no text); the drag selects natively, locally.
+    app.request(&format!("mouse down {x0} {y}"));
+    let caret = program_event(&probe, "edit");
+    assert_eq!((caret["from"].clone(), caret["to"].clone()), (json!(0), json!(0)), "{caret}");
+    app.request(&format!("mouse drag {} {y}", (x0 + x5) / 2.0));
+    app.request(&format!("mouse drag {x5} {y}"));
+    app.request(&format!("mouse up {x5} {y}"));
+    let (bodies, bytes) = program_input(&probe, Duration::from_millis(300));
+    assert!(bodies.is_empty() && bytes.is_empty(), "the drag stays local: {bodies:?} {bytes:?}");
+    // ⌘C copies the field's selection.
+    menu(&app, "Edit", "Copy");
+    wait_for("the field's selection on the clipboard", || {
+        (app.request("clipboard") == "hello").then_some(())
+    });
+    // A paste with the selection is an edit that replaces it (§7.9), not bracketed keys.
+    app.request("clipboard-set XY");
+    menu(&app, "Edit", "Paste");
+    let edit = program_event(&probe, "edit");
+    assert_eq!(
+        edit,
+        json!({"ev": "edit", "sf": "s1", "id": "ed", "from": 0, "to": 5, "text": "XY", "cursor": 2, "len": 11})
+    );
+    // With no selection left, a paste is the program's input.
+    menu(&app, "Edit", "Paste");
+    let got = probe.read_until("the pasted keys", |b| b.ends_with(b"XY"));
+    assert!(events(&tsp_bodies(&split_input(&got)), "edit").is_empty());
+}
+
+#[test]
+fn checklist_toggle_and_copy_of_md_and_ansi_from_the_window() {
+    let env = env("actions");
+    let app = App::start(&env, "a", &[]);
+    let probe = focused_probe(&env, &app);
+    probe.write(&hello(&[]));
+    probe.write(&open_with(
+        "s1",
+        "inline",
+        json!([
+            {"id": "md", "k": "md", "p": {"text": "# Title\n\nsome **bold** text", "actions": {"click": "copy"}}},
+            {"id": "an", "k": "ansi", "p": {"text": "\u{1b}[31mred\u{1b}[0m and plain", "actions": {"click": "copy"}}},
+            {"id": "ck", "k": "checklist", "p": {"actions": {"click": "toggle"}, "phases": [
+                {"id": "p1", "title": "Phase", "items": [
+                    {"id": "a", "text": "first", "status": "done"},
+                    {"id": "b", "text": "second", "status": "active"},
+                    {"id": "c", "text": "third", "status": "pending"}
+                ]}
+            ]}}
+        ]),
+    ));
+    acked(&probe, 1);
+    let pane = probe.pane;
+    // Copy: the md source, and the ansi text without its escapes.
+    let md = wait_for("the md node", || node_box(&app, pane, "md"));
+    click(&app, center(md));
+    wait_for("the md source", || {
+        (app.request("clipboard") == "# Title\n\nsome **bold** text").then_some(())
+    });
+    let an = wait_for("the ansi node", || node_box(&app, pane, "an"));
+    click(&app, center(an));
+    wait_for("the ansi text", || {
+        (app.request("clipboard").as_str().map(str::trim_end) == Some("red and plain")).then_some(())
+    });
+    // Toggle folds the checklist to its phase heads and reports it.
+    let ck = wait_for("the checklist", || node_box(&app, pane, "ck"));
+    click(&app, (ck[0] + 30.0, ck[1] + ck[3] - 6.0));
+    let toggle = program_event(&probe, "toggle");
+    assert_eq!(toggle, json!({"ev": "toggle", "sf": "s1", "id": "ck", "collapsed": true}));
+    wait_for("the folded checklist", || {
+        let b = node_box(&app, pane, "ck")?;
+        (b[3] < ck[3] - 10.0).then_some(())
+    });
+}
+
+#[test]
+fn selection_links_mouse_reports_and_the_cursor_follow_rows_a_surface_block_shifts() {
+    let env = env("shift");
+    let app = App::start(&env, "a", &[]);
+    let probe = focused_probe(&env, &app);
+    probe.write(&hello(&[]));
+    probe.write(b"above\r\n");
+    probe.write(&open_with(
+        "s1",
+        "inline",
+        json!([{"id": "t", "k": "text", "p": {"text": "one\ntwo\nthree\nfour\nfive"}}]),
+    ));
+    acked(&probe, 1);
+    probe.write(&auk_conformance::probe::tsp_json("x", &json!({"id": "s1"})));
+    probe.write(b"below \x1b]8;;https://example.com/below\x1b\\link\x1b]8;;\x1b\\\r\nsecond row\r\n> ");
+    caught_up(&env, &app, probe.pane);
+    let pane = probe.pane;
+    // Drawn once the closed surface lets the rows after it show (lines 2 to 4).
+    let layout = pane_layout(&app, pane, "the block and the rows below it", |l| {
+        l["blocks"].as_array().is_some_and(|b| b.len() == 1)
+            && (2..=4).all(|line| line_top(l, line).is_some_and(|(_, h)| h > 0.0))
+    });
+    let block = &layout["blocks"][0];
+    let anchor = block["line"].as_u64().unwrap();
+    let cw = layout["cell"][0].as_f64().unwrap();
+    let ch = layout["cell"][1].as_f64().unwrap();
+    let ox = layout["origin"][0].as_f64().unwrap();
+    // The block is taller than its row, so the rows after it sit lower than a plain grid's.
+    let (link_top, link_h) = line_top(&layout, anchor + 1).unwrap();
+    let (anchor_top, _) = line_top(&layout, anchor).unwrap();
+    assert!(link_top - anchor_top > 2.0 * ch, "{layout}");
+    let (second_top, _) = line_top(&layout, anchor + 2).unwrap();
+    let mid = |top: f64| top + link_h / 2.0;
+
+    // Selection: a drag over "second" on the shifted row.
+    app.request(&format!("mouse down {} {}", ox + 0.5 * cw, mid(second_top)));
+    app.request(&format!("mouse drag {} {}", ox + 5.5 * cw, mid(second_top)));
+    app.request(&format!("mouse up {} {}", ox + 5.5 * cw, mid(second_top)));
+    assert_eq!(app.request("selection"), "second");
+
+    // Links: the hover readout names the link on the shifted row.
+    app.request(&format!("mouse move {} {}", ox + 8.5 * cw, mid(link_top)));
+    wait_for("the shifted link's target", || {
+        (app.request("chrome")["hover_link"] == "https://example.com/below").then_some(())
+    });
+
+    // The cursor: the input method is told where the cursor's row was drawn.
+    let cursor_line = anchor + 3;
+    let (cursor_top, _) = line_top(&layout, cursor_line).unwrap();
+    let ime = wait_for("the IME area", || {
+        let a = app.state()["ime_area"].clone();
+        a.is_array().then_some(a)
+    });
+    assert!((ime[1].as_f64().unwrap() - cursor_top).abs() < 0.5, "{ime} vs {cursor_top}");
+    assert!((ime[0].as_f64().unwrap() - (ox + 2.0 * cw)).abs() < 0.5, "{ime}");
+
+    // Mouse reports name the screen cell under the pointer, not a plain grid's row.
+    probe.write(b"\x1b[?1000h\x1b[?1006h");
+    caught_up(&env, &app, pane);
+    let screen = app.request(&format!("capture {pane}"))["text"].as_str().unwrap().to_owned();
+    let row = screen.lines().position(|l| l.starts_with("second row")).unwrap() + 1;
+    app.request(&format!("mouse down {} {}", ox + 3.5 * cw, mid(second_top)));
+    app.request(&format!("mouse up {} {}", ox + 3.5 * cw, mid(second_top)));
+    let got = probe.read_until("the press and release", |b| b.ends_with(b"m"));
+    assert_eq!(
+        String::from_utf8_lossy(&got),
+        format!("\x1b[<0;4;{row}M\x1b[<0;4;{row}m")
+    );
+}
+
+#[test]
+fn a_screen_surface_over_an_inline_one_takes_pointer_caret_and_visible() {
+    let env = env("screen-over");
+    let app = App::start(&env, "a", &[]);
+    let probe = focused_probe(&env, &app);
+    probe.write(&hello(&["edit"]));
+    probe.write(&open_with(
+        "s1",
+        "inline",
+        json!([
+            {"id": "in-go", "k": "text", "p": {"text": "inline button", "actions": {"click": "inline-act"}}},
+            {"id": "ed1", "k": "editor", "p": {"text": "inline field", "cursor": 0}}
+        ]),
+    ));
+    probe.write(&auk_conformance::probe::frame("s1", 2, json!([["focus", "ed1"]])));
+    acked(&probe, 2);
+    let pane = probe.pane;
+    let inline_go = wait_for("the inline button", || node_box(&app, pane, "in-go"));
+    // A screen surface covers the pane and the inline surface.
+    probe.write(&open_with(
+        "s2",
+        "screen",
+        json!([
+            {"id": "sc-go", "k": "text", "p": {"text": "screen button", "actions": {"click": "screen-act"}}},
+            {"id": "ed2", "k": "input", "p": {"text": "screen field", "cursor": 0}}
+        ]),
+    ));
+    probe.write(&auk_conformance::probe::frame("s2", 2, json!([["focus", "ed2"]])));
+    acked(&probe, 2);
+    pane_layout(&app, pane, "the screen surface", |l| l["screen"] == true);
+    let _ = program_input(&probe, Duration::from_millis(200));
+    // Pointer: where the inline button was drawn, the screen surface takes the press.
+    click(&app, center(inline_go));
+    let sc = wait_for("the screen button", || node_box(&app, pane, "sc-go"));
+    click(&app, center(sc));
+    let (bodies, _) = program_input(&probe, Duration::from_millis(500));
+    let actions: Vec<&Value> = events(&bodies, "action");
+    assert!(!actions.is_empty(), "{bodies:?}");
+    assert!(actions.iter().all(|a| a["sf"] == "s2"), "{bodies:?}");
+    // Caret: native editing keys go to the screen surface's field.
+    app.request("type shift+right");
+    let edit = stroke_event(&app, &probe, "backspace", "edit");
+    assert_eq!((edit["sf"].clone(), edit["id"].clone()), (json!("s2"), json!("ed2")), "{edit}");
+    // `visible`: when no window shows the pane, only the screen surface hears of it.
+    app.quit();
+    let input = probe.read_until("visible:false", |b| {
+        !events(&tsp_bodies(&split_input(b)), "visible").is_empty()
+    });
+    std::thread::sleep(Duration::from_millis(200));
+    let mut all = input;
+    all.extend(probe.read_for(Duration::from_millis(200)));
+    let bodies = tsp_bodies(&split_input(&all));
+    assert_eq!(
+        events(&bodies, "visible"),
+        [&json!({"ev": "visible", "sf": "s2", "visible": false})]
+    );
+}
+
+#[test]
+fn view_state_belongs_to_each_window_and_never_reaches_snapshots() {
+    let env = env("view-state");
+    let a = App::start(&env, "a", &[]);
+    let probe = focused_probe(&env, &a);
+    let b = App::start(&env, "b", &[]);
+    let pane = probe.pane;
+    show(&b, pane);
+    probe.write(&hello(&[]));
+    let mut out = String::new();
+    for i in 0..120 {
+        out.push_str(&format!("line {i}\r\n"));
+    }
+    probe.write(out.as_bytes());
+    probe.write(&open_with(
+        "s1",
+        "flow",
+        json!([{"id": "card", "k": "card", "p": {"head": "Details", "collapsible": true}, "c": [
+            {"id": "body", "k": "text", "p": {"text": "1\n2\n3\n4\n5\n6"}}
+        ]}]),
+    ));
+    acked(&probe, 1);
+    caught_up(&env, &a, pane);
+    caught_up(&env, &b, pane);
+    let (hash_before, _) = env.daemon_hash(pane);
+    let open_a = wait_for("the card in a", || node_box(&a, pane, "card"));
+    let open_b = wait_for("the card in b", || node_box(&b, pane, "card"));
+
+    // Fold in a: a's card shrinks, b's doesn't.
+    click(&a, (open_a[0] + 40.0, open_a[1] + 8.0));
+    let toggle = program_event(&probe, "toggle");
+    assert_eq!(toggle["collapsed"], true, "{toggle}");
+    wait_for("a's card to fold", || {
+        (node_box(&a, pane, "card")?[3] < open_a[3] - 20.0).then_some(())
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(node_box(&b, pane, "card").map(|r| r[3]), Some(open_b[3]));
+    // Select and scroll in a: b has no selection and still follows the tail.
+    menu(&a, "Edit", "Select All");
+    assert!(a.request("selection").is_string());
+    let la = pane_layout(&a, pane, "a's flow drawn with its scrollback", |l| {
+        l["max_scroll"].as_f64().is_some_and(|m| m > 0.0)
+    });
+    assert_eq!(la["following"], true);
+    menu(&a, "View", "Scroll to Top");
+    pane_layout(&a, pane, "a scrolled to the top", |l| l["following"] == false && l["first_line"] == 0);
+    assert!(b.request("selection").is_null());
+    assert_eq!(pane_layout(&b, pane, "b's flow", |l| l["rows"].is_array())["following"], true);
+
+    // None of it is pane state: the daemon's hash is unchanged, and a window attaching now
+    // (from a snapshot) shows the card open, nothing selected, following the tail.
+    assert_eq!(env.daemon_hash(pane).0, hash_before);
+    let c = App::start(&env, "c", &[]);
+    show(&c, pane);
+    let open_c = wait_for("the card in c", || node_box(&c, pane, "card"));
+    assert_eq!(open_c[3], open_b[3]);
+    assert!(c.request("selection").is_null());
+    assert_eq!(pane_layout(&c, pane, "c's flow", |l| l["rows"].is_array())["following"], true);
+}
+
+/// Writes the settings file the app reads (`<config>/settings.json`; the harness's config dir
+/// is the state dir).
+fn write_settings(env: &TestEnv, settings: Value) {
+    std::fs::write(env.state.join("settings.json"), settings.to_string()).expect("write settings.json");
+}
+
+/// §7.8, §7.9, §7.12, §7.13: the settings file turns off program colors and native editing,
+/// makes a plain click open links, and reduces motion (Auk's own setting over the system's); the
+/// program learns motion from the hello and a `motion` event when "Reload Settings" changes it.
+#[test]
+fn settings_drive_program_colors_native_editing_plain_click_links_and_reduce_motion() {
+    let env = env("settings");
+    write_settings(
+        &env,
+        json!({"program_colors": false, "native_editing": false, "links_plain_click": true, "reduce_motion": true}),
+    );
+    let opener = env.root.join("opener.sh");
+    std::fs::write(&opener, "#!/bin/sh\nexit 0\n").expect("write the opener");
+    std::fs::set_permissions(&opener, std::os::unix::fs::PermissionsExt::from_mode(0o755)).expect("chmod");
+    let app = App::start_with(&env, "a", &[], &[("AUK_OPENER", &opener.to_string_lossy())]);
+    let probe = focused_probe(&env, &app);
+    let pane = probe.pane;
+    let settings = wait_for("the views' settings", || {
+        let s = app.request("settings");
+        (!s["view"].is_null()).then_some(s)
+    });
+    assert_eq!(
+        settings["view"],
+        json!({"program_colors": false, "native_editing": false, "links_plain_click": true, "reduce_motion": true}),
+        "{settings}"
+    );
+
+    // The program's hello says motion is reduced.
+    probe.write(&hello(&["reduce-motion"]));
+    let input = probe.read_until("the hello reply", |b| {
+        tsp_bodies(&split_input(b)).iter().any(|v| v.get("reduceMotion").is_some())
+    });
+    let reply = tsp_bodies(&split_input(&input)).into_iter().find(|v| v.get("reduceMotion").is_some()).unwrap();
+    assert_eq!(reply["reduceMotion"], true, "{reply}");
+
+    // A plain click on a link opens it.
+    probe.write(b"see \x1b]8;;https://example.com/plain\x1b\\the link\x1b]8;;\x1b\\ here\r\n");
+    caught_up(&env, &app, pane);
+    let layout = pane_layout(&app, pane, "the link's row", |l| line_top(l, 0).is_some());
+    let cw = layout["cell"][0].as_f64().unwrap();
+    let (top, h) = line_top(&layout, 0).unwrap();
+    let (x, y) = (layout["origin"][0].as_f64().unwrap() + cw * 6.5, top + h / 2.0);
+    click(&app, (x, y));
+    let opened = wait_for("the plain click's open", || {
+        let o = app.request("opens")["opened"].clone();
+        (o.as_array()?.len() == 1).then_some(o)
+    });
+    assert_eq!(opened[0]["target"], "https://example.com/plain", "{opened}");
+
+    // Reload Settings with the defaults back: motion runs again (a `motion` event), and a plain
+    // click opens nothing while a ⌘-click does.
+    write_settings(&env, json!({"reduce_motion": false}));
+    // (Events go to a program with a live listening surface.)
+    probe.write(&open_with("s1", "inline", json!([{"id": "t", "k": "text", "p": {"text": "x"}}])));
+    acked(&probe, 1);
+    menu(&app, "View", "Reload Settings");
+    let motion = program_event(&probe, "motion");
+    assert_eq!(motion["reduce"], false, "{motion}");
+    let settings = app.request("settings");
+    assert_eq!(settings["links_plain_click"], false, "{settings}");
+    click(&app, (x, y));
+    app.request(&format!("mouse down {x} {y} --cmd"));
+    app.request(&format!("mouse up {x} {y} --cmd"));
+    let opened = wait_for("the ⌘-click's open", || {
+        let o = app.request("opens")["opened"].clone();
+        (o.as_array()?.len() >= 2).then_some(o)
+    });
+    assert_eq!(opened.as_array().unwrap().len(), 2, "the plain click opened nothing: {opened}");
+    wait_for("the views' settings back to the defaults", || {
+        let v = app.request("settings")["view"].clone();
+        (v == json!({"program_colors": true, "native_editing": true, "links_plain_click": false, "reduce_motion": false}))
+            .then_some(())
+    });
+}
+
+/// §9.8 keymap layers: the preset (`keymap`, `keymap_prefix`) under the user's `keybinds`, which
+/// replace a preset chord, take a default's keys from the menu, and `unbind` one.
+#[test]
+fn keymap_preset_and_user_keybinds_with_unbind() {
+    let env = env("keymap");
+    write_settings(
+        &env,
+        json!({
+            "keymap": "tmux",
+            "keymap_prefix": "ctrl+a",
+            "keybinds": {
+                "ctrl+a>c": "split_down",
+                "cmd+d": ["plugin.nobody.here", "new_tab"],
+                "cmd+shift+d": "unbind",
+            },
+        }),
+    );
+    let app = App::start(&env, "a", &[]);
+    let _us = InputSource::select(&app, US_LAYOUT);
+    let first = wait_for("a focused pane", || app.state()["focused"].as_u64());
+    env.wait(first, "prompt");
+    fn leaves(n: &Value) -> usize {
+        if n["pane"].is_u64() {
+            1
+        } else {
+            leaves(&n["first"]) + leaves(&n["second"])
+        }
+    }
+    let panes = |app: &App| -> usize { tabs(&app.layout()).iter().map(|t| leaves(&t["root"])).sum() };
+
+    // The preset: ctrl+a then % splits right.
+    app.request("type ctrl+a shift+5");
+    wait_for("the preset's split", || (panes(&app) == 2).then_some(()));
+    assert_eq!(tabs(&app.layout()).len(), 1);
+    assert_eq!(tabs(&app.layout())[0]["root"]["dir"], "right");
+
+    // The user layer replaces the preset's ctrl+a>c (new tab) with split down.
+    app.request("type ctrl+a c");
+    wait_for("the user's split", || (panes(&app) == 3).then_some(()));
+    assert_eq!(tabs(&app.layout()).len(), 1, "no new tab");
+
+    // A user keybind takes a default's keys (cmd+d) from the menu; its list runs the first
+    // action that applies.
+    assert_eq!(app.request("menu-key Shell 'Split Right'")["key"], "", "the menu gives cmd+d up");
+    app.request("type cmd+d");
+    wait_for("the new tab", || (tabs(&app.layout()).len() == 2).then_some(()));
+    // `unbind` removes a default without binding it again; the others keep theirs.
+    assert_eq!(app.request("menu-key Shell 'Split Down'")["key"], "");
+    assert_eq!(app.request("menu-key Shell 'New Tab'")["key"], "t");
+    let settings = app.request("settings");
+    assert!(settings["user"].as_array().unwrap().len() == 2, "unbind binds nothing: {settings}");
+}
+
+#[test]
+fn with_native_editing_switched_off_field_keys_and_pastes_are_the_programs() {
+    let env = env("native-off");
+    write_settings(&env, json!({"native_editing": false}));
+    let app = App::start(&env, "a", &[]);
+    let _us = InputSource::select(&app, US_LAYOUT);
+    let probe = focused_probe(&env, &app);
+    probe.write(&hello(&["edit", "undo"]));
+    probe.write(&open_with(
+        "s1",
+        "inline",
+        json!([{"id": "ed", "k": "editor", "p": {"text": "hello world", "cursor": 0}}]),
+    ));
+    probe.write(&auk_conformance::probe::frame("s1", 2, json!([["focus", "ed"]])));
+    acked(&probe, 2);
+    caught_up(&env, &app, probe.pane);
+    // The program granted `edit`, but the user's switch wins (§7.9): selecting keys are keys.
+    app.request("type shift+right");
+    let (bodies, bytes) = program_input(&probe, Duration::from_millis(400));
+    assert!(bodies.is_empty(), "{bodies:?}");
+    assert_eq!(bytes, b"\x1b[1;2C");
+    // ⌘Z is the program's key too, not an `undo` event.
+    app.request("type cmd+z");
+    let (bodies, _) = program_input(&probe, Duration::from_millis(400));
+    assert!(events(&bodies, "undo").is_empty(), "{bodies:?}");
+    // A paste is input, not an edit.
+    app.request("clipboard-set XY");
+    menu(&app, "Edit", "Paste");
+    let got = probe.read_until("the pasted keys", |b| b.ends_with(b"XY"));
+    assert!(events(&tsp_bodies(&split_input(&got)), "edit").is_empty());
+}
+
+/// §4.3 "can be locked": Shell › Lock Session locks the shown session through the daemon; a
+/// close is then refused with a toast in the window, and the same command unlocks it.
+#[test]
+fn lock_session_from_the_menu_refuses_closes_with_a_toast_and_unlocks() {
+    let env = env("lock");
+    let app = App::start(&env, "a", &[]);
+    let pane = wait_for("a focused pane", || app.state()["focused"].as_u64());
+    env.wait(pane, "prompt");
+    let locked = |app: &App| app.layout()["sessions"][0]["locked"] == true;
+    menu(&app, "Shell", "Lock Session");
+    wait_for("the session to lock", || locked(&app).then_some(()));
+    let closed = env.daemon(&format!("close {pane}"));
+    assert_eq!(closed["closed"], false, "{closed}");
+    wait_for("the window's toast", || {
+        app.request("toasts")
+            .as_array()?
+            .iter()
+            .any(|t| t["text"].as_str().is_some_and(|s| s.ends_with("is locked")))
+            .then_some(())
+    });
+    assert!(env.pane_info(pane)["exit"].is_null(), "the pane stays");
+    menu(&app, "Shell", "Lock Session");
+    wait_for("the session to unlock", || (!locked(&app)).then_some(()));
+}
+
+/// §10.1 Presence: the window shows the other clients attached to its host, with their
+/// identity, and stops when they leave.
+#[test]
+fn presence_shows_the_other_clients_attached_to_the_host() {
+    let env = env("presence");
+    let app = App::start(&env, "a", &[]);
+    let pane = wait_for("a focused pane", || app.state()["focused"].as_u64());
+    env.wait(pane, "prompt");
+    let headless = env.start_headless("h", &[]);
+    let shown = wait_for("the headless window in the app's presence", || {
+        let p = app.request("presence");
+        p["shown"].as_str().filter(|s| s.contains("headless")).map(str::to_owned)
+    });
+    assert!(shown.starts_with("Also here: "), "{shown}");
+    let p = app.request("presence");
+    let me = p["you"].clone();
+    assert!(p["clients"].as_array().unwrap().iter().any(|c| c["id"] == me && c["kind"] == "app"), "{p}");
+    std::process::Command::new("/bin/kill").arg(headless.pid.to_string()).status().expect("kill the headless window");
+    wait_for("the headless window to leave", || app.request("presence")["shown"].is_null().then_some(()));
+}
+
+/// §4.2, §10.1 "Who runs what", §10.4 "Remote window": `auk --host` opens the app's windows on a
+/// remote host's daemon (the Lima VM, over SSH). The remote daemon owns the panes; the window
+/// halves run here and see them (a status formatter reads the remote pane's directory); plugin
+/// CSS is the remote host's catalog styles plus the local manifests.
+#[test]
+fn remote_window_shows_remote_panes_to_local_window_halves_with_local_and_remote_css() {
+    let r = auk_conformance::remote::RemoteEnv::new(env!("CARGO_BIN_EXE_auk"), "app-remote");
+    // A plugin with manifest styles on the host, and one with a window half and styles here.
+    let remote_plugin = format!("{}/state/plugins/rstyle", r.root);
+    r.vm.ssh_ok(&format!(
+        "mkdir -p {remote_plugin} && printf '%s\\n' 'schema = 1' 'id = \"rstyle\"' 'name = \"Remote Style\"' \
+         'version = \"1\"' 'host = \"host.luau\"' 'styles = [\"r.css\"]' > {remote_plugin}/plugin.toml && \
+         echo '-- nothing' > {remote_plugin}/host.luau && echo '.rstyle {{ color: red; }}' > {remote_plugin}/r.css"
+    ));
+    let local = r.local.state.join("plugins/localwin");
+    std::fs::create_dir_all(&local).expect("mkdir");
+    std::fs::write(
+        local.join("plugin.toml"),
+        "schema = 1\nid = \"localwin\"\nname = \"Local Window\"\nversion = \"1\"\nwindow = \"window.luau\"\nstyles = [\"l.css\"]\n",
+    )
+    .expect("write plugin.toml");
+    std::fs::write(local.join("l.css"), ".localwin { color: blue; }").expect("write l.css");
+    std::fs::write(
+        local.join("window.luau"),
+        r#"tern.chrome.status(function(p) return { { text = "at " .. p.cwd } } end)"#,
+    )
+    .expect("write window.luau");
+
+    let pane = r.new_pane(&[]);
+    let config = r.vm.ssh_config.to_string_lossy().into_owned();
+    let command = r.remote_command();
+    let app = App::start(
+        &r.local,
+        "app",
+        &["--host", &r.vm.host, "--ssh-config", &config, "--remote-command", &command],
+    );
+    assert_eq!(app.state()["focused"], pane, "the window shows the remote pane");
+    assert!(!auk_conformance::harness::ping(&r.local.control_path()), "no local daemon serves it");
+
+    // The local window half sees the remote pane: its directory on the VM.
+    let home = format!("{}/home", r.root);
+    wait_for("the local formatter's segment for the remote pane", || {
+        app.request("chrome")["status"]
+            .as_array()?
+            .iter()
+            .any(|s| s["plugin"] == "localwin" && s["text"] == format!("at {home}"))
+            .then_some(())
+    });
+
+    // Plugin CSS: the host's catalog styles under its name, and the local manifests.
+    let catalog = wait_for("the remote catalog's styles", || {
+        let c = app.request("catalog");
+        (c["styles"].as_array()?.iter().any(|s| s == "rstyle")).then_some(c)
+    });
+    assert_eq!(catalog["host"], r.vm.host.as_str());
+    let sheets: Vec<&str> = catalog["sheets"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+    assert!(sheets.contains(&format!("plugin:{}:rstyle:styles", r.vm.host).as_str()), "{sheets:?}");
+    assert!(sheets.contains(&"plugin:local:localwin:styles"), "{sheets:?}");
+    wait_for("the sheets in the remote pane's document", || {
+        let s = app.request(&format!("surface-sheets {pane}"));
+        s.as_array()?.iter().any(|n| n.as_str().is_some_and(|n| n.ends_with(":rstyle:styles"))).then_some(())
+    });
+
+    // Typing in the window reaches the remote shell.
+    app.request("text 'echo remote-$((6*7))'");
+    app.request("type return");
+    wait_for("the remote output in the window", || {
+        app.request(&format!("capture {pane}"))["text"].as_str()?.contains("\nremote-42").then_some(())
+    });
+}

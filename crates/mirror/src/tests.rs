@@ -54,7 +54,11 @@ fn client_messages() -> Vec<ClientMsg> {
 
 fn daemon_messages() -> Vec<DaemonMsg> {
     let mut layout = Layout::default();
-    layout.new_session("main", None, 7);
+    let session = layout.new_session("main", None, 7);
+    layout.split(7, SplitDir::Right, 8).unwrap();
+    // Kinds and locks travel with the layout, inside the tagged messages too.
+    layout.set_kind(8, crate::layout::PaneTag::Agent);
+    layout.lock_session(session, true).unwrap();
     vec![
         DaemonMsg::Welcome {
             versions: Versions::current(),
@@ -119,6 +123,13 @@ fn daemon_messages() -> Vec<DaemonMsg> {
                 id: 3,
                 kind: ClientKind::App,
                 window_key: None,
+                identity: vec![crate::Hop {
+                    principal: "me@laptop".into(),
+                    method: "local".into(),
+                    origin: "laptop".into(),
+                    acting: "me@laptop".into(),
+                    key: None,
+                }],
             }],
         },
         DaemonMsg::PaneExit {

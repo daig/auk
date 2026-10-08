@@ -271,6 +271,12 @@ impl PluginHost {
         }
     }
 
+    /// Replaces the `plugins` and `plugins_disabled` settings; the next [`reload`](Self::reload)
+    /// applies them (the daemon re-reads its settings file before each reload, §9.3).
+    pub fn set_settings(&mut self, settings: PluginSettings) {
+        self.config.settings = settings;
+    }
+
     /// The catalog every replica receives.
     pub fn catalog(&self) -> &Catalog {
         &self.catalog

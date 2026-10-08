@@ -186,6 +186,26 @@ fn panes_get_a_login_environment_and_their_identity() {
     assert!(screen.contains("login-2"), "{screen}");
 }
 
+/// Whether `pane` is in the window key `main`'s layout.
+fn in_layout(env: &TestEnv, pane: u64) -> bool {
+    let ls = env.daemon("ls");
+    ls["layout"]["main"]["sessions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|s| s["tabs"].as_array().into_iter().flatten())
+        .any(|t| tree_has(&t["root"], pane))
+}
+
+/// Whether a split tree's JSON names `pane`.
+fn tree_has(node: &Value, pane: u64) -> bool {
+    node["pane"] == pane || tree_has_child(node, "first", pane) || tree_has_child(node, "second", pane)
+}
+
+fn tree_has_child(node: &Value, side: &str, pane: u64) -> bool {
+    node.get(side).is_some_and(|n| tree_has(n, pane))
+}
+
 #[test]
 fn exited_panes_report_their_status() {
     let env = env("exit");
@@ -196,25 +216,221 @@ fn exited_panes_report_their_status() {
     // The exit is a record in the stream: the replica's hash covers it.
     let (_, seq) = env.daemon_hash(pane);
     assert!(seq >= 1);
-    // The pane left the layout but stays listed for capture.
-    let ls = env.daemon("ls");
-    assert!(
-        ls["layout"]["main"]["sessions"]
-            .as_array()
-            .unwrap()
-            .is_empty(),
-        "{ls}"
-    );
+    // A command that fails keeps its pane open, showing how it ended (§5.1).
+    assert!(in_layout(&env, pane), "{}", env.daemon("ls"));
     assert_eq!(env.pane_info(pane)["exit"], 7);
+    // Closing it takes it out of the layout and the table.
+    env.daemon(&format!("close {pane}"));
+    assert!(!in_layout(&env, pane));
+    assert!(env.control().send(&format!("capture {pane}"))["ok"] == false);
 
     let shell = env.new_pane(&[]);
     env.wait(shell, "prompt");
     let pid = env.pane_info(shell)["pid"].as_u64().unwrap() as u32;
     env.daemon(&format!("kill {shell}"));
     let done = env.wait(shell, "exit");
-    // zsh exits with a failure status when hung up.
+    // zsh exits with a failure status when hung up; a closed pane leaves the layout anyway.
     assert!(done["exit"].as_i64().is_some_and(|s| s != 0), "{done}");
     assert!(!alive(pid));
+    assert!(!in_layout(&env, shell));
+}
+
+#[test]
+fn a_command_pane_closes_when_its_command_exits_0_unless_kept_open() {
+    let env = env("exit0");
+    env.start_daemon();
+    let keep = env.new_pane(&[]);
+    env.wait(keep, "prompt");
+    // Exit 0 closes the pane (§5.1); it stays listed for `capture` and `wait`.
+    let ok = env.new_pane(&["--", "echo done-$((40+2))"]);
+    assert_eq!(env.wait(ok, "exit")["exit"], 0);
+    wait_for("the finished pane to leave the layout", || {
+        (!in_layout(&env, ok)).then_some(())
+    });
+    assert!(env.daemon(&format!("capture {ok}"))["text"]
+        .as_str()
+        .unwrap()
+        .contains("done-42"));
+    // Tern's CLI can keep it open (`--keep-open`), through the CLI verb too.
+    let out = env.cli(&["new", "tab", "--keep-open", "--cwd", &env.home.to_string_lossy(), "--", "true"]);
+    assert!(out.status.success(), "{out:?}");
+    let kept: u64 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
+    assert_eq!(env.wait(kept, "exit")["exit"], 0);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert!(in_layout(&env, kept), "{}", env.daemon("ls"));
+    // A shell that exits 0 closes like any program.
+    env.daemon(&format!("run {keep} 'exit 0'"));
+    assert_eq!(env.wait(keep, "exit")["exit"], 0);
+    wait_for("the shell's pane to leave the layout", || {
+        (!in_layout(&env, keep)).then_some(())
+    });
+    assert!(in_layout(&env, kept));
+}
+
+/// Kills a process the test spawned when the test ends, however it ends.
+struct Reap(std::process::Child);
+
+impl Drop for Reap {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// Waits up to 20 s for a process to exit; returns its output.
+fn finish(mut child: std::process::Child) -> std::process::Output {
+    let deadline = std::time::Instant::now() + auk_conformance::harness::WAIT;
+    while std::time::Instant::now() < deadline {
+        if child.try_wait().unwrap().is_some() {
+            return child.wait_with_output().unwrap();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let _ = child.kill();
+    panic!("the process didn't exit: {:?}", child.wait_with_output());
+}
+
+#[test]
+fn a_second_daemon_on_the_same_socket_is_refused() {
+    let env = env("onedaemon");
+    let first = env.start_daemon();
+    let second = env
+        .command()
+        .arg("daemon")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let out = finish(second);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{stderr}");
+    assert!(
+        stderr.contains(&format!("another daemon serves {}", env.socket.display())),
+        "{stderr}"
+    );
+    // The first one still serves, on the same socket.
+    assert!(alive(first));
+    assert_eq!(env.daemon("ls")["daemon_pid"], first);
+    assert!(env.socket.exists());
+}
+
+#[test]
+fn without_auk_daemon_socket_the_daemon_listens_in_the_settings_dir() {
+    let env = env("defsock");
+    // No `$AUK_DAEMON_SOCKET` and no `$XDG_RUNTIME_DIR`: `daemon.sock` in the settings dir,
+    // which `$AUK_CONFIG_DIR` names.
+    let mut cmd = env.command();
+    cmd.env_remove("AUK_DAEMON_SOCKET").arg("daemon");
+    let daemon = Reap(cmd.spawn().unwrap());
+    let socket = env.state.join("daemon.sock");
+    let control = env.state.join("daemon.ctl");
+    wait_for("the daemon on its default socket", || {
+        auk_conformance::harness::ping(&control).then_some(())
+    });
+    assert!(socket.exists());
+    assert!(!env.socket.exists(), "nothing listens on the test's own socket");
+    // Clients find it the same way.
+    let out = env
+        .command()
+        .env_remove("AUK_DAEMON_SOCKET")
+        .args(["--json", "ls"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let ls: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(ls["daemon_pid"], daemon.0.id());
+    // A different socket is a separate daemon with its own sessions.
+    env.start_daemon();
+    assert_ne!(env.daemon("ls")["daemon_pid"], daemon.0.id());
+}
+
+/// Runs `line` in a new shell pane and returns the screen.
+fn pane_prints(env: &TestEnv, line: &str) -> String {
+    let pane = env.new_pane(&[]);
+    env.wait(pane, "prompt");
+    env.run(pane, line);
+    env.daemon(&format!("capture {pane}"))["text"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+#[test]
+fn the_daemon_keeps_the_environment_it_started_with() {
+    let env = env("keepenv");
+    env.start_daemon_with(|c| {
+        c.env("LANG", "en_GB.UTF-8");
+    });
+    // A later client with another environment opens a pane: the pane gets the daemon's.
+    let out = env
+        .command()
+        .env("LANG", "fr_FR.UTF-8")
+        .env("AUK_TEST_CLIENT_ONLY", "leaked")
+        .env("SHELL", "/bin/sh")
+        .args(["new", "--cwd", &env.home.to_string_lossy()])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let pane: u64 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
+    env.wait(pane, "prompt");
+    env.run(
+        pane,
+        "print -r -- \"[$LANG|${AUK_TEST_CLIENT_ONLY-unset}|$SHELL|${ZSH_NAME}|$HOME]\"",
+    );
+    let screen = env.daemon(&format!("capture {pane}"))["text"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let expected = format!("[en_GB.UTF-8|unset|/bin/zsh|zsh|{}]", env.home.display());
+    assert!(screen.contains(&expected), "{expected} not in\n{screen}");
+}
+
+#[test]
+fn panes_start_from_a_fresh_login_environment_not_the_daemons() {
+    let env = env("loginenv");
+    let sentinel = env.root.join("daemon-only-bin");
+    fs::create_dir_all(&sentinel).unwrap();
+    env.start_daemon_with(|c| {
+        c.env("AUK_TEST_DAEMON_ONLY", "leaked")
+            .env("PATH", format!("{}:/usr/bin:/bin", sentinel.display()));
+    });
+    let screen = pane_prints(
+        &env,
+        "print -r -- \"[${AUK_TEST_DAEMON_ONLY-unset}|$PATH]\" | tr : ,",
+    );
+    let line = screen
+        .lines()
+        .find(|l| l.starts_with("[unset|") || l.starts_with("[leaked|"))
+        .unwrap_or_else(|| panic!("no line in\n{screen}"));
+    assert!(line.starts_with("[unset|"), "the daemon's variable leaked: {line}");
+    assert!(
+        !line.contains("daemon-only-bin"),
+        "the daemon's PATH leaked: {line}"
+    );
+    assert!(line.contains("/usr/bin"), "the login shell's PATH: {line}");
+
+    // The pane-identity set (§5.2, Appendix B), with the TERN_ prefix swapped for AUK_ (D5).
+    let screen = pane_prints(
+        &env,
+        "print -r -- \"<$AUK_IDENTITY|$AUK_LENSES|$AUK_COMPLETE|$AUK_BLOB_DIR|${+AUK_WINDOW_SOCKET}${#AUK_WINDOW_SOCKET}|$TERM_PROGRAM_VERSION>\"",
+    );
+    let user = Command::new("id").arg("-un").output().unwrap();
+    let host = Command::new("hostname").arg("-s").output().unwrap();
+    let identity = format!(
+        "{}@{}",
+        String::from_utf8_lossy(&user.stdout).trim(),
+        String::from_utf8_lossy(&host.stdout).trim()
+    );
+    let expected = format!(
+        "<{identity}|1|0|{}|10|{}>",
+        env.state.join("blobs").display(),
+        env!("CARGO_PKG_VERSION")
+    );
+    assert!(screen.contains(&expected), "{expected} not in\n{screen}");
+    // Lens claims follow `command_lenses`.
+    env.daemon("settings --command-lenses off");
+    let screen = pane_prints(&env, "print -r -- \"<lenses=$AUK_LENSES>\"");
+    assert!(screen.contains("<lenses=0>"), "{screen}");
 }
 
 #[test]
@@ -617,6 +833,158 @@ fn ac10_a_plugin_block_resumes_from_its_last_save() {
         ls["layout"]["main"]["sessions"][0]["tabs"][0]["root"]["pane"], pane,
         "{ls}"
     );
+}
+
+/// A block that shows its size and a count its keys bump, and saves the count.
+fn sizer_plugin(env: &TestEnv) {
+    let dir = env.state.join("plugins/sizer");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("plugin.toml"),
+        "schema = 1\nid = \"sizer\"\nname = \"Sizer\"\nversion = \"1\"\nhost = \"host.luau\"\n[[blocks]]\nid = \"show\"\ntitle = \"Show\"\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("host.luau"),
+        r#"tern.block.define("show", {
+            init = function(cx, args, saved)
+                return { n = saved and saved.n or 0, cx = cx }
+            end,
+            view = function(s)
+                return { main = tern.ui.text("size " .. s.cx.cols .. "x" .. s.cx.rows .. " n=" .. s.n) }
+            end,
+            key = function(s, key) s.n += 1 return true end,
+            save = function(s) return { n = s.n } end,
+        })"#,
+    )
+    .unwrap();
+}
+
+/// The text of a pane's live surface (a block's view), from the daemon.
+fn block_text(env: &TestEnv, pane: u64) -> String {
+    let tsp = env.daemon(&format!("tsp {pane}"));
+    tsp["surfaces"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|s| s["state"] == "live")
+        .map(|s| s["doc"].to_string())
+        .collect()
+}
+
+#[test]
+fn a_restored_block_restarts_at_its_last_size_on_a_blank_screen_and_needs_its_type() {
+    let env = env("blocksize");
+    sizer_plugin(&env);
+    let daemon = env.start_daemon();
+    let pane = env.daemon("block sizer.show --size 90x25")["pane"]
+        .as_u64()
+        .expect("a pane");
+    wait_for("the block's first view", || {
+        block_text(&env, pane).contains("size 90x25 n=0").then_some(())
+    });
+    for _ in 0..3 {
+        env.daemon(&format!("send {pane} text k"));
+    }
+    wait_for("three keys counted and saved", || {
+        (block_text(&env, pane).contains("n=3")
+            && env.pane_info(pane)["kind"]["saved"] == r#"{"n":3}"#)
+            .then_some(())
+    });
+    // A size a window gave it later is the one it keeps.
+    env.daemon(&format!("resize {pane} 70 18"));
+    wait_for("the block's new size", || {
+        block_text(&env, pane).contains("size 70x18 n=3").then_some(())
+    });
+    let (_, seq_before) = env.daemon_hash(pane);
+    wait_checkpoint(&env, &[pane]);
+
+    env.kill9(daemon);
+    let daemon = env.start_daemon();
+    // Back from its save, at its last size, on a blank screen: a new stream with one live
+    // surface, not the old screen.
+    wait_for("the restored block", || {
+        block_text(&env, pane).contains("size 70x18 n=3").then_some(())
+    });
+    let info = env.pane_info(pane);
+    assert_eq!((info["cols"].as_u64(), info["rows"].as_u64()), (Some(70), Some(18)), "{info}");
+    let tsp = env.daemon(&format!("tsp {pane}"));
+    let surfaces = tsp["surfaces"].as_array().unwrap();
+    assert_eq!(surfaces.len(), 1, "only the new run's surface: {tsp:#}");
+    let (_, seq_after) = env.daemon_hash(pane);
+    assert!(seq_after < seq_before, "a fresh stream: {seq_after} vs {seq_before}");
+    wait_checkpoint(&env, &[pane]);
+
+    // With its plugin disabled (`plugins_disabled` in the settings file, §9.1), no Ready plugin
+    // defines the block type: the pane isn't restored, and leaves the layout.
+    fs::write(
+        env.state.join("settings.json"),
+        json!({"plugins_disabled": ["sizer"]}).to_string(),
+    )
+    .unwrap();
+    env.kill9(daemon);
+    env.start_daemon();
+    let catalog = env.daemon("plugin list");
+    assert_eq!(catalog["plugins"][0]["status"], "disabled", "{catalog}");
+    let ls = env.daemon("ls");
+    assert!(
+        !ls["panes"].as_array().unwrap().iter().any(|p| p["id"] == pane),
+        "{ls}"
+    );
+    assert!(ls["layout"].get("main").is_none_or(|w| !w.to_string().contains(&format!("\"pane\":{pane}"))), "{ls}");
+}
+
+#[test]
+fn command_blocks_keep_their_line_cwd_raw_width_status_and_view_across_a_restart() {
+    let env = env("lensrestore");
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../third_party/tern-sdk/plugins/examples/terraform");
+    assert!(examples.is_dir(), "the SDK example terraform is missing");
+    copy_dir(&examples, &env.state.join("plugins/terraform"));
+    let plan = Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugins/tests/fixtures/terraform-plan.txt");
+    assert!(plan.is_file(), "the plan fixture is missing");
+    let tf = env.root.join("bin/terraform");
+    executable(&tf, &format!("#!/bin/sh\ncat '{}'\nexit 2\n", plan.display()));
+    let daemon = env.start_daemon();
+    let pane = env.new_pane(&["--size", "110x30"]);
+    env.wait(pane, "prompt");
+    env.run(pane, &format!("{} plan", tf.display()));
+    wait_for("the command block's view", || {
+        let b = env.daemon(&format!("lens {pane}"))["blocks"][0].clone();
+        (!b["view"].is_null()).then_some(b)
+    });
+    // Views come at most every 250 ms (§9.6): let the last one land before the checkpoint.
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    wait_checkpoint(&env, &[pane]);
+    let before = env.daemon(&format!("lens {pane}"))["blocks"][0].clone();
+    assert_eq!(before["status"], 2);
+    assert_eq!(before["cols"], 110);
+
+    env.kill9(daemon);
+    env.start_daemon();
+    env.wait(pane, "prompt");
+    let after = env.daemon(&format!("lens {pane}"))["blocks"][0].clone();
+    for key in ["line", "typed", "cwd", "raw", "cols", "status", "done", "plugin", "lens", "view"] {
+        assert_eq!(after[key], before[key], "{key}: {after:#}");
+    }
+    // The view stays visible: windows that attach get it with the snapshot.
+    let window = env.start_headless("w", &[]);
+    let seen = wait_for("the restored view in a window", || {
+        let v = window.request(&format!("lens {pane}"))["blocks"][0]["view"].clone();
+        (!v.is_null()).then_some(v)
+    });
+    assert_eq!(seen, before["view"]);
+    // The lens state behind it is rebuilt on the next event: the view's action still works.
+    let ev = json!({"ev": "action", "id": "n1", "act": "copy-address", "value": "aws_instance.old"});
+    window.request(&format!("event {pane} lens:0 {}", quote(&ev.to_string())));
+    wait_for("the rehydrated lens's copy effect", || {
+        window
+            .request("effects")
+            .as_array()?
+            .iter()
+            .find(|e| e["effect"] == "copy" && e["text"] == "aws_instance.old")
+            .cloned()
+    });
 }
 
 // ---------------------------------------------------------------------------------------------

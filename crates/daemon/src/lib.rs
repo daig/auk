@@ -24,6 +24,7 @@ pub mod play;
 pub mod plugins;
 pub mod pty;
 pub mod server;
+pub mod settings;
 pub mod spawn;
 pub mod tsp;
 pub mod upgrade;

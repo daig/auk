@@ -395,8 +395,10 @@ pub fn state_json(pane: &TspPane, term: &auk_term::Terminal) -> Value {
             })
         })
         .collect();
+    let f = pane.facts();
     json!({
         "enabled": pane.config().enabled,
+        "facts": {"dark": f.dark, "reduce_motion": f.reduce_motion, "hour12": f.hour12, "visible": f.visible},
         "kinds": pane.config().kinds,
         "features": pane.config().features,
         "retention": pane.config().retention,

@@ -11,7 +11,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use auk_plugins::manage::{self, Verb};
-use auk_plugins::{Catalog, PluginSettings};
+use auk_plugins::Catalog;
 use serde_json::{Value, json};
 
 use crate::control::{Control, ControlError};
@@ -51,7 +51,9 @@ fn daemon(socket: &Path) -> Option<Control> {
 }
 
 fn reload(control: &mut Control) -> Result<Catalog, Fail> {
-    let _ = control.set_timeout(Some(RELOAD_WAIT + Duration::from_secs(5)));
+    // The daemon answers "did not answer" itself at 60 s; one that says nothing at all gets the
+    // same 124 when the 60 s are up.
+    let _ = control.set_timeout(Some(RELOAD_WAIT));
     match control.request(&["plugin", "reload"]) {
         Ok(value) => serde_json::from_value(value).map_err(|e| Fail::Failed(e.to_string())),
         Err(ControlError::Io(e))
@@ -118,7 +120,9 @@ fn run_verb(socket: &Path, args: &[String], out: &mut impl Write) -> Result<Exit
                         .map_err(|e| Fail::Failed(e.to_string()))?;
                     serde_json::from_value(value).map_err(|e| Fail::Failed(e.to_string()))?
                 }
-                None => manage::offline_catalog(&plugins_dir, &PluginSettings::default()),
+                // `plugins` and `plugins_disabled` from the settings file, as the daemon reads
+                // them (§9.1).
+                None => manage::offline_catalog(&plugins_dir, &auk_daemon::settings::read().plugins),
             };
             print(out, json, catalog.to_json(), &manage::format_list(&catalog))?;
         }

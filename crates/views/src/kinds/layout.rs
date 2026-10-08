@@ -147,6 +147,7 @@ pub(crate) fn card(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
     let p = node.props();
     let collapsible = bool_prop(p, "collapsible");
     let collapsed = collapsible && cx.st.fold(node, false);
+    look.class_if(cx.st.unfolding(node, collapsed), "sf-unfold");
     let status = str_prop(p, "status").unwrap_or("");
     let has_head = p.get("head").is_some_and(|h| !h.is_null() && h != "");
     let nohead = !has_head && status.is_empty() && !collapsible;
@@ -216,6 +217,7 @@ pub(crate) fn section(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look
     let collapsed = collapsible && cx.st.fold(node, false);
     look.class_if(collapsible, "collapsible");
     look.class_if(collapsed, "collapsed");
+    look.class_if(cx.st.unfolding(node, collapsed), "sf-unfold");
     let head = part(cx, m, "div", "sf-section-head");
     if collapsible {
         cx.dom.attr(head, "role", "button");
@@ -332,6 +334,10 @@ pub(crate) fn overlay(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look
         _ => "center".to_owned(),
     };
     look.class(&format!("at-{anchor}"));
+    // An overlay that opens into a drawn surface pops in (§7.13).
+    let drawn = cx.st.drawn;
+    let pop = *cx.st.overlays.entry(node.id().to_owned()).or_insert(drawn);
+    look.class_if(pop, "sf-pop");
     let modal = bool_prop(p, "modal");
     look.class_if(modal, "modal");
     if modal {

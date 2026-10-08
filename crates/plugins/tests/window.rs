@@ -382,3 +382,37 @@ fn a_failed_window_entry_toasts_once_and_keeps_its_styles() {
     plugins.reload(&mut win);
     assert_eq!(win.toasts().len(), 1, "an identical failure isn't toasted again");
 }
+
+#[test]
+fn sheet_urls_inline_plugin_files_as_data_and_refuse_the_rest() {
+    use base64::Engine as _;
+    let root = Root::new();
+    let png = b"\x89PNG\r\n\x1a\n-not-really".to_vec();
+    let pkg = root.package(
+        "pics",
+        &[
+            ("plugin.toml", "schema = 1\nid = \"pics\"\nname = \"Pics\"\nversion = \"1\"\nwindow = \"w.luau\"\nstyles = [\"s.css\"]\n"),
+            ("w.luau", "tern.css('extra', \".x { background-image: url('img/dot.png') } .y { background-image: url(https://example.com/a.png) }\")"),
+            ("s.css", ".a { background: url(img/dot.png) } .b { background-image: url(../s.css) } .c { background-image: url(data:image/gif;base64,R0lG) }"),
+        ],
+    );
+    let dir = pkg.join("img");
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    std::fs::write(dir.join("dot.png"), &png).expect("write");
+    let mut win = TestWindow::default();
+    let plugins = WindowPlugins::load(root.window_config(BUILTIN), &mut win);
+    let data = format!(
+        "url(\"data:image/png;base64,{}\")",
+        base64::engine::general_purpose::STANDARD.encode(&png)
+    );
+    let sheets = plugins.sheets();
+    let names: Vec<&str> = sheets.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, ["plugin:local:pics:styles", "plugin:local:pics:extra"]);
+    let (styles, extra) = (&sheets[0].1, &sheets[1].1);
+    assert!(styles.contains(&format!(".a {{ background: {data} }}")), "{styles}");
+    assert!(styles.contains("url(../s.css)"), "`..` is refused and left for the engine to drop");
+    assert!(styles.contains("url(data:image/gif;base64,R0lG)"), "data: URLs pass");
+    assert!(extra.contains(&format!(".x {{ background-image: {data} }}")), "{extra}");
+    assert!(extra.contains("url(https://example.com/a.png)"));
+}
+

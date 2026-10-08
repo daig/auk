@@ -153,3 +153,89 @@ fn text_overflow_ellipsis_replaces_the_overflowing_glyphs() {
     assert!(dark(0, 20), "text drawn");
     assert!(!dark(61, 100), "nothing past the box");
 }
+
+#[test]
+fn plugin_sheet_data_url_backgrounds_paint_tiled_and_program_sheets_drop_url() {
+    use auk_ui::{ImageContent, SheetKind};
+    use vello::peniko::{Blob, ImageAlphaType, ImageData, ImageFormat};
+    let mut doc = auk_ui::Document::new();
+    doc.set_device_scale(1.0);
+    let root = doc.root();
+    let body = doc.create_element("body");
+    doc.append_child(root, body);
+    let a = doc.create_element("div");
+    doc.set_attribute(a, "class", "pic");
+    doc.append_child(body, a);
+    let scoped = doc.create_element("div");
+    doc.set_attribute(scoped, "data-scope", "sf1");
+    doc.append_child(body, scoped);
+    let b = doc.create_element("div");
+    doc.set_attribute(b, "class", "pic2");
+    doc.append_child(scoped, b);
+    // A 2×1 picture, red then blue, for any data: URL the loader sees.
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let log = seen.clone();
+    doc.set_url_loader(Box::new(move |url| {
+        log.lock().unwrap().push(url.to_owned());
+        let px = vec![255, 0, 0, 255, 0, 0, 255, 255];
+        Some(ImageContent::new(ImageData {
+            data: Blob::from(px),
+            format: ImageFormat::Rgba8,
+            alpha_type: ImageAlphaType::Alpha,
+            width: 2,
+            height: 1,
+        }))
+    }));
+    doc.set_stylesheet(
+        "base",
+        SheetKind::BuiltIn,
+        None,
+        "body { margin: 0; background: white } div { height: 10px; width: 40px }",
+    );
+    let url = "data:image/png;base64,AAAA";
+    let errors = doc.set_stylesheet(
+        "plugin:local:p:styles",
+        SheetKind::Plugin,
+        None,
+        &format!(".pic {{ background-image: url(\"{url}\"); image-rendering: pixelated }} .bad {{ background-image: url(x.png) }}"),
+    );
+    assert_eq!(
+        errors.len(),
+        1,
+        "a file url() never reaches the engine: {errors:?}"
+    );
+    assert!(errors[0].contains("url()"), "{errors:?}");
+    let errors = doc.set_stylesheet(
+        "tsp:sf1:main",
+        SheetKind::Program,
+        Some("sf1"),
+        &format!(".pic2 {{ background-image: url(\"{url}\") }}"),
+    );
+    assert_eq!(errors.len(), 1, "program sheets drop url(): {errors:?}");
+    doc.set_viewport(64.0, 32.0);
+    doc.update();
+    assert_eq!(
+        doc.computed_style(a).unwrap().background_image.as_deref(),
+        Some(url)
+    );
+    assert_eq!(doc.computed_style(b).unwrap().background_image, None);
+    assert_eq!(*seen.lock().unwrap(), [url], "each URL loads once");
+    let Some(px) = render(&doc, 64, 32) else {
+        panic!("no wgpu adapter for offscreen rendering");
+    };
+    let at = |x: u32, y: u32| -> [u8; 4] {
+        let i = ((y * 64 + x) * 4) as usize;
+        [px[i], px[i + 1], px[i + 2], px[i + 3]]
+    };
+    // Repeated at its own size over the box, clipped to it.
+    assert_eq!(at(0, 5), [255, 0, 0, 255]);
+    assert_eq!(at(1, 5), [0, 0, 255, 255]);
+    assert_eq!(at(38, 5), [255, 0, 0, 255]);
+    assert_eq!(at(39, 5), [0, 0, 255, 255]);
+    assert_eq!(at(45, 5), [255, 255, 255, 255], "nothing past the box");
+    assert_eq!(
+        at(5, 15),
+        [255, 255, 255, 255],
+        "the program sheet's url() was dropped"
+    );
+}

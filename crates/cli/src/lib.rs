@@ -91,6 +91,13 @@ pub enum Command {
         /// COLSxROWS.
         #[arg(long, value_parser = parse_size)]
         size: Option<(u16, u16)>,
+        /// Open an agent pane: the `agent_command` setting (default `omp`) through the login
+        /// shell.
+        #[arg(long, conflicts_with = "command")]
+        agent: bool,
+        /// Keep the pane open when its command exits 0 (it stays open after any other status).
+        #[arg(long)]
+        keep_open: bool,
         /// A command to run instead of a login shell.
         #[arg(last = true)]
         command: Vec<String>,
@@ -103,12 +110,30 @@ pub enum Command {
         /// The new pane's directory (default: the split pane's).
         #[arg(long)]
         cwd: Option<PathBuf>,
+        /// Open an agent pane (see `new --agent`).
+        #[arg(long, conflicts_with = "command")]
+        agent: bool,
+        /// Keep the pane open when its command exits 0.
+        #[arg(long)]
+        keep_open: bool,
         /// A command to run instead of a login shell.
         #[arg(last = true)]
         command: Vec<String>,
     },
-    /// Close a pane: hang up its process and take it out of the layout.
+    /// Close a pane: hang up its process and take it out of the layout. A locked session
+    /// refuses, and its windows show why.
     Close { target: String },
+    /// Lock a session, so closing it, its tabs or its panes is refused: SESSION is an id, a
+    /// name, or `@focused` (the focused pane's session).
+    Lock {
+        #[arg(default_value = "@focused")]
+        session: String,
+    },
+    /// Unlock a session.
+    Unlock {
+        #[arg(default_value = "@focused")]
+        session: String,
+    },
     /// Stream daemon events as JSON lines, such as
     /// `{"event":"pane_spawned","pane":3,"window":"main","by":"cli"}`.
     Events {
@@ -190,14 +215,15 @@ pub enum Command {
         #[arg(long)]
         surfaces: bool,
     },
-    /// Play a TSP recording into a pane (§7.15): `surface-play FILE [from N] [until N]
-    /// [paced [TIMES]]`. The first play restarts the pane as a stand-in program.
+    /// Play a TSP recording into a pane (§7.15): `surface-play FILE [from F] [until F]
+    /// [paced [TIMES]]`, where F is a frame's `s` or `<sf>#<s>`; `from` continues an earlier play
+    /// after frame F. The first play restarts the pane as a stand-in program.
     SurfacePlay {
         file: PathBuf,
         /// The pane (default: the focused one).
         #[arg(long, default_value = "@focused")]
         pane: String,
-        /// `from N`, `until N`, `paced [TIMES]`.
+        /// `from F`, `until F`, `paced [TIMES]`.
         #[arg(trailing_var_arg = true)]
         options: Vec<String>,
     },
@@ -501,9 +527,16 @@ fn run_verb(socket: &Path, g: &Globals, verb: Command) -> Result<ExitCode, VerbE
             name,
             cwd,
             size,
+            agent,
+            keep_open,
             command,
         } => {
             let mut words = vec!["new".to_owned(), what];
+            for (on, flag) in [(agent, "--agent"), (keep_open, "--keep-open")] {
+                if on {
+                    words.push(flag.to_owned());
+                }
+            }
             let mut flag = |name: &str, value: Option<String>| {
                 if let Some(value) = value {
                     words.push(format!("--{name}"));
@@ -529,9 +562,16 @@ fn run_verb(socket: &Path, g: &Globals, verb: Command) -> Result<ExitCode, VerbE
             target,
             dir,
             cwd,
+            agent,
+            keep_open,
             command,
         } => {
             let mut words = vec!["split".to_owned(), target, dir];
+            for (on, flag) in [(agent, "--agent"), (keep_open, "--keep-open")] {
+                if on {
+                    words.push(flag.to_owned());
+                }
+            }
             if let Some(cwd) = cwd {
                 words.extend([
                     "--cwd".to_owned(),
@@ -546,8 +586,19 @@ fn run_verb(socket: &Path, g: &Globals, verb: Command) -> Result<ExitCode, VerbE
             report(&mut out, g, &value, Some(value["pane"].to_string()))?;
         }
         Command::Close { target } => {
-            connect(socket, false)?.request(&["close", &target])?;
-            report(&mut out, g, &serde_json::json!({"closed": target}), None)?;
+            let value = connect(socket, false)?.request(&["close", &target])?;
+            // A locked session refuses without failing the script (book:16896).
+            let text = (value["closed"] == false)
+                .then(|| format!("session {} is locked; pane {target} stays open", value["locked"]));
+            report(&mut out, g, &value, text)?;
+        }
+        Command::Lock { session } => {
+            let value = connect(socket, false)?.request(&["lock", &session, "on"])?;
+            report(&mut out, g, &value, None)?;
+        }
+        Command::Unlock { session } => {
+            let value = connect(socket, false)?.request(&["lock", &session, "off"])?;
+            report(&mut out, g, &value, None)?;
         }
         Command::Events { filter } => {
             let mut control = connect(socket, false)?;

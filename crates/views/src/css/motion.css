@@ -3,6 +3,15 @@
 @media (prefers-reduced-motion: reduce) {
   .sf-region, .sf-region * { transition-duration: 0s !important; animation-duration: 0s !important; }
 }
+/* Fold and overlay transitions (§7.13, book:5654, 7694), clocked by the view: a fold opened by
+   the user or the program fades and slides in; an overlay that opens pops in over 220ms. */
+@keyframes sf-unfold { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes sf-pop { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: none; } }
+.sf-card.sf-unfold > .sf-card-body, .sf-section.sf-unfold > .sf-section-body,
+.sf-tool.sf-unfold > .sf-tool-body, .sf-agent.sf-unfold > .sf-agent-kids,
+.sf-checklist.sf-unfold .sf-ck-item, .sf-tree-kids.sf-unfold { animation: sf-unfold 180ms ease-out; }
+.sf-overlay.sf-pop .sf-ov-card { animation: sf-pop 220ms cubic-bezier(0.2, 0.9, 0.3, 1); }
+.sf-still .sf-unfold, .sf-still .sf-unfold *, .sf-still .sf-pop .sf-ov-card { animation: none; }
 .sf-still .md.streaming { opacity: 1; }
 .sf-paused .md-caret, .sf-still .md-caret { opacity: 1; }
 @media (prefers-contrast: more) {

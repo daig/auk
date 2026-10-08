@@ -435,6 +435,7 @@ fn web_client_in_safari_attaches_draws_over_webgpu_and_types() {
     // First, so a missing prerequisite fails fast and says what to do.
     let safari = Safari::start();
     let env = env("websafari");
+    web_plugin(&env);
     let pane = daemon_with_pane(&env);
     // Exact colors, whatever the page's theme: red text, then text on a green background.
     env.run(
@@ -519,6 +520,162 @@ fn web_client_in_safari_attaches_draws_over_webgpu_and_types() {
         );
         std::thread::sleep(Duration::from_millis(250));
     }
+
+    safari_surfaces_lens_views_and_blocks(&safari, &env, pane);
+}
+
+/// Where the page drew a node (`window.aukNodeRect`), in page CSS pixels.
+fn page_node_rect(safari: &Safari, pane: u64, sf: &str, id: &str) -> Value {
+    let what = format!("{sf}/{id} of pane {pane} to be drawn");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let raw = safari.execute(&format!(
+            "return window.aukNodeRect ? window.aukNodeRect({pane}, {}, {}) : 'null';",
+            Value::from(sf),
+            Value::from(id)
+        ));
+        let rect: Value = raw
+            .as_str()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or(Value::Null);
+        if rect["w"].as_f64().is_some_and(|w| w > 0.0) {
+            return rect;
+        }
+        assert!(Instant::now() < deadline, "timed out waiting for {what}");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn click_center(safari: &Safari, rect: &Value) {
+    let c = |k: &str| rect[k].as_f64().unwrap();
+    safari.click_at(c("x") + c("w") / 2.0, c("y") + c("h") / 2.0);
+}
+
+/// The id of a node in a JSON tree whose `text` starts with `prefix`.
+fn json_node_with_text(v: &Value, prefix: &str) -> Option<String> {
+    if v["p"]["text"]
+        .as_str()
+        .is_some_and(|t| t.starts_with(prefix))
+    {
+        return v["id"].as_str().map(str::to_owned);
+    }
+    v["c"]
+        .as_array()?
+        .iter()
+        .find_map(|c| json_node_with_text(c, prefix))
+}
+
+/// The live surface of a pane in the daemon: its id and the id of the node showing `prefix`.
+fn daemon_node(env: &TestEnv, pane: u64, prefix: &str) -> Option<(String, String)> {
+    let tsp = env.daemon(&format!("tsp {pane}"));
+    tsp["surfaces"].as_array()?.iter().rev().find_map(|s| {
+        let id = json_node_with_text(&s["doc"], prefix)?;
+        Some((s["id"].as_str()?.to_owned(), id))
+    })
+}
+
+/// §10.3, §10.4 in the browser: a program's surface, a lens view (with the plugin's manifest
+/// style and its effects) and a plugin block are drawn, and clicks on them reach their owners.
+fn safari_surfaces_lens_views_and_blocks(safari: &Safari, env: &TestEnv, pane: u64) {
+    // A program's surface in the flow.
+    env.run(pane, &web_surface_program(env));
+    let state = page_state(safari, "the surface to be drawn", |s| {
+        pane_state(s, pane).is_some_and(|p| {
+            p["surfaces"].as_array().is_some_and(|a| {
+                a.iter()
+                    .any(|sf| sf["sf"] == "w1" && sf["h"].as_f64() > Some(0.0))
+            })
+        })
+    });
+    page_node_rect(safari, pane, "w1", "t");
+    assert_eq!(
+        pane_state(&state, pane).unwrap()["styles"],
+        serde_json::json!(["webdemo"])
+    );
+
+    // A lensed command: its block shows the lens view, painted with the manifest style.
+    env.run(pane, &web_cmd(env));
+    let state = page_state(safari, "the lens view to be drawn", |s| {
+        pane_state(s, pane).is_some_and(|p| {
+            p["lens"].as_array().is_some_and(|a| {
+                a.iter()
+                    .any(|l| l["view"] == true && l["h"].as_f64() > Some(0.0))
+            })
+        })
+    });
+    let lens = pane_state(&state, pane).unwrap()["lens"][0].clone();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let (_, _, greenish) = screen_ink(safari, &lens);
+        if greenish > 100 {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the lens block shows only {greenish} pixels of the manifest style's green"
+        );
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    // A click on the view's node: the lens copies and toasts, in this page.
+    let go = page_node_rect(safari, pane, "lens:0", "go");
+    click_center(safari, &go);
+    page_state(safari, "the lens's toast", |s| {
+        s["effects"].as_array().is_some_and(|e| {
+            e.iter()
+                .any(|e| e["effect"] == "toast" && e["text"] == "Copied from the lens")
+                && e.iter()
+                    .any(|e| e["effect"] == "copy" && e["text"] == "copied-from-lens")
+        })
+    });
+    let toast = safari.execute("return document.getElementById('toast').textContent;");
+    assert!(
+        toast
+            .as_str()
+            .is_some_and(|t| t.contains("Copied from the lens")),
+        "{toast}"
+    );
+
+    // A plugin block in a new session of the window key: its tab shows in the tab bar, and a
+    // click there shows the block, drawn as a screen surface that takes clicks.
+    let block = env.daemon("block webdemo.panel --window main")["pane"]
+        .as_u64()
+        .expect("a block pane");
+    let (sf, id) = wait_for("the block's view in the daemon", || {
+        daemon_node(env, block, "block-panel 0")
+    });
+    page_state(safari, "the block's tab", |s| {
+        s["tabs"]
+            .as_array()
+            .is_some_and(|t| t.iter().any(|t| t["pane"] == block))
+    });
+    safari.click(&safari.element(&format!("#tabs .tab[data-pane=\"{block}\"]")));
+    page_state(safari, "the block to be drawn", |s| {
+        pane_state(s, block).is_some_and(|p| {
+            !p["rect"].is_null()
+                && p["surfaces"]
+                    .as_array()
+                    .is_some_and(|a| a.iter().any(|x| x["sf"] == sf.as_str()))
+        })
+    });
+    let node = page_node_rect(safari, block, &sf, &id);
+    click_center(safari, &node);
+    wait_for("the block to take the click", || {
+        daemon_node(env, block, "block-panel 1")
+    });
+    page_state(safari, "the block's toast in the page", |s| {
+        s["effects"].as_array().is_some_and(|e| {
+            e.iter()
+                .any(|e| e["effect"] == "toast" && e["text"] == "bumped 1")
+        })
+    });
+    let state = page_state(safari, "the page's block replica to match", |s| {
+        let (hash, seq) = env.daemon_hash(block);
+        pane_state(s, block).is_some_and(|p| p["hash"] == hash.as_str() && p["seq"] == seq)
+    });
+    assert!(
+        state["errors"].as_array().is_some_and(Vec::is_empty),
+        "{state}"
+    );
 }
 
 /// Drawn pixels in a page rect (CSS pixels) of a screenshot: (unlike the background, red,
@@ -633,4 +790,345 @@ fn ac02_wasm_replicas_reach_the_native_state_hashes_under_fuzzing() {
     for (i, (w, n)) in wasm_lines.iter().zip(&native).enumerate() {
         assert_eq!(w, n, "case {i}: wasm32 and native replicas differ");
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Plugins in the web client (§9.4, §10.3, §10.4): the catalog's manifest styles, plugin blocks,
+// lens views and effects. The client runs no Lua; all of it comes from the serving daemon.
+
+/// A plugin with a lens on `webdemo-cmd *` whose view has a clickable node (`go`, which copies
+/// and toasts), a block type `panel` whose node `bump`s a counter and toasts, and a manifest
+/// style that paints the lens's block green.
+fn web_plugin(env: &TestEnv) {
+    let dir = env.state.join("plugins/webdemo");
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    std::fs::write(
+        dir.join("plugin.toml"),
+        "schema = 1\nid = \"webdemo\"\nname = \"Web demo\"\nversion = \"1\"\n\
+         host = \"host.luau\"\nstyles = [\"web.css\"]\n\
+         [[lenses]]\nid = \"echo\"\nmatch = [\"webdemo-cmd *\"]\n\
+         [[blocks]]\nid = \"panel\"\ntitle = \"Panel\"\n",
+    )
+    .expect("write plugin.toml");
+    std::fs::write(dir.join("web.css"), WEB_CSS).expect("write web.css");
+    std::fs::write(
+        dir.join("host.luau"),
+        r#"tern.lens.define("echo", {
+            open = function(run) return { lines = 0 } end,
+            line = function(s, l) s.lines += 1 end,
+            finish = function(s, status) end,
+            view = function(s)
+                return { k = "col", c = {
+                    { k = "text", p = { text = "lens-view " .. s.lines .. " lines" } },
+                    { id = "go", k = "text", p = { text = "Copy it", actions = { click = "copy-it" } } },
+                } }
+            end,
+            event = function(s, ev, cx)
+                if ev.ev == "action" and ev.act == "copy-it" then
+                    cx:copy("copied-from-lens")
+                    cx:toast("success", "Copied from the lens", "webdemo")
+                end
+            end,
+        })
+        tern.block.define("panel", {
+            init = function(cx, args, saved) return { n = 0 } end,
+            view = function(s)
+                return { main = { k = "col", c = {
+                    { k = "text", p = { text = "block-panel " .. s.n, actions = { click = "bump" } } },
+                } } }
+            end,
+            event = function(s, ev, cx)
+                if ev.ev == "action" and ev.act == "bump" then
+                    s.n += 1
+                    cx:toast("info", "bumped " .. s.n)
+                    cx:render()
+                end
+            end,
+        })"#,
+    )
+    .expect("write host.luau");
+}
+
+const WEB_CSS: &str =
+    "[data-role=\"lens.plugin.webdemo.echo\"] { background-color: rgb(0, 200, 0); }\n";
+
+/// A program that draws a flow surface `w1` showing `web-surface` (node `t`) and closes it,
+/// keeping it in scrollback.
+fn web_surface_program(env: &TestEnv) -> String {
+    let tsp = env.root.join("bin/websurface");
+    std::fs::create_dir_all(tsp.parent().unwrap()).expect("mkdir");
+    std::fs::write(
+        &tsp,
+        r#"#!/bin/sh
+printf '\033_tsp;o;{"id":"w1","mode":"flow","listen":false}\033\\'
+printf '\033_tsp;f;{"sf":"w1","s":1,"ops":[["add","main","w1",null,{"id":"main","k":"col","c":[{"id":"t","k":"text","p":{"text":"web-surface"}}]}]]}\033\\'
+printf '\033_tsp;x;{"id":"w1","keep":true}\033\\'
+"#,
+    )
+    .expect("write the surface program");
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&tsp, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    tsp.display().to_string()
+}
+
+/// The lensed command: a stand-in program printing three lines.
+fn web_cmd(env: &TestEnv) -> String {
+    use std::os::unix::fs::PermissionsExt;
+    let path = env.root.join("bin/webdemo-cmd");
+    std::fs::create_dir_all(path.parent().unwrap()).expect("mkdir");
+    std::fs::write(&path, "#!/bin/sh\nprintf 'one\\ntwo\\nthree\\n'\n").expect("write");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    format!("{} go", path.display())
+}
+
+/// The browser client's session ([`auk_web::session::Session`]) over a real WebSocket to `auk
+/// web serve`: what the wasm client runs, without the page.
+struct WebSession {
+    ws: WsClient,
+    s: auk_web::session::Session,
+}
+
+impl WebSession {
+    fn connect(server: &WebServer) -> WebSession {
+        let cookie = format!("auk_session={}", server.login());
+        let host = server.host();
+        let origin = format!("http://{host}");
+        let ws = WsClient::connect(
+            server.port,
+            &[("Host", &host), ("Origin", &origin), ("Cookie", &cookie)],
+        )
+        .expect("upgrade");
+        let s = auk_web::session::Session::new("main", ClientFacts::default());
+        WebSession { ws, s }
+    }
+
+    fn flush(&mut self) {
+        for frame in self.s.take_outbox() {
+            self.ws.send_binary(&frame);
+        }
+    }
+
+    /// Feeds the session messages until `f` finds what it waits for.
+    fn until<T>(
+        &mut self,
+        what: &str,
+        mut f: impl FnMut(&mut auk_web::session::Session) -> Option<T>,
+    ) -> T {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            self.flush();
+            if let Some(t) = f(&mut self.s) {
+                return t;
+            }
+            assert!(Instant::now() < deadline, "timed out waiting for {what}");
+            match self.ws.recv() {
+                Some(WsMessage::Binary(bytes)) => {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs_f64();
+                    self.s.set_time(now);
+                    self.s.on_message(&bytes);
+                    assert!(self.s.errors.is_empty(), "{:?}", self.s.errors);
+                }
+                Some(_) => {}
+                None => panic!("the connection ended waiting for {what}"),
+            }
+        }
+    }
+}
+
+/// The newest surface with a node whose text starts with `prefix`: the surface's id and the
+/// node's.
+fn node_with_text(tsp: &auk_tsp::TspPane, prefix: &str) -> Option<(String, String)> {
+    fn walk(n: auk_tsp::NodeRef<'_>, prefix: &str) -> Option<String> {
+        if n.props()
+            .get("text")
+            .and_then(Value::as_str)
+            .is_some_and(|t| t.starts_with(prefix))
+        {
+            return Some(n.id().to_owned());
+        }
+        n.children().find_map(|c| walk(c, prefix))
+    }
+    tsp.surfaces()
+        .iter()
+        .rev()
+        .find_map(|s| walk(s.document().root(), prefix).map(|id| (s.id().to_owned(), id)))
+}
+
+/// A pane drawn by the web client's drawing code at 80x24 cells of 8x16 px (Ahem, so text
+/// measures the same everywhere).
+fn web_draw(s: &mut auk_web::session::Session, d: &mut auk_web::pane::PaneDraw, pane: u64) {
+    let (_, changes) = s.take_changes(pane);
+    let p = &s.panes[&pane];
+    for c in &changes {
+        d.sync(p.replica.tsp(), c, 0.0);
+    }
+    d.layout(&p.replica, (640.0, 384.0), true, 0.0);
+    d.arrange(&p.replica, 16.0, 384.0);
+}
+
+fn new_web_draw() -> auk_web::pane::PaneDraw {
+    const AHEM: &[u8] = include_bytes!("../../../fixtures/fonts/Ahem.ttf");
+    let settings = auk_views::ViewSettings {
+        cell: (8.0, 16.0),
+        ..auk_views::ViewSettings::default()
+    };
+    auk_web::pane::PaneDraw::new(settings, 1.0, Some(std::sync::Arc::new(AHEM.to_vec())))
+}
+
+fn center(rect: [f32; 4]) -> auk_web::pane::Press {
+    auk_web::pane::Press {
+        x: rect[0] + rect[2] / 2.0,
+        y: rect[1] + rect[3] / 2.0,
+        clicks: 1,
+        ..auk_web::pane::Press::default()
+    }
+}
+
+/// Sends what a click asked for through the session.
+fn web_click(
+    s: &mut auk_web::session::Session,
+    d: &mut auk_web::pane::PaneDraw,
+    pane: u64,
+    sf: &str,
+    id: &str,
+) {
+    let p = &s.panes[&pane];
+    let rect = d
+        .node_rect(p.replica.tsp(), sf, id)
+        .unwrap_or_else(|| panic!("{sf}/{id} isn't drawn"));
+    let actions = d
+        .click(pane, &p.replica, center(rect), 384.0)
+        .unwrap_or_else(|| panic!("the click on {sf}/{id} reached no view"));
+    assert!(!actions.is_empty(), "the click on {sf}/{id} did nothing");
+    for a in actions {
+        match a {
+            auk_web::pane::Action::Send(ClientMsg::ViewEvent { pane, sf, event }) => {
+                s.view_event(pane, &sf, event)
+            }
+            other => panic!("expected a view event, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn web_session_gets_manifest_styles_lens_views_blocks_and_effects_through_the_socket() {
+    let env = env("webplugins");
+    web_plugin(&env);
+    let cmd = web_cmd(&env);
+    let pane = daemon_with_pane(&env);
+    let assets = builds().web_client();
+    let server = WebServer::start(&env, &assets, &["--port", "0"]);
+    let mut c = WebSession::connect(&server);
+
+    // The welcome brings the catalog, and with it the Ready plugin's manifest styles.
+    c.until("the welcome", |s| (s.client_id.is_some()).then_some(()));
+    assert_eq!(
+        c.s.styles,
+        vec![("webdemo".to_owned(), WEB_CSS.to_owned())],
+        "{}",
+        c.s.catalog
+    );
+    c.until("the pane's snapshot", |s| {
+        s.panes.contains_key(&pane).then_some(())
+    });
+    c.s.focus(pane);
+
+    // A program's surface: the client draws it in the flow.
+    env.run(pane, &web_surface_program(&env));
+    let mut d = new_web_draw();
+    c.until("the surface", |s| {
+        node_with_text(s.panes[&pane].replica.tsp(), "web-surface").filter(|(sf, _)| sf == "w1")
+    });
+    web_draw(&mut c.s, &mut d, pane);
+    assert!(
+        d.surface_node_rect(c.s.panes[&pane].replica.tsp(), "w1", "t")
+            .is_some(),
+        "{d:?}"
+    );
+
+    // A lensed command: the block, then its view out of band.
+    env.run(pane, &cmd);
+    let view = c.until("the lens view", |s| {
+        let b = s.panes[&pane].replica.lens_blocks().first()?.clone();
+        b.view
+            .filter(|v| v.to_string().contains("lens-view 3 lines"))
+    });
+    assert!(view.to_string().contains("copy-it"), "{view}");
+
+    // The client draws the block with its view and the manifest style, and a click on the
+    // view's node is a view event the lens answers with effects.
+    d.set_styles(c.s.styles_serial, &c.s.styles);
+    web_draw(&mut c.s, &mut d, pane);
+    assert_eq!(d.style_ids(), ["webdemo"]);
+    assert_eq!(d.lens_placed.len(), 1, "{d:?}");
+    assert!(
+        d.lens_node_rect(0, "go").is_some(),
+        "the lens view is drawn"
+    );
+    web_click(&mut c.s, &mut d, pane, "lens:0", "go");
+    let effects = c.until("the lens's effects", |s| {
+        let e = s.take_effects();
+        (!e.is_empty()).then_some(e)
+    });
+    let mut effects = effects;
+    if effects.len() < 2 {
+        effects.extend(c.until("the toast", |s| {
+            let e = s.take_effects();
+            (!e.is_empty()).then_some(e)
+        }));
+    }
+    assert_eq!(
+        effects,
+        vec![
+            auk_mirror::Effect::Copy {
+                text: "copied-from-lens".into()
+            },
+            auk_mirror::Effect::Toast {
+                level: "success".into(),
+                text: "Copied from the lens".into(),
+                sub: Some("webdemo".into()),
+            },
+        ]
+    );
+
+    // A plugin block opens in the attached window key: a pane with a screen surface the client
+    // draws, whose clicks reach the block.
+    let block = env.daemon("block webdemo.panel --window main")["pane"]
+        .as_u64()
+        .expect("a block pane");
+    let (sf, id) = c.until("the block's view", |s| {
+        node_with_text(s.panes.get(&block)?.replica.tsp(), "block-panel 0")
+    });
+    let tabs = c.s.tab_bar(Some(block));
+    assert_eq!(tabs.len(), 2, "{tabs:?}");
+    assert!(tabs[1].active && tabs[1].pane == Some(block), "{tabs:?}");
+    c.s.focus(block);
+    let mut bd = new_web_draw();
+    web_draw(&mut c.s, &mut bd, block);
+    let placed = bd.surfaces_placed(c.s.panes[&block].replica.tsp());
+    assert_eq!(
+        placed.first().map(|p| p.0.as_str()),
+        Some(sf.as_str()),
+        "{placed:?}"
+    );
+    web_click(&mut c.s, &mut bd, block, &sf, &id);
+    c.until("the block to re-render", |s| {
+        node_with_text(s.panes.get(&block)?.replica.tsp(), "block-panel 1")
+    });
+    let toast = c.until("the block's toast", |s| {
+        s.take_effects()
+            .into_iter()
+            .find(|e| matches!(e, auk_mirror::Effect::Toast { .. }))
+    });
+    assert_eq!(
+        toast,
+        auk_mirror::Effect::Toast {
+            level: "info".into(),
+            text: "bumped 1".into(),
+            sub: None
+        }
+    );
 }

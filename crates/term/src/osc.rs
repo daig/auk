@@ -103,6 +103,9 @@ impl Core {
             b"112" => self.overrides.retain(|&(i, _)| i != 258),
             b"133" if params.len() >= 2 => {
                 if let Some(mark) = parse_mark(&params[1..]) {
+                    if mark == Mark::PromptStart && !self.alt_active {
+                        self.scr().cursor_row_mut().prompt = true;
+                    }
                     self.events.push_back(Event::Mark(mark));
                 }
             }
@@ -208,13 +211,15 @@ impl Core {
                     self.mark_anchor(AnchorKey(key));
                 }
             }
-            // The cursor row's flags: bit 0 wrapped, bit 1 a leading spacer in the last column.
+            // The cursor row's flags: bit 0 wrapped, bit 1 a leading spacer in the last column,
+            // bit 2 a prompt started there.
             b"row" => {
                 let bits = number(params.get(1)).unwrap_or(0);
                 let cols = self.cols;
                 let row = self.scr().cursor_row_mut();
                 row.touch_all();
                 row.wrapped = bits & 1 != 0;
+                row.prompt = bits & 4 != 0;
                 if bits & 2 != 0 {
                     row.cells[cols - 1].flags.0 |= Flags::LEADING_SPACER;
                 }

@@ -31,6 +31,19 @@ struct Top {
     /// App: which Option keys act as Alt (also $AUK_OPTION_AS_ALT).
     #[arg(long, value_parser = ["none", "left", "right", "both"])]
     option_as_alt: Option<String>,
+
+    /// App: attach the windows to this host's daemon over SSH (`ssh HOST auk attach --stdio`,
+    /// §10.2); window halves still run here.
+    #[arg(long)]
+    host: Option<String>,
+
+    /// App, with --host: the SSH config file (`ssh -F`).
+    #[arg(long, requires = "host")]
+    ssh_config: Option<PathBuf>,
+
+    /// App, with --host: the command the remote shell runs (default: `auk attach --stdio`).
+    #[arg(long, requires = "host")]
+    remote_command: Option<String>,
 }
 
 fn main() -> std::process::ExitCode {
@@ -62,6 +75,11 @@ fn main() -> std::process::ExitCode {
         control: top.control.or_else(|| env("AUK_APP_CONTROL").map(PathBuf::from)),
         window_keys: top.window_keys,
         option_as_alt,
+        remote: top.host.map(|destination| auk_app::RemoteHost {
+            destination,
+            ssh_config: top.ssh_config,
+            remote_command: top.remote_command,
+        }),
     };
     auk_app::run(opts)
 }

@@ -185,6 +185,76 @@ pub struct Document {
     changes: DocChanges,
     reveal: Option<Reveal>,
     scrolls: Vec<Scroll>,
+    /// `(node id, message)` for `el` nodes whose new version has an unknown tag (§7.7).
+    tag_errors: Vec<(String, String)>,
+}
+
+/// The 42 tags `el` builds (§8.2, research/elements.md §2.9).
+pub const EL_TAGS: [&str; 42] = [
+    "div",
+    "span",
+    "p",
+    "section",
+    "header",
+    "footer",
+    "nav",
+    "aside",
+    "main",
+    "article",
+    "figure",
+    "blockquote",
+    "ul",
+    "ol",
+    "li",
+    "dl",
+    "dt",
+    "dd",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "pre",
+    "code",
+    "kbd",
+    "strong",
+    "b",
+    "em",
+    "i",
+    "del",
+    "mark",
+    "hr",
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "th",
+    "td",
+    "label",
+    "button",
+    "form",
+    "input",
+];
+
+/// The `error` message for an `el` node's tag, when it isn't one `el` builds: a tag outside the
+/// list, or an `input` that isn't a checkbox or radio (book:8622, "Unknown tags"). `None` for
+/// other kinds and known tags.
+pub fn el_tag_error(kind: &str, props: &Map<String, Value>) -> Option<String> {
+    if kind != "el" {
+        return None;
+    }
+    let tag = props
+        .get("tag")
+        .and_then(Value::as_str)
+        .unwrap_or("div")
+        .to_ascii_lowercase();
+    if tag == "input" {
+        return match props.get("type").and_then(Value::as_str) {
+            Some("checkbox" | "radio") => None,
+            Some(other) => Some(format!("unknown el tag input type {other}")),
+            None => Some("unknown el tag input".to_owned()),
+        };
+    }
+    (!EL_TAGS.contains(&tag.as_str())).then(|| format!("unknown el tag {tag}"))
 }
 
 impl Document {
@@ -198,6 +268,7 @@ impl Document {
             count: 0,
             cost: 0,
             focus: None,
+            tag_errors: Vec::new(),
             changes: DocChanges::default(),
             reveal: None,
             scrolls: Vec::new(),
@@ -448,9 +519,27 @@ impl Document {
             Some(pos) => siblings.insert(pos, top),
             None => siblings.push(top),
         }
+        for &slot in &slots {
+            self.check_tag(slot);
+        }
         self.changes.children.insert(parent.to_owned());
         self.unsettle(parent_slot);
         Ok(())
+    }
+
+    /// Notes an `el` node version with an unknown tag, for the program's `error` event.
+    fn check_tag(&mut self, slot: usize) {
+        let node = self.node(slot);
+        if let Some(msg) = el_tag_error(&node.kind, &node.props) {
+            let id = node.id.clone();
+            self.tag_errors.push((id, msg));
+        }
+    }
+
+    /// `(node id, message)` for each `el` node version since the last call whose tag `el`
+    /// doesn't build: once per add or change of the node (§7.7).
+    pub fn take_tag_errors(&mut self) -> Vec<(String, String)> {
+        std::mem::take(&mut self.tag_errors)
     }
 
     /// Validates `node` and its subtree, appending `(parent index, node)` in pre-order. Returns
@@ -576,6 +665,7 @@ impl Document {
 
     /// Records a change to a node's props and clears settle hints above it.
     fn touched(&mut self, slot: usize) {
+        self.check_tag(slot);
         self.recost(slot);
         self.changes.nodes.insert(self.node(slot).id.clone());
         self.unsettle(slot);

@@ -63,6 +63,17 @@ pub struct Toast {
     pub until: Instant,
 }
 
+/// A block open that failed: what Retry opens again, and why it failed.
+#[derive(Clone, Debug)]
+pub struct BlockCard {
+    pub kind: String,
+    pub args: Vec<String>,
+    pub how: How,
+    pub reveal: Reveal,
+    pub cwd: Option<String>,
+    pub error: String,
+}
+
 /// A `cx.session:settle` waiting for its command.
 struct Settle {
     pane: PaneId,
@@ -157,6 +168,14 @@ pub struct PluginState {
     pub routed: Vec<Value>,
     /// The plugin keymap layer: chords and actions.
     pub keymap: Vec<(Chord, String)>,
+    /// The preset layer (`keymap`, `keymap_prefix`), below the plugins' (§9.8).
+    pub preset: Vec<(Chord, String)>,
+    /// The user's `keybinds`, above everything: a chord and its actions in priority order.
+    pub user: Vec<(Chord, Vec<String>)>,
+    /// The plugin sheets installed, in cascade order.
+    pub sheets: Vec<(String, String)>,
+    /// A block that could not start, for the card's Retry (§9.5).
+    pub block_card: Option<BlockCard>,
     /// Chords left out because a default binds them.
     pub dropped_binds: Vec<String>,
     prefix: Vec<Step>,
@@ -263,7 +282,13 @@ pub fn system_open(target: &str) {
 
 /// One request to the daemon's control endpoint.
 fn control(words: &[String]) -> Result<Value, String> {
-    let socket = crate::app::with(|a| a.opts.socket.clone()).ok_or("no app")?;
+    let (socket, remote) =
+        crate::app::with(|a| (a.opts.socket.clone(), a.opts.remote.is_some())).ok_or("no app")?;
+    // A remote host's daemon has no control endpoint here (§10.2); its panes are reached
+    // through the window's link.
+    if remote {
+        return Err("the remote host's daemon takes no control requests from this machine".into());
+    }
     let path = auk_daemon::paths::control_socket(&socket);
     let mut stream = UnixStream::connect(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
@@ -326,6 +351,24 @@ fn key_steps(key: &KeyInput) -> Vec<Step> {
             .then(|| chord::Key::Physical(format!("numpad_{c}"))),
     };
     let mut out: Vec<Step> = k.into_iter().map(|k| Step { mods, key: Some(k) }).collect();
+    // A shifted symbol is its character as the layout types it (`%`, not `shift+5`).
+    let typed = key.event.text.as_deref().and_then(|t| {
+        let mut cs = t.chars();
+        cs.next().filter(|_| cs.next().is_none())
+    });
+    if let Some(c) = typed
+        && mods.shift
+        && !c.is_ascii_alphabetic()
+        && !c.is_whitespace()
+    {
+        out.push(Step {
+            mods: chord::Mods {
+                shift: false,
+                ..mods
+            },
+            key: Some(chord::Key::Char(c)),
+        });
+    }
     if let Some(p) = physical(key.keycode) {
         out.push(Step {
             mods,
@@ -418,13 +461,32 @@ impl WinState {
     }
 
     /// The keymap layer, sheets and formatter caches after a load or reload.
-    fn plugins_rebuilt(&mut self) {
+    pub(super) fn plugins_rebuilt(&mut self) {
+        // The preset and user layers (§9.8), from the settings; plugins fill the layer between.
+        let preset = self.settings.preset();
+        let user: Vec<(Chord, Vec<String>)> = self
+            .settings
+            .keybinds
+            .iter()
+            .map(|b| (b.chord.clone(), b.actions.clone()))
+            .collect();
+        let taken = |c: &Chord| user.iter().any(|(u, _)| u == c);
+        self.plugins.preset = preset.into_iter().filter(|(c, _)| !taken(c)).collect();
+        // `unbind` removes the keys without binding them again.
+        self.plugins.user = user
+            .iter()
+            .filter(|(_, a)| !a.is_empty())
+            .cloned()
+            .collect();
+        self.plugins.prefix.clear();
+        self.refresh_sheets();
         let Some(rt) = self.plugins.rt.as_ref() else {
             return;
         };
         let defaults: Vec<Chord> = commands::default_chords()
             .iter()
             .filter_map(|c| Chord::parse(c).ok())
+            .chain(self.plugins.preset.iter().map(|(c, _)| c.clone()))
             .collect();
         let mut keymap: Vec<(Chord, String)> = Vec::new();
         let mut dropped = Vec::new();
@@ -440,15 +502,39 @@ impl WinState {
                 dropped.push(bind.chord.clone());
                 continue;
             }
+            // A user keybind replaces every binding of its keys.
+            if taken(&chord) {
+                continue;
+            }
             keymap.push((chord, bind.action.clone()));
         }
-        let sheets = rt.sheets();
         self.plugins.keymap = keymap;
         self.plugins.dropped_binds = dropped;
-        self.plugins.prefix.clear();
+        if let Some(w) = &self.window {
+            w.request_frame();
+        }
+    }
+
+    /// The plugin sheets (§8.4 cascade step 3, §9.8 "CSS"): the host's catalog styles (only
+    /// Ready plugins contribute), local manifest styles too in a remote window, then `tern.css`
+    /// sheets. They install into the chrome and every pane's documents.
+    pub(super) fn refresh_sheets(&mut self) {
+        let host = self.conn.host_name();
+        let mut sheets: Vec<(String, String)> = self
+            .plugins
+            .catalog
+            .styles()
+            .map(|(id, css)| (format!("plugin:{host}:{id}:styles"), css.to_owned()))
+            .collect();
+        let local = self.plugins.rt.as_ref().map(WindowPlugins::sheets).unwrap_or_default();
+        if host != "local" {
+            sheets.extend(local.iter().filter(|(n, _)| n.ends_with(":styles")).cloned());
+        }
+        sheets.extend(local.into_iter().filter(|(n, _)| !n.ends_with(":styles")));
         if self.chrome.set_plugin_sheets(&sheets) {
             self.ui_dirty = true;
         }
+        self.plugins.sheets = sheets;
         if let Some(w) = &self.window {
             w.request_frame();
         }
@@ -467,7 +553,7 @@ impl WinState {
     }
 
     /// The host's catalog, when a new one arrived.
-    fn plugins_catalog(&mut self) {
+    pub(super) fn plugins_catalog(&mut self) {
         let (generation, catalog) = {
             let shared = self.conn.shared();
             (shared.catalog_generation, shared.catalog.clone())
@@ -481,6 +567,7 @@ impl WinState {
         if let Some(rt) = self.plugins.rt.as_mut() {
             rt.set_catalog(catalog);
         }
+        self.refresh_sheets();
     }
 
     /// Lends the runtime to `f` with this window as its host; queued plugin actions run after.
@@ -566,7 +653,10 @@ impl WinState {
     /// A key press against the plugin keymap. Returns whether the keymap took it.
     pub(super) fn plugin_key(&mut self, key: &KeyInput) -> bool {
         self.plugins.tap = None;
-        if self.plugins.keymap.is_empty() {
+        if self.plugins.keymap.is_empty()
+            && self.plugins.preset.is_empty()
+            && self.plugins.user.is_empty()
+        {
             return false;
         }
         self.chord_step(key_steps(key))
@@ -578,18 +668,41 @@ impl WinState {
         for step in &candidates {
             let mut seq = prefix.clone();
             seq.push(step.clone());
-            if let Some((_, action)) = self.plugins.keymap.iter().find(|(c, _)| c.steps == seq) {
-                let action = action.clone();
+            // The user layer, then plugins, then the preset (§9.8 keymap layers).
+            let found: Option<Vec<String>> = self
+                .plugins
+                .user
+                .iter()
+                .find(|(c, _)| c.steps == seq)
+                .map(|(_, a)| a.clone())
+                .or_else(|| {
+                    self.plugins
+                        .keymap
+                        .iter()
+                        .chain(&self.plugins.preset)
+                        .find(|(c, _)| c.steps == seq)
+                        .map(|(_, a)| vec![a.clone()])
+                });
+            if let Some(actions) = found {
                 self.plugins.prefix.clear();
-                self.run_plugin_action(&action);
+                // A list runs the first action that applies.
+                for action in &actions {
+                    match self.run_keymap_action(action) {
+                        Ok(()) => break,
+                        Err(e) => eprintln!("auk: action {action}: {e}"),
+                    }
+                }
                 return true;
             }
+            let longer = |c: &Chord| c.steps.len() > seq.len() && c.steps[..seq.len()] == seq[..];
             if partial.is_none()
-                && self
-                    .plugins
-                    .keymap
-                    .iter()
-                    .any(|(c, _)| c.steps.len() > seq.len() && c.steps[..seq.len()] == seq[..])
+                && (self.plugins.user.iter().any(|(c, _)| longer(c))
+                    || self
+                        .plugins
+                        .keymap
+                        .iter()
+                        .chain(&self.plugins.preset)
+                        .any(|(c, _)| longer(c)))
             {
                 partial = Some(seq);
             }
@@ -858,8 +971,43 @@ impl WinState {
         reveal: Reveal,
         cwd: Option<String>,
     ) -> Option<u64> {
+        match self.try_open_block(kind, args, how, reveal, cwd.clone()) {
+            Ok(pane) => {
+                self.plugins.block_card = None;
+                Some(pane)
+            }
+            Err(error) => {
+                // "Could not start the block", with Retry (§9.5).
+                eprintln!("auk: block {kind}: {error}");
+                self.plugins.block_card = Some(BlockCard {
+                    kind: kind.to_owned(),
+                    args: args.to_vec(),
+                    how,
+                    reveal,
+                    cwd,
+                    error,
+                });
+                self.ui_dirty = true;
+                if let Some(w) = &self.window {
+                    w.request_frame();
+                }
+                None
+            }
+        }
+    }
+
+    fn try_open_block(
+        &mut self,
+        kind: &str,
+        args: &[String],
+        how: How,
+        reveal: Reveal,
+        cwd: Option<String>,
+    ) -> Result<u64, String> {
         self.plugins_catalog();
-        self.plugins.catalog.block_type(kind)?;
+        if self.plugins.catalog.block_type(kind).is_none() {
+            return Err(format!("No plugin offers the block type {kind}"));
+        }
         let mut words = vec!["block".to_owned(), kind.to_owned()];
         let focused = self.focused_pane();
         match (how, focused) {
@@ -879,19 +1027,14 @@ impl WinState {
             words.push("--".into());
             words.extend(args.iter().cloned());
         }
-        match control(&words) {
-            Ok(v) => {
-                let pane = v["pane"].as_u64()?;
-                if reveal.focus {
-                    self.plugins.focus_when_shown = Some(pane);
-                }
-                Some(pane)
-            }
-            Err(err) => {
-                eprintln!("auk: block {kind}: {err}");
-                None
-            }
+        let v = control(&words)?;
+        let pane = v["pane"]
+            .as_u64()
+            .ok_or_else(|| format!("the daemon answered without a pane: {v}"))?;
+        if reveal.focus {
+            self.plugins.focus_when_shown = Some(pane);
         }
+        Ok(pane)
     }
 
     // -----------------------------------------------------------------------------------------

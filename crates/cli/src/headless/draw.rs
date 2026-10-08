@@ -561,6 +561,22 @@ impl Drawer {
         Ok(json!(out))
     }
 
+    /// The pane document's sheets in cascade order (`css` with no selector, §7.15): program
+    /// sheets show as `tsp:<scope>:<name>`.
+    pub fn sheets(&self, pane: PaneId) -> Result<Value, String> {
+        let pd = self
+            .docs
+            .get(&pane)
+            .ok_or_else(|| format!("pane {pane} hasn't been drawn"))?;
+        let sheets: Vec<Value> = pd
+            .doc()
+            .sheets()
+            .into_iter()
+            .map(|(name, rules)| json!({"name": name, "rules": rules}))
+            .collect();
+        Ok(json!({"sheets": sheets}))
+    }
+
     /// Computed style values of the first element matching `selector` (`css`).
     pub fn css(&self, pane: PaneId, selector: &str, props: &[String]) -> Result<Value, String> {
         let pd = self

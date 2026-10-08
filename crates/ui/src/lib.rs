@@ -4,6 +4,7 @@
 //! absolutely positioned boxes, virtualized lists and scroll anchoring, replaced boxes (images),
 //! and painting into a Vello scene.
 
+mod anim;
 pub mod css;
 mod document;
 pub mod dom;

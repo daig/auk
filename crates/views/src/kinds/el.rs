@@ -9,51 +9,8 @@ use auk_tsp::NodeRef;
 use auk_ui::ElementState;
 use serde_json::Value;
 
-/// The 42 tags `el` builds.
-pub const TAGS: [&str; 42] = [
-    "div",
-    "span",
-    "p",
-    "section",
-    "header",
-    "footer",
-    "nav",
-    "aside",
-    "main",
-    "article",
-    "figure",
-    "blockquote",
-    "ul",
-    "ol",
-    "li",
-    "dl",
-    "dt",
-    "dd",
-    "h1",
-    "h2",
-    "h3",
-    "h4",
-    "pre",
-    "code",
-    "kbd",
-    "strong",
-    "b",
-    "em",
-    "i",
-    "del",
-    "mark",
-    "hr",
-    "table",
-    "thead",
-    "tbody",
-    "tr",
-    "th",
-    "td",
-    "label",
-    "button",
-    "form",
-    "input",
-];
+/// The 42 tags `el` builds; the replica owns the list and reports unknown tags (§7.7).
+pub use auk_tsp::EL_TAGS as TAGS;
 
 /// Attributes the terminal owns; `attrs` can't set them.
 const OWNED: [&str; 8] = [
@@ -81,7 +38,9 @@ pub(crate) fn control_type(node: NodeRef) -> Option<&'static str> {
     }
     match str_prop(node.props(), "type") {
         Some("radio") => Some("radio"),
-        _ => Some("checkbox"),
+        Some("checkbox") => Some("checkbox"),
+        // Any other type, or none, draws as an empty `div` (book:8622).
+        _ => None,
     }
 }
 
@@ -90,7 +49,8 @@ pub(crate) fn tag(node: NodeRef) -> &'static str {
     let t = requested(node);
     match t.as_str() {
         "form" => "div",
-        "input" => "span",
+        "input" if control_type(node).is_some() => "span",
+        "input" => "div",
         other => TAGS.iter().find(|x| **x == other).copied().unwrap_or("div"),
     }
 }
@@ -126,12 +86,6 @@ pub(crate) fn el(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
     begin(cx, m);
     let p = node.props();
     let req = requested(node);
-    let known = TAGS.contains(&req.as_str());
-    if !known {
-        cx.st
-            .reports
-            .push((node.id().to_owned(), format!("unknown el tag {req}")));
-    }
     let control = control_type(node);
     m.direct = !matches!(req.as_str(), "input" | "hr");
     if req == "form" {

@@ -158,6 +158,28 @@ pub(crate) fn dump(mtm: MainThreadMarker) -> Vec<(String, Vec<String>)> {
     out
 }
 
+/// The key equivalent of the item at `path` (a top-level menu's title, then the item's), with
+/// its modifier mask; `None` when there is no such item.
+pub(crate) fn key_equivalent(mtm: MainThreadMarker, path: &[&str]) -> Option<(String, usize)> {
+    let mut menu = NSApplication::sharedApplication(mtm).mainMenu()?;
+    let (last, parents) = path.split_last()?;
+    for title in parents {
+        let sub = menu.itemArray().iter().find_map(|item| {
+            let sub = item.submenu()?;
+            (sub.title().to_string() == *title).then_some(sub)
+        })?;
+        menu = sub;
+    }
+    let item = menu
+        .itemArray()
+        .iter()
+        .find(|i| i.title().to_string() == *last)?;
+    Some((
+        item.keyEquivalent().to_string(),
+        item.keyEquivalentModifierMask().0,
+    ))
+}
+
 /// Invokes the item at `path` (a top-level menu's title, then item titles) the way a click
 /// does: `-[NSMenu performActionForItemAtIndex:]`, which validates the item and sends its action
 /// down the responder chain. Returns false when no enabled item has that path.

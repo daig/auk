@@ -43,7 +43,7 @@ mod window;
 #[cfg(target_os = "macos")]
 pub use accessibility::{AccessibilityHandler, AxNode};
 #[cfg(target_os = "macos")]
-pub use app::{AppContext, run, run_on_main};
+pub use app::{AppContext, run, run_on_main, system_reduce_motion};
 #[cfg(target_os = "macos")]
 pub use clipboard::Clipboard;
 #[cfg(target_os = "macos")]

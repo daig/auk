@@ -11,7 +11,7 @@
 //! | `key KEY…`, `type TEXT…`, `paste TEXT…` | input to the focused pane |
 //! | `shot NAME` | writes `NAME.png` and `NAME.json` (the layout) to the output dir |
 //! | `tree [PANE] [SELECTOR]` | the focused (or given) pane's surface boxes |
-//! | `css SELECTOR [PROP…]` | computed values of the first matching element |
+//! | `css [PANE] [SELECTOR [PROP…]]` | the installed sheets in cascade order (program sheets as `tsp:<scope>:<name>`), or the computed values of the first matching element |
 //! | `state`, `dump`, `perf` | the window's state; plus every pane's text; shot timings |
 //! | `ready` | a first session if there is none, at its prompt |
 //! | `run TEXT…` | types a command line and Enter; waits for the next prompt |
@@ -511,7 +511,12 @@ impl Headless {
 
     fn cmd_css(&self, args: &[String]) -> Result<Value, String> {
         let (pane, rest) = self.pane_arg(args)?;
-        let (sel, props) = rest.split_first().ok_or("css: expected a selector")?;
+        let Some((sel, props)) = rest.split_first() else {
+            // No selector: the installed sheets, in cascade order.
+            self.settle()?;
+            self.draw_now()?;
+            return self.with_drawer(move |_, d| d.sheets(pane));
+        };
         let props: Vec<String> = if props.is_empty() {
             [
                 "display",

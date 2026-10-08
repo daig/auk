@@ -99,6 +99,7 @@ pub(crate) fn tool(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
     let running = matches!(status, "running" | "pending");
     let collapsible = bool_prop(p, "collapsible");
     let collapsed = collapsible && cx.st.fold(node, false);
+    look.class_if(cx.st.unfolding(node, collapsed), "sf-unfold");
     let inline = str_prop(p, "frame") == Some("inline");
     let tk = str_prop(p, "targetKind").unwrap_or("text");
     look.class("card");
@@ -345,6 +346,7 @@ pub(crate) fn agent(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
     look.class(&format!("st-{status}"));
     look.class_if(collapsible, "collapsible");
     look.class_if(collapsed, "collapsed");
+    look.class_if(cx.st.unfolding(node, collapsed), "sf-unfold");
     let depth = num_prop(p, "depth").unwrap_or(0.0).clamp(0.0, 6.0);
     look.style(&format!("--sf-depth: {};", depth as u32));
     let row = part(cx, m, "div", "sf-agent-row");
@@ -536,6 +538,10 @@ pub(crate) fn checklist(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Lo
     let mode = str_prop(p, "mode").unwrap_or("full");
     look.class(mode);
     look.attr("role", "group");
+    // The `toggle` action folds the whole list to its phase heads (§7.8); `collapsed` sets it.
+    let collapsed = cx.st.fold(node, false);
+    look.class_if(collapsed, "collapsed");
+    look.class_if(cx.st.unfolding(node, collapsed), "sf-unfold");
     let phases: Vec<serde_json::Map<String, Value>> = p
         .get("phases")
         .and_then(Value::as_array)
@@ -640,7 +646,8 @@ pub(crate) fn checklist(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Lo
                 .filter(|i| i.2 == "done" || i.2 == "dropped")
                 .count();
             let key = format!("{id}\u{1f}phase\u{1f}{pid}");
-            let folded = SurfaceState::flip(&mut cx.st.folds, &key, ph.get("collapsed"), false);
+            let folded = SurfaceState::flip(&mut cx.st.folds, &key, ph.get("collapsed"), false)
+                || collapsed;
             let mut class = String::from("sf-ck-phase");
             if pdone == items.len() && !items.is_empty() {
                 class.push_str(" done");

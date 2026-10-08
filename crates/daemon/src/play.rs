@@ -10,9 +10,10 @@
 //! - The first play in a pane restarts it as a stand-in program ([`stand_in`]): a raw-mode reader
 //!   that swallows whatever the terminal answers, so the answers pass the mode gate and never
 //!   reach a shell.
-//! - `from N` plays everything before the N-th frame at once and paces from there; `until N`
-//!   stops after the N-th frame (frames count `f` messages from 1). `paced` keeps the recorded
-//!   gaps, divided by `TIMES` (default 1); without it the messages go in one after another.
+//! - A frame is named by its `s` (`3`) or by surface and `s` (`chat#3`), as in Tern (book:11581,
+//!   16730). `from F` starts after frame F, so a second play continues the first; it needs an
+//!   earlier play in the pane. `until F` stops after frame F. `paced` keeps the recorded gaps,
+//!   divided by `TIMES` (default 1); without it the messages go in one after another.
 
 use std::io;
 use std::path::Path;
@@ -27,11 +28,46 @@ use crate::server::{Daemon, lock};
 /// The longest pause `paced` keeps between two messages.
 const MAX_GAP: Duration = Duration::from_secs(2);
 
+/// A frame of a recording: its `s`, and optionally its surface (`chat#3`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct FrameRef {
+    pub sf: Option<String>,
+    pub s: u64,
+}
+
+impl FrameRef {
+    fn parse(word: &str) -> Option<FrameRef> {
+        let (sf, s) = match word.rsplit_once('#') {
+            Some((sf, s)) if !sf.is_empty() => (Some(sf.to_owned()), s),
+            Some(_) => return None,
+            None => (None, word),
+        };
+        Some(FrameRef {
+            sf,
+            s: s.parse().ok()?,
+        })
+    }
+
+    /// Whether a frame `(sf, s)` is this one.
+    fn names(&self, frame: &(String, u64)) -> bool {
+        self.s == frame.1 && self.sf.as_ref().is_none_or(|sf| *sf == frame.0)
+    }
+}
+
+impl std::fmt::Display for FrameRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.sf {
+            Some(sf) => write!(f, "{sf}#{}", self.s),
+            None => write!(f, "{}", self.s),
+        }
+    }
+}
+
 /// How a recording plays.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlayOptions {
-    pub from: Option<u64>,
-    pub until: Option<u64>,
+    pub from: Option<FrameRef>,
+    pub until: Option<FrameRef>,
     /// `paced`, with its speed-up.
     pub paced: Option<f64>,
 }
@@ -46,11 +82,10 @@ impl PlayOptions {
         };
         let mut it = words.iter().peekable();
         while let Some(word) = it.next() {
-            let mut number = |what: &str| -> Result<u64, String> {
-                it.next()
-                    .and_then(|n| n.parse().ok())
-                    .filter(|n| *n > 0)
-                    .ok_or_else(|| format!("surface-play: `{what}` needs a frame number"))
+            let mut number = |what: &str| -> Result<FrameRef, String> {
+                it.next().and_then(|w| FrameRef::parse(w)).ok_or_else(|| {
+                    format!("surface-play: `{what}` needs a frame: `s` or `<sf>#<s>`")
+                })
             };
             match word.as_str() {
                 "from" => opts.from = Some(number("from")?),
@@ -77,7 +112,8 @@ impl PlayOptions {
 pub struct Step {
     pub t: Option<f64>,
     pub bytes: Vec<u8>,
-    pub frame: bool,
+    /// For an `f`: its surface and `s`.
+    pub frame: Option<(String, u64)>,
 }
 
 /// Reads a recording into the bytes its program side would write, in order.
@@ -141,11 +177,12 @@ pub fn load(path: &Path, apc: usize) -> Result<Vec<Step>, String> {
             "pty" => bytes.extend_from_slice(body.as_str().unwrap_or_default().as_bytes()),
             _ => continue,
         }
-        steps.push(Step {
-            t,
-            bytes,
-            frame: verb == "f",
+        let frame = (verb == "f").then(|| {
+            let sf = body.get("sf").and_then(Value::as_str).unwrap_or_default();
+            let s = body.get("s").and_then(Value::as_u64).unwrap_or_default();
+            (sf.to_owned(), s)
         });
+        steps.push(Step { t, bytes, frame });
     }
     Ok(steps)
 }
@@ -184,18 +221,33 @@ impl Daemon {
             let p = lock(&pane);
             (p.id, p.stand_in)
         };
+        // `from` continues an earlier play: it starts after the named frame.
+        let start = match &opts.from {
+            None => 0,
+            Some(_) if !stand_in => {
+                return Err(format!(
+                    "surface-play: `from` continues an earlier play, and pane {id} has none"
+                ));
+            }
+            Some(from) => {
+                steps
+                    .iter()
+                    .position(|st| st.frame.as_ref().is_some_and(|f| from.names(f)))
+                    .ok_or_else(|| format!("surface-play: the recording has no frame {from}"))?
+                    + 1
+            }
+        };
         if !stand_in {
             self.restart_as_stand_in(&pane, id).await?;
         }
         let mut frames = 0u64;
         let mut played = 0u64;
         let mut last_t: Option<f64> = None;
-        for step in steps {
-            if step.frame {
+        for step in steps.into_iter().skip(start) {
+            if step.frame.is_some() {
                 frames += 1;
             }
-            let pacing = opts.paced.filter(|_| opts.from.is_none_or(|f| frames >= f));
-            if let (Some(times), Some(t), Some(last)) = (pacing, step.t, last_t) {
+            if let (Some(times), Some(t), Some(last)) = (opts.paced, step.t, last_t) {
                 let gap = Duration::from_secs_f64(((t - last) / times).max(0.0) / 1000.0);
                 tokio::time::sleep(gap.min(MAX_GAP)).await;
             }
@@ -208,7 +260,9 @@ impl Daemon {
                 p.on_output(&step.bytes);
             }
             played += 1;
-            if step.frame && opts.until.is_some_and(|u| frames >= u) {
+            if let (Some(until), Some(frame)) = (&opts.until, &step.frame)
+                && until.names(frame)
+            {
                 break;
             }
         }
@@ -263,13 +317,17 @@ mod tests {
     fn options_parse() {
         let words = |s: &str| s.split_whitespace().map(String::from).collect::<Vec<_>>();
         assert_eq!(
-            PlayOptions::parse(&words("from 3 until 9 paced 4")).unwrap(),
+            PlayOptions::parse(&words("from 3 until chat#9 paced 4")).unwrap(),
             PlayOptions {
-                from: Some(3),
-                until: Some(9),
+                from: Some(FrameRef { sf: None, s: 3 }),
+                until: Some(FrameRef {
+                    sf: Some("chat".into()),
+                    s: 9
+                }),
                 paced: Some(4.0)
             }
         );
+        assert!(PlayOptions::parse(&words("from #3")).is_err());
         assert_eq!(
             PlayOptions::parse(&words("paced")).unwrap().paced,
             Some(1.0)
@@ -304,7 +362,7 @@ mod tests {
             steps[0].bytes,
             b"\x1b_tsp;o;{\"id\":\"s1\",\"mode\":\"flow\"}\x1b\\"
         );
-        assert!(steps[1].frame);
+        assert_eq!(steps[1].frame, Some(("s1".to_owned(), 1)));
         assert!(
             steps[1]
                 .bytes

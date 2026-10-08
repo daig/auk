@@ -225,6 +225,16 @@ pub(crate) struct Seed {
     pub order: Vec<(SurfaceKey, u64)>,
 }
 
+/// Document state held outside the TSP engine that counts against the pane's retention budget
+/// (§7.10): a replica's finished command block, by its anchor row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Outside {
+    pub anchor: AnchorKey,
+    /// The replica's id for it, reported back when it is evicted.
+    pub id: u64,
+    pub cost: u64,
+}
+
 /// The TSP side of one pane.
 #[derive(Debug)]
 pub struct TspPane {
@@ -250,6 +260,10 @@ pub struct TspPane {
     arrived: Vec<String>,
     pane_changed: bool,
     held: Vec<HeldSend>,
+    /// Finished command blocks (§7.10), oldest first: evictable like closed surfaces.
+    outside: Vec<Outside>,
+    /// Command blocks the budget evicted, for the replica to drop.
+    outside_evicted: Vec<u64>,
 }
 
 impl TspPane {
@@ -287,6 +301,8 @@ impl TspPane {
             arrived: Vec::new(),
             pane_changed: false,
             held: Vec::new(),
+            outside: Vec::new(),
+            outside_evicted: Vec::new(),
         }
     }
 
@@ -401,9 +417,24 @@ impl TspPane {
             .collect()
     }
 
-    /// The pane's retention estimate in bytes.
+    /// The pane's retention estimate in bytes: its documents, plus the finished command blocks
+    /// the replica reported ([`set_outside`](Self::set_outside)).
     pub fn retention_cost(&self) -> u64 {
-        self.surfaces.iter().map(Surface::cost).sum()
+        self.surfaces.iter().map(Surface::cost).sum::<u64>()
+            + self.outside.iter().map(|o| o.cost).sum::<u64>()
+    }
+
+    /// The replica's finished command blocks, which share the retention budget (§7.10). Over
+    /// budget, they are evicted whole with the closed surfaces, oldest (highest anchor row)
+    /// first; [`take_outside_evicted`](Self::take_outside_evicted) says which went.
+    pub fn set_outside(&mut self, grid: &mut dyn Grid, outside: Vec<Outside>) {
+        self.outside = outside;
+        self.enforce_budget(grid);
+    }
+
+    /// The command blocks the budget evicted since the last call.
+    pub fn take_outside_evicted(&mut self) -> Vec<u64> {
+        std::mem::take(&mut self.outside_evicted)
     }
 
     /// Takes the messages for the program, in order. The daemon writes them to the PTY subject
@@ -1011,6 +1042,11 @@ impl TspPane {
                     json!({"ev": "error", "sf": sf, "op": n, "msg": msg}),
                 )),
             }
+            // An `el` whose tag isn't built draws as a `div`, and the program hears once per
+            // node version (§7.7, book:8622).
+            for (id, msg) in surface.doc.take_tag_errors() {
+                errors.push(json!({"ev": "error", "sf": sf, "id": id, "msg": msg}));
+            }
         }
         if s.is_some() {
             surface.last_s = s;
@@ -1275,7 +1311,25 @@ impl TspPane {
             return;
         }
         while self.retention_cost() > self.config.retention {
-            if let Some(i) = self.surfaces.iter().position(|s| s.state == State::Closed) {
+            let closed = self.surfaces.iter().position(|s| s.state == State::Closed);
+            // A command block older than the oldest closed surface goes first: rows higher up
+            // are older; a surface without an anchor row counts as oldest.
+            let line = |key: Option<AnchorKey>| key.and_then(|k| grid.anchor_line(k));
+            let block_first = match (closed, self.outside.first()) {
+                (_, None) => false,
+                (None, Some(_)) => true,
+                (Some(i), Some(o)) => match (line(self.surfaces[i].anchor), line(Some(o.anchor))) {
+                    (Some(s), Some(b)) => b < s,
+                    (None, _) => false,
+                    (Some(_), None) => true,
+                },
+            };
+            if block_first {
+                let o = self.outside.remove(0);
+                self.outside_evicted.push(o.id);
+                continue;
+            }
+            if let Some(i) = closed {
                 self.discard(grid, i);
                 continue;
             }

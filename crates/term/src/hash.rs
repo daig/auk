@@ -113,6 +113,10 @@ fn row(h: &mut Hasher, core: &Core, r: &Row) {
             h.u64(key.0);
         }
     }
+    // Only prompt rows add to the hash, so rows without one hash as they always have.
+    if r.prompt {
+        h.u8(2);
+    }
     h.u64(r.cells.len() as u64);
     for c in &r.cells {
         cell(h, core, c);

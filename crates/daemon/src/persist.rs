@@ -455,7 +455,9 @@ impl Daemon {
             let id = saved.record.id;
             let result = match &saved.record.kind {
                 PaneKind::Block { .. } => self.restore_block(&saved.full_record()),
-                PaneKind::Shell | PaneKind::Command { .. } => self.restore_shell(saved),
+                PaneKind::Shell | PaneKind::Command { .. } | PaneKind::Agent { .. } => {
+                    self.restore_shell(saved)
+                }
             };
             match result {
                 Ok(()) => restored.push(id),
@@ -494,9 +496,15 @@ impl Daemon {
         };
         let mut replica = self.replica_from(&record);
         replica.set_facts(default_facts());
+        // A command pane comes back as a shell; an agent pane keeps its kind (and badge), and
+        // resumes through the shell when its program said how (D19).
+        let kind = match &record.kind {
+            PaneKind::Agent { line } => PaneKind::Agent { line: line.clone() },
+            _ => PaneKind::Shell,
+        };
         let pane = Arc::new(Mutex::new(Pane::new(
             id,
-            PaneKind::Shell,
+            kind.clone(),
             cwd.clone(),
             record.window_key.clone(),
             replica,
@@ -518,6 +526,7 @@ impl Daemon {
         {
             let mut st = self.state();
             st.next_pane = st.next_pane.max(id);
+            st.layout.set_kind(id, kind.tag());
             st.panes.insert(id, pane.clone());
         }
         lock(&pane).link_info();

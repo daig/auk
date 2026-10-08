@@ -27,6 +27,7 @@
 mod a11y;
 mod ansi;
 mod checker;
+pub mod chrome;
 mod common;
 pub mod compose;
 mod control;
@@ -39,6 +40,7 @@ mod icon_table;
 pub mod icons;
 pub mod image;
 mod kinds;
+pub mod lenses;
 mod md;
 mod measure;
 pub mod motion;
@@ -56,6 +58,7 @@ pub use events::{Button, FieldKey, MenuEntry, Outcome, PointerEvent, Zoom, ZoomI
 pub use kinds::KINDS;
 pub use sheets::install_sheets;
 pub use state::{Preedit, Selection};
+pub use lenses::{LensInput, LensLayer};
 pub use surfaces::{Arranged, PaneSurfaces, Place, SurfaceBlock};
 pub use view::PaneView;
 

@@ -293,6 +293,76 @@ fn identity_chain_shows_the_ssh_key_hop() {
     assert_eq!(hop["acting"], r.vm.ssh_ok("echo \"$(id -un)@$(uname -n)\""));
 }
 
+#[test]
+fn presence_shows_every_window_of_the_host_with_its_ssh_hop() {
+    let r = env("presence");
+    r.new_pane(&[]);
+    let w1 = r.window("w1");
+    let w2 = r.window("w2");
+    wait_label(&w1, "connected");
+    wait_label(&w2, "connected");
+    // Each window hears who else is attached to the host, with their identity (§10.1).
+    let seen = wait_for("both windows in the presence list", || {
+        let p = w1.request("presence");
+        (p.as_array()?.len() == 2).then_some(p)
+    });
+    let acting = r.vm.ssh_ok("echo \"$(id -un)@$(uname -n)\"");
+    let hostname = Command::new("hostname").output().expect("hostname");
+    let origin = String::from_utf8_lossy(&hostname.stdout).trim().to_owned();
+    for client in seen.as_array().unwrap() {
+        assert_eq!(client["kind"], "headless", "{client}");
+        assert_eq!(client["window_key"], "main", "{client}");
+        let hop = &client["identity"][0];
+        assert_eq!(hop["method"], "ssh-key", "{client}");
+        assert_eq!(hop["acting"], acting, "{client}");
+        assert_eq!(hop["origin"], origin, "{client}");
+    }
+    // The chain each window shows for the host is the same hop.
+    let own = status(&w1)["identity"][0].clone();
+    assert_eq!(seen[0]["identity"][0]["key"], own["key"], "{seen} vs {own}");
+    // A window that goes away leaves the list.
+    r.local.kill9(w2.pid);
+    wait_for("one window left in the presence list", || {
+        (w1.request("presence").as_array()?.len() == 1).then_some(())
+    });
+}
+
+#[test]
+fn the_link_starts_connecting_and_fails_when_the_host_stops_serving_auk() {
+    let r = env("failed");
+    let pane = r.new_pane(&[]);
+    let w = r.window("w");
+    r.window_shows(&w, pane, PROMPT);
+    let st = wait_label(&w, "connected");
+    let history: Vec<&str> = st["history"]
+        .as_array()
+        .expect("history")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(history.first(), Some(&"connecting"), "{history:?}");
+    let ssh = st["ssh_pid"].as_u64().expect("the ssh pid");
+
+    // Drop the link while the host's `auk` is gone: the reconnect finds no bridge to run.
+    r.vm.ssh_ok(&format!("touch {}", r.gate()));
+    signal(ssh, "-KILL");
+    wait_label(&w, "reconnecting(1)");
+    r.vm.ssh_ok(&format!("mv {0} {0}.gone && rm {1}", r.auk, r.gate()));
+    let failed = wait_for("the link to fail", || {
+        let st = status(&w);
+        st["label"]
+            .as_str()
+            .is_some_and(|l| l.starts_with("failed"))
+            .then_some(st)
+    });
+    let label = failed["label"].as_str().unwrap();
+    assert!(label.contains("wasn't found"), "{failed}");
+    // A failed link stays failed: no more attempts, and typing isn't held for a resync.
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    assert_eq!(status(&w)["label"], failed["label"]);
+    assert_eq!(status(&w)["reconnects"], 0);
+}
+
 /// `ssh`'s stdio as one stream, after the bridge's preamble.
 #[derive(Debug)]
 struct Duplex {

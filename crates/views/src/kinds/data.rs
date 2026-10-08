@@ -184,12 +184,22 @@ pub(crate) fn kv(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
         let vd = cx.dom.child(row, "div", "sf-kv-v");
         m.clock |= spans_into(cx, vd, o.get("v"));
     }
+    // Long lists virtualize (§8.3): each item lays out as its own grid row on the shared columns,
+    // in a stack only the visible part of which is laid out.
+    let virt = !inline && items.len() > VIRTUAL_ROWS;
+    look.class_if(virt, "virt");
     if !inline {
+        let cols = format!("calc({widest}*var(--sf-cw)) minmax(0, 1fr)");
         look.style(&format!(
-            "grid-template-columns: calc({widest}*var(--sf-cw)) minmax(0, 1fr);"
+            "grid-template-columns: {cols}; --sf-kv-cols: {cols};"
         ));
     }
+    super::virtualize(cx, node.id(), m.el, virt.then_some(19.0));
 }
+
+/// `kv` items, `table` rows and `tree` items past this many virtualize (§8.3; Tern's `list`
+/// threshold).
+pub(crate) const VIRTUAL_ROWS: usize = 200;
 
 /// Column sizing input for a table (book:5522).
 #[derive(Clone, Debug, PartialEq)]
@@ -248,7 +258,8 @@ pub(crate) fn table(cx: &mut Cx, node: NodeRef, m: &mut Mount, _look: &mut Look)
         .and_then(Value::as_array)
         .map(|a| a.iter().filter_map(|c| c.as_object().cloned()).collect())
         .unwrap_or_default();
-    let grid = part(cx, m, "div", "sf-tbl");
+    let virt = rows.len() > VIRTUAL_ROWS;
+    let grid = part(cx, m, "div", if virt { "sf-tbl virt" } else { "sf-tbl" });
     cx.dom.attr(grid, "role", "table");
     cx.dom
         .attr(grid, "aria-rowcount", &(rows.len() + 1).to_string());
@@ -345,9 +356,15 @@ pub(crate) fn table(cx: &mut Cx, node: NodeRef, m: &mut Mount, _look: &mut Look)
         .iter()
         .map(|c| format!("calc({}*var(--sf-cw) + 14px)", c.natural))
         .collect();
-    cx.dom
-        .set_style(grid, &format!("grid-template-columns: {}", tpl.join(" ")));
+    cx.dom.set_style(grid, &table_columns(&tpl.join(" ")));
+    // Long tables virtualize (§8.3): rows become their own grids on the shared columns.
+    super::virtualize(cx, node.id(), grid, virt.then_some(23.0));
     cx.st.tables.insert(node.id().to_owned(), info);
+}
+
+/// A table grid's column template, also as `--sf-tbl-cols` for the rows of a virtualized table.
+pub(crate) fn table_columns(tpl: &str) -> String {
+    format!("grid-template-columns: {tpl}; --sf-tbl-cols: {tpl}")
 }
 
 /// Fit table columns to `width` px with cell width `cw` (book:5522): hide lowest priority first
@@ -426,6 +443,8 @@ pub(crate) fn tree(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
         .unwrap_or_default();
     let el = m.el;
     let id = node.id().to_owned();
+    // The open groups' virtualization is rebuilt with the items.
+    cx.st.forget_virtual_under(&id);
     let mut made = Vec::new();
     for n in &nodes {
         if let Some(e) = tree_item(cx, &id, el, n, 1) {
@@ -433,6 +452,8 @@ pub(crate) fn tree(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
         }
     }
     m.generated.extend(made);
+    // Many items at a level virtualize (§8.3), the top level here and open groups below.
+    super::virtualize(cx, &id, el, (nodes.len() > VIRTUAL_ROWS).then_some(22.0));
 }
 
 fn tree_item(cx: &mut Cx, tree: &str, parent: NodeId, n: &Value, level: u32) -> Option<NodeId> {
@@ -498,21 +519,25 @@ fn tree_item(cx: &mut Cx, tree: &str, parent: NodeId, n: &Value, level: u32) -> 
     }
     let lbl = cx.dom.child(row, "div", "sf-tree-lbl");
     spans_into(cx, lbl, o.get("label"));
+    let unfold = !leaf && cx.st.unfolding_key(format!("tree:{tree}/{item}"), !open);
     let kd = cx.dom.child(
         el,
         "div",
-        if open {
-            "sf-tree-kids"
-        } else {
-            "sf-tree-kids sf-hidden"
+        match (open, unfold) {
+            (true, true) => "sf-tree-kids sf-unfold",
+            (true, false) => "sf-tree-kids",
+            _ => "sf-tree-kids sf-hidden",
         },
     );
     cx.dom.attr(kd, "role", "group");
     // Closed items mount no descendants (the windowed mode's cheap form).
     if open && let Some(kids) = kids {
-        let wrap = cx.dom.child(kd, "div", "");
+        let wrap = cx.dom.child(kd, "div", "sf-tree-group");
         for k in kids {
             tree_item(cx, tree, wrap, k, level + 1);
+        }
+        if kids.len() > VIRTUAL_ROWS {
+            super::virtualize(cx, &format!("{tree}/{item}"), wrap, Some(22.0));
         }
     }
     Some(el)

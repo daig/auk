@@ -29,8 +29,11 @@ use crate::geometry::{self, Rect, TabLayout};
 use crate::gfx::{FrameClock, FrameCost, Gfx, PaneDraw};
 use crate::select::{Selection, Unit};
 
+mod extras;
+mod find;
 mod overlays;
 mod plugins;
+mod pointer;
 
 pub use plugins::osc7_path;
 
@@ -135,6 +138,18 @@ pub struct WinState {
     viewer_size: (f64, f64),
     /// Bumped whenever the chrome document is rebuilt, for the accessibility tree.
     chrome_updates: u64,
+    /// Find (§6.2): the bar, the matches and the current one.
+    pub find: Option<find::Find>,
+    /// The target of the link under the pointer, shown while hovering (§7.14, §12.2).
+    pub hover_link: Option<String>,
+    /// A drag selecting in a program field: the pane and the offset it started at (§7.9).
+    field_drag: Option<(PaneId, u64)>,
+    /// Where the input method's window was last told the cursor is, in window points.
+    pub ime_area: Option<(f64, f64, f64, f64)>,
+    /// The replica generation each pane's command blocks were last drawn from.
+    lens_seen: BTreeMap<PaneId, u64>,
+    /// The settings file, as last read (§7.8, §7.9, §7.12, §7.13, §9.8).
+    pub settings: crate::settings::Settings,
 }
 
 impl std::fmt::Debug for WinState {
@@ -238,6 +253,12 @@ impl WinState {
             overlays: overlays::Overlays::default(),
             viewer_size: (1.0, 1.0),
             chrome_updates: 0,
+            find: None,
+            hover_link: None,
+            field_drag: None,
+            ime_area: None,
+            lens_seen: BTreeMap::new(),
+            settings: crate::settings::Settings::load(),
         }
     }
 
@@ -262,7 +283,10 @@ impl WinState {
             Event::Frame => self.frame(window),
             Event::Key(key) => self.key(window, key),
             Event::Text(text) => {
-                if self.palette_text(&text) {
+                if self.palette_text(&text) || self.find_text(&text) {
+                    if let Some(w) = &self.window {
+                        w.request_frame();
+                    }
                     return;
                 }
                 if let Some(pane) = self.focused_pane()
@@ -287,6 +311,8 @@ impl WinState {
             Event::Scroll(s) => self.scroll(window, s),
             Event::Focus(focused) => {
                 self.key_window = focused;
+                // The system's Reduce Motion may have changed while the window was away.
+                self.send_facts();
                 if focused {
                     self.focus_serial = next_focus_serial();
                 }
@@ -602,7 +628,7 @@ impl WinState {
         let facts = ClientFacts {
             cell_px: [m.cell_width as u16, m.cell_height as u16],
             dark: self.dark,
-            reduce_motion: false,
+            reduce_motion: self.reduce_motion(),
             hour12: false,
         };
         if self.facts_sent.as_ref() != Some(&facts) {
@@ -638,6 +664,7 @@ impl WinState {
             f64::from(metrics.cell_width),
             f64::from(metrics.cell_height),
         );
+        self.find_before_frame();
         let sessions = self.sessions();
         let focused = self.focused_pane();
         let mut draws = Vec::new();
@@ -650,12 +677,17 @@ impl WinState {
             font_px: crate::gfx::FONT_SIZE,
             cell: ((cw / scale) as f32, (ch / scale) as f32),
             dark: self.dark,
+            reduce_motion: self.reduce_motion(),
+            program_colors: self.settings.program_colors,
+            native_editing: self.settings.native_editing,
+            links_plain_click: self.settings.links_plain_click,
             ..ViewSettings::default()
         };
         // Surfaces paint into the UI layer's scene, under the chrome.
         let mut scene = auk_render::vello::Scene::new();
         let mut painted = false;
         let mut animating = false;
+        let mut find_synced = false;
         {
             let conn = self.conn.clone();
             let mut shared = conn.shared();
@@ -663,6 +695,7 @@ impl WinState {
             for (pane, data) in shared.panes.iter_mut() {
                 if std::mem::take(&mut data.reset) {
                     self.surfaces.remove(pane);
+                    self.lens_seen.remove(pane);
                 }
                 let missing: Vec<String> = data
                     .replica
@@ -685,8 +718,21 @@ impl WinState {
                     .or_insert_with(|| PaneSurfaces::new(settings.clone(), scale as f32));
                 if !changes.is_empty() {
                     sf.sync(tsp, &changes, now);
+                    find_synced |= self.find.as_ref().is_some_and(|f| f.pane == *pane);
                 }
                 sf.configure(tsp, settings.clone(), scale as f32);
+                // Plugin sheets cascade after the built-in ones (§8.4 step 3).
+                sf.set_plugin_sheets(&self.plugins.sheets);
+                // Command blocks (§9.6), when the replica changed.
+                if self.lens_seen.get(pane) != Some(&data.generation) {
+                    self.lens_seen.insert(*pane, data.generation);
+                    let blocks = lens_inputs(&data.replica);
+                    sf.sync_lenses(&blocks, now);
+                }
+            }
+            // The views may have rebuilt marked elements: mark the matches again.
+            if find_synced {
+                self.find_show(false);
             }
             for (pane, title) in titles_of(&shared, &sessions) {
                 titles.insert(pane, title);
@@ -748,6 +794,7 @@ impl WinState {
                 let rows = composed.slots.len().clamp(1, usize::from(u16::MAX)) as u16;
                 let mut snap =
                     GridSnapshot::from_lines(term, &self.theme, &render_view, composed.first, rows);
+                find::tint(self.find.as_ref(), pane, composed.first, &mut snap);
                 // The input method's composition draws over the cursor's cells (§19).
                 let cursor = term.cursor();
                 let cursor_line = term.history_len() + usize::from(cursor.row);
@@ -813,6 +860,12 @@ impl WinState {
         }
         if let Some((x, y, w, h)) = ime_area {
             window.set_ime_cursor_area(x, y, w, h);
+        }
+        self.ime_area = ime_area;
+        // A match just stepped to may need another look once virtualized content near it is
+        // laid out.
+        if self.find_reveal_again() {
+            window.request_frame();
         }
 
         // The chrome, over the surfaces.
@@ -913,6 +966,7 @@ impl WinState {
                     .collect()
             })
             .unwrap_or_default();
+        let (tab_apps, pane_app) = (self.chrome_tab_apps_in(sessions), self.chrome_pane_app());
         ChromeModel {
             width: size.width,
             height: size.height,
@@ -920,11 +974,27 @@ impl WinState {
             sessions: sessions
                 .sessions
                 .iter()
-                .map(|s| (s.id, s.name.clone(), Some(s.id) == self.active_session))
+                .map(|s| {
+                    // A locked session says so in its chip (§4.3).
+                    let name = if s.locked {
+                        format!("{} (locked)", s.name)
+                    } else {
+                        s.name.clone()
+                    };
+                    (s.id, name, Some(s.id) == self.active_session)
+                })
                 .collect(),
             tabs,
             dividers: self.tab_layout.dividers.clone(),
             focus: self.focused_pane().and_then(|p| self.tab_layout.rect(p)),
+            tab_apps,
+            pane_app,
+            hover_link: self.hover_link.clone(),
+            find: self.find.as_ref().filter(|f| f.open).map(|f| crate::chrome::FindView {
+                query: f.query.clone(),
+                current: f.current,
+                count: f.matches.len(),
+            }),
             ..ChromeModel::default()
         }
     }
@@ -961,7 +1031,7 @@ impl WinState {
 
     fn key(&mut self, window: &Window, key: KeyInput) {
         // Overlays first, then the plugin keymap layer (§9.8 "Binds").
-        if self.overlay_key(window, &key) || self.plugin_key(&key) {
+        if self.overlay_key(window, &key) || self.find_key(&key) || self.plugin_key(&key) {
             window.request_frame();
             return;
         }
@@ -1070,16 +1140,26 @@ impl WinState {
                 }
             }
             Cmd::Copy => {
-                if let Some(text) = self.selection_text() {
+                // A program field's native selection first (§7.9), then the grid's.
+                let field = focused.and_then(|pane| self.field_selection_text(pane));
+                if let Some(text) = field.or_else(|| self.selection_text()) {
                     crate::app::clipboard_set(&text);
                 }
             }
             Cmd::Paste => {
-                if let (Some(pane), Some(text)) = (focused, crate::app::clipboard_get()) {
+                // Into a program field with a native selection, a paste is an `edit` (§7.9).
+                if let (Some(pane), Some(text)) = (focused, crate::app::clipboard_get())
+                    && !self.surface_text(window, pane, &text)
+                {
                     let modes = self.modes(pane);
                     self.typed(window, pane, encode_paste(&text, &modes));
                 }
             }
+            Cmd::Find => self.find_open(),
+            Cmd::FindNext => self.find_step(true),
+            Cmd::FindPrevious => self.find_step(false),
+            Cmd::PreviousPrompt => self.jump_to_prompt(false),
+            Cmd::NextPrompt => self.jump_to_prompt(true),
             Cmd::SelectAll => {
                 let field = |s: &mut Self, pane| {
                     s.field_key_input(
@@ -1130,6 +1210,16 @@ impl WinState {
             }
             Cmd::CommandPalette => self.open_palette(),
             Cmd::ReloadPlugins => self.plugins_reload(),
+            Cmd::ReloadSettings => self.reload_settings(),
+            // Locks the shown session, or unlocks it (§4.3).
+            Cmd::LockSession => {
+                if let Some(s) = self.session(&sessions) {
+                    self.edit(LayoutEdit::LockSession {
+                        session: s.id,
+                        locked: !s.locked,
+                    });
+                }
+            }
             Cmd::ScrollToTop | Cmd::ScrollToBottom => {
                 if let Some(pane) = focused
                     && let Some(v) = self.views.get_mut(&pane)
@@ -1173,6 +1263,7 @@ impl WinState {
     fn mouse(&mut self, window: &Window, m: MouseEvent) {
         match m.kind {
             MouseKind::Down(button) => {
+                self.field_drag = None;
                 if self.chrome_press(window, &m, button) {
                     return;
                 }
@@ -1192,13 +1283,17 @@ impl WinState {
                 if matches!(button, MouseButton::Left | MouseButton::Right)
                     && self.surface_click(window, pane, &m, button)
                 {
+                    if button == MouseButton::Left && m.clicks <= 1 {
+                        self.field_press(pane, &m);
+                    }
                     return;
                 }
                 // ⌘-click opens a link or a printed path (routes first).
+                // With "links_plain_click", a plain click on a link opens it too (§7.8).
                 if button == MouseButton::Left
-                    && m.mods.meta
                     && let Some((p, line, col)) = self.cell_at(m.x, m.y)
                     && p == pane
+                    && (m.mods.meta || self.plain_click_link(pane, line, col, &m))
                     && self.grid_link_click(pane, line, col)
                 {
                     return;
@@ -1231,6 +1326,9 @@ impl WinState {
                 window.request_frame();
             }
             MouseKind::Dragged(button) => {
+                if self.field_dragged(window, &m) {
+                    return;
+                }
                 let Some(press) = self.press else { return };
                 if press.reported {
                     self.report_mouse(press.pane, &m, button, MouseAction::Motion);
@@ -1257,6 +1355,7 @@ impl WinState {
                 }
             }
             MouseKind::Up(button) => {
+                self.field_drag = None;
                 if let Some(press) = self.press.take()
                     && press.reported
                 {
@@ -1265,7 +1364,7 @@ impl WinState {
                 self.press_anchor = None;
             }
             MouseKind::Moved => {
-                if self.hover_at(m.x, m.y) {
+                if self.hover_at(m.x, m.y) | self.hover_link_at(m.x, m.y) {
                     window.request_frame();
                 }
                 if let Some(pane) = self.tab_layout.pane_at(m.x, m.y)
@@ -1300,7 +1399,9 @@ impl WinState {
         let Some(sf) = self.surfaces.get_mut(&pane) else {
             return false;
         };
-        let Some((dx, dy)) = sf.doc_point(&view.arranged, x, y, view.content_px, scale as f32)
+        let lens_at = sf.lens_point(&view.arranged, x, y, scale as f32);
+        let Some((dx, dy)) =
+            lens_at.or_else(|| sf.doc_point(&view.arranged, x, y, view.content_px, scale as f32))
         else {
             return false;
         };
@@ -1320,7 +1421,11 @@ impl WinState {
                 auk_views::Button::Primary
             },
         };
-        let outcomes = {
+        let outcomes = if lens_at.is_some() {
+            // A command block (§9.6): Native/Raw and Copy are local; lens view events go to
+            // `lens:<block>`.
+            sf.lens_click(ev)
+        } else {
             let conn = self.conn.clone();
             let shared = conn.shared();
             let Some(data) = shared.panes.get(&pane) else {
@@ -1329,7 +1434,7 @@ impl WinState {
             let (doc, pv) = sf.parts();
             pv.click(doc, data.replica.tsp(), ev)
         };
-        let took = !outcomes.iter().all(|o| matches!(o, Outcome::Keys));
+        let took = lens_at.is_some() || !outcomes.iter().all(|o| matches!(o, Outcome::Keys));
         self.outcomes(window, pane, outcomes);
         took
     }
@@ -1579,6 +1684,26 @@ fn cycle<T: Copy + PartialEq>(ids: &[T], current: Option<T>, forward: bool) -> O
 }
 
 /// A pane's title: the program's (OSC 0/2), else its cwd's last component.
+/// A replica's command blocks as the views draw them (§9.6).
+fn lens_inputs(replica: &auk_replica::Replica) -> Vec<auk_views::LensInput> {
+    replica
+        .lens_blocks()
+        .iter()
+        .map(|b| {
+            let raw = replica.lens_raw(b.id).unwrap_or_default();
+            let mut node = b.node(raw);
+            // `cmd` is the line as typed: the label's tooltip.
+            node["p"]["cmd"] = b.typed.clone().into();
+            auk_views::LensInput {
+                id: b.id,
+                anchor: auk_term::AnchorKey(b.anchor),
+                node,
+                cols: b.cols,
+            }
+        })
+        .collect()
+}
+
 fn titles_of(shared: &Shared, sessions: &Sessions) -> Vec<(PaneId, String)> {
     sessions
         .panes()

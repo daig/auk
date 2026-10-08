@@ -62,7 +62,10 @@ pub fn open_window(conn: Connection) {
     )));
     with(|a| a.windows.push(state.clone()));
     let attrs = WindowAttributes {
-        title: format!("Auk — {}", conn.window_key),
+        title: match &conn.host {
+            Some(host) => format!("Auk — {host} — {}", conn.window_key),
+            None => format!("Auk — {}", conn.window_key),
+        },
         option_as_alt,
         ..WindowAttributes::default()
     };
@@ -78,11 +81,11 @@ pub fn open_window(conn: Connection) {
 /// Opens a window on a new window key, with a new session (⌘N).
 pub fn new_window() {
     run_on_main(|| {
-        let Some(socket) = with(|a| a.opts.socket.clone()) else {
+        let Some(opts) = with(|a| a.opts.clone()) else {
             return;
         };
         let key = fresh_window_key();
-        let opened = Connection::open(&socket, ClientFacts::default()).and_then(|(mut conn, _)| {
+        let opened = connect(&opts).and_then(|(mut conn, _)| {
             conn.attach(&key)?;
             Ok(conn)
         });
@@ -91,6 +94,22 @@ pub fn new_window() {
             Err(err) => eprintln!("auk: new window: {err}"),
         }
     });
+}
+
+/// Connects a window: to the remote host when the app attaches to one, else to the local
+/// daemon.
+pub fn connect(opts: &Options) -> std::io::Result<(Connection, auk_mirror::Welcome)> {
+    match &opts.remote {
+        Some(r) => {
+            let mut target = auk_remote::SshTarget::new(r.destination.clone());
+            target.config = r.ssh_config.clone();
+            if let Some(c) = &r.remote_command {
+                target.remote_command = c.clone();
+            }
+            Connection::open_target(auk_remote::Target::Ssh(target), ClientFacts::default())
+        }
+        None => Connection::open(&opts.socket, ClientFacts::default()),
+    }
 }
 
 fn fresh_window_key() -> String {

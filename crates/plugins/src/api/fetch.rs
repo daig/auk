@@ -168,9 +168,13 @@ fn perform(agent: &ureq::Agent, prepared: Prepared) -> FetchResult {
     match response
         .body_mut()
         .with_config()
-        .limit(MAX_BODY)
+        // ureq refuses a body that reaches its limit; a body of exactly 16 MiB is within the cap.
+        .limit(MAX_BODY + 1)
         .read_to_vec()
     {
+        Ok(body) if body.len() as u64 > MAX_BODY => {
+            FetchResult::failed("the body is over 16 MiB".into(), false)
+        }
         Ok(body) => FetchResult {
             status,
             headers,

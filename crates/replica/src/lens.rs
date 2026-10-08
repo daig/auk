@@ -73,6 +73,20 @@ impl LensBlock {
         format!("lens.plugin.{}.{}", self.plugin, self.lens)
     }
 
+    /// The block's retention cost (§7.10), as the TSP engine estimates a node: a fixed overhead
+    /// plus its text. The view, a side message that replicas get at different times, doesn't
+    /// count, so every replica evicts the same blocks.
+    pub fn cost(&self) -> u64 {
+        let text = [&self.plugin, &self.lens, &self.line, &self.typed, &self.program]
+            .iter()
+            .map(|s| s.len())
+            .sum::<usize>()
+            + self.args.iter().map(String::len).sum::<usize>()
+            + self.cwd.as_ref().map_or(0, String::len)
+            + self.raw.len();
+        auk_tsp::doc::NODE_OVERHEAD + text as u64
+    }
+
     /// The surface name view events use for this block.
     pub fn sf(&self) -> String {
         format!("{SF_PREFIX}{}", self.id)
@@ -161,6 +175,8 @@ pub(crate) struct Lenses {
     /// The block whose command runs, and its capture.
     pub running: Option<(u64, Capture)>,
     pub notes: Vec<LensNote>,
+    /// The finished blocks last handed to the TSP engine's retention budget.
+    pub outside: Vec<auk_tsp::Outside>,
 }
 
 impl Lenses {
@@ -213,6 +229,7 @@ impl Lenses {
             blocks,
             running,
             notes: Vec::new(),
+            outside: Vec::new(),
         }
     }
 
@@ -455,6 +472,35 @@ impl crate::Replica {
             }
         }
         self.lens.blocks.remove(i);
+    }
+
+    /// Retention (§7.10): finished command blocks share the pane's budget with its surface
+    /// documents, and go whole, oldest first, with the closed surfaces. Runs after every item.
+    pub(crate) fn enforce_retention(&mut self) {
+        let running = self.lens.running.as_ref().map(|(id, _)| *id);
+        let outside: Vec<auk_tsp::Outside> = self
+            .lens
+            .blocks
+            .iter()
+            .filter(|b| b.done && Some(b.id) != running)
+            .map(|b| auk_tsp::Outside {
+                anchor: AnchorKey(b.anchor),
+                id: b.id,
+                cost: b.cost(),
+            })
+            .collect();
+        // The engine weighs them after its own frames, palettes, sheets and closes; here only a
+        // change in the finished blocks needs a pass.
+        if outside != self.lens.outside {
+            self.lens.outside = outside.clone();
+            self.tsp.set_outside(&mut self.term, outside);
+        }
+        for id in self.tsp.take_outside_evicted() {
+            if let Some(i) = self.lens.index(id) {
+                let b = self.lens.blocks.remove(i);
+                self.term.drop_anchor(AnchorKey(b.anchor));
+            }
+        }
     }
 
     // Public reading and the side messages.

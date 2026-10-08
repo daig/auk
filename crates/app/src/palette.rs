@@ -13,6 +13,8 @@ pub enum RowAction {
     Plugin(String),
     /// Open a path (origin `palette`).
     Open(String),
+    /// Open a block of this type (`<plugin>.<block>`, §9.5).
+    Block(String),
 }
 
 /// A palette row.
@@ -31,6 +33,7 @@ impl Row {
             RowAction::Builtin(c) => commands::builtin_id(*c),
             RowAction::Plugin(a) => a.clone(),
             RowAction::Open(p) => format!("open:{p}"),
+            RowAction::Block(kind) => format!("block:{kind}"),
         }
     }
 }

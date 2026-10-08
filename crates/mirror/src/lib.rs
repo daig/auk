@@ -28,8 +28,8 @@ use serde::{Deserialize, Serialize};
 
 pub use frame::{Frame, MAX_PAYLOAD, WireError};
 pub use msg::{
-    ClientFacts, ClientInfo, ClientKind, ClientMsg, DaemonMsg, Effect, Hello, LayoutEdit, Message,
-    Refusal,
+    ClientFacts, ClientInfo, ClientKind, ClientMsg, DaemonMsg, Effect, Hello, Hop, LayoutEdit,
+    Message, Refusal,
 };
 
 /// A pane's id, unique for the daemon's lifetime (and kept across restore).

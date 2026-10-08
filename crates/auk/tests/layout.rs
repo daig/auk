@@ -301,7 +301,12 @@ fn every_t0_and_t1_kind_renders() {
         .into_iter()
         .filter(|b| b["ev"] == "error")
         .collect();
-    assert!(errors.is_empty(), "the program got errors: {errors:?}");
+    // The one error is the surface's deliberate unknown `el` tag (§7.7).
+    assert_eq!(
+        errors,
+        [serde_json::json!({"ev": "error", "sf": "s1", "id": "el2", "msg": "unknown el tag marquee"})],
+        "the program got errors"
+    );
     window.converge(&env, probe.pane);
 
     let replica = window.replica(probe.pane);

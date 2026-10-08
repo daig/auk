@@ -495,6 +495,43 @@ fn b7_blobs_query_answers_in_request_order() {
 }
 
 #[test]
+fn b7_a_blobs_query_counts_as_a_use_for_lru_eviction() {
+    use base64::Engine as _;
+    let b64 = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
+    // A store holding two of these blobs: a third evicts the least recently used.
+    let blob = |c: u8| vec![c; 1000];
+    let mut h = Harness::with(Config::default());
+    h.pane = TspPane::with(
+        Config::default(),
+        Box::new(auk_tsp::AcceptAll),
+        Box::new(auk_tsp::MemoryBlobs::new(2000)),
+    );
+    let ids: Vec<String> = b"abc".map(|c| blob_id(&blob(c))).to_vec();
+    h.send("b", &b64(&blob(b'a')));
+    h.send("b", &b64(&blob(b'b')));
+    // Without the query, `a` (the oldest) would go first. Asking about it is a use.
+    h.send_json("q", json!({"q": "blobs", "ids": [ids[0]]}));
+    assert_eq!(h.out(), [json!({"r": "blobs", "have": [ids[0]]})]);
+    h.send("b", &b64(&blob(b'c')));
+    let blobs = h.pane.blobs();
+    assert!(blobs.has(&ids[0]), "the queried blob stays");
+    assert!(!blobs.has(&ids[1]), "the least recently used goes");
+    assert!(blobs.has(&ids[2]));
+    // And the control: with no query, the oldest goes.
+    let mut h = Harness::with(Config::default());
+    h.pane = TspPane::with(
+        Config::default(),
+        Box::new(auk_tsp::AcceptAll),
+        Box::new(auk_tsp::MemoryBlobs::new(2000)),
+    );
+    for c in *b"abc" {
+        h.send("b", &b64(&blob(c)));
+    }
+    assert!(!h.pane.blobs().has(&ids[0]));
+    assert!(h.pane.blobs().has(&ids[1]));
+}
+
+#[test]
 fn b8_other_queries_are_unanswered() {
     let mut h = Harness::new();
     h.send_json("q", json!({"q": "version"}));

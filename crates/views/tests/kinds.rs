@@ -35,7 +35,13 @@ fn advertised_kinds_are_t0_and_t1() {
 #[test]
 fn every_t0_t1_kind_renders() {
     let h = harness();
-    assert!(h.errors().is_empty(), "{:?}", h.errors());
+    // The only error is the deliberate unknown `el` tag (el_attribute_allowlist_and_unknown_tags).
+    let errors: Vec<_> = h
+        .errors()
+        .into_iter()
+        .filter(|e| e["id"] != "el2")
+        .collect();
+    assert!(errors.is_empty(), "{errors:?}");
     let doc = h.pane.surfaces()[0].document();
     let mut used = std::collections::BTreeSet::new();
     let mut stack = vec![doc.root()];
@@ -148,7 +154,10 @@ fn text_and_span_kinds() {
     let kv = h.el("s1", "sec1.kv");
     assert_eq!(
         h.view.written().style(kv),
-        Some("grid-template-columns: calc(7*var(--sf-cw)) minmax(0, 1fr);")
+        Some(
+            "grid-template-columns: calc(7*var(--sf-cw)) minmax(0, 1fr); \
+             --sf-kv-cols: calc(7*var(--sf-cw)) minmax(0, 1fr);"
+        )
     );
     // Shimmer effect spans and Nerd Font runs.
     let tx2 = h.el("s1", "tx2");
@@ -419,8 +428,112 @@ fn el_attribute_allowlist_and_unknown_tags() {
     assert_eq!(h.text(e), "hellobold");
     let u = h.el("s1", "el2");
     assert_eq!(h.doc.node(u).element().unwrap().tag.as_str(), "div");
-    let reports = h.view.take_reports();
-    assert_eq!(reports.len(), 1);
-    assert_eq!(reports[0].2, "unknown el tag marquee");
-    assert!(h.view.take_reports().is_empty(), "once per node version");
+    // The replica reports the unknown tag to the program at op time (§7.7): once per node
+    // version, so a redraw or a change elsewhere sends nothing and a change to the node sends it
+    // again.
+    let tag_errors = |h: &Harness| -> Vec<serde_json::Value> {
+        h.errors()
+            .into_iter()
+            .filter(|e| e.get("id").is_some())
+            .cloned()
+            .collect()
+    };
+    assert_eq!(
+        tag_errors(&h),
+        vec![json!({"ev": "error", "sf": "s1", "id": "el2", "msg": "unknown el tag marquee"})]
+    );
+    h.frame();
+    h.frame_ops("s1", 3, json!([["set", "el1", {"class": "box two"}]]));
+    assert_eq!(
+        tag_errors(&h).len(),
+        1,
+        "a redraw or another node sends nothing"
+    );
+    h.frame_ops("s1", 4, json!([["set", "el2", {"class": "again"}]]));
+    assert_eq!(
+        tag_errors(&h).len(),
+        2,
+        "a change to the node sends it again"
+    );
+    // An input that is neither a checkbox nor a radio draws as an empty div.
+    h.frame_ops(
+        "s1",
+        5,
+        json!([
+            ["add", "bad1", "main", null, {"id": "bad1", "k": "el", "p": {"tag": "input", "type": "text", "text": "x"}}],
+            ["add", "bad2", "main", null, {"id": "bad2", "k": "el", "p": {"tag": "input"}}],
+            ["set", "el2", {"tag": "section"}]
+        ]),
+    );
+    h.frame();
+    let msgs: Vec<_> = tag_errors(&h)[2..]
+        .iter()
+        .map(|e| e["msg"].clone())
+        .collect();
+    assert_eq!(
+        msgs,
+        vec![
+            json!("unknown el tag input type text"),
+            json!("unknown el tag input")
+        ]
+    );
+    let i1 = h.el("s1", "bad1");
+    assert_eq!(h.doc.node(i1).element().unwrap().tag.as_str(), "div");
+    assert_eq!(h.text(i1), "");
+    assert!(!h.class(i1).contains("sf-check"));
+    // Programs that don't listen hear nothing.
+    h.apc("o", r#"{"id":"quiet","listen":false}"#);
+    h.frame_ops(
+        "quiet",
+        1,
+        json!([["add", "main", "quiet", null, {"id": "main", "k": "col", "c": [{"id": "q", "k": "el", "p": {"tag": "blink"}}]}]]),
+    );
+    assert_eq!(tag_errors(&h).len(), 4);
+}
+
+#[test]
+fn mark_prop_sets_data_mark_pick_draws_a_bar_and_drop_dims() {
+    let mut h = Harness::new();
+    h.hello(&[]);
+    h.surface(
+        "s1",
+        "inline",
+        json!([
+            {"id": "p", "k": "text", "p": {"text": "picked", "mark": "pick"}},
+            {"id": "d", "k": "card", "p": {"title": "dropped", "mark": "drop"}},
+            {"id": "o", "k": "text", "p": {"text": "other", "mark": "star"}},
+            {"id": "n", "k": "text", "p": {"text": "plain"}}
+        ]),
+    );
+    h.frame();
+    let (p, d, o, n) = (
+        h.el("s1", "p"),
+        h.el("s1", "d"),
+        h.el("s1", "o"),
+        h.el("s1", "n"),
+    );
+    assert_eq!(h.attr(p, "data-mark").as_deref(), Some("pick"));
+    assert_eq!(h.attr(d, "data-mark").as_deref(), Some("drop"));
+    assert_eq!(
+        h.attr(o, "data-mark").as_deref(),
+        Some("star"),
+        "other strings only set the attribute"
+    );
+    assert_eq!(h.attr(n, "data-mark"), None);
+    let style = |el| h.doc.computed_style(el).unwrap().clone();
+    let (sp, sd, so, sn) = (style(p), style(d), style(o), style(n));
+    let bar = |s: &auk_ui::style::ComputedStyle| {
+        s.border_style[3] != auk_ui::style::BorderStyle::None && s.border_width[3] > 0.0
+    };
+    assert!(bar(&sp), "pick: an accent bar on the left");
+    assert!(!bar(&sn));
+    assert!(sd.opacity < 1.0, "drop dims");
+    assert_eq!(sn.opacity, 1.0);
+    assert!(!bar(&so));
+    assert_eq!(so.opacity, 1.0);
+    // Clearing the prop clears the attribute.
+    h.frame_ops("s1", 2, json!([["set", "p", {"mark": null}]]));
+    h.frame();
+    assert_eq!(h.attr(p, "data-mark"), None);
+    assert!(!bar(h.doc.computed_style(p).unwrap()));
 }

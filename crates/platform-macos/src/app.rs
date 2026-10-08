@@ -52,6 +52,11 @@ impl AppContext {
         menu::dump(self.mtm)
     }
 
+    /// A menu item's key equivalent and modifier mask, by its path.
+    pub fn menu_key(&self, path: &[&str]) -> Option<(String, usize)> {
+        menu::key_equivalent(self.mtm, path)
+    }
+
     /// Chooses a menu item as a click would: `path` is a menu's title, then item titles.
     /// Returns false when no enabled item has that path.
     pub fn perform_menu(&self, path: &[&str]) -> bool {
@@ -76,6 +81,11 @@ impl AppContext {
 }
 
 /// Runs `f` on the main thread, from the event loop, soon. Callable from any thread.
+/// The system's Reduce Motion setting (System Settings › Accessibility › Display).
+pub fn system_reduce_motion() -> bool {
+    objc2_app_kit::NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceMotion()
+}
+
 pub fn run_on_main(f: impl FnOnce() + Send + 'static) {
     dispatch2::DispatchQueue::main().exec_async(f);
 }

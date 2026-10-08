@@ -209,7 +209,7 @@ impl PaneView {
                     .filter(|(shown, _)| *shown)
                     .map(|(_, w)| format!("{}px", crate::common::fmt_num(*w as f64)))
                     .collect();
-                let css = format!("grid-template-columns: {}", tpl.join(" "));
+                let css = crate::kinds::data::table_columns(&tpl.join(" "));
                 if dom.w.style(info.grid) != Some(css.as_str()) {
                     dom.set_style(info.grid, &css);
                     changed = true;

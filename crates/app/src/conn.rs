@@ -69,6 +69,13 @@ pub struct Shared {
     pub catalog: serde_json::Value,
     /// Bumped whenever the catalog arrives.
     pub catalog_generation: u64,
+    /// Lens views that arrived before this window's replica had their block (§9.6): retried for
+    /// 5 s as the stream catches up.
+    pub early_views: Vec<(PaneId, u64, Option<serde_json::Value>, std::time::Instant)>,
+    /// The clients attached to the host, as presence last reported them (§10.1).
+    pub presence: Vec<auk_mirror::ClientInfo>,
+    /// Bumped whenever presence arrives.
+    pub presence_generation: u64,
 }
 
 impl Shared {
@@ -175,10 +182,47 @@ impl Shared {
                 self.catalog = catalog;
                 self.catalog_generation += 1;
             }
-            DaemonMsg::Welcome { .. }
-            | DaemonMsg::Refused(_)
-            | DaemonMsg::LensView { .. }
-            | DaemonMsg::Presence { .. } => {}
+            // A lens view replaces the block's last one whole (§9.6); `null` shows the raw output.
+            DaemonMsg::LensView { pane, block, node } => {
+                if let Ok(block) = block.parse::<u64>() {
+                    let node = (!node.is_null()).then_some(node);
+                    if !self.set_lens_view(pane, block, node.clone()) {
+                        self.early_views
+                            .push((pane, block, node, std::time::Instant::now()));
+                    }
+                }
+            }
+            DaemonMsg::Presence { clients } => {
+                self.presence = clients;
+                self.presence_generation += 1;
+            }
+            DaemonMsg::Welcome { .. } | DaemonMsg::Refused(_) => {}
+        }
+        self.retry_views();
+    }
+
+    fn set_lens_view(&mut self, pane: PaneId, block: u64, node: Option<serde_json::Value>) -> bool {
+        let Some(p) = self.panes.get_mut(&pane) else {
+            return false;
+        };
+        if !p.replica.set_lens_view(block, node) {
+            return false;
+        }
+        p.generation += 1;
+        true
+    }
+
+    /// Applies early lens views whose block has appeared; drops those older than 5 s.
+    fn retry_views(&mut self) {
+        if self.early_views.is_empty() {
+            return;
+        }
+        for (pane, block, node, at) in std::mem::take(&mut self.early_views) {
+            if !self.set_lens_view(pane, block, node.clone())
+                && at.elapsed() < std::time::Duration::from_secs(5)
+            {
+                self.early_views.push((pane, block, node, at));
+            }
         }
     }
 }
@@ -189,6 +233,8 @@ impl Shared {
 pub struct Connection {
     pub window_key: String,
     pub client_id: u64,
+    /// The remote host this window attached to (`None`: this machine's daemon).
+    pub host: Option<String>,
     shared: Arc<Mutex<Shared>>,
     link: Link,
     reader: Mutex<Option<LinkReader>>,
@@ -198,9 +244,19 @@ impl Connection {
     /// Connects and says hello. The welcome lists every window key's sessions; then
     /// [`Connection::attach`] picks one. Nothing is read until [`Connection::start`].
     pub fn open(socket: &Path, facts: ClientFacts) -> io::Result<(Connection, Welcome)> {
+        Connection::open_target(Target::Local(socket.to_owned()), facts)
+    }
+
+    /// Connects to the local daemon or, over SSH, a remote host's (§10.2): the window's halves
+    /// stay here and see the remote panes.
+    pub fn open_target(target: Target, facts: ClientFacts) -> io::Result<(Connection, Welcome)> {
+        let (name, host) = match &target {
+            Target::Local(socket) => (socket.display().to_string(), None),
+            Target::Ssh(ssh) => (ssh.destination.clone(), Some(ssh.destination.clone())),
+        };
         let hello = Hello::new(ClientKind::App, facts);
-        let (link, welcome, reader) = Link::connect(Target::Local(socket.to_owned()), hello)
-            .map_err(|e| io::Error::other(format!("{}: {e}", socket.display())))?;
+        let (link, welcome, reader) = Link::connect(target, hello)
+            .map_err(|e| io::Error::other(format!("{name}: {e}")))?;
         let shared = Shared {
             catalog: welcome.catalog.clone(),
             catalog_generation: 1,
@@ -210,6 +266,7 @@ impl Connection {
             Connection {
                 window_key: String::new(),
                 client_id: welcome.client,
+                host,
                 shared: Arc::new(Mutex::new(shared)),
                 link,
                 reader: Mutex::new(Some(reader)),
@@ -261,6 +318,12 @@ impl Connection {
     /// Sends a message; while the link resyncs after a reconnect it holds input and drops acks.
     pub fn send(&self, msg: &ClientMsg) -> io::Result<()> {
         self.link.send(msg).map(|_| ())
+    }
+
+    /// The host's name in sheet names (`plugin:<host>:<id>:styles`): `local`, or the SSH
+    /// destination.
+    pub fn host_name(&self) -> String {
+        self.host.clone().unwrap_or_else(|| "local".to_owned())
     }
 
     /// The link's state (`connected`, `reconnecting(n)`, …).

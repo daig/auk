@@ -11,6 +11,8 @@ auk-ui = { path = "../ui" }
 auk-tsp = { path = "../tsp" }
 auk-term = { path = "../term" }
 serde_json = { workspace = true, features = ["preserve_order"] }
+# `data:` URLs in plugin sheets' `background-image` (§9.8 CSS).
+base64 = "0.23.1"
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 syntect = { version = "5", default-features = false, features = ["default-fancy"] }
 two-face = { version = "0.4", default-features = false, features = ["syntect-fancy"] }

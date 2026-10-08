@@ -38,7 +38,19 @@ pub struct Document {
         std::sync::Mutex<std::collections::HashMap<NodeId, crate::paint::ChildExtents>>,
     /// Scroll containers with a nonzero offset (for scroll anchoring).
     pub(crate) scrolled: std::collections::BTreeSet<NodeId>,
+    /// Decodes `background-image` URLs (`data:` only reach styles); none decodes nothing.
+    url_loader: Option<UrlLoader>,
+    /// The clock transitions and animations run on, in ms ([`Document::set_time`]).
+    clock: f64,
+    /// Elements with running transitions or animations.
+    motion: std::collections::HashMap<NodeId, crate::anim::NodeMotion>,
+    /// Pictures by URL, loaded once each (`None`: the URL didn't decode).
+    pub(crate) url_images:
+        std::collections::HashMap<Arc<str>, Option<Arc<crate::image::ImageContent>>>,
 }
+
+/// Turns a `background-image` URL into a picture ([`Document::set_url_loader`]).
+pub type UrlLoader = Box<dyn Fn(&str) -> Option<crate::image::ImageContent> + Send + Sync>;
 
 /// What the last [`Document::update`] did, for checking that work is incremental.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -89,6 +101,10 @@ impl Document {
             generation: 0,
             child_extents: Default::default(),
             scrolled: Default::default(),
+            url_loader: None,
+            url_images: Default::default(),
+            clock: 0.0,
+            motion: Default::default(),
         };
         doc.root = doc.create_element("html");
         doc.stylist
@@ -231,6 +247,7 @@ impl Document {
 
     /// Free one node (not its children).
     pub(crate) fn free_node(&mut self, id: NodeId) {
+        self.motion.remove(&id);
         if self.nodes[id.index()].take().is_some() {
             self.free.push(id.0);
         }
@@ -605,6 +622,16 @@ impl Document {
                     scope.as_ref(),
                     caches,
                 ));
+                if let Some(url) = &new.background_image {
+                    self.load_url(url);
+                }
+                let new = self.animate(
+                    id,
+                    new,
+                    style.clone(),
+                    parent_style,
+                    scope.as_ref().map(|(_, a)| a.as_str().to_owned()),
+                );
                 let changed = style.as_deref() != Some(&*new);
                 if changed {
                     let layout_changed = style.as_deref().is_none_or(|old| !layout_eq(old, &new));
@@ -693,22 +720,7 @@ impl Document {
         } else {
             None
         };
-        let root_fs = if id == self.root && pseudo.is_none() {
-            16.0
-        } else {
-            self.node(self.root)
-                .style
-                .as_ref()
-                .map(|s| s.font_size)
-                .unwrap_or(16.0)
-        };
-        let env = ComputeEnv {
-            root_font_size: root_fs,
-            vw: self.viewport.0,
-            vh: self.viewport.1,
-            dark: self.dark,
-            dpr: self.device_scale,
-        };
+        let env = self.compute_env(id, pseudo);
         let attr = |name: &str| self.attribute(id, name).map(|s| s.to_string());
         cascade(
             &blocks,
@@ -718,6 +730,25 @@ impl Document {
             &env,
             &attr,
         )
+    }
+
+    fn compute_env(&self, id: NodeId, pseudo: Option<PseudoKind>) -> ComputeEnv {
+        let root_fs = if id == self.root && pseudo.is_none() {
+            16.0
+        } else {
+            self.node(self.root)
+                .style
+                .as_ref()
+                .map(|s| s.font_size)
+                .unwrap_or(16.0)
+        };
+        ComputeEnv {
+            root_font_size: root_fs,
+            vw: self.viewport.0,
+            vh: self.viewport.1,
+            dark: self.dark,
+            dpr: self.device_scale,
+        }
     }
 
     fn update_pseudos(
@@ -889,6 +920,154 @@ impl Document {
             l.size.width - l.border.left - l.border.right + mx,
             l.size.height - l.border.top - l.border.bottom + my,
         )
+    }
+
+    /// Sets what decodes `background-image` URLs (the views decode `data:` pictures). Pictures
+    /// already loaded are dropped and load again.
+    pub fn set_url_loader(&mut self, loader: UrlLoader) {
+        self.url_loader = Some(loader);
+        self.url_images.clear();
+        self.mark_all_styles_dirty();
+    }
+
+    /// The picture a `background-image` URL decoded to, once a restyle has loaded it.
+    pub fn url_image(&self, url: &str) -> Option<&crate::image::ImageContent> {
+        self.url_images.get(url)?.as_deref()
+    }
+
+    fn load_url(&mut self, url: &Arc<str>) {
+        if self.url_images.contains_key(url) {
+            return;
+        }
+        let image = self
+            .url_loader
+            .as_ref()
+            .and_then(|load| load(url))
+            .map(Arc::new);
+        self.url_images.insert(url.clone(), image);
+    }
+
+    /// Advances the clock transitions and animations run on (ms; the view's clock, paused while
+    /// the pane is hidden) and updates what they show. Changes that only repaint are applied
+    /// here; a moving `color` restyles the element's subtree on the next [`update`](Self::update).
+    pub fn set_time(&mut self, now: f64) {
+        self.clock = now;
+        if self.motion.is_empty() {
+            return;
+        }
+        let ids: Vec<NodeId> = self.motion.keys().copied().collect();
+        for id in ids {
+            let Some(mut m) = self.motion.remove(&id) else {
+                continue;
+            };
+            if self.try_node(id).is_none() {
+                continue;
+            }
+            let shown = m.at(now).map(Arc::new).unwrap_or_else(|| m.base.clone());
+            let old = self.node(id).style.clone();
+            if old.as_deref() != Some(&*shown) {
+                let recolor = old.as_ref().is_none_or(|o| {
+                    o.color != shown.color || o.text_decoration_color != shown.text_decoration_color
+                });
+                if recolor {
+                    // Text and descendants inherit it: restyle (which shows the motion again).
+                    self.mark_style_dirty(id, true);
+                } else {
+                    self.node_mut(id).style = Some(shown);
+                }
+            }
+            if !m.is_idle() {
+                self.motion.insert(id, m);
+            }
+        }
+    }
+
+    /// The clock transitions and animations run on.
+    pub fn time(&self) -> f64 {
+        self.clock
+    }
+
+    /// Whether a transition or animation is moving: the host keeps drawing frames.
+    pub fn animating(&self) -> bool {
+        let now = self.clock;
+        self.motion.values().any(|m| m.moving(now))
+    }
+
+    /// Runs transitions and animations over an element's new cascaded style (§8.4): returns the
+    /// style to show.
+    fn animate(
+        &mut self,
+        id: NodeId,
+        base: Arc<ComputedStyle>,
+        shown: Option<Arc<ComputedStyle>>,
+        parent: &ComputedStyle,
+        scope: Option<String>,
+    ) -> Arc<ComputedStyle> {
+        let has = base.transitions.is_some() || base.animations.is_some();
+        if !has && !self.motion.contains_key(&id) {
+            return base;
+        }
+        let reduce = self.stylist.media.reduced_motion;
+        let now = self.clock;
+        let mut m = self
+            .motion
+            .remove(&id)
+            .unwrap_or_else(|| crate::anim::NodeMotion::new(base.clone()));
+        m.restyle(base.clone(), shown.as_deref(), now, reduce, |name| {
+            self.keyframes_for(name, scope.as_deref(), parent, id)
+        });
+        let out = m.at(now);
+        if !m.is_idle() {
+            self.motion.insert(id, m);
+        }
+        out.map(Arc::new).unwrap_or(base)
+    }
+
+    /// An animation's keyframes for one element: each keyframe cascaded over the element's
+    /// parent style, keeping the interpolated properties it declares.
+    fn keyframes_for(
+        &self,
+        name: &str,
+        scope: Option<&str>,
+        parent: &ComputedStyle,
+        id: NodeId,
+    ) -> Option<crate::anim::Frames> {
+        use crate::css::sheet::DeclProp;
+        let k = self.stylist.keyframes(name, scope)?;
+        let env = self.compute_env(id, None);
+        let attr = |n: &str| self.attribute(id, n).map(|s| s.to_string());
+        let mut frames: crate::anim::Frames = Vec::new();
+        for (offset, block) in &k.frames {
+            let declared: Vec<crate::css::properties::Prop> = block
+                .decls
+                .iter()
+                .filter_map(|d| match d.prop {
+                    DeclProp::Long(p) => Some(p),
+                    DeclProp::Custom(_) => None,
+                })
+                .collect();
+            let styled = cascade(
+                &[(crate::css::cascade::Origin::Author, 0, 0, block.clone())],
+                None,
+                parent,
+                &self.initial,
+                &env,
+                &attr,
+            );
+            frames.push((*offset, crate::anim::frame_values(&declared, &styled)));
+        }
+        frames.sort_by(|a, b| a.0.total_cmp(&b.0));
+        Some(frames)
+    }
+
+    /// The installed sheets in cascade order, as `(name, rules)`: the control `css` command's
+    /// listing (§7.15), where program sheets show as `tsp:<scope>:<name>`.
+    pub fn sheets(&self) -> Vec<(String, usize)> {
+        self.stylist
+            .sheets
+            .iter()
+            .map(|e| (e.name.clone(), e.sheet.rules.len()))
+            .collect()
     }
 
     /// A `@keyframes` rule by name, looking first in the scope's program sheets.

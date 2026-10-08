@@ -175,3 +175,96 @@ fn an_exit_ends_a_running_capture_and_cleared_scrollback_drops_blocks() {
     r.push(Item::Record(&Record::ClearScrollback));
     assert!(r.lens_blocks().is_empty());
 }
+
+/// One claimed `terraform plan` that prints `n` lines and finishes.
+fn claimed_command(n: usize) -> Vec<u8> {
+    let mut out = START.to_vec();
+    for i in 0..n {
+        out.extend(format!("  # aws_thing.r{i:02} will be created, with a long tail of text\r\n").bytes());
+    }
+    out.extend_from_slice(b"\x1b]133;D;0\x07\x1b]133;A\x07$ ");
+    out
+}
+
+/// A flow surface with a little text, closed (it stays, read-only, at its anchor row).
+fn closed_surface(id: &str) -> Vec<u8> {
+    let tsp = |verb: &str, body: String| format!("\x1b_tsp;{verb};{body}\x1b\\").into_bytes();
+    let mut out = b"prog\r\n".to_vec();
+    out.extend(tsp("o", format!(r#"{{"id":"{id}","mode":"flow"}}"#)));
+    out.extend(tsp(
+        "f",
+        format!(
+            r#"{{"sf":"{id}","s":1,"ops":[["add","main","{id}",null,{{"id":"main","k":"col","c":[{{"id":"t","k":"text","p":{{"text":"{}"}}}}]}}]]}}"#,
+            "x".repeat(300)
+        ),
+    ));
+    out.extend(tsp("x", format!(r#"{{"id":"{id}","keep":true}}"#)));
+    out.extend_from_slice(b"\x1b]133;A\x07$ ");
+    out
+}
+
+#[test]
+fn finished_command_blocks_share_the_retention_budget_and_go_oldest_first() {
+    // Measure what a block and a closed surface cost, on a replica with room for everything.
+    let mut probe = Replica::new(100, 30, Settings::default(), Role::Authoritative);
+    probe.push(Item::Record(&Record::Catalog {
+        catalog: claim_catalog(&catalog()),
+    }));
+    let docs = probe.tsp().retention_cost();
+    probe.push(Item::Output(&claimed_command(10)));
+    let block = probe.tsp().retention_cost() - docs;
+    assert_eq!(block, probe.lens_blocks()[0].cost(), "finished blocks count");
+    probe.push(Item::Output(&closed_surface("s1")));
+    let surface = probe.tsp().retention_cost() - docs - block;
+    assert!(block > 500 && surface > 300, "{block} {surface}");
+
+    // Room for two blocks, or a block and the surface, but not three things.
+    let settings = Settings {
+        retention: 2 * block.max(surface) + block.min(surface) / 2,
+        ..Settings::default()
+    };
+    let mut daemon = Replica::new(100, 30, settings.clone(), Role::Authoritative);
+    let mut client = Replica::new(100, 30, settings, Role::Follower);
+    fn feed(daemon: &mut Replica, client: &mut Replica, item: Item<'_>) {
+        let (seq, _) = daemon.push(item);
+        client.apply(seq, item).unwrap();
+        assert_eq!(hex(daemon), hex(client));
+    }
+    let (d, c) = (&mut daemon, &mut client);
+    feed(d, c, Item::Record(&Record::Catalog {
+        catalog: claim_catalog(&catalog()),
+    }));
+    feed(d, c, Item::Output(&claimed_command(10))); // block 0
+    feed(d, c, Item::Output(&closed_surface("s1")));
+    assert_eq!(daemon.lens_blocks().len(), 1);
+    assert_eq!(daemon.tsp().surfaces().len(), 1);
+
+    // A third item: the oldest of the finished blocks and closed surfaces goes, whole.
+    feed(&mut daemon, &mut client, Item::Output(&claimed_command(10))); // block 1
+    let ids: Vec<u64> = daemon.lens_blocks().iter().map(|b| b.id).collect();
+    assert_eq!(ids, [1], "block 0 was the oldest");
+    assert_eq!(daemon.tsp().surfaces().len(), 1, "the surface is younger than block 0");
+    assert!(daemon.lens_raw(0).is_none(), "an evicted block is gone");
+
+    // A replica built from a snapshot here weighs the same blocks from the start.
+    let mut late = Replica::from_snapshot(&daemon.snapshot(), Role::Follower, None);
+    let block2 = claimed_command(10);
+    let (seq, _) = daemon.push(Item::Output(&block2));
+    client.apply(seq, Item::Output(&block2)).unwrap();
+    late.apply(seq, Item::Output(&block2)).unwrap();
+    assert_eq!(hex(&daemon), hex(&client));
+    assert_eq!(hex(&late), hex(&daemon));
+    assert_eq!(late.lens_blocks(), client.lens_blocks());
+    let ids: Vec<u64> = daemon.lens_blocks().iter().map(|b| b.id).collect();
+    assert_eq!(ids, [1, 2], "then the closed surface, older than block 1");
+    assert!(daemon.tsp().surfaces().is_empty());
+    assert!(daemon.tsp().retention_cost() <= 2 * block.max(surface) + block.min(surface) / 2);
+
+    // A running capture isn't finished: it is never evicted while it runs.
+    let (seq, _) = daemon.push(Item::Output(START));
+    client.apply(seq, Item::Output(START)).unwrap();
+    assert_eq!(daemon.lens_running(), Some(3));
+    assert_eq!(hex(&daemon), hex(&client));
+    let late = Replica::from_snapshot(&daemon.snapshot(), Role::Follower, None);
+    assert_eq!(hex(&late), hex(&daemon));
+}

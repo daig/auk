@@ -17,7 +17,7 @@ use auk_render::{
 };
 use auk_text::{Backend, FontConfig, GridFonts};
 use auk_views::compose::Scroll;
-use auk_views::{Arranged, PaneSurfaces, Place, ViewSettings};
+use auk_views::{Place, ViewSettings};
 use raw_window_handle::{
     RawDisplayHandle, RawWindowHandle, WebCanvasWindowHandle, WebDisplayHandle,
 };
@@ -31,6 +31,7 @@ use web_sys::{
 };
 
 use crate::keys::{DomKey, KeyAction, map_key};
+use crate::pane::{Action, PaneDraw, Press};
 use crate::session::{Rect, Session, Status, layout};
 
 /// The grid font's size in CSS pixels (points, as in the app).
@@ -50,15 +51,15 @@ fn families() -> Vec<String> {
         .collect()
 }
 
-/// A pane as this client shows it: its surfaces (kept for every pane, shown or not), the grid
-/// renderer once shown, and the view state (never replicated).
+/// A pane as this client shows it: its surfaces and command blocks (kept for every pane, shown
+/// or not) and the grid renderer once shown.
 struct PaneView {
     renderer: Option<GridRenderer>,
-    surfaces: PaneSurfaces,
-    scroll: Scroll,
-    /// The pane as last drawn.
-    arranged: Arranged,
+    draw: PaneDraw,
 }
+
+/// How long a toast stays up, in milliseconds (§9.7: two lines, a few seconds).
+const TOAST_MS: i32 = 4000;
 
 struct App {
     session: Session,
@@ -78,6 +79,14 @@ struct App {
     canvas: HtmlCanvasElement,
     input: HtmlTextAreaElement,
     status: HtmlElement,
+    /// The tab bar (a minimal one: the app's chrome widgets aren't shared with this client).
+    tabs: HtmlElement,
+    /// The tab bar as last drawn.
+    tabs_shown: Vec<crate::session::TabEntry>,
+    /// Where toasts show.
+    toast: HtmlElement,
+    /// Effects performed, newest last (the last 32), for the debug state.
+    effects_done: Vec<serde_json::Value>,
     /// `?pane=`: show the tab holding this pane and focus it.
     want_pane: Option<PaneId>,
     /// The focused pane; keys go here.
@@ -179,6 +188,8 @@ async fn start_inner() -> Result<(), String> {
     let canvas: HtmlCanvasElement = element("screen")?;
     let input: HtmlTextAreaElement = element("input")?;
     let status: HtmlElement = element("status")?;
+    let tabs: HtmlElement = element("tabs")?;
+    let toast: HtmlElement = element("toast")?;
     status.set_text_content(Some("Connecting…"));
 
     let font = Arc::new(fetch_bytes("/font/0").await?);
@@ -233,6 +244,10 @@ async fn start_inner() -> Result<(), String> {
         canvas: canvas.clone(),
         input: input.clone(),
         status,
+        tabs: tabs.clone(),
+        tabs_shown: Vec::new(),
+        toast,
+        effects_done: Vec::new(),
         want_pane,
         focused: None,
         rects: Vec::new(),
@@ -257,7 +272,9 @@ async fn start_inner() -> Result<(), String> {
             if let Ok(buf) = data.dyn_into::<js_sys::ArrayBuffer>() {
                 let bytes = js_sys::Uint8Array::new(&buf).to_vec();
                 let mut a = app.borrow_mut();
+                a.session.set_time(js_sys::Date::now() / 1000.0);
                 a.session.on_message(&bytes);
+                a.effects();
                 a.flush();
                 a.request_frame(&app);
             }
@@ -331,13 +348,27 @@ async fn start_inner() -> Result<(), String> {
         move |e: web_sys::MouseEvent| {
             e.prevent_default();
             let mut a = app.borrow_mut();
-            let (x, y) = (e.offset_x() as f32 * a.scale, e.offset_y() as f32 * a.scale);
-            let hit = a
-                .rects
-                .iter()
-                .find(|(_, r)| x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h)
-                .map(|(p, _)| *p);
-            if let Some(pane) = hit {
+            a.mouse_down(&e);
+            let _ = a.input.focus();
+            a.request_frame(&app);
+        }
+    });
+    on(&canvas, "contextmenu", |e: web_sys::MouseEvent| {
+        e.prevent_default()
+    });
+    // A tab clicked in the tab bar shows that tab and focuses its pane.
+    on(&tabs, "click", {
+        let app = app.clone();
+        move |e: web_sys::MouseEvent| {
+            let pane = e
+                .target()
+                .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+                .and_then(|el| el.closest("[data-pane]").ok().flatten())
+                .and_then(|el| el.get_attribute("data-pane"))
+                .and_then(|p| p.parse::<PaneId>().ok());
+            let mut a = app.borrow_mut();
+            if let Some(pane) = pane {
+                a.want_pane = Some(pane);
                 a.focus(pane);
             }
             let _ = a.input.focus();
@@ -471,7 +502,7 @@ impl App {
             KeyAction::Send(ev) => {
                 e.prevent_default();
                 if let Some(v) = self.views.get_mut(&pane) {
-                    v.scroll = Scroll::default();
+                    v.draw.scroll = Scroll::default();
                 }
                 self.session.key(pane, &ev);
                 self.flush();
@@ -501,8 +532,150 @@ impl App {
             _ => e.delta_y() * f64::from(self.scale),
         };
         if let Some(v) = self.views.get_mut(&pane) {
-            v.scroll = Scroll::by(&v.arranged.composed, -px as f32);
+            v.draw.scroll = Scroll::by(&v.draw.arranged.composed, -px as f32);
         }
+    }
+
+    /// A press on the canvas: it focuses the pane under it, and a surface or command block there
+    /// takes it as a view event (§7.8).
+    fn mouse_down(&mut self, e: &web_sys::MouseEvent) {
+        let (x, y) = (
+            e.offset_x() as f32 * self.scale,
+            e.offset_y() as f32 * self.scale,
+        );
+        let Some((pane, rect)) = self
+            .rects
+            .iter()
+            .find(|(_, r)| x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h)
+            .copied()
+        else {
+            return;
+        };
+        self.focus(pane);
+        let pad = (PADDING * self.scale).round();
+        let press = Press {
+            x: x - rect.x - pad,
+            y: y - rect.y - pad,
+            clicks: e.detail().clamp(1, 2) as u8,
+            mods: auk_tsp::Mods {
+                shift: e.shift_key(),
+                ctrl: e.ctrl_key(),
+                alt: e.alt_key(),
+                meta: e.meta_key(),
+            },
+            secondary: e.button() == 2,
+        };
+        if press.x < 0.0 || press.y < 0.0 {
+            return;
+        }
+        let content_h = (rect.h - 2.0 * pad).max(0.0);
+        let (Some(p), Some(view)) = (self.session.panes.get(&pane), self.views.get_mut(&pane))
+        else {
+            return;
+        };
+        let Some(actions) = view.draw.click(pane, &p.replica, press, content_h) else {
+            return;
+        };
+        for action in actions {
+            match action {
+                Action::Send(auk_mirror::ClientMsg::ViewEvent { pane, sf, event }) => {
+                    self.session.view_event(pane, &sf, event);
+                }
+                Action::Send(_) => {}
+                Action::Copy(text) => self.copy(&text),
+                Action::Open(target) => self.open(&target),
+            }
+        }
+        self.flush();
+    }
+
+    /// Performs the effects the serving host sent (§9.7, §10.3): toasts show over the page,
+    /// copies go to the clipboard, and links open in a new tab.
+    fn effects(&mut self) {
+        for effect in self.session.take_effects() {
+            self.effects_done.push(json!(effect));
+            if self.effects_done.len() > 32 {
+                self.effects_done.remove(0);
+            }
+            match effect {
+                auk_mirror::Effect::Toast { level, text, sub } => {
+                    self.show_toast(&level, &text, sub.as_deref());
+                }
+                auk_mirror::Effect::Copy { text } => self.copy(&text),
+                auk_mirror::Effect::Open { target, .. } => self.open(&target),
+            }
+        }
+    }
+
+    fn show_toast(&self, level: &str, text: &str, sub: Option<&str>) {
+        let t = &self.toast;
+        t.set_text_content(None);
+        let _ = t.set_attribute("data-level", level);
+        if let Some(doc) = window().document() {
+            for (class, line) in [("text", Some(text)), ("sub", sub)] {
+                if let Some(line) = line
+                    && let Ok(el) = doc.create_element("div")
+                {
+                    el.set_class_name(class);
+                    el.set_text_content(Some(line));
+                    let _ = t.append_child(&el);
+                }
+            }
+        }
+        let _ = t.class_list().add_1("shown");
+        let toast = t.clone();
+        let hide = Closure::once_into_js(move || {
+            let _ = toast.class_list().remove_1("shown");
+        });
+        let _ = window()
+            .set_timeout_with_callback_and_timeout_and_arguments_0(hide.unchecked_ref(), TOAST_MS);
+    }
+
+    fn copy(&self, text: &str) {
+        let _ = window().navigator().clipboard().write_text(text);
+    }
+
+    /// Opens a link in a new tab. A path names a file on the serving host, which a browser
+    /// can't open: the client says so.
+    fn open(&self, target: &str) {
+        let lower = target.to_ascii_lowercase();
+        if ["http://", "https://", "mailto:"]
+            .iter()
+            .any(|p| lower.starts_with(p))
+        {
+            let _ = window().open_with_url_and_target(target, "_blank");
+        } else {
+            self.show_toast(
+                "info",
+                &format!("Open {target} on the host"),
+                Some("The browser can't open files on the serving machine."),
+            );
+        }
+    }
+
+    /// Draws the tab bar when it changed.
+    fn draw_tabs(&mut self) {
+        let entries = self.session.tab_bar(self.want_pane.or(self.focused));
+        if entries == self.tabs_shown {
+            return;
+        }
+        let Some(doc) = window().document() else {
+            return;
+        };
+        self.tabs.set_text_content(None);
+        for t in &entries {
+            if let Ok(el) = doc.create_element("button") {
+                el.set_class_name(if t.active { "tab active" } else { "tab" });
+                el.set_text_content(Some(&t.title));
+                let _ = el.set_attribute("role", "tab");
+                let _ = el.set_attribute("aria-selected", if t.active { "true" } else { "false" });
+                if let Some(p) = t.pane {
+                    let _ = el.set_attribute("data-pane", &p.to_string());
+                }
+                let _ = self.tabs.append_child(&el);
+            }
+        }
+        self.tabs_shown = entries;
     }
 
     fn set_status(&self, text: &str) {
@@ -574,6 +747,7 @@ impl App {
                 self.set_status("");
             }
         }
+        self.draw_tabs();
         // Focus the wanted pane, else keep focus in the tab, else its first pane.
         let shown: Vec<PaneId> = self.rects.iter().map(|(p, _)| *p).collect();
         let want = self
@@ -620,21 +794,17 @@ impl App {
             }
             let tsp = self.session.panes[&pane].replica.tsp();
             let font = &self.font;
-            let view = self.views.entry(pane).or_insert_with(|| {
-                let mut surfaces = PaneSurfaces::new(settings.clone(), scale);
-                // The browser has no system fonts: surfaces draw in the server's font.
-                surfaces.use_font(font.to_vec());
-                PaneView {
-                    renderer: None,
-                    surfaces,
-                    scroll: Scroll::default(),
-                    arranged: Arranged::default(),
-                }
+            let view = self.views.entry(pane).or_insert_with(|| PaneView {
+                renderer: None,
+                draw: PaneDraw::new(settings.clone(), scale, Some(font.clone())),
             });
             for c in &changes {
-                view.surfaces.sync(tsp, c, now);
+                view.draw.sync(tsp, c, now);
             }
-            view.surfaces.configure(tsp, settings.clone(), scale);
+            view.draw.configure(tsp, settings.clone(), scale);
+            // The catalog's plugin styles (§9.4, §10.4).
+            view.draw
+                .set_styles(self.session.styles_serial, &self.session.styles);
         }
         let mut scene = auk_render::vello::Scene::new();
         let mut painted = false;
@@ -656,30 +826,24 @@ impl App {
             let renderer = view.renderer.as_mut().expect("made above");
             let (cols, rows) = renderer.grid_size_for(rect.w as u32, rect.h as u32, pad as u32);
             let term = p.replica.terminal();
-            let tsp = p.replica.tsp();
             let content_w = (rect.w - 2.0 * pad).max(0.0);
             let content_h = (rect.h - 2.0 * pad).max(0.0);
             let pane_focused = doc_focused && self.focused == Some(pane);
-            // The pane's flow (§6.2): grid rows, and surface blocks at their anchor rows.
-            if view
-                .surfaces
-                .layout(
-                    term,
-                    tsp,
-                    (content_w / scale, content_h / scale),
-                    pane_focused,
-                    now,
-                )
-                .is_some()
-            {
+            // The pane's flow (§6.2): grid rows, and surface and command blocks at their anchor
+            // rows.
+            if view.draw.layout(
+                &p.replica,
+                (content_w / scale, content_h / scale),
+                pane_focused,
+                now,
+            ) {
                 animating = true;
             }
-            let arranged =
-                view.surfaces
-                    .arrange(term, tsp, self.cell.1 as f32, content_h, scale, view.scroll);
-            view.scroll = arranged.composed.scroll;
-            if view.surfaces.paint(
-                &arranged,
+            let arranged = view
+                .draw
+                .arrange(&p.replica, self.cell.1 as f32, content_h)
+                .clone();
+            if view.draw.paint(
                 &mut scene,
                 Place {
                     x: f64::from(rect.x + pad),
@@ -719,7 +883,6 @@ impl App {
             renderer.set_row_slots(slots);
             renderer.prepare(&self.gpu, &snap, (w, h));
             let grid_shown = arranged.grid_shown();
-            view.arranged = arranged;
             drawn.push((pane, rect, cols, rows, grid_shown));
         }
         if (painted || self.ui_painted)
@@ -806,6 +969,10 @@ impl App {
     }
 
     fn debug(&self) -> serde_json::Value {
+        // Page coordinates: the canvas sits below the tab bar.
+        let origin = self.canvas.get_bounding_client_rect();
+        let (ox, oy) = (origin.left() as f32, origin.top() as f32);
+        let pad = (PADDING * self.scale).round();
         let panes: Vec<serde_json::Value> = self
             .session
             .panes
@@ -813,16 +980,57 @@ impl App {
             .map(|(id, p)| {
                 let r = &p.replica;
                 let hash: String = r.state_hash().iter().map(|b| format!("{b:02x}")).collect();
-                let rect = self
+                let at = self
                     .rects
                     .iter()
                     .find(|(pane, _)| pane == id)
-                    .map(|(_, r)| {
-                        json!({
-                            "x": r.x / self.scale, "y": r.y / self.scale,
-                            "w": r.w / self.scale, "h": r.h / self.scale,
-                        })
-                    });
+                    .map(|(_, r)| *r);
+                let rect = at.map(|r| {
+                    json!({
+                        "x": ox + r.x / self.scale, "y": oy + r.y / self.scale,
+                        "w": r.w / self.scale, "h": r.h / self.scale,
+                    })
+                });
+                // What the pane drew last, in page coordinates: surfaces (a plugin block's
+                // screen surface among them), command blocks and whether their lens view
+                // showed, and the plugin sheets installed.
+                let (surfaces, lens, styles) = match (self.views.get(id), at) {
+                    (Some(v), Some(at)) => {
+                        let top = |y: f32| oy + (at.y + pad + y) / self.scale;
+                        let surfaces: Vec<serde_json::Value> = v
+                            .draw
+                            .surfaces_placed(r.tsp())
+                            .into_iter()
+                            .map(|(sf, y, h)| {
+                                json!({
+                                    "sf": sf, "x": ox + (at.x + pad) / self.scale, "y": top(y),
+                                    "w": (at.w - 2.0 * pad) / self.scale, "h": h / self.scale,
+                                })
+                            })
+                            .collect();
+                        let lens: Vec<serde_json::Value> = v
+                            .draw
+                            .lens_placed
+                            .iter()
+                            .map(|l| {
+                                let block = r.lens_blocks().iter().find(|b| b.id == l.block);
+                                json!({
+                                    "block": l.block,
+                                    "view": block.is_some_and(|b| b.view.is_some()),
+                                    "x": ox + (at.x + pad) / self.scale, "y": top(l.y),
+                                    "w": (at.w - 2.0 * pad) / self.scale,
+                                    "h": l.height / self.scale,
+                                })
+                            })
+                            .collect();
+                        (
+                            surfaces,
+                            lens,
+                            v.draw.style_ids().into_iter().map(str::to_owned).collect(),
+                        )
+                    }
+                    _ => (Vec::new(), Vec::new(), Vec::<String>::new()),
+                };
                 json!({
                     "id": id,
                     "seq": r.seq(),
@@ -833,6 +1041,9 @@ impl App {
                     "primary": p.primary,
                     "exit": p.exit,
                     "rect": rect,
+                    "surfaces": surfaces,
+                    "lens": lens,
+                    "styles": styles,
                 })
             })
             .collect();
@@ -852,9 +1063,41 @@ impl App {
             "adapter": self.adapter,
             "format": format!("{:?}", self.surface.format()),
             "panes": panes,
+            "tabs": self.tabs_shown.iter().map(|t| json!({
+                "title": t.title, "active": t.active, "pane": t.pane,
+            })).collect::<Vec<_>>(),
+            "effects": self.effects_done,
             "errors": self.session.errors,
         })
     }
+}
+
+/// Where a node of a pane's surface (or of a command block, `lens:<block>`) was drawn last, as
+/// `{"x", "y", "w", "h"}` in page CSS pixels, or `null` (`window.aukNodeRect` on the page).
+#[wasm_bindgen]
+pub fn node_rect(pane: f64, sf: &str, id: &str) -> String {
+    let rect = APP.with(|a| {
+        let app = a.borrow().clone()?;
+        let app = app.borrow();
+        let pane = pane as PaneId;
+        let (_, at) = app.rects.iter().find(|(p, _)| *p == pane)?;
+        let p = app.session.panes.get(&pane)?;
+        let [x, y, w, h] = app
+            .views
+            .get(&pane)?
+            .draw
+            .node_rect(p.replica.tsp(), sf, id)?;
+        let origin = app.canvas.get_bounding_client_rect();
+        let pad = (PADDING * app.scale).round();
+        let s = app.scale;
+        Some(json!({
+            "x": origin.left() as f32 + (at.x + pad + x) / s,
+            "y": origin.top() as f32 + (at.y + pad + y) / s,
+            "w": w / s,
+            "h": h / s,
+        }))
+    });
+    rect.unwrap_or(serde_json::Value::Null).to_string()
 }
 
 /// The client's state as JSON, for tests and debugging (`window.aukDebug()` on the page): the

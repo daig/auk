@@ -522,6 +522,8 @@ struct WindowPlugin {
     name: String,
     vm: Vm,
     css: String,
+    /// The plugin's directory, which its sheets' `url()`s resolve against (§9.8 CSS).
+    dir: PathBuf,
 }
 
 /// Formatter slots.
@@ -1033,6 +1035,7 @@ impl WindowPlugins {
                             name: m.name.clone(),
                             vm,
                             css: package.css.clone(),
+                            dir: package.dir.clone(),
                         });
                     }
                 }
@@ -1055,6 +1058,7 @@ impl WindowPlugins {
                         name: m.name.clone(),
                         vm,
                         css: package.css.clone(),
+                        dir: package.dir.clone(),
                     });
                 }
                 Err(error) => {
@@ -1070,6 +1074,7 @@ impl WindowPlugins {
                                 name: m.name.clone(),
                                 vm,
                                 css: package.css.clone(),
+                                dir: package.dir.clone(),
                             });
                         }
                     }
@@ -1557,12 +1562,16 @@ impl WindowPlugins {
     /// then its `tern.css` sheets (`plugin:local:<id>:<name>`).
     pub fn sheets(&self) -> Vec<(String, String)> {
         let mut out = Vec::new();
+        // A plugin file's `url()` becomes a `data:` URL here, at install (§9.8 CSS).
+        let inline = |css: &str, p: &WindowPlugin| {
+            crate::css_url::inline_urls_logged(css, Some(&p.dir), &p.id)
+        };
         for p in &self.plugins {
             if !p.css.is_empty() {
-                out.push((format!("plugin:local:{}:styles", p.id), p.css.clone()));
+                out.push((format!("plugin:local:{}:styles", p.id), inline(&p.css, p)));
             }
             for (name, css) in &p.vm.window_registry().css {
-                out.push((format!("plugin:local:{}:{name}", p.id), css.clone()));
+                out.push((format!("plugin:local:{}:{name}", p.id), inline(css, p)));
             }
         }
         out

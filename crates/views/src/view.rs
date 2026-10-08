@@ -186,6 +186,10 @@ pub struct PaneView {
     /// What the last measure loop settled on: the document's generation and the inputs the
     /// measure pass reads besides it (viewport, view rect, cell size).
     pub(crate) measured: Option<(u64, crate::measure::MeasureInputs)>,
+    /// The CSS motion clock's pause (§7.13: motion pauses while the pane is hidden): time spent
+    /// hidden, and since when it is hidden.
+    pub(crate) paused_ms: f64,
+    pub(crate) hidden_at: Option<f64>,
 }
 
 impl PaneView {
@@ -205,6 +209,8 @@ impl PaneView {
         let toasts = crate::kinds::layout::ToastHost::new(&mut dom, container);
         // Load the grammars off the main thread before the first code block needs them.
         crate::highlight::warm();
+        // Reduce Motion reaches sheets (`prefers-reduced-motion`) and the CSS motion engine.
+        doc.set_media_preferences(settings.reduce_motion, false, false);
         PaneView {
             settings,
             written,
@@ -227,7 +233,15 @@ impl PaneView {
             view_rect: None,
             fit_viewport: (0.0, 0.0),
             measured: None,
+            paused_ms: 0.0,
+            hidden_at: None,
         }
+    }
+
+    /// The clock CSS transitions and animations run on: the view's clock less the time the pane
+    /// spent hidden, so they pause without resetting.
+    pub(crate) fn css_clock(&self, now: f64) -> f64 {
+        now - self.paused_ms - self.hidden_at.map_or(0.0, |at| (now - at).max(0.0))
     }
 
     /// The pane container element.
@@ -270,6 +284,8 @@ impl PaneView {
     /// [`TspPane::take_changes`]). `now` is the view clock in ms; ages anchor to it.
     pub fn sync(&mut self, doc: &mut Document, pane: &TspPane, changes: &Changes, now: f64) {
         self.last_now = now;
+        // Transitions the new frame starts begin now.
+        doc.set_time(self.css_clock(now));
         self.pass += 1;
         if changes.pane {
             let app = pane.app().map(str::to_owned);
@@ -672,6 +688,8 @@ impl PaneView {
                 }
             }
         }
+        // Later overlays open with their transition (§7.13); what the first draw shows doesn't.
+        cx.st.drawn = true;
     }
 
     /// Re-render some nodes of surface `i`, with their clocks and children.

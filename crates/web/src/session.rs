@@ -6,8 +6,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use auk_mirror::layout::{Node, Tab, Window};
 use auk_mirror::{
-    ClientFacts, ClientKind, ClientMsg, DaemonMsg, Frame, Hello, Message, PaneId, WireError,
-    frame::split_frame,
+    ClientFacts, ClientKind, ClientMsg, DaemonMsg, Effect, Frame, Hello, Message, PaneId,
+    WireError, frame::split_frame,
 };
 use auk_replica::{Item, Replica, Role};
 use auk_term::input::{KeyEvent, encode_key, encode_paste};
@@ -91,6 +91,14 @@ pub struct Session {
     /// The plugin catalog (§9.4): the web client runs no Lua and learns block types, lens claims
     /// and plugin styles from it (§10.3).
     pub catalog: serde_json::Value,
+    /// The Ready plugins' manifest styles from the catalog, as `(plugin id, css)` in id order
+    /// (§9.4, §10.3): the client installs them as plugin sheets in every pane's document.
+    pub styles: Vec<(String, String)>,
+    /// Bumped whenever [`Session::styles`] changes.
+    pub styles_serial: u64,
+    /// Effects the serving host asked this window to perform, oldest first
+    /// ([`Session::take_effects`]).
+    pub effects: Vec<Effect>,
     /// Protocol errors: items out of order, undecodable frames. A correct daemon causes none.
     pub errors: Vec<String>,
     /// Something visible changed since the last [`Session::take_dirty`].
@@ -98,7 +106,15 @@ pub struct Session {
     outbox: Vec<u8>,
     /// Panes whose primary status we asked for by focusing.
     focused: Option<PaneId>,
+    /// Lens views that arrived before their block (§9.6: replicas retry an early view for 5 s):
+    /// pane, block, view, arrival time.
+    early_views: Vec<(PaneId, u64, Option<serde_json::Value>, f64)>,
+    /// The clock, in seconds ([`Session::set_time`]).
+    now: f64,
 }
+
+/// How long an early lens view waits for its block (§9.6).
+pub const EARLY_VIEW_SECS: f64 = 5.0;
 
 impl Session {
     /// A session about to say hello with `facts`.
@@ -110,10 +126,15 @@ impl Session {
             panes: BTreeMap::new(),
             window: Window::default(),
             catalog: serde_json::Value::Null,
+            styles: Vec::new(),
+            styles_serial: 0,
+            effects: Vec::new(),
             errors: Vec::new(),
             dirty: true,
             outbox: Vec::new(),
             focused: None,
+            early_views: Vec::new(),
+            now: 0.0,
         };
         s.send(&ClientMsg::Hello(Hello::new(ClientKind::Web, facts)));
         s
@@ -142,6 +163,73 @@ impl Session {
 
     pub fn mark_dirty(&mut self) {
         self.dirty = true;
+    }
+
+    /// Sets the clock (seconds) that times early lens views, and drops those past their wait.
+    pub fn set_time(&mut self, now: f64) {
+        self.now = now;
+        self.retry_views(None);
+    }
+
+    /// Effects to perform, oldest first.
+    pub fn take_effects(&mut self) -> Vec<Effect> {
+        std::mem::take(&mut self.effects)
+    }
+
+    /// Lens views still waiting for their block.
+    pub fn early_views(&self) -> usize {
+        self.early_views.len()
+    }
+
+    /// Takes a new catalog: its Ready plugins' styles replace the installed ones (§9.4).
+    fn set_catalog(&mut self, catalog: serde_json::Value) {
+        let styles: Vec<(String, String)> = if catalog.is_null() {
+            Vec::new()
+        } else {
+            match serde_json::from_value::<auk_plugins::Catalog>(catalog.clone()) {
+                Ok(c) => c
+                    .styles()
+                    .map(|(id, css)| (id.to_owned(), css.to_owned()))
+                    .collect(),
+                Err(err) => {
+                    self.error(format!("bad catalog: {err}"));
+                    Vec::new()
+                }
+            }
+        };
+        if styles != self.styles {
+            self.styles = styles;
+            self.styles_serial += 1;
+        }
+        self.catalog = catalog;
+    }
+
+    /// Applies early lens views whose block has appeared (only `pane`'s, when given) and drops
+    /// those past their wait.
+    fn retry_views(&mut self, pane: Option<PaneId>) {
+        let now = self.now;
+        let panes = &mut self.panes;
+        self.early_views.retain(|(p, block, view, at)| {
+            if pane.is_none_or(|want| want == *p)
+                && let Some(state) = panes.get_mut(p)
+                && state.replica.set_lens_view(*block, view.clone())
+            {
+                return false;
+            }
+            now - *at < EARLY_VIEW_SECS
+        });
+    }
+
+    /// A view event from a pane's surface or command block (`lens:<block>`), sent as the
+    /// daemon's view-event message (§7.8, §9.6).
+    pub fn view_event(&mut self, pane: PaneId, sf: &str, event: serde_json::Value) {
+        if self.status == Status::Attached && self.panes.contains_key(&pane) {
+            self.send(&ClientMsg::ViewEvent {
+                pane,
+                sf: sf.to_owned(),
+                event,
+            });
+        }
     }
 
     /// One WebSocket message: exactly one frame.
@@ -185,7 +273,7 @@ impl Session {
                 catalog, client, ..
             } => {
                 self.client_id = Some(client);
-                self.catalog = catalog;
+                self.set_catalog(catalog);
                 self.status = Status::Attached;
                 self.send(&ClientMsg::Attach {
                     window_key: self.window_key.clone(),
@@ -222,6 +310,7 @@ impl Session {
                 };
                 p.keep_changes();
                 self.panes.insert(pane, p);
+                self.retry_views(Some(pane));
             }
             DaemonMsg::Output { pane, seq, bytes } => self.apply(pane, seq, Item::Output(&bytes)),
             DaemonMsg::Record { pane, seq, record } => self.apply(pane, seq, Item::Record(&record)),
@@ -232,7 +321,7 @@ impl Session {
                     self.window = window;
                 }
             }
-            DaemonMsg::Catalog { catalog } => self.catalog = catalog,
+            DaemonMsg::Catalog { catalog } => self.set_catalog(catalog),
             DaemonMsg::PaneExit { pane, status } => {
                 if let Some(p) = self.panes.get_mut(&pane) {
                     p.exit = Some(status);
@@ -254,7 +343,25 @@ impl Session {
                     p.keep_changes();
                 }
             }
-            DaemonMsg::LensView { .. } | DaemonMsg::Effect(_) | DaemonMsg::Presence { .. } => {}
+            DaemonMsg::LensView { pane, block, node } => {
+                // A view replaces the block's last one whole; `null` shows the raw output.
+                let Ok(block) = block.parse::<u64>() else {
+                    self.error(format!("pane {pane}: lens view for block `{block}`"));
+                    return;
+                };
+                let view = (!node.is_null()).then_some(node);
+                let shown = self
+                    .panes
+                    .get_mut(&pane)
+                    .is_some_and(|p| p.replica.set_lens_view(block, view.clone()));
+                if !shown {
+                    self.early_views
+                        .retain(|(p, b, ..)| (*p, *b) != (pane, block));
+                    self.early_views.push((pane, block, view, self.now));
+                }
+            }
+            DaemonMsg::Effect(effect) => self.effects.push(effect),
+            DaemonMsg::Presence { .. } => {}
         }
     }
 
@@ -268,6 +375,7 @@ impl Session {
             self.errors.push(format!("pane {pane}: {err}"));
         }
         p.keep_changes();
+        let waiting = self.early_views.iter().any(|(id, ..)| *id == pane);
         // Blobs a document names that this client lacks.
         let ask: Vec<String> = p
             .replica
@@ -278,6 +386,9 @@ impl Session {
             .collect();
         if !ask.is_empty() {
             self.send(&ClientMsg::Blobs { pane, ids: ask });
+        }
+        if waiting {
+            self.retry_views(Some(pane));
         }
     }
 
@@ -295,6 +406,39 @@ impl Session {
         let tabs = || self.window.sessions.iter().flat_map(|s| s.tabs.iter());
         pane.and_then(|p| tabs().find(|t| t.root.contains(p)))
             .or_else(|| tabs().next())
+    }
+
+    /// The tab bar: every tab of the window key's sessions, in order, the one holding `pane`
+    /// (else the first) active. A tab's title is its own, else its first pane's terminal title,
+    /// else the session's name.
+    pub fn tab_bar(&self, pane: Option<PaneId>) -> Vec<TabEntry> {
+        let active = self.tab(pane).map(|t| t.id);
+        self.window
+            .sessions
+            .iter()
+            .flat_map(|s| s.tabs.iter().map(move |t| (s, t)))
+            .map(|(s, t)| {
+                let panes = t.root.panes();
+                let first = panes.first().copied();
+                let title = t
+                    .title
+                    .clone()
+                    .filter(|t| !t.is_empty())
+                    .or_else(|| {
+                        first
+                            .and_then(|p| self.panes.get(&p))
+                            .map(|p| p.replica.terminal().title().to_owned())
+                            .filter(|t| !t.is_empty())
+                    })
+                    .unwrap_or_else(|| s.name.clone());
+                TabEntry {
+                    id: t.id,
+                    title,
+                    active: active == Some(t.id),
+                    pane: t.zoom.or(first),
+                }
+            })
+            .collect()
     }
 
     /// Sends input bytes to a pane's PTY.
@@ -387,6 +531,16 @@ impl Session {
     }
 }
 
+/// A tab as the tab bar shows it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TabEntry {
+    pub id: auk_mirror::layout::TabId,
+    pub title: String,
+    pub active: bool,
+    /// The pane a click on the tab shows and focuses.
+    pub pane: Option<PaneId>,
+}
+
 /// A rectangle in physical pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Rect {
@@ -466,7 +620,7 @@ mod tests {
     fn welcome() -> Vec<u8> {
         DaemonMsg::Welcome {
             versions: Versions::current(),
-            catalog: serde_json::json!({"plugins": []}),
+            catalog: serde_json::json!({"plugins": [], "problems": [], "jit": false}),
             sessions: Layout::default(),
             client: 7,
         }
@@ -570,6 +724,224 @@ mod tests {
         }
         s.input(1, b"x".to_vec());
         assert!(s.take_outbox().len() == 1, "only the hello");
+    }
+
+    fn attached() -> Session {
+        let mut s = Session::new("main", ClientFacts::default());
+        s.on_message(&welcome());
+        s.take_outbox();
+        s
+    }
+
+    fn plugin(id: &str, css: &str, status: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "id": id, "name": id, "version": "1", "description": "", "icon": "plug",
+            "css": css, "blocks": [], "lenses": [], "host": true, "window": false,
+            "status": status,
+        })
+    }
+
+    #[test]
+    fn the_catalog_brings_the_ready_plugins_styles() {
+        let mut s = Session::new("main", ClientFacts::default());
+        let catalog = serde_json::json!({"plugins": [
+            plugin("a", ".a{}", serde_json::json!("ready")),
+            plugin("b", ".b{}", serde_json::json!("disabled")),
+            plugin("c", ".c{}", serde_json::json!({"failed": "boom"})),
+            plugin("d", "", serde_json::json!("ready")),
+        ], "problems": [], "jit": false});
+        s.on_message(
+            &DaemonMsg::Welcome {
+                versions: Versions::current(),
+                catalog: catalog.clone(),
+                sessions: Layout::default(),
+                client: 1,
+            }
+            .to_bytes(),
+        );
+        assert_eq!(s.styles, vec![("a".to_owned(), ".a{}".to_owned())]);
+        let serial = s.styles_serial;
+        // The same styles again change nothing; a reload's new catalog replaces them.
+        s.on_message(&DaemonMsg::Catalog { catalog }.to_bytes());
+        assert_eq!(s.styles_serial, serial);
+        let reloaded = serde_json::json!({"plugins": [
+            plugin("a", ".a{color:red}", serde_json::json!("ready")),
+            plugin("b", ".b{}", serde_json::json!("ready")),
+        ], "problems": [], "jit": false});
+        s.on_message(&DaemonMsg::Catalog { catalog: reloaded }.to_bytes());
+        assert!(s.styles_serial > serial);
+        assert_eq!(
+            s.styles,
+            vec![
+                ("a".to_owned(), ".a{color:red}".to_owned()),
+                ("b".to_owned(), ".b{}".to_owned())
+            ]
+        );
+        assert!(s.errors.is_empty(), "{:?}", s.errors);
+    }
+
+    #[test]
+    fn effects_queue_for_the_page_in_order() {
+        let mut s = attached();
+        let toast = Effect::Toast {
+            level: "info".into(),
+            text: "Saved".into(),
+            sub: Some("plan.tf".into()),
+        };
+        let copy = Effect::Copy {
+            text: "aws_instance.old".into(),
+        };
+        s.on_message(&DaemonMsg::Effect(toast.clone()).to_bytes());
+        s.on_message(&DaemonMsg::Effect(copy.clone()).to_bytes());
+        assert_eq!(s.take_effects(), vec![toast, copy]);
+        assert!(s.take_effects().is_empty());
+    }
+
+    /// A replica of a pane that ran a command `tf` claims, with the claim catalog in its stream.
+    fn lensed_daemon() -> Replica {
+        use auk_plugins::catalog::{LensRule, PluginEntry};
+        let catalog = auk_plugins::Catalog {
+            plugins: vec![PluginEntry {
+                id: "tf".into(),
+                name: "TF".into(),
+                version: "1".into(),
+                description: String::new(),
+                icon: "stack".into(),
+                css: String::new(),
+                blocks: Vec::new(),
+                lenses: vec![LensRule {
+                    id: "plan".into(),
+                    patterns: vec!["tf".into()],
+                }],
+                host: true,
+                window: false,
+                status: auk_plugins::Status::Ready,
+            }],
+            problems: Vec::new(),
+            jit: false,
+        };
+        let mut daemon = Replica::new(40, 10, Settings::default(), Role::Authoritative);
+        let record = auk_replica::Record::Catalog {
+            catalog: auk_replica::claim_catalog(&catalog),
+        };
+        daemon.push(Item::Record(&record));
+        daemon
+    }
+
+    #[test]
+    fn lens_views_reach_the_replica_and_early_ones_wait_up_to_5_s() {
+        let mut s = attached();
+        let mut daemon = lensed_daemon();
+        s.on_message(
+            &DaemonMsg::Snapshot {
+                pane: 2,
+                snapshot: daemon.snapshot(),
+            }
+            .to_bytes(),
+        );
+        let view = serde_json::json!({"k": "text", "p": {"text": "1 to add"}});
+        let lens_view = |node: serde_json::Value| {
+            DaemonMsg::LensView {
+                pane: 2,
+                block: "0".into(),
+                node,
+            }
+            .to_bytes()
+        };
+        // The view outruns the command's output: it waits for the block.
+        s.set_time(100.0);
+        s.on_message(&lens_view(view.clone()));
+        assert_eq!(s.early_views(), 1);
+        for bytes in [
+            &b"$ tf\r\n\x1b]133;C;cmdline_url=tf\x07"[..],
+            b"out\r\n\x1b]133;D;0\x07",
+        ] {
+            let (seq, _) = daemon.push(Item::Output(bytes));
+            s.on_message(
+                &DaemonMsg::Output {
+                    pane: 2,
+                    seq,
+                    bytes: bytes.to_vec(),
+                }
+                .to_bytes(),
+            );
+        }
+        assert!(s.errors.is_empty(), "{:?}", s.errors);
+        assert_eq!(s.early_views(), 0);
+        let blocks = s.panes[&2].replica.lens_blocks();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].view.as_ref(), Some(&view));
+        // `null` shows the raw output again.
+        s.on_message(&lens_view(serde_json::Value::Null));
+        assert_eq!(s.panes[&2].replica.lens_blocks()[0].view, None);
+
+        // A view for a block that never comes is dropped after 5 s.
+        s.on_message(
+            &DaemonMsg::LensView {
+                pane: 2,
+                block: "9".into(),
+                node: view,
+            }
+            .to_bytes(),
+        );
+        s.set_time(104.0);
+        assert_eq!(s.early_views(), 1);
+        s.set_time(105.5);
+        assert_eq!(s.early_views(), 0);
+    }
+
+    #[test]
+    fn view_events_go_to_the_daemon_for_known_panes() {
+        let mut s = attached();
+        let daemon = Replica::new(20, 5, Settings::default(), Role::Authoritative);
+        s.on_message(
+            &DaemonMsg::Snapshot {
+                pane: 4,
+                snapshot: daemon.snapshot(),
+            }
+            .to_bytes(),
+        );
+        let ev = serde_json::json!({"ev": "action", "id": "go", "act": "deploy"});
+        s.view_event(4, "lens:0", ev.clone());
+        s.view_event(5, "s1", ev.clone());
+        let out: Vec<ClientMsg> = decode_all(&s.take_outbox().concat()).unwrap();
+        assert_eq!(
+            out,
+            vec![ClientMsg::ViewEvent {
+                pane: 4,
+                sf: "lens:0".into(),
+                event: ev
+            }]
+        );
+    }
+
+    #[test]
+    fn the_tab_bar_lists_every_tab_and_marks_the_shown_one() {
+        let mut s = attached();
+        let mut l = Layout::default();
+        let session = l.new_session("main", None, 1);
+        l.new_tab(session, 2).unwrap();
+        l.rename_tab(
+            l.window("main").unwrap().sessions[0].tabs[1].id,
+            Some("logs"),
+        )
+        .unwrap();
+        s.on_message(
+            &DaemonMsg::Layout {
+                window_key: "main".into(),
+                window: l.window("main").unwrap().clone(),
+            }
+            .to_bytes(),
+        );
+        let bar = s.tab_bar(Some(2));
+        assert_eq!(bar.len(), 2);
+        assert_eq!((bar[0].active, bar[0].pane), (false, Some(1)));
+        assert_eq!(bar[0].title, l.window("main").unwrap().sessions[0].name);
+        assert_eq!(
+            (bar[1].title.as_str(), bar[1].active, bar[1].pane),
+            ("logs", true, Some(2))
+        );
+        assert!(s.tab_bar(None)[0].active, "the first tab by default");
     }
 
     #[test]

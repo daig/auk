@@ -7,7 +7,26 @@
 <style>
   html, body { margin: 0; height: 100%; background: #16181a; overflow: hidden; }
   @media (prefers-color-scheme: light) { html, body { background: #fbfbfa; } }
-  #screen { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+  /* A minimal tab bar: one button per tab of the attached window key. */
+  #tabs { position: fixed; left: 0; right: 0; top: 0; height: 28px; display: flex; gap: 2px;
+          padding: 0 6px; align-items: flex-end; box-sizing: border-box; overflow: hidden;
+          font: 12px -apple-system, system-ui, sans-serif; background: #101213; }
+  #tabs:empty { display: none; }
+  #tabs .tab { border: 0; border-radius: 6px 6px 0 0; padding: 4px 12px; max-width: 16em;
+               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: default;
+               background: transparent; color: #8b9096; font: inherit; }
+  #tabs .tab.active { background: #16181a; color: #e6e8ea; }
+  #screen { position: fixed; left: 0; right: 0; bottom: 0; top: 0; width: 100vw; height: 100vh;
+            display: block; }
+  #tabs:not(:empty) ~ #screen { top: 28px; height: calc(100vh - 28px); }
+  #toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); max-width: 36em;
+           padding: 8px 14px; border-radius: 8px; background: #2a2d30; color: #e6e8ea;
+           font: 13px -apple-system, system-ui, sans-serif; box-shadow: 0 4px 16px #0006;
+           opacity: 0; pointer-events: none; transition: opacity .2s; }
+  #toast.shown { opacity: 1; }
+  #toast[data-level="error"] { background: #5a1d1d; }
+  #toast .sub { font-family: ui-monospace, monospace; font-size: 11px; opacity: .75;
+                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* Keyboard and IME input land here; it follows the cursor so IME popups sit next to it. */
   #input { position: fixed; left: 0; top: 0; width: 1px; height: 1em; opacity: 0; border: 0;
            padding: 0; resize: none; outline: none; overflow: hidden; caret-color: transparent; }
@@ -15,14 +34,21 @@
             font: 14px -apple-system, system-ui, sans-serif; color: #c5c8c6; text-align: center;
             white-space: pre-wrap; }
   #status:empty { display: none; }
-  @media (prefers-color-scheme: light) { #status { color: #1f2328; } }
+  @media (prefers-color-scheme: light) {
+    #status { color: #1f2328; }
+    #tabs { background: #ecebe8; }
+    #tabs .tab { color: #6a6f75; }
+    #tabs .tab.active { background: #fbfbfa; color: #1f2328; }
+  }
 </style>
 </head>
 <body>
+<nav id="tabs" role="tablist" aria-label="Tabs"></nav>
 <canvas id="screen"></canvas>
 <textarea id="input" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"
           aria-label="Terminal input"></textarea>
 <div id="status">Loading…</div>
+<div id="toast" role="status" aria-live="polite"></div>
 <script type="module" src="/boot.js"></script>
 </body>
 </html>
