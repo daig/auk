@@ -315,6 +315,79 @@ fn added_kinds(records: &[Value]) -> Vec<(String, String, String)> {
     out
 }
 
+/// CSS effects the engine accepts but doesn't draw (§8.4 "Effects": filters, backdrop-filter,
+/// masks, 3D transforms, and box-shadow among the other accepted-unused properties of
+/// `auk-ui`'s `properties.rs`).
+const UNDRAWN: [&str; 14] = [
+    "filter",
+    "backdrop-filter",
+    "box-shadow",
+    "clip-path",
+    "mix-blend-mode",
+    "isolation",
+    "perspective",
+    "perspective-origin",
+    "translate",
+    "rotate",
+    "scale",
+    "transform-style",
+    "backface-visibility",
+    "background-blend-mode",
+];
+
+/// The declarations in `css` that name an effect the engine doesn't draw: an [`UNDRAWN`]
+/// property, any `mask*`, or a `transform` with a 3D function.
+fn undrawn_effects(css: &str) -> Vec<String> {
+    css.split(['{', '}', ';'])
+        .filter_map(|decl| {
+            let (name, value) = decl.split_once(':')?;
+            let name = name.trim().to_ascii_lowercase();
+            let value = value.to_ascii_lowercase();
+            let undrawn = UNDRAWN.contains(&name.as_str())
+                || name.starts_with("mask")
+                || name.starts_with("-webkit-mask")
+                || (name == "transform" && (value.contains("3d(") || value.contains("perspective(")));
+            undrawn.then(|| decl.trim().to_owned())
+        })
+        .collect()
+}
+
+/// Every piece of CSS omp's records carry: the stylesheets it installs (`s`) and the inline
+/// `style` of the `el` nodes it adds or sets.
+fn program_css(records: &[Value]) -> Vec<String> {
+    fn el_styles(n: &Value, out: &mut Vec<String>) {
+        if n["k"] == "el"
+            && let Some(style) = n["p"]["style"].as_str()
+        {
+            out.push(style.to_owned());
+        }
+        for c in n["c"].as_array().into_iter().flatten() {
+            el_styles(c, out);
+        }
+    }
+    let mut out = Vec::new();
+    for r in records.iter().filter(|r| r["dir"] == "out") {
+        match r["verb"].as_str() {
+            Some("s") => out.push(r["body"]["css"].as_str().unwrap_or_default().to_owned()),
+            Some("f") => {
+                for op in r["body"]["ops"].as_array().into_iter().flatten() {
+                    match op[0].as_str() {
+                        Some("add") => el_styles(&op[4], &mut out),
+                        Some("set") => {
+                            if let Some(style) = op[2]["style"].as_str() {
+                                out.push(style.to_owned());
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 /// What omp's record says about T2 kinds under the hello it got: the hello's kinds, the
 /// unadvertised kinds omp sent anyway, and every error the daemon answered, each checked to be
 /// explained by an unadvertised kind (directly, or through an op on a node whose `add` failed).
@@ -630,6 +703,51 @@ fn ac09_replay_draws_transcript_tool_cards_and_diffs_natively() {
 /// text in the composer. omp's settings and model picker (T2 `prefs` and `picker`) open as screen
 /// surfaces built from T1 kinds. ⌃D quits omp, and the shell's next prompt discards the inline
 /// surface.
+/// §8.4: the effects the engine accepts but doesn't draw (filters, backdrop-filter, masks, 3D
+/// transforms, box-shadow) are only a gap if omp sends them. It doesn't: neither recording holds a
+/// stylesheet or an `el` style that names one, and after the replay through the daemon, the
+/// window's surfaces hold no program sheet that does. (The live T2 test checks omp's own record.)
+#[test]
+fn omp_sends_none_of_the_css_effects_the_engine_leaves_undrawn() {
+    assert_eq!(
+        undrawn_effects(".a { box-shadow: 0 1px red; color: red } .b{transform: rotate3d(1,0,0,9deg)} .c { mask-image: none; transform: rotate(3deg) }"),
+        ["box-shadow: 0 1px red", "transform: rotate3d(1,0,0,9deg)", "mask-image: none"],
+        "the check itself"
+    );
+    for name in ["omp-session.jsonl", "omp-session-own.jsonl"] {
+        let path = auk_conformance::fixtures_dir().join(name);
+        let records: Vec<Value> = std::fs::read_to_string(&path)
+            .expect("read the recording")
+            .lines()
+            .map(|l| serde_json::from_str(l).expect("a record"))
+            .collect();
+        let css = program_css(&records);
+        let found: Vec<String> = css.iter().flat_map(|c| undrawn_effects(c)).collect();
+        assert!(found.is_empty(), "{name}: omp sends undrawn effects: {found:?}");
+    }
+    omp();
+    let env = TestEnv::new(env!("CARGO_BIN_EXE_auk"), "omp-effects");
+    env.start_daemon();
+    let pane = env.new_pane(&[]);
+    env.wait(pane, "prompt");
+    let mut window = NativeWindow::attach(&env, "main", SIZE);
+    let path = auk_conformance::fixtures_dir().join("omp-session.jsonl");
+    let played = env.daemon(&format!(
+        "surface-play --pane {pane} {}",
+        quote(&path.to_string_lossy())
+    ));
+    assert!(played["frames"].as_u64().is_some_and(|f| f > 0), "{played}");
+    window.converge(&env, pane);
+    let tsp = window.tsp(pane);
+    assert!(!tsp.surfaces().is_empty());
+    for s in tsp.surfaces() {
+        for (name, css) in s.sheets().iter() {
+            let found = undrawn_effects(css);
+            assert!(found.is_empty(), "sheet {name} of {}: {found:?}", s.id());
+        }
+    }
+}
+
 #[test]
 fn ac09_live_composer_native_editing_adopt_and_discard() {
     let mut omp = LiveOmp::start("omp-composer", true);
@@ -1050,6 +1168,9 @@ fn omp_t2_fallback_under_t0_t1_hello() {
         "omp got errors: {:?}",
         report.errors
     );
+    // §8.4: none of the CSS effects the engine leaves undrawn.
+    let undrawn: Vec<String> = program_css(&records).iter().flat_map(|c| undrawn_effects(c)).collect();
+    assert!(undrawn.is_empty(), "omp sends undrawn effects: {undrawn:?}");
     let logos: Vec<String> = added_kinds(&records)
         .into_iter()
         .filter(|(_, _, kind)| kind == "image")

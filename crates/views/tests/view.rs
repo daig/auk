@@ -391,6 +391,220 @@ fn reduce_motion_gives_still_equivalents() {
     assert_eq!(h.text(h.el("s1", "el")), "0.7s");
 }
 
+/// §7.13 Reduce Motion: no shimmer (the `shimmer` kind and span `fx` hold still, in the text's
+/// own color), no pulse, and a `meter` shows its value at once.
+#[test]
+fn reduce_motion_means_no_shimmer_no_pulse_and_meters_at_their_value() {
+    let s = ViewSettings {
+        reduce_motion: true,
+        ..Default::default()
+    };
+    let mut h = Harness::with(auk_tsp::Config::default(), s);
+    h.hello(&[]);
+    h.surface(
+        "s1",
+        "inline",
+        json!([
+            {"id": "sh", "k": "shimmer", "p": {"text": "Working"}},
+            {"id": "tx", "k": "text", "p": {"spans": [
+                {"t": "Thinking", "fx": "shimmer"},
+                {"t": "live", "fx": "pulse"}
+            ]}},
+            {"id": "mt", "k": "meter", "p": {"value": 0.4}}
+        ]),
+    );
+    h.frame();
+    let t0 = h.now;
+    let kind_chars = h.find_class(h.el("s1", "sh"), "sf-sh");
+    let fx_chars = h.find_class(h.el("s1", "tx"), "sf-sh");
+    let pulse = h.find_class(h.el("s1", "tx"), "sf-fx-pulse")[0];
+    for step in 0..8 {
+        let next = h.view.tick(&mut h.doc, &h.pane, t0 + 300.0 * f64::from(step));
+        assert!(next.is_none(), "nothing asks for frames");
+        assert!(levels(&h, &kind_chars).iter().all(|&l| l == 0));
+        assert!(levels(&h, &fx_chars).iter().all(|&l| l == 0));
+        assert_eq!(h.view.written().style(pulse), None, "no pulse");
+    }
+    // Still characters draw in the text's color, not the shimmer's low tone.
+    h.frame();
+    let color = |el| h.doc.computed_style(el).unwrap().color;
+    let sh = h.el("s1", "sh");
+    assert!(kind_chars.iter().all(|&c| color(c) == color(sh)));
+    let fill = h.find_class(h.el("s1", "mt"), "fill");
+    let fill = fill.first().copied().unwrap_or_else(|| h.find_class(h.el("s1", "mt"), "sf-mt-fill")[0]);
+    assert_eq!(h.view.written().style(fill), Some("width: 40%"));
+}
+
+/// §8.4: the system's Reduce Motion, Reduce Transparency and Increase Contrast reach program
+/// sheets as `prefers-reduced-motion`, `prefers-reduced-transparency` and `prefers-contrast`, and
+/// a settings change re-matches them.
+#[test]
+fn the_media_preferences_reach_program_sheets() {
+    let mut h = Harness::new();
+    h.hello(&[]);
+    h.surface(
+        "s1",
+        "inline",
+        json!([
+            {"id": "m", "k": "el", "p": {"tag": "div", "class": "m"}},
+            {"id": "t", "k": "el", "p": {"tag": "div", "class": "t"}},
+            {"id": "c", "k": "el", "p": {"tag": "div", "class": "c"}}
+        ]),
+    );
+    h.apc(
+        "s",
+        r#"{"sf":"s1","name":"main","css":".m, .t, .c { width: 10px } @media (prefers-reduced-motion: reduce) { .m { width: 20px } } @media (prefers-reduced-transparency: reduce) { .t { width: 30px } } @media (prefers-contrast: more) { .c { width: 40px } }"}"#,
+    );
+    h.frame();
+    assert!(h.errors().is_empty(), "{:?}", h.errors());
+    let widths = |h: &Harness| ["m", "t", "c"].map(|id| h.doc.border_box(h.el("s1", id)).unwrap().w);
+    assert_eq!(widths(&h), [10.0, 10.0, 10.0]);
+    for (s, want) in [
+        ((true, false, false), [20.0, 10.0, 10.0]),
+        ((false, true, false), [10.0, 30.0, 10.0]),
+        ((false, false, true), [10.0, 10.0, 40.0]),
+        ((true, true, true), [20.0, 30.0, 40.0]),
+        ((false, false, false), [10.0, 10.0, 10.0]),
+    ] {
+        let settings = ViewSettings {
+            reduce_motion: s.0,
+            reduce_transparency: s.1,
+            more_contrast: s.2,
+            ..h.view.settings().clone()
+        };
+        h.view.set_settings(&mut h.doc, &h.pane, settings);
+        h.frame();
+        assert_eq!(widths(&h), want, "{s:?}");
+    }
+}
+
+/// The shimmer levels of `chars` (`sf-sh`, `sf-sh mid`, `sf-sh hi`) as 0, 1, 2.
+fn levels(h: &Harness, chars: &[auk_ui::NodeId]) -> Vec<u8> {
+    chars
+        .iter()
+        .map(|&c| {
+            let class = h.class(c);
+            let has = |x: &str| class.split(' ').any(|t| t == x);
+            if has("hi") {
+                2
+            } else if has("mid") {
+                1
+            } else {
+                0
+            }
+        })
+        .collect()
+}
+
+/// §7.13: the `shimmer` kind sweeps on the view's clock (2.25 s, staggered per character), and
+/// span `fx` (shimmer and pulse) inside any spans move with it.
+#[test]
+fn shimmer_and_span_fx_move_on_the_view_clock() {
+    let mut h = Harness::new();
+    h.hello(&[]);
+    h.surface(
+        "s1",
+        "inline",
+        json!([
+            {"id": "sh", "k": "shimmer", "p": {"text": "Working hard"}},
+            {"id": "tx", "k": "text", "p": {"spans": [
+                {"t": "Thinking", "fx": "shimmer"},
+                {"t": " · "},
+                {"t": "live", "fx": "pulse"}
+            ]}}
+        ]),
+    );
+    h.frame();
+    let t0 = h.now;
+    let kind_chars = h.find_class(h.el("s1", "sh"), "sf-sh");
+    assert_eq!(kind_chars.len(), "Working hard".chars().count());
+    let fx = h.find_class(h.el("s1", "tx"), "sf-fx-shimmer");
+    assert_eq!(fx.len(), 1);
+    let fx_chars = h.find_class(fx[0], "sf-sh");
+    assert_eq!(fx_chars.len(), "Thinking".chars().count());
+    let pulse = h.find_class(h.el("s1", "tx"), "sf-fx-pulse")[0];
+    let opacity = |h: &Harness| h.view.written().style(pulse).map(str::to_owned);
+
+    let mut kind_seen = Vec::new();
+    let mut fx_seen = Vec::new();
+    let mut pulse_seen = Vec::new();
+    for step in 0..12 {
+        let next = h.view.tick(&mut h.doc, &h.pane, t0 + 200.0 * f64::from(step));
+        assert!(next.is_some(), "shimmer and fx keep asking for frames");
+        kind_seen.push(levels(&h, &kind_chars));
+        fx_seen.push(levels(&h, &fx_chars));
+        pulse_seen.push(opacity(&h));
+    }
+    // The sweep moves: the levels change over time, and the highlight reaches every level.
+    for seen in [&kind_seen, &fx_seen] {
+        assert!(seen.windows(2).any(|w| w[0] != w[1]), "{seen:?}");
+        assert!(seen.iter().flatten().any(|&l| l == 2), "{seen:?}");
+        assert!(seen.iter().flatten().any(|&l| l == 0), "{seen:?}");
+    }
+    // The staggered characters aren't all at one level at once.
+    assert!(kind_seen.iter().any(|l| l.iter().any(|&x| x != l[0])), "{kind_seen:?}");
+    // The pulse's opacity runs 1 → .45 → 1 over 1.6 s.
+    let ops: Vec<f64> = pulse_seen
+        .iter()
+        .map(|o| {
+            o.as_deref()
+                .and_then(|s| s.strip_prefix("opacity: "))
+                .unwrap()
+                .parse()
+                .unwrap()
+        })
+        .collect();
+    assert!(ops.iter().any(|&o| o < 0.6) && ops.iter().any(|&o| o > 0.9), "{ops:?}");
+    // The clock is the view's: the same time gives the same levels.
+    h.view.tick(&mut h.doc, &h.pane, t0 + 400.0);
+    assert_eq!(levels(&h, &kind_chars), kind_seen[2]);
+}
+
+/// §7.13: a `meter` grows from 0 on first show (0.6 s) and later values transition (0.4 s), on
+/// the view's clock.
+#[test]
+fn meter_values_grow_and_transition_on_the_view_clock() {
+    let mut h = Harness::new();
+    h.hello(&[]);
+    h.surface(
+        "s1",
+        "inline",
+        json!([{"id": "mt", "k": "meter", "p": {"value": 0.5}}]),
+    );
+    h.frame();
+    let t0 = h.now;
+    let mt = h.el("s1", "mt");
+    let fill = |h: &Harness| {
+        let fills: Vec<_> = h
+            .find_class(mt, "fill")
+            .into_iter()
+            .chain(h.find_class(mt, "sf-mt-fill"))
+            .collect();
+        let style = h.view.written().style(fills[0]).unwrap_or("").to_owned();
+        style
+            .split(';')
+            .find_map(|d| d.trim().strip_prefix("width: "))
+            .and_then(|w| w.trim_end_matches('%').parse::<f64>().ok())
+            .unwrap_or_else(|| panic!("a width in {style:?}"))
+    };
+    assert_eq!(fill(&h), 0.0, "the first show starts at 0");
+    assert!(h.view.tick(&mut h.doc, &h.pane, t0 + 200.0).is_some());
+    let mid = fill(&h);
+    assert!(mid > 0.0 && mid < 50.0, "{mid}");
+    h.view.tick(&mut h.doc, &h.pane, t0 + 700.0);
+    assert_eq!(fill(&h), 50.0);
+    // Settled: no more frames.
+    assert!(h.view.tick(&mut h.doc, &h.pane, t0 + 720.0).is_none());
+    // A new value transitions from where it was.
+    h.now = t0 + 1000.0;
+    h.frame_ops("s1", 2, json!([["set", "mt", {"value": 0.9}]]));
+    h.view.tick(&mut h.doc, &h.pane, h.now + 150.0);
+    let mid = fill(&h);
+    assert!(mid > 50.0 && mid < 90.0, "{mid}");
+    h.view.tick(&mut h.doc, &h.pane, h.now + 450.0);
+    assert_eq!(fill(&h), 90.0);
+}
+
 #[test]
 fn hidden_panes_ask_for_no_frames() {
     let mut h = Harness::new();

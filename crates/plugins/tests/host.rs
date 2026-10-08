@@ -1135,3 +1135,200 @@ fn after_the_block_ends_render_save_exit_frame_and_blob_are_ignored() {
         .expect("the copy");
     assert_eq!(copied.len(), 64, "blob still returns its id: {copied}");
 }
+
+// ---------------------------------------------------------------------------------------------
+// Lens state limits (§9.6 "State"): the worker keeps 256 captures per plugin, the host 4096
+// lens owners.
+
+/// A lens whose `open` numbers the captures it opened, so a view tells a kept capture (its old
+/// number) from a rehydrated one (a new number).
+fn numbered_lens(root: &common::Root) {
+    root.package(
+        "lim",
+        &[
+            (
+                "plugin.toml",
+                "schema = 1\nid = \"lim\"\nname = \"Lim\"\nversion = \"1\"\nhost = \"host.luau\"\n[[lenses]]\nid = \"v\"\nmatch = [\"run *\"]\n",
+            ),
+            (
+                "host.luau",
+                r#"local opened = 0
+                tern.lens.define("v", {
+                    open = function(run) opened += 1; return { n = opened, picked = "-", done = false } end,
+                    line = function(s, l) end,
+                    finish = function(s) s.done = true end,
+                    view = function(s) return tern.ui.text("n" .. s.n .. " " .. s.picked .. (s.done and " done" or "")) end,
+                    event = function(s, ev) s.picked = ev.act end,
+                })"#,
+            ),
+        ],
+    );
+}
+
+fn lens_view_text(o: &HostOutput, of: u64) -> Option<String> {
+    match o {
+        HostOutput::LensView { block, view: Some(v), .. } if *block == of => {
+            v["p"]["spans"][0]["t"].as_str().map(str::to_owned)
+        }
+        _ => None,
+    }
+}
+
+fn record(line: &str, status: Option<i32>) -> auk_plugins::LensRecord {
+    auk_plugins::LensRecord {
+        line: line.into(),
+        typed: line.into(),
+        cwd: None,
+        raw: Vec::new(),
+        cols: 80,
+        status,
+    }
+}
+
+fn pick(act: &str) -> serde_json::Map<String, serde_json::Value> {
+    serde_json::json!({"ev": "action", "act": act}).as_object().cloned().expect("an object")
+}
+
+#[test]
+fn the_worker_keeps_256_captures_dropping_finished_ones_first_then_rehydrates() {
+    assert_eq!(auk_plugins::MAX_CAPTURES, 256);
+    let root = common::Root::new();
+    numbered_lens(&root);
+    let mut host = root.host(None);
+    let pre = auk_plugins::Preconditions { shell_integration: true, lenses_on: true, main_screen: true, surface_open: false };
+    let line = |b: u64| format!("run {b}");
+    // Block 1 keeps running; blocks 2 to 257 finish: one capture too many.
+    for b in 1..=257u64 {
+        let claim = host.catalog().claim(&line(b), pre).expect("claim");
+        host.lens_open(b, 1, &claim, claim.run(&line(b), &line(b), None));
+        if b > 1 {
+            host.lens_finish(b, 0);
+        }
+    }
+    let mut seen = Vec::new();
+    common::wait_for(&host, Duration::from_secs(20), &mut seen, |o| lens_view_text(o, 257));
+    // The least recently used finished capture (block 2) went: an event rebuilds it through
+    // `open`, `line` and `finish` (a new number), and it handles the event.
+    host.lens_event(2, 1, pick("a"), record(&line(2), Some(0)));
+    let text = common::wait_for(&host, Duration::from_secs(5), &mut seen, |o| lens_view_text(o, 2));
+    assert_eq!(text, "n258 a done");
+    // The running capture stayed, though it is the oldest.
+    host.lens_event(1, 1, pick("b"), record(&line(1), None));
+    let text = common::wait_for(&host, Duration::from_secs(5), &mut seen, |o| lens_view_text(o, 1));
+    assert_eq!(text, "n1 b");
+    // Rebuilding block 2 took a slot, so the next least recently used finished one (block 3)
+    // went; block 4 is still there.
+    host.lens_event(4, 1, pick("c"), record(&line(4), Some(0)));
+    let text = common::wait_for(&host, Duration::from_secs(5), &mut seen, |o| lens_view_text(o, 4));
+    assert_eq!(text, "n4 c done");
+    host.lens_event(3, 1, pick("d"), record(&line(3), Some(0)));
+    let text = common::wait_for(&host, Duration::from_secs(5), &mut seen, |o| lens_view_text(o, 3));
+    assert_eq!(text, "n259 d done");
+}
+
+#[test]
+fn the_host_remembers_4096_lens_owners_and_forgets_the_oldest() {
+    assert_eq!(auk_plugins::LENS_OWNERS, 4096);
+    let root = common::Root::new();
+    numbered_lens(&root);
+    let mut host = root.host(None);
+    let pre = auk_plugins::Preconditions { shell_integration: true, lenses_on: true, main_screen: true, surface_open: false };
+    let claim = host.catalog().claim("run x", pre).expect("claim");
+    let open = |host: &mut PluginHost, b: u64, finish: bool| {
+        host.lens_open(b, 1, &claim, claim.run("run x", "run x", None));
+        if finish {
+            host.lens_finish(b, 0);
+        }
+    };
+    // 4096 blocks: the first, still running, is remembered, and its finish reaches its capture.
+    open(&mut host, 1, false);
+    for b in 2..=4096 {
+        open(&mut host, b, true);
+    }
+    host.lens_finish(1, 0);
+    let mut seen = Vec::new();
+    let text = common::wait_for(&host, Duration::from_secs(30), &mut seen, |o| {
+        lens_view_text(o, 1).filter(|t| t.ends_with("done"))
+    });
+    assert_eq!(text, "n1 - done");
+    // Block 4097 runs; 4096 more blocks push it out of the owners the host remembers. Its
+    // capture is still on the worker (running captures are kept), but the host no longer knows
+    // where its lines and finish go.
+    open(&mut host, 4097, false);
+    for b in 4098..=8193 {
+        open(&mut host, b, true);
+    }
+    common::wait_for(&host, Duration::from_secs(30), &mut seen, |o| lens_view_text(o, 8193));
+    host.lens_finish(4097, 0);
+    let late = common::drain(&host, Duration::from_millis(800));
+    assert!(
+        !late.iter().any(|o| lens_view_text(o, 4097).is_some()),
+        "a forgotten block's finish reached its capture: {late:?}"
+    );
+    // An event still finds the capture by the current claim: it was never finished.
+    host.lens_event(4097, 1, pick("e"), record("run x", None));
+    let text = common::wait_for(&host, Duration::from_secs(5), &mut seen, |o| lens_view_text(o, 4097));
+    assert_eq!(text, "n4097 e");
+}
+
+/// §9.2 "No re-entrancy": work requested through `cx` applies after the handler returns (nothing
+/// a handler asks for is out before it ends), and host callbacks (timers, awaitables) get no `cx`.
+#[test]
+fn host_cx_work_applies_after_the_handler_returns_and_host_callbacks_get_no_cx() {
+    let p = Plugins::new();
+    p.add(
+        "later",
+        "",
+        r##"
+        timer_args, next_args = -1, -1
+        tern.on("command_started", function(ev, cx)
+            cx:copy("first")
+            local t = os.clock()
+            while os.clock() - t < 0.4 do end
+            cx:copy("second")
+            tern.timer(1, function(...) timer_args = select("#", ...) end)
+            tern.sleep(1):next(function(...)
+                local n, has_cx = select("#", ...), false
+                for i = 1, n do
+                    local a = select(i, ...)
+                    if type(a) == "table" and a.copy ~= nil then has_cx = true end
+                end
+                next_args = has_cx and 99 or n
+            end)
+        end)
+        tern.on("command_finished", function(ev, cx)
+            cx:copy(string.format("timer %d next %d", timer_args, next_args))
+        end)
+        "##,
+    );
+    let host = p.start();
+    let sent = Instant::now();
+    host.dispatch(HostEvent::CommandStarted {
+        pane: 3,
+        line: "make".into(),
+        cwd: None,
+    });
+    let wait = Duration::from_secs(3);
+    let first = next(&host, wait);
+    let at = sent.elapsed();
+    assert_eq!(first.effect, Effect::Copy("first".into()));
+    assert!(
+        at >= Duration::from_millis(350),
+        "the first copy came out {at:?} after the dispatch, while its handler still ran"
+    );
+    assert_eq!(next(&host, wait).effect, Effect::Copy("second".into()));
+    // The callbacks ran (on the worker, after the handler); then a new event reports what they
+    // were called with.
+    std::thread::sleep(Duration::from_millis(200));
+    host.dispatch(HostEvent::CommandFinished {
+        pane: 3,
+        line: "make".into(),
+        status: 0,
+        took_ms: 1.0,
+    });
+    assert_eq!(
+        next(&host, wait).effect,
+        Effect::Copy("timer 0 next 2".into()),
+        "a timer gets no arguments, an awaitable's callback gets (result, error) and no cx"
+    );
+}

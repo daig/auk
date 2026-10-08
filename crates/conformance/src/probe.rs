@@ -176,7 +176,8 @@ impl Probe {
         self.sync();
     }
 
-    /// Sets the tty: `raw` (non-canonical, echo off), `raw-echo` or `cooked`.
+    /// Sets the tty: `raw` (non-canonical, echo off), `raw-echo`, `cooked` or `cooked-noecho`
+    /// (canonical with echo off, as `read -s` sets it).
     pub fn tty(&self, mode: &str) {
         self.send(json!({"tty": mode}));
         self.sync();

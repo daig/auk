@@ -1246,3 +1246,93 @@ fn remote_loopback_attaches_a_second_daemon_through_the_bridge() {
     let status = serve.ctl(&env, &["remote"]);
     assert_eq!(status["state"]["state"], "connected", "{status:#}");
 }
+
+/// Every file under `dir` with its bytes and mtime.
+fn snapshot_tree(dir: &Path) -> Vec<(PathBuf, Vec<u8>, std::time::SystemTime)> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        for entry in std::fs::read_dir(&d).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            let meta = std::fs::symlink_metadata(&path).unwrap();
+            if meta.is_dir() {
+                stack.push(path);
+            } else {
+                let bytes = std::fs::read(&path).unwrap_or_default();
+                out.push((path, bytes, meta.modified().unwrap()));
+            }
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+#[test]
+fn headless_mode_ignores_the_users_settings_and_never_writes_them() {
+    let env = TestEnv::new(AUK, "cli-usersettings");
+    // The user's config dir (the harness points AUK_CONFIG_DIR and AUK_STATE_DIR at it): settings
+    // that turn plugins off and disable terraform, and a plugin of their own.
+    let config = env.state.clone();
+    let settings = config.join("settings.json");
+    std::fs::write(
+        &settings,
+        json!({"plugins": false, "plugins_disabled": ["terraform"], "agent_command": "false"}).to_string(),
+    )
+    .unwrap();
+    let mine = config.join("plugins/mine");
+    std::fs::create_dir_all(&mine).unwrap();
+    std::fs::write(
+        mine.join("plugin.toml"),
+        "schema = 1\nid = \"mine\"\nname = \"Mine\"\nversion = \"1\"\nhost = \"host.luau\"\n",
+    )
+    .unwrap();
+    std::fs::write(mine.join("host.luau"), "").unwrap();
+    let before = snapshot_tree(&config);
+
+    let out = env.root.join("shots");
+    let serve = Serve::start(&env, &out);
+    // Default settings: the user's plugin isn't loaded, and fixtures load with every plugin on,
+    // terraform included.
+    let none = serve.ctl(&env, &["plugins", "list", "--json"]);
+    assert_eq!(none["plugins"], json!([]), "{none}");
+    let loaded = serve.ctl(&env, &["plugins", "fixtures"]);
+    let terraform = loaded["list"]["plugins"]
+        .as_array()
+        .and_then(|p| p.iter().find(|p| p["id"] == "terraform"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    assert_eq!(terraform["status"], "ready", "{loaded:#}");
+    // Changes a window could save: none reach the user's files.
+    serve.ctl(&env, &["ready"]);
+    serve.ctl(&env, &["appearance", "dark"]);
+    serve.ctl(&env, &["size", "800x500"]);
+    serve.ctl(&env, &["run", "echo", "hi"]);
+    serve.ctl(&env, &["expect", "hi"]);
+    serve.ctl(&env, &["shot", "s"]);
+    drop(serve);
+    assert_eq!(snapshot_tree(&config), before, "headless mode changed the user's config dir");
+}
+
+#[test]
+fn a_real_work_wait_gives_up_after_20_s() {
+    let env = TestEnv::new(AUK, "cli-realwork");
+    let out = env.root.join("shots");
+    let serve = Serve::start(&env, &out);
+    serve.ctl(&env, &["ready"]);
+    let control = serve.control.to_string_lossy().into_owned();
+    let start = Instant::now();
+    let reply = env.cli(&["ctl", "--control", &control, "expect", "never-printed"]);
+    let took = start.elapsed();
+    let text = String::from_utf8_lossy(&reply.stdout).into_owned();
+    let reply: Value = serde_json::from_str(text.trim()).unwrap_or_else(|e| panic!("{e}: {text}"));
+    assert_eq!(reply["ok"], false, "{reply}");
+    assert!(reply["error"].as_str().is_some_and(|e| e.contains("never-printed")), "{reply}");
+    assert!(
+        took >= Duration::from_secs(20) && took < Duration::from_secs(23),
+        "the wait took {took:?}, not 20 s"
+    );
+    // The window still works after the timeout.
+    serve.ctl(&env, &["run", "echo", "after"]);
+    serve.ctl(&env, &["expect", "after"]);
+}

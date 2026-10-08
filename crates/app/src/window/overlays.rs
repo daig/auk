@@ -177,7 +177,7 @@ impl WinState {
             }
             RowAction::Block(kind) => {
                 let cwd = self.focused_cwd();
-                self.open_block(
+                let _ = self.open_block(
                     &kind,
                     &[],
                     auk_plugins::window::How::Tab,

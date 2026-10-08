@@ -1200,3 +1200,170 @@ fn a_newer_client_attaching_upgrades_the_daemon() {
     );
     still_ticking(&env, pane, shell, before, &window);
 }
+
+// ---------------------------------------------------------------------------------------------
+// A graceful stop (§5.4: "after a quit, crash or reboot"), and blobs across a restart (§4.4)
+
+/// Waits until the daemon whose log is `daemon.log` says it stopped.
+fn wait_stopped(env: &TestEnv) {
+    let log = env.root.join("daemon.log");
+    wait_for("the daemon to stop", || {
+        fs::read_to_string(&log)
+            .ok()?
+            .contains("auk daemon: stopped")
+            .then_some(())
+    });
+}
+
+/// Brings a pane's state to a checkpoint, then removes the state file. Nothing changes after,
+/// so the checkpointer has no reason to write it again: only the stop path can bring it back.
+fn checkpoint_then_remove_the_state_file(env: &TestEnv, pane: u64) -> PathBuf {
+    wait_checkpoint(env, &[pane]);
+    let file = env.state.join("daemon.state");
+    fs::remove_file(&file).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    assert!(
+        !file.exists(),
+        "the checkpointer rewrote an unchanged state: the stop path wouldn't be tested"
+    );
+    file
+}
+
+#[test]
+fn a_graceful_stop_by_sigterm_or_shutdown_writes_the_state_file_and_panes_come_back() {
+    let env = env("graceful");
+    let daemon = env.start_daemon();
+    let work = env.home.join("work");
+    fs::create_dir_all(&work).unwrap();
+    let pane = env.new_pane(&["--cwd", &work.to_string_lossy()]);
+    env.wait(pane, "prompt");
+    env.run(pane, "echo before-term-$((4*5))");
+    let layout = env.daemon("ls")["layout"].clone();
+    let shell = env.pane_info(pane)["pid"].as_u64().unwrap() as u32;
+
+    // SIGTERM: the daemon writes the state file on its way out and hangs up its panes.
+    let file = checkpoint_then_remove_the_state_file(&env, pane);
+    let status = Command::new("/bin/kill")
+        .args(["-TERM", &daemon.to_string()])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    wait_stopped(&env);
+    assert!(file.is_file(), "SIGTERM didn't write the state file");
+    wait_for("the old shell to end with the daemon", || {
+        (!alive(shell)).then_some(())
+    });
+
+    env.start_daemon();
+    assert_eq!(env.daemon("ls")["layout"], layout);
+    env.wait(pane, "prompt");
+    let info = env.pane_info(pane);
+    let new_shell = info["pid"].as_u64().unwrap() as u32;
+    assert_ne!(new_shell, shell);
+    assert_eq!(real(Path::new(info["cwd"].as_str().unwrap())), real(&work));
+    assert!(scrollback(&env, pane).contains("before-term-20"));
+
+    // The `shutdown` command (the app's quit path for a private daemon), the same way.
+    env.run(pane, "echo before-shutdown-$((5*6))");
+    let file = checkpoint_then_remove_the_state_file(&env, pane);
+    env.daemon("shutdown");
+    wait_stopped(&env);
+    assert!(file.is_file(), "shutdown didn't write the state file");
+    wait_for("the second shell to end with the daemon", || {
+        (!alive(new_shell)).then_some(())
+    });
+
+    env.start_daemon();
+    env.wait(pane, "prompt");
+    let text = scrollback(&env, pane);
+    assert!(
+        text.contains("before-term-20") && text.contains("before-shutdown-30"),
+        "{text}"
+    );
+    env.run(pane, "echo after-$((7*6))");
+    assert!(scrollback(&env, pane).contains("after-42"));
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::Digest as _;
+    sha2::Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// Whether a window draws node `id` of `pane` as a picture, not a placeholder.
+fn drawn_picture(window: &auk_conformance::harness::Headless, pane: u64, id: &str) -> bool {
+    let tree = window.request(&format!("tree {pane} .sf-image"));
+    let Some(els) = tree.as_array() else {
+        return false;
+    };
+    let Some(at) = els.iter().position(|e| e["id"] == id) else {
+        return false;
+    };
+    let class = els[at]["class"].as_str().unwrap_or("");
+    !class.contains("missing")
+        && els[at + 1..]
+            .iter()
+            .take_while(|e| e["id"].is_null())
+            .any(|e| e["class"].as_str().is_some_and(|c| c.contains("sf-img-svg")))
+}
+
+#[test]
+fn a_blob_survives_a_daemon_restart_and_a_restored_surface_still_shows_it() {
+    let env = env("blobrestart");
+    let daemon = env.start_daemon();
+    let pane = env.new_pane(&[]);
+    env.wait(pane, "prompt");
+
+    // A program sends a picture, shows it in a kept flow surface, and exits.
+    let svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"10\">\
+               <rect width=\"20\" height=\"10\" fill=\"#cc3311\"/></svg>";
+    let id = sha256_hex(svg.as_bytes());
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let probe = Probe::run_in_shell(&env, pane);
+    exchange(&probe, &hello(&[]));
+    exchange(
+        &probe,
+        &auk_conformance::probe::tsp("b", &[("mime", "image/svg+xml")], &b64.encode(svg)),
+    );
+    exchange(
+        &probe,
+        &open_with(
+            "pic",
+            "flow",
+            json!([{"id": "img", "k": "image", "p": {"blob": id, "alt": "Pic"}}]),
+        ),
+    );
+    exchange(&probe, &tsp_json("x", &json!({"id": "pic", "keep": true})));
+    probe.tty("cooked");
+    probe.exit(0);
+    env.wait(pane, "prompt");
+    let file = env.state.join("blobs").join(&id);
+    assert!(file.is_file(), "the blob wasn't written through to disk");
+    wait_checkpoint(&env, &[pane]);
+
+    // The daemon dies; its memory goes with it.
+    env.kill9(daemon);
+    env.start_daemon();
+    env.wait(pane, "prompt");
+    let after = env.daemon(&format!("tsp {pane}"));
+    let s = surface(&after, "pic").unwrap_or_else(|| panic!("pic missing: {after}"));
+    assert_eq!((&s["state"], &s["restored"]), (&json!("closed"), &json!(true)), "{s}");
+    assert_eq!(fs::read(&file).unwrap(), svg.as_bytes());
+
+    // A window attaching now is sent the blob from disk and draws the picture, and showing it
+    // makes it the most recently shown blob (its file's mtime moves).
+    let shown_before = fs::metadata(&file).unwrap().modified().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    let window = env.start_headless("w", &[]);
+    wait_for("the window to draw the restored picture", || {
+        drawn_picture(&window, pane, "img").then_some(())
+    });
+    let shown_after = fs::metadata(&file).unwrap().modified().unwrap();
+    assert!(
+        shown_after > shown_before,
+        "showing the blob didn't touch it: {shown_before:?} {shown_after:?}"
+    );
+    assert!(window.errors().is_empty(), "{:?}", window.errors());
+}

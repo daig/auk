@@ -351,7 +351,8 @@ impl PaneView {
             None
         };
         if let Some(ctl) = control {
-            if !surface.interactive() || bool_prop(ctl.props(), "disabled") {
+            // Lens views are the plugin's to change: their controls don't flip (§9.6).
+            if !surface.interactive() || self.inert_controls || bool_prop(ctl.props(), "disabled") {
                 return Some(Vec::new());
             }
             return Some(self.flip_control(doc, pane, surface, ctl));

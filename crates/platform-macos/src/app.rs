@@ -86,6 +86,16 @@ pub fn system_reduce_motion() -> bool {
     objc2_app_kit::NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceMotion()
 }
 
+/// The system's Reduce Transparency accessibility setting.
+pub fn system_reduce_transparency() -> bool {
+    objc2_app_kit::NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceTransparency()
+}
+
+/// The system's Increase Contrast accessibility setting.
+pub fn system_increase_contrast() -> bool {
+    objc2_app_kit::NSWorkspace::sharedWorkspace().accessibilityDisplayShouldIncreaseContrast()
+}
+
 pub fn run_on_main(f: impl FnOnce() + Send + 'static) {
     dispatch2::DispatchQueue::main().exec_async(f);
 }

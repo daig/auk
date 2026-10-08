@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use auk_mirror::layout::{Node, SessionId, SplitDir, TabId};
+use auk_mirror::layout::{Node, PaneTag, SessionId, SplitDir, TabId};
 use auk_mirror::{ClientMsg, LayoutEdit, PaneId};
 use auk_platform_macos::{KeyInput, Waker, Window};
 use auk_plugins::chord::{self, Chord, Step};
@@ -164,6 +164,8 @@ pub struct PluginState {
     pub toast_log: Vec<Value>,
     /// Built-in opens (the system opener), for the automation endpoint.
     pub opened: Vec<Value>,
+    /// Links refused under §7.14 (for the automation endpoint).
+    pub refused: Vec<Value>,
     /// Route decisions taken, for the automation endpoint.
     pub routed: Vec<Value>,
     /// The plugin keymap layer: chords and actions.
@@ -194,6 +196,9 @@ pub struct PluginState {
     kinds: BTreeMap<PaneId, (String, Option<String>)>,
     /// A pane a plugin opened with `reveal.focus`: focused once the layout shows it.
     pub focus_when_shown: Option<PaneId>,
+    /// A remote window asked its host for a block it should focus: the next block pane that
+    /// appears (the link carries no pane id back, §10.4).
+    pub focus_next_block: bool,
     pub status: Vec<StatusItem>,
     pub tab_titles: BTreeMap<TabId, String>,
     pub window_title: Option<String>,
@@ -249,6 +254,51 @@ pub fn osc7_path(cwd: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// The local path a `file:` link names (§7.14: "`file://` links are limited to paths"): only
+/// `file:` with no host or `localhost`, an absolute path, and no query or fragment. Anything else
+/// (another machine's file, a URL with parts that aren't a path) is `None`, and is refused.
+pub fn file_url_path(url: &str) -> Option<String> {
+    let rest = url
+        .get(..5)
+        .filter(|s| s.eq_ignore_ascii_case("file:"))
+        .map(|_| &url[5..])?;
+    let path = match rest.strip_prefix("//") {
+        Some(r) => {
+            let i = r.find('/')?;
+            let host = &r[..i];
+            if !(host.is_empty() || host.eq_ignore_ascii_case("localhost")) {
+                return None;
+            }
+            &r[i..]
+        }
+        None => rest,
+    };
+    if !path.starts_with('/') || path.contains(['?', '#']) {
+        return None;
+    }
+    let decoded = osc7_path(path);
+    (!decoded.contains('\0')).then_some(decoded)
+}
+
+/// URL schemes the system hands to a terminal program or a remote shell: a link never opens them
+/// (§7.14 "nothing runs a command").
+const COMMAND_SCHEMES: &[&str] = &["ssh", "telnet", "rlogin", "tn3270", "x-man-page"];
+
+/// Whether opening `path` with the system opener would run something: an executable file or a
+/// bundle or document type the system launches.
+fn runs_something(path: &str) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    let p = Path::new(path.trim_end_matches('/'));
+    let launches = p.extension().and_then(|e| e.to_str()).is_some_and(|e| {
+        ["app", "command", "tool", "terminal", "workflow", "action", "prefpane"]
+            .iter()
+            .any(|x| e.eq_ignore_ascii_case(x))
+    });
+    launches
+        || std::fs::metadata(p)
+            .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+}
+
 /// The program word of a command line (no assignments or directories).
 fn program_of(line: &str) -> String {
     line.split_whitespace()
@@ -267,10 +317,20 @@ fn shell_name() -> String {
 
 /// The system opener: `$AUK_OPENER`, else `open`.
 pub fn system_open(target: &str) {
+    run_opener(&[target]);
+}
+
+/// Shows `path` selected in the Finder (`open -R`) instead of opening it: how a link reaches a
+/// program or an app bundle, so that following a link never runs a command (§7.14).
+pub fn system_reveal(path: &str) {
+    run_opener(&["-R", path]);
+}
+
+fn run_opener(args: &[&str]) {
     let opener = std::env::var_os("AUK_OPENER")
         .filter(|v| !v.is_empty())
         .map_or_else(|| PathBuf::from("/usr/bin/open"), PathBuf::from);
-    match std::process::Command::new(&opener).arg(target).spawn() {
+    match std::process::Command::new(&opener).args(args).spawn() {
         Ok(mut child) => {
             std::thread::spawn(move || {
                 let _ = child.wait();
@@ -281,6 +341,11 @@ pub fn system_open(target: &str) {
 }
 
 /// One request to the daemon's control endpoint.
+/// Whether this app's windows are on a remote host's daemon (`--host`).
+fn is_remote() -> bool {
+    crate::app::with(|a| a.opts.remote.is_some()).unwrap_or(false)
+}
+
 fn control(words: &[String]) -> Result<Value, String> {
     let (socket, remote) =
         crate::app::with(|a| (a.opts.socket.clone(), a.opts.remote.is_some())).ok_or("no app")?;
@@ -520,11 +585,31 @@ impl WinState {
     /// sheets. They install into the chrome and every pane's documents.
     pub(super) fn refresh_sheets(&mut self) {
         let host = self.conn.host_name();
+        // A plugin file's `url()` in manifest styles becomes a `data:` URL at install, as in
+        // `tern.css` sheets (§9.8 CSS). A local plugin resolves against its package directory; a
+        // remote host's files aren't here, so only `data:` URLs pass in its styles.
+        let dirs: BTreeMap<String, PathBuf> = if host == "local" {
+            let root = auk_plugins::paths::plugins_dir(&auk_plugins::paths::config_dir());
+            auk_plugins::discovery::scan(&root)
+                .packages
+                .into_iter()
+                .map(|p| (p.manifest.id, p.dir))
+                .collect()
+        } else {
+            BTreeMap::new()
+        };
         let mut sheets: Vec<(String, String)> = self
             .plugins
             .catalog
             .styles()
-            .map(|(id, css)| (format!("plugin:{host}:{id}:styles"), css.to_owned()))
+            .map(|(id, css)| {
+                let css = auk_plugins::css_url::inline_urls_logged(
+                    css,
+                    dirs.get(id).map(PathBuf::as_path),
+                    id,
+                );
+                (format!("plugin:{host}:{id}:styles"), css)
+            })
             .collect();
         let local = self.plugins.rt.as_ref().map(WindowPlugins::sheets).unwrap_or_default();
         if host != "local" {
@@ -735,9 +820,11 @@ impl WinState {
                 self.apply_link_decision(target, d);
                 return;
             }
-            if let Some(path) = target.strip_prefix("file://") {
-                let path = osc7_path(&format!("file://{path}"));
-                self.open_path_routed(&path, origin, How::Default, None);
+            if target.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("file:")) {
+                match file_url_path(target) {
+                    Some(path) => self.open_path_routed(&path, origin, How::Default, None),
+                    None => self.refuse_link(target, "Only local file paths open from a link"),
+                }
                 return;
             }
             if is_url {
@@ -846,7 +933,7 @@ impl WinState {
                 let cwd = Path::new(&path).parent().map(|p| p.display().to_string());
                 if self
                     .open_block(&kind, &args, how, Reveal { focus: true }, cwd)
-                    .is_none()
+                    .is_err()
                 {
                     self.toast(
                         ToastLevel::Error,
@@ -892,7 +979,7 @@ impl WinState {
                 let cwd = self.focused_cwd();
                 if self
                     .open_block(&kind, &args, How::Default, Reveal { focus: true }, cwd)
-                    .is_none()
+                    .is_err()
                 {
                     self.toast(
                         ToastLevel::Error,
@@ -921,17 +1008,48 @@ impl WinState {
 
     /// The built-in open: with no file blocks in v1, the system opener (§9.8 "v1 subset").
     pub(super) fn builtin_open(&mut self, target: &str, how: Option<How>, origin: &str) {
-        let target = if target.contains("://") || target.starts_with("mailto:") {
+        let is_url = target.contains("://") || target.starts_with("mailto:");
+        let mut target = if is_url {
             target.to_owned()
         } else {
             self.absolute(target)
         };
+        let mut reveal = false;
+        // A link (from a program's output or a surface, or a route's answer to one) opens a page
+        // or a path, and never runs a command (§7.14).
+        if origin == "link" {
+            if is_url {
+                let scheme = target.split(':').next().unwrap_or_default().to_ascii_lowercase();
+                if scheme == "file" {
+                    match file_url_path(&target) {
+                        Some(path) => target = path,
+                        None => {
+                            return self
+                                .refuse_link(&target, "Only local file paths open from a link");
+                        }
+                    }
+                } else if COMMAND_SCHEMES.contains(&scheme.as_str()) {
+                    return self.refuse_link(&target, "Links don't run commands");
+                }
+            }
+            reveal = !target.contains("://") && runs_something(&target);
+        }
         self.plugins.opened.push(json!({
             "target": target,
-            "how": how.map(|h| format!("{h:?}").to_lowercase()),
+            "how": if reveal { Some("reveal".to_owned()) } else { how.map(|h| format!("{h:?}").to_lowercase()) },
             "origin": origin,
         }));
-        system_open(&target);
+        if reveal {
+            system_reveal(&target);
+        } else {
+            system_open(&target);
+        }
+    }
+
+    /// A link that §7.14 doesn't let open: a toast, and a note for the automation endpoint.
+    fn refuse_link(&mut self, target: &str, why: &str) {
+        self.plugins.refused.push(json!({"target": target, "why": why}));
+        self.toast(ToastLevel::Error, why, Some(target));
     }
 
     fn absolute(&self, path: &str) -> String {
@@ -961,8 +1079,9 @@ impl WinState {
             .filter(|c| !c.is_empty())
     }
 
-    /// Opens a block pane through the daemon, placed by `how`. `None` when no Ready plugin
-    /// defines the kind, or the daemon refused.
+    /// Opens a block pane through the daemon, placed by `how`: its pane id, or `None` for a
+    /// remote window, whose link carries the request but no pane id back. `Err` (with the "Could
+    /// not start the block" card up) when no Ready plugin defines the kind, or the daemon refused.
     pub(super) fn open_block(
         &mut self,
         kind: &str,
@@ -970,11 +1089,11 @@ impl WinState {
         how: How,
         reveal: Reveal,
         cwd: Option<String>,
-    ) -> Option<u64> {
+    ) -> Result<Option<u64>, ()> {
         match self.try_open_block(kind, args, how, reveal, cwd.clone()) {
             Ok(pane) => {
                 self.plugins.block_card = None;
-                Some(pane)
+                Ok(pane)
             }
             Err(error) => {
                 // "Could not start the block", with Retry (§9.5).
@@ -991,7 +1110,7 @@ impl WinState {
                 if let Some(w) = &self.window {
                     w.request_frame();
                 }
-                None
+                Err(())
             }
         }
     }
@@ -1003,10 +1122,31 @@ impl WinState {
         how: How,
         reveal: Reveal,
         cwd: Option<String>,
-    ) -> Result<u64, String> {
+    ) -> Result<Option<u64>, String> {
         self.plugins_catalog();
         if self.plugins.catalog.block_type(kind).is_none() {
             return Err(format!("No plugin offers the block type {kind}"));
+        }
+        if is_remote() {
+            // The host's daemon takes no control requests from here: the block goes over the
+            // link as a layout edit (§10.4), in the host's directories.
+            let focused = self.focused_pane();
+            let split = match (how, focused) {
+                (How::Below, Some(p)) => Some((p, SplitDir::Down)),
+                (How::Beside | How::Split | How::Default | How::Replace | How::Preview, Some(p)) => {
+                    Some((p, SplitDir::Right))
+                }
+                _ => None,
+            };
+            self.edit(LayoutEdit::Block {
+                kind: kind.to_owned(),
+                args: args.to_vec(),
+                split,
+                session: split.is_none().then_some(self.active_session).flatten(),
+                cwd,
+            });
+            self.plugins.focus_next_block = reveal.focus;
+            return Ok(None);
         }
         let mut words = vec!["block".to_owned(), kind.to_owned()];
         let focused = self.focused_pane();
@@ -1034,7 +1174,7 @@ impl WinState {
         if reveal.focus {
             self.plugins.focus_when_shown = Some(pane);
         }
-        Ok(pane)
+        Ok(Some(pane))
     }
 
     // -----------------------------------------------------------------------------------------
@@ -1161,6 +1301,10 @@ impl WinState {
             }
             for &pane in panes.difference(&self.plugins.seen_panes) {
                 self.plugins.events.push(WindowEvent::PaneCreated { pane });
+                if self.plugins.focus_next_block && sessions.kind(pane) == PaneTag::Block {
+                    self.plugins.focus_next_block = false;
+                    self.plugins.focus_when_shown = Some(pane);
+                }
             }
             for &pane in self.plugins.seen_panes.difference(&panes) {
                 self.plugins.events.push(WindowEvent::PaneClosed { pane });
@@ -1182,8 +1326,26 @@ impl WinState {
         }
     }
 
-    /// Learns which panes are blocks, from the daemon.
+    /// Learns which panes are blocks, from the daemon; a remote window, which has no control
+    /// endpoint to ask, from the layout's pane tags (block types aren't named there).
     fn refresh_kinds(&mut self) {
+        if is_remote() {
+            let sessions = self.sessions();
+            self.plugins.kinds = sessions
+                .kinds
+                .iter()
+                .map(|(&pane, &tag)| {
+                    let kind = match tag {
+                        PaneTag::Shell => "shell",
+                        PaneTag::Command => "command",
+                        PaneTag::Agent => "agent",
+                        PaneTag::Block => "block",
+                    };
+                    (pane, (kind.to_owned(), None))
+                })
+                .collect();
+            return;
+        }
         let Ok(ls) = control(&["ls".to_owned()]) else {
             return;
         };
@@ -1619,7 +1781,7 @@ impl WindowHost for Host<'_> {
 
     fn new_block(&mut self, kind: &str, args: &[String], how: How, reveal: Reveal) -> Option<u64> {
         let cwd = self.w.focused_cwd();
-        self.w.open_block(kind, args, how, reveal, cwd)
+        self.w.open_block(kind, args, how, reveal, cwd).ok().flatten()
     }
 
     fn command(&mut self, id: &str) -> Result<(), String> {
@@ -1929,5 +2091,47 @@ impl WindowHost for Host<'_> {
         }
         let problem = (!problems.is_empty()).then(|| problems.join("; "));
         (Some(tab), problem)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{file_url_path, runs_something};
+
+    #[test]
+    fn file_links_are_limited_to_local_paths() {
+        assert_eq!(file_url_path("file:///tmp/a%20b.txt").as_deref(), Some("/tmp/a b.txt"));
+        assert_eq!(file_url_path("FILE://localhost/etc/hosts").as_deref(), Some("/etc/hosts"));
+        assert_eq!(file_url_path("file:/usr/share").as_deref(), Some("/usr/share"));
+        // Another machine's file, parts that aren't a path, or no path at all: refused.
+        for refused in [
+            "file://server/share/x",
+            "file:///tmp/x?query=1",
+            "file:///tmp/x#frag",
+            "file://",
+            "file:relative/path",
+            "file:///tmp/%00x",
+            "https://example.com/",
+        ] {
+            assert_eq!(file_url_path(refused), None, "{refused}");
+        }
+    }
+
+    #[test]
+    fn executables_and_launching_bundles_run_something() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("auk-runs-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("go.sh");
+        let text = dir.join("notes.txt");
+        std::fs::write(&script, "#!/bin/sh\n").unwrap();
+        std::fs::write(&text, "hi").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(runs_something(&script.to_string_lossy()));
+        assert!(!runs_something(&text.to_string_lossy()));
+        assert!(!runs_something(&dir.to_string_lossy()), "a directory opens in the Finder");
+        assert!(runs_something("/Applications/Nothing.app/"));
+        assert!(runs_something("/tmp/x.command"));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -143,13 +143,13 @@ impl PaneView {
             return;
         }
         let theme = settings.dark != self.settings.dark;
-        let motion = settings.reduce_motion != self.settings.reduce_motion;
+        let media = settings.media() != self.settings.media();
         self.settings = settings;
         if theme {
             crate::sheets::set_theme(doc, self.settings.dark);
         }
-        if motion {
-            doc.set_media_preferences(self.settings.reduce_motion, false, false);
+        if media {
+            self.settings.apply_media(doc);
         }
         let now = self.last_now;
         self.pass += 1;

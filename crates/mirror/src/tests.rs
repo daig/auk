@@ -44,10 +44,18 @@ fn client_messages() -> Vec<ClientMsg> {
             pane: 7,
             dir: SplitDir::Right,
         }),
+        ClientMsg::LayoutEdit(LayoutEdit::Block {
+            kind: "demo.panel".into(),
+            args: vec!["--flag".into(), "x y".into()],
+            split: Some((7, SplitDir::Down)),
+            session: None,
+            cwd: Some("/tmp".into()),
+        }),
         ClientMsg::Blobs {
             pane: 7,
             ids: vec!["ab".repeat(32)],
         },
+        ClientMsg::ClearScrollback { pane: 7 },
         ClientMsg::Detach,
     ]
 }

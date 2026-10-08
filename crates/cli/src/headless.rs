@@ -7,7 +7,7 @@
 //! `capture PANE [--scrollback]`, `send PANE text|paste WORD…`, `send PANE keys KEY…`,
 //! `focus PANE`, `resize PANE COLS ROWS`, `tsp PANE`, `event PANE SF JSON`,
 //! `click PANE SF NODE [--double] [--menu ACT] [--mods shift,ctrl,alt,meta]`, `facts JSON`,
-//! `effects`, `catalog`, `lens PANE`, `remote`, `quit`.
+//! `effects`, `catalog`, `lens PANE`, `remote`, `clear-scrollback PANE`, `quit`.
 //!
 //! It also draws (`draw.rs`) and takes the scenario commands of §11.3 (`script.rs`): harness
 //! commands (`size`, `appearance`, `wait`, `freeze-anims`, `thaw`, `motion-at`, `key`, `type`,
@@ -95,7 +95,7 @@ struct View {
     catalog: Value,
     /// Lens views that arrived before this window's replica had their block, retried for 5 s
     /// (§9.6): `(pane, block, view, when)`.
-    early_views: Vec<(PaneId, u64, Option<Value>, std::time::Instant)>,
+    early_views: Vec<EarlyView>,
     /// TSP changes not yet drawn, per pane, in order (the draw thread's views take them).
     pending: BTreeMap<PaneId, Vec<auk_tsp::Changes>>,
     /// The pane this window has focused.
@@ -379,6 +379,10 @@ impl Headless {
                 },
                 _ => Err("resize: expected a pane, columns and rows".into()),
             },
+            // The window's Clear Scrollback (§5.5), as the app's ⌘K sends it.
+            "clear-scrollback" => {
+                pane_id(args).and_then(|pane| self.sent(&ClientMsg::ClearScrollback { pane }))
+            }
             "quit" => {
                 let _ = self.send(&ClientMsg::Detach);
                 self.stop_owned();
@@ -544,6 +548,12 @@ impl Headless {
     }
 }
 
+/// How long an early lens view waits for its block (§9.6: replicas retry an early view for 5 s).
+const EARLY_VIEW_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// An early lens view: `(pane, block, view, when it arrived)`.
+type EarlyView = (PaneId, u64, Option<Value>, std::time::Instant);
+
 /// Applies early lens views whose block has appeared; drops those older than 5 s.
 fn retry_views(view: &mut View) {
     let View {
@@ -551,11 +561,22 @@ fn retry_views(view: &mut View) {
         early_views,
         ..
     } = view;
-    early_views.retain(|(pane, block, node, at)| {
-        let Some(r) = replicas.get_mut(pane) else {
-            return at.elapsed() < std::time::Duration::from_secs(5);
-        };
-        !r.set_lens_view(*block, node.clone()) && at.elapsed() < std::time::Duration::from_secs(5)
+    retry_early_views(replicas, early_views, std::time::Instant::now());
+}
+
+/// [`retry_views`] at time `now`: each early view whose block a replica now has is shown and
+/// dropped from the list; one still waiting at `now` past [`EARLY_VIEW_WAIT`] is dropped unshown.
+fn retry_early_views(
+    replicas: &mut BTreeMap<PaneId, Replica>,
+    early: &mut Vec<EarlyView>,
+    now: std::time::Instant,
+) {
+    early.retain(|(pane, block, node, at)| {
+        let waiting = now.saturating_duration_since(*at) < EARLY_VIEW_WAIT;
+        let shown = replicas
+            .get_mut(pane)
+            .is_some_and(|r| r.set_lens_view(*block, node.clone()));
+        !shown && waiting
     });
 }
 
@@ -802,4 +823,80 @@ pub fn default_control(socket: &Path) -> PathBuf {
         .parent()
         .unwrap_or(Path::new("."))
         .join(format!("headless-{}.ctl", std::process::id()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use auk_plugins::catalog::{LensRule, PluginEntry};
+    use auk_plugins::{Catalog, Status};
+    use auk_replica::{Record, Settings, claim_catalog};
+    use std::time::{Duration, Instant};
+
+    /// A follower replica whose catalog claims `lensme`, and the bytes that open block 0.
+    fn replica() -> (Replica, Vec<u8>) {
+        let catalog = Catalog {
+            plugins: vec![PluginEntry {
+                id: "p".into(),
+                name: "P".into(),
+                version: "1".into(),
+                description: String::new(),
+                icon: "puzzle".into(),
+                css: String::new(),
+                blocks: Vec::new(),
+                lenses: vec![LensRule {
+                    id: "l".into(),
+                    patterns: vec!["lensme*".into()],
+                }],
+                host: true,
+                window: false,
+                status: Status::Ready,
+            }],
+            problems: Vec::new(),
+            jit: true,
+        };
+        let mut r = Replica::new(80, 24, Settings::default(), Role::Follower);
+        let record = Record::Catalog {
+            catalog: claim_catalog(&catalog),
+        };
+        r.apply(1, Item::Record(&record)).unwrap();
+        (r, b"$ lensme\r\n\x1b]133;C;cmdline_url=lensme\x07out\r\n".to_vec())
+    }
+
+    #[test]
+    fn an_early_lens_view_waits_for_its_block_for_5_s_then_is_dropped() {
+        let t0 = Instant::now();
+        let (mut r, start) = replica();
+        let mut replicas = BTreeMap::from([(7, r)]);
+        let view = json!({"k": "text", "p": {"text": "native"}});
+        let mut early: Vec<EarlyView> = vec![
+            (7, 0, Some(view.clone()), t0),
+            // Another pane's view, for a pane this window doesn't have yet.
+            (9, 0, Some(view.clone()), t0),
+        ];
+        // No block yet: both keep waiting.
+        retry_early_views(&mut replicas, &mut early, t0 + Duration::from_secs(1));
+        assert_eq!(early.len(), 2);
+        // The block arrives in the stream: its view is shown and leaves the list.
+        r = replicas.remove(&7).unwrap();
+        r.apply(2, Item::Output(&start)).unwrap();
+        replicas.insert(7, r);
+        retry_early_views(&mut replicas, &mut early, t0 + Duration::from_secs(4));
+        assert_eq!(early.len(), 1);
+        assert_eq!(replicas[&7].lens_blocks()[0].view.as_ref(), Some(&view));
+        // Past 5 s, the one still waiting is dropped unshown.
+        retry_early_views(&mut replicas, &mut early, t0 + Duration::from_millis(4999));
+        assert_eq!(early.len(), 1);
+        retry_early_views(&mut replicas, &mut early, t0 + EARLY_VIEW_WAIT);
+        assert!(early.is_empty());
+        // A late view for a block that came after 5 s is never shown either.
+        let (mut late, start) = replica();
+        let mut early: Vec<EarlyView> = vec![(1, 0, Some(view.clone()), t0)];
+        let mut replicas = BTreeMap::new();
+        retry_early_views(&mut replicas, &mut early, t0 + Duration::from_secs(6));
+        late.apply(2, Item::Output(&start)).unwrap();
+        replicas.insert(1, late);
+        retry_early_views(&mut replicas, &mut early, t0 + Duration::from_secs(6));
+        assert!(replicas[&1].lens_blocks()[0].view.is_none());
+    }
 }

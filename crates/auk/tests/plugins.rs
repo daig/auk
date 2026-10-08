@@ -1540,6 +1540,198 @@ fn m9_catalog_drives_plugin_css_and_a_failed_host_contributes_none() {
     });
 }
 
+/// §9.8 "CSS": a local plugin's manifest styles reach the app with their plugin-file `url()`s
+/// inlined as `data:` URLs (the engine loads only `data:`), as `tern.css` sheets do; a `url()`
+/// out of the package, or to another scheme, stays as written and so is dropped.
+#[cfg(target_os = "macos")]
+#[test]
+fn m9_manifest_style_urls_inline_plugin_files_as_data_in_the_app() {
+    use window_half::*;
+    const PNG: [u8; 70] = [
+        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6,
+        0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99, 248, 207, 192, 240,
+        31, 0, 5, 0, 1, 255, 137, 153, 61, 29, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+    ];
+    let env = TestEnv::new(EXE, "m9-style-urls");
+    package(
+        &env,
+        "pic",
+        "schema = 1\nid = \"pic\"\nname = \"Pic\"\nversion = \"1\"\nhost = \"host.luau\"\nstyles = [\"pic.css\"]\n",
+        &[
+            (
+                "pic.css",
+                ".pic { background-image: url(icon.png); } .out { background-image: url(../x.png); } .web { background-image: url(https://example.com/x.png); }",
+            ),
+            ("host.luau", "-- nothing to do"),
+        ],
+    );
+    std::fs::write(plugins_dir(&env).join("pic").join("icon.png"), PNG).expect("write the icon");
+    env.start_daemon();
+    let app = auk_conformance::app::App::start(&env, "app", &[]);
+    let pane = shell(&env, &app);
+    let catalog = wait_for("the manifest styles installed", || {
+        let c = app.request("catalog");
+        c["sheet_css"].get("plugin:local:pic:styles").is_some().then_some(c)
+    });
+    let css = catalog["sheet_css"]["plugin:local:pic:styles"].as_str().unwrap().to_owned();
+    use base64::Engine as _;
+    let data = format!(
+        "url(\"data:image/png;base64,{}\")",
+        base64::engine::general_purpose::STANDARD.encode(PNG)
+    );
+    assert!(css.contains(&format!(".pic {{ background-image: {data}; }}")), "{css}");
+    assert!(!css.contains("icon.png"), "{css}");
+    assert!(css.contains("url(../x.png)") && css.contains("url(https://example.com/x.png)"), "{css}");
+    wait_for("the sheet in the pane's document", || {
+        let s = app.request(&format!("surface-sheets {pane}"));
+        s.as_array()?.iter().any(|n| n == "plugin:local:pic:styles").then_some(())
+    });
+}
+
+/// §9.8 through the app: the recursion guard (`cx:command` and `cx:action` run the built-in, not
+/// an override, and `cx:open` skips routes), the window cx's `command`, `action`, `session`
+/// (`sessions`, `layout`, `read`, `surface`, `settle`) and `layout` (`split`, `move`, `resize`,
+/// `close`), and a plugin bind on a chord a default already binds being left out.
+#[cfg(target_os = "macos")]
+#[test]
+fn m9_window_cx_recursion_guard_session_and_layout_calls_and_a_bind_on_a_taken_chord() {
+    use window_half::*;
+    let env = TestEnv::new(EXE, "m9-window-cx");
+    let opener = env.root.join("opener.sh");
+    executable(&opener, "#!/bin/sh\nexit 0\n");
+    package(
+        &env,
+        "probe",
+        "schema = 1\nid = \"probe\"\nname = \"Probe\"\nversion = \"1\"\nwindow = \"window.luau\"\n",
+        &[(
+            "window.luau",
+            r##"
+            local overrides = 0
+            local settled = "pending"
+            tern.override("new_tab", function(cx)
+                overrides = overrides + 1
+                cx:toast("info", "override " .. overrides)
+                -- The built-in, not this override again.
+                cx:command("new_tab")
+                return true
+            end)
+            tern.route.link(function(req, cx) cx:toast("info", "route saw " .. req.url) end)
+            tern.route.open(function(req, cx) cx:toast("info", "route saw " .. req.path) end)
+            -- The defaults bind cmd+t (New Tab): this is left out.
+            tern.bind("cmd+t", function(cx) cx:toast("info", "bound cmd+t") end)
+            tern.command({id = "second", title = "Second", run = function(cx) cx:toast("info", "second ran") end})
+            tern.command({id = "probe", title = "Probe window cx", run = function(cx)
+                cx:open("https://example.com/cx-open")
+                cx:open("/tmp/cx-open.txt")
+                cx:action("plugin.probe.second")
+                cx:action("new_tab")
+                local s, l = cx.session, cx.layout
+                local focused = s:focused()
+                local tabs = s:tabs()
+                local sessions = s:sessions()
+                local layout = s:layout(tabs[1].id)
+                local read = s:read(focused, {})
+                local surface = s:surface(focused, {})
+                local new = l:split(focused, "right")
+                local moved = l:move(new, focused, "swap")
+                local resized = l:resize(new, "right", 3)
+                l:close(new)
+                s:settle(focused, 50):next(function(r, e)
+                    settled = (e == nil and type(r) == "string") and "settled" or ("settle failed: " .. tostring(e))
+                end)
+                cx:copy(string.format(
+                    "sessions=%d layout=%s read=%s surface=%s split=%s move=%s resize=%s",
+                    #sessions, type(layout), type(read), tostring(surface), type(new),
+                    tostring(moved), tostring(resized)
+                ))
+            end})
+            tern.command({id = "settled", title = "Report settle", run = function(cx)
+                cx:copy(settled)
+            end})
+            "##,
+        )],
+    );
+    env.start_daemon();
+    let app = auk_conformance::app::App::start_with(
+        &env,
+        "app",
+        &[],
+        &[("AUK_OPENER", &opener.to_string_lossy())],
+    );
+    let _us = auk_conformance::app::InputSource::select(&app, auk_conformance::app::US_LAYOUT);
+    let pane = shell(&env, &app);
+    let plugins = loaded(&app, &["probe"]);
+    assert!(plugins["failures"].as_array().unwrap().is_empty(), "{plugins}");
+    assert_eq!(plugins["dropped_binds"], serde_json::json!(["cmd+t"]), "{plugins}");
+    assert!(
+        !plugins["keymap"].as_array().unwrap().iter().any(|k| k["action"] == "plugin.probe.bind.0"),
+        "{plugins}"
+    );
+    let infos = |app: &auk_conformance::app::App| -> Vec<String> {
+        toasts(app)
+            .into_iter()
+            .filter(|t| t["level"] == "info")
+            .filter_map(|t| t["text"].as_str().map(str::to_owned))
+            .collect()
+    };
+    let tab_count = |app: &auk_conformance::app::App| tab_panes(app).len();
+    assert_eq!(tab_count(&app), 1);
+
+    // The menu's New Tab runs the override once; its cx:command runs the built-in.
+    app.request("menu Shell 'New Tab'");
+    wait_for("the override's tab", || (tab_count(&app) == 2).then_some(()));
+    // ⌘T doesn't reach the plugin's bind (it was left out; the menu keeps the key).
+    app.request(&format!("focus {pane}"));
+    app.request("type cmd+t");
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    assert_eq!(infos(&app), ["override 1"]);
+    assert_eq!(app.request("menu-key Shell 'New Tab'")["key"], "t");
+
+    // The probe command: cx:open skips routes, cx:action runs a plugin action after the handler
+    // and a built-in without its override, and the session and layout calls answer.
+    app.request(&format!("focus {pane}"));
+    palette_run(&app, "probe window cx", "plugin.probe.probe");
+    wait_for("the probe's report", || {
+        (app.request("clipboard").as_str()?.starts_with("sessions=")).then_some(())
+    });
+    assert_eq!(
+        app.request("clipboard"),
+        "sessions=1 layout=table read=table surface=nil split=number move=false resize=false"
+    );
+    wait_for("the queued action", || infos(&app).contains(&"second ran".to_owned()).then_some(()));
+    wait_for("cx:action's built-in tab", || (tab_count(&app) == 3).then_some(()));
+    assert_eq!(
+        infos(&app),
+        ["override 1", "second ran"],
+        "no override ran for cx:action(\"new_tab\"), and no route saw cx:open"
+    );
+    let opened = app.request("opens");
+    let targets: Vec<&str> = opened["opened"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|o| o["target"].as_str())
+        .collect();
+    assert_eq!(targets, ["https://example.com/cx-open", "/tmp/cx-open.txt"], "{opened}");
+    assert!(opened["opened"].as_array().unwrap().iter().all(|o| o["origin"] == "plugin"), "{opened}");
+    assert_eq!(opened["routed"], serde_json::json!([]), "{opened}");
+    // The split closed again: the probe's tab has only the shell.
+    wait_for("the split to close", || {
+        tab_panes(&app).iter().any(|(_, panes)| panes == &[pane]).then_some(())
+    });
+    // settle resolves (the shell is idle) on the window's clock.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        palette_run(&app, "report settle", "plugin.probe.settled");
+        let got = app.request("clipboard");
+        if got == "settled" {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "the settle: {got}; {:?}", toasts(&app));
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
 /// §9.5 "Opening": the palette offers "New <title> block" for Ready plugins' palette block
 /// types, and an open whose type is gone shows "Could not start the block" with Retry, which
 /// opens it once the type is back.
@@ -1876,4 +2068,547 @@ fn plugin_install_from_a_git_url_and_from_github_owner_repo() {
     let list: Value = serde_json::from_slice(&env.cli(&["plugin", "list", "--json"]).stdout).expect("json");
     assert_eq!(list["plugins"][0]["id"], "gitplug", "{list}");
     assert_eq!(list["plugins"][0]["status"], "ready", "{list}");
+}
+
+// ---------------------------------------------------------------------------------------------
+// Blocks: the frame diff, quiet keys and view events, through the daemon (§9.5)
+
+/// A client attached to the daemon's `main` window key that keeps every output byte of every
+/// pane, as a window receives them: a block's frames are there exactly as the worker wrote them.
+struct Tap {
+    out: std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<u64, Vec<u8>>>>,
+    _stream: std::os::unix::net::UnixStream,
+}
+
+impl Tap {
+    fn attach(env: &TestEnv) -> Tap {
+        use auk_mirror::{Client, ClientFacts, ClientKind, ClientMsg, DaemonMsg, Hello, read_msg, write_msg};
+        let stream = std::os::unix::net::UnixStream::connect(&env.socket).expect("connect");
+        let (client, _) = Client::handshake(stream, &Hello::new(ClientKind::Headless, ClientFacts::default()))
+            .expect("handshake");
+        let stream = client.into_inner();
+        let out = std::sync::Arc::new(std::sync::Mutex::new(std::collections::BTreeMap::new()));
+        let mut reader = stream.try_clone().expect("clone");
+        let sink = out.clone();
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            while let Ok(Some(msg)) = read_msg::<DaemonMsg>(&mut reader, &mut buf) {
+                if let DaemonMsg::Output { pane, bytes, .. } = msg {
+                    sink.lock().expect("lock").entry(pane).or_insert_with(Vec::new).extend(bytes);
+                }
+            }
+        });
+        write_msg(&mut &stream, &ClientMsg::Attach { window_key: "main".into() }).expect("attach");
+        Tap { out, _stream: stream }
+    }
+
+    /// The bodies of the `f` messages of `pane` seen so far, in order.
+    fn frames(&self, pane: u64) -> Vec<Value> {
+        let bytes = self.out.lock().expect("lock").get(&pane).cloned().unwrap_or_default();
+        let mut frames = Vec::new();
+        let mut at = 0;
+        while let Some(start) = bytes[at..].windows(6).position(|w| w == b"\x1b_tsp;") {
+            let from = at + start + 6;
+            let Some(len) = bytes[from..].windows(2).position(|w| w == b"\x1b\\") else {
+                break;
+            };
+            let payload = String::from_utf8_lossy(&bytes[from..from + len]).into_owned();
+            if let Some(rest) = payload.strip_prefix("f;")
+                && let Some(i) = rest.find('{')
+                && let Ok(body) = serde_json::from_str::<Value>(&rest[i..])
+            {
+                frames.push(body);
+            }
+            at = from + len + 2;
+        }
+        frames
+    }
+
+    /// Waits for the frame of `pane` numbered `s` (block frames count from 1).
+    fn frame(&self, pane: u64, s: u64) -> Value {
+        wait_for(&format!("frame {s} of pane {pane}"), || {
+            self.frames(pane).into_iter().find(|f| f["s"] == s)
+        })
+    }
+}
+
+/// The ops of one frame whose first element is `verb`.
+fn ops_of<'a>(frame: &'a Value, verb: &str) -> Vec<&'a Value> {
+    frame["ops"].as_array().into_iter().flatten().filter(|op| op[0] == verb).collect()
+}
+
+/// The ids of a document node's children.
+fn child_ids(node: &Value) -> Vec<String> {
+    node["c"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|c| c["id"].as_str().unwrap_or_default().to_owned())
+        .collect()
+}
+
+#[test]
+fn block_frames_diff_views_by_derived_ids_and_quiet_keys_and_view_events_behave() {
+    let env = TestEnv::new(EXE, "blockdiff");
+    package(
+        &env,
+        "diffs",
+        "schema = 1\nid = \"diffs\"\nname = \"Diffs\"\nversion = \"1\"\nhost = \"host.luau\"\n[[blocks]]\nid = \"probe\"\ntitle = \"Probe\"\n",
+        &[(
+            "host.luau",
+            r#"local function t(key, text, extra)
+                local p = { text = text }
+                if key then p.key = key end
+                for k, v in extra or {} do p[k] = v end
+                return { k = "text", p = p }
+            end
+            local function main(step)
+                if step == 0 then
+                    return { t("t", "hello", { tone = "muted" }), t("k", "kind"), t("a", "A"), t("b", "B"), t(nil, "by index") }
+                elseif step == 1 then
+                    return { t("t", "hello world"), t("k", "kind"), t("a", "A"), t("b", "B"), t(nil, "by index") }
+                else
+                    return { t("t", "bye"), { k = "code", p = { key = "k", text = "kind" } }, t("b", "B"), t("a", "A"), t(nil, "by index") }
+                end
+            end
+            tern.block.define("probe", {
+                init = function(cx, args, saved) return { step = 0, quiet = 0, log = "log:" } end,
+                view = function(s)
+                    return {
+                        main = { k = "col", c = main(s.step) },
+                        dock = { k = "col", c = { t("q", "quiet " .. s.quiet), t("log", s.log) } },
+                    }
+                end,
+                key = function(s, key)
+                    if key.name == "n" then
+                        s.step += 1
+                        return true
+                    elseif key.name == "q" then
+                        s.quiet += 1
+                        return false
+                    end
+                    return false
+                end,
+                event = function(s, ev)
+                    local entry = ev.ev .. ":" .. tostring(ev.id)
+                    if ev.ev == "change" then entry ..= ":" .. tostring(ev.checked) end
+                    s.log ..= " " .. entry
+                end,
+                save = function(s) return { step = s.step, quiet = s.quiet } end,
+            })"#,
+        )],
+    );
+    let _daemon = env.start_daemon();
+    let tap = Tap::attach(&env);
+    let pane = env.daemon("block diffs.probe")["pane"].as_u64().expect("a pane");
+    let window = env.start_headless("w", &[]);
+    let (sf, _) = wait_for("the block's surface", || window_doc(&window, pane));
+
+    // The first view: every node id derives from its region and its key, or its index.
+    let doc = live(&env.daemon(&format!("tsp {pane}"))).expect("a live surface").1;
+    assert_eq!(child_ids(&doc), ["main", "dock"], "{doc}");
+    assert_eq!(child_ids(&doc["c"][0]), ["main.t", "main.k", "main.a", "main.b", "main.4"], "{doc}");
+    assert_eq!(child_ids(&doc["c"][1]), ["dock.q", "dock.log"], "{doc}");
+    assert_eq!(doc["c"][0]["c"][0]["p"]["tone"], "muted", "{doc}");
+    let saved = || -> Value {
+        env.daemon("blocks")[pane.to_string()]["saved"]
+            .as_str()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or(Value::Null)
+    };
+    wait_for("the first save", || (saved() == json!({"step": 0, "quiet": 0})).then_some(()));
+
+    // Text grown by a suffix appends; a removed prop is set to null.
+    env.daemon(&format!("send {pane} keys n"));
+    let second = tap.frame(pane, 2);
+    assert_eq!(ops_of(&second, "set"), [&json!(["set", "main.t", {"tone": null}])], "{second}");
+    assert_eq!(ops_of(&second, "text"), [&json!(["text", "main.t", "append", " world"])], "{second}");
+    for verb in ["add", "del", "move"] {
+        assert!(ops_of(&second, verb).is_empty(), "{second}");
+    }
+    wait_for("the second save", || (saved() == json!({"step": 1, "quiet": 0})).then_some(()));
+
+    // A key handler that returns exactly false: no render and no save, though the state changed.
+    env.daemon(&format!("send {pane} keys q"));
+    std::thread::sleep(Duration::from_millis(600));
+    assert!(
+        tap.frames(pane).iter().all(|f| f["s"].as_u64() < Some(3)),
+        "a quiet key rendered: {:?}",
+        tap.frames(pane)
+    );
+    assert!(!daemon_doc(&env, pane).contains("quiet 1"));
+    assert_eq!(saved(), json!({"step": 1, "quiet": 0}), "a quiet key saved");
+
+    // Text that isn't an extension is replaced; a kind change is `del` then `add` under the same
+    // id; swapped siblings move by id and are neither deleted nor re-added. The quiet change
+    // shows now.
+    env.daemon(&format!("send {pane} keys n"));
+    let third = tap.frame(pane, 3);
+    let texts = ops_of(&third, "text");
+    assert!(texts.contains(&&json!(["text", "main.t", "replace", "bye"])), "{third}");
+    assert!(texts.contains(&&json!(["text", "dock.q", "replace", "quiet 1"])), "{third}");
+    assert_eq!(ops_of(&third, "del"), [&json!(["del", "main.k"])], "{third}");
+    let added = ops_of(&third, "add");
+    assert_eq!(added.len(), 1, "{third}");
+    assert_eq!(
+        (&added[0][1], &added[0][2], &added[0][4]["k"]),
+        (&json!("main.k"), &json!("main"), &json!("code")),
+        "{third}"
+    );
+    let ops = third["ops"].as_array().unwrap();
+    let del_at = ops.iter().position(|op| op[0] == "del").unwrap();
+    let add_at = ops.iter().position(|op| op[0] == "add").unwrap();
+    assert!(del_at < add_at, "{third}");
+    let moves = ops_of(&third, "move");
+    assert_eq!(moves.len(), 1, "{third}");
+    assert!(moves[0][1] == "main.a" || moves[0][1] == "main.b", "{third}");
+    assert_eq!(moves[0][2], "main", "{third}");
+    let doc = live(&env.daemon(&format!("tsp {pane}"))).unwrap().1;
+    assert_eq!(child_ids(&doc["c"][0]), ["main.t", "main.k", "main.b", "main.a", "main.4"], "{doc}");
+
+    // toggle, change and focus from a window reach `event`, and each renders.
+    for (ev, s) in [
+        (json!({"ev": "toggle", "id": "main.a", "collapsed": true}), 4),
+        (json!({"ev": "change", "id": "main.b", "value": "on", "checked": true, "name": "pick"}), 5),
+        (json!({"ev": "focus", "id": "main.t"}), 6),
+    ] {
+        window.request(&format!("event {pane} {sf} {}", quote(&ev.to_string())));
+        let frame = tap.frame(pane, s);
+        // The log grew by a suffix: an append.
+        let texts = ops_of(&frame, "text");
+        assert!(
+            texts.len() == 1 && texts[0][1] == "dock.log" && texts[0][2] == "append",
+            "{frame}"
+        );
+    }
+    let text = daemon_doc(&env, pane);
+    assert!(text.contains("log: toggle:main.a change:main.b:true focus:main.t"), "{text}");
+}
+
+// ---------------------------------------------------------------------------------------------
+// Data and paths (§9.1)
+
+#[test]
+fn plugin_data_is_kept_when_the_plugin_is_removed_and_reinstalling_finds_it() {
+    let env = TestEnv::new(EXE, "plugindata");
+    let src = env.root.join("src/keeper");
+    std::fs::create_dir_all(&src).expect("mkdir");
+    std::fs::write(
+        src.join("plugin.toml"),
+        "schema = 1\nid = \"keeper\"\nname = \"Keeper\"\nversion = \"1\"\nhost = \"host.luau\"\n",
+    )
+    .expect("write");
+    std::fs::write(
+        src.join("host.luau"),
+        r#"local runs = (tern.kv.get("runs") or 0) + 1
+           tern.kv.set("runs", runs)"#,
+    )
+    .expect("write");
+    let (code, _, err) = auk(&env, &["plugin", "install", &src.to_string_lossy()]);
+    assert_eq!(code, 0, "{err}");
+    let _daemon = env.start_daemon();
+    wait_for("the first run's kv", || (kv(&env, "keeper")["runs"] == 1).then_some(()));
+
+    // Removing the package leaves its data folder alone.
+    let (code, out, err) = auk(&env, &["plugin", "remove", "keeper"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.starts_with("removed keeper ("), "{out}");
+    assert!(!plugins_dir(&env).join("keeper").exists());
+    let data = env.state.join("plugin-data/keeper");
+    assert!(data.join("kv.json").is_file(), "the data folder went with the plugin");
+    assert_eq!(kv(&env, "keeper")["runs"], 1);
+
+    // Installed again, it finds what it stored.
+    let (code, _, err) = auk(&env, &["plugin", "install", &src.to_string_lossy()]);
+    assert_eq!(code, 0, "{err}");
+    wait_for("the second run's kv", || (kv(&env, "keeper")["runs"] == 2).then_some(()));
+}
+
+#[test]
+fn without_auk_config_dir_plugins_live_in_application_support_on_macos() {
+    let env = TestEnv::new(EXE, "defaultpaths");
+    let run = |args: &[&str]| {
+        let out = env
+            .command()
+            .env_remove("AUK_CONFIG_DIR")
+            .env_remove("AUK_STATE_DIR")
+            .env("XDG_CONFIG_HOME", env.root.join("xdg-config"))
+            .env("XDG_STATE_HOME", env.root.join("xdg-state"))
+            .args(args)
+            .output()
+            .expect("run auk");
+        (
+            out.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    };
+    let config = if cfg!(target_os = "macos") {
+        env.home.join("Library/Application Support/Auk")
+    } else {
+        env.root.join("xdg-config/auk")
+    };
+    let (code, out, err) = run(&["plugin", "dir"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out.trim(), config.join("plugins").to_string_lossy());
+    // A package installed there is what `list` reads, still without a daemon.
+    let src = env.root.join("src/where");
+    std::fs::create_dir_all(&src).expect("mkdir");
+    std::fs::write(
+        src.join("plugin.toml"),
+        "schema = 1\nid = \"where\"\nname = \"Where\"\nversion = \"1\"\nhost = \"host.luau\"\n",
+    )
+    .expect("write");
+    std::fs::write(src.join("host.luau"), "").expect("write");
+    let (code, out, err) = run(&["plugin", "install", &src.to_string_lossy()]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains(&config.join("plugins/where").to_string_lossy().into_owned()), "{out}");
+    assert!(config.join("plugins/where/plugin.toml").is_file());
+    let (_, out, _) = run(&["plugin", "list"]);
+    assert!(out.starts_with("where 1 Where"), "{out}");
+    assert!(!env.root.join("xdg-config/auk").exists() || cfg!(not(target_os = "macos")));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Loading (§9.3, §4.1 start order)
+
+/// A plugin whose entry spins for `ms` and records when it ran, by `os.clock` (one clock for the
+/// whole process), in its kv store.
+fn slow_entry_plugin(env: &TestEnv, id: &str, ms: u32) {
+    package(
+        env,
+        id,
+        &format!("schema = 1\nid = \"{id}\"\nname = \"{id}\"\nversion = \"1\"\nhost = \"host.luau\"\n"),
+        &[(
+            "host.luau",
+            &format!(
+                r#"local t0 = os.clock()
+                   while os.clock() - t0 < {secs} do end
+                   tern.kv.set("ran", {{ t0, os.clock() }})"#,
+                secs = f64::from(ms) / 1000.0
+            ),
+        )],
+    );
+}
+
+#[test]
+fn host_halves_load_in_parallel_before_saved_panes_are_restored() {
+    let env = TestEnv::new(EXE, "loadorder");
+    slow_entry_plugin(&env, "slow-a", 800);
+    slow_entry_plugin(&env, "slow-b", 800);
+    // Every shell says when its rc file ran.
+    std::fs::write(
+        env.zdotdir.join(".zshrc"),
+        format!("{}zmodload zsh/datetime\necho rc-at-$EPOCHREALTIME\n", auk_conformance::harness::TEST_ZSHRC),
+    )
+    .expect("write .zshrc");
+    let daemon = env.start_daemon();
+    let pane = env.new_pane(&[]);
+    env.wait(pane, "prompt");
+    env.daemon("checkpoint");
+    env.kill9(daemon);
+
+    env.start_daemon();
+    env.wait(pane, "prompt");
+    // Both entries ran at once: their spans overlap.
+    let span = |id: &str| -> (f64, f64) {
+        let ran = kv(&env, id)["ran"].clone();
+        (ran[0].as_f64().expect("t0"), ran[1].as_f64().expect("t1"))
+    };
+    let (a, b) = (span("slow-a"), span("slow-b"));
+    assert!(a.1 - a.0 >= 0.8 && b.1 - b.0 >= 0.8, "{a:?} {b:?}");
+    assert!(a.0 < b.1 && b.0 < a.1, "the entries ran one after the other: {a:?} {b:?}");
+    // And the restored shell started after both had loaded (their kv writes are the entries'
+    // last act).
+    let loaded = ["slow-a", "slow-b"]
+        .iter()
+        .map(|id| {
+            std::fs::metadata(env.state.join(format!("plugin-data/{id}/kv.json")))
+                .and_then(|m| m.modified())
+                .expect("kv.json")
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_secs_f64()
+        })
+        .fold(0.0_f64, f64::max);
+    let text = env.daemon(&format!("capture {pane} --scrollback"))["text"].as_str().unwrap_or_default().to_owned();
+    let rc: f64 = text
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("rc-at-"))
+        .filter_map(|t| t.parse().ok())
+        .last()
+        .unwrap_or_else(|| panic!("no rc line: {text}"));
+    assert!(loaded < rc, "the pane was restored before the plugins loaded: {loaded} >= {rc}");
+}
+
+// ---------------------------------------------------------------------------------------------
+// Lens preconditions and the 16 MiB abort, through the daemon (§9.6)
+
+#[test]
+fn lenses_claim_only_with_shell_integration_lenses_on_and_the_main_screen_and_abort_past_16_mib() {
+    let env = TestEnv::new(EXE, "lenspre");
+    package(
+        &env,
+        "pre",
+        "schema = 1\nid = \"pre\"\nname = \"Pre\"\nversion = \"1\"\nhost = \"host.luau\"\n[[lenses]]\nid = \"l\"\nmatch = [\"lensme *\"]\n",
+        &[(
+            "host.luau",
+            r#"tern.lens.define("l", {
+                open = function(run) return { args = table.concat(run.args, " "), n = 0 } end,
+                line = function(s) s.n += 1 end,
+                finish = function(s) end,
+                view = function(s) return tern.ui.text("lensed " .. s.args) end,
+            })"#,
+        )],
+    );
+    // 17 MiB of 80-column lines, then a tail line, for `lensme big`.
+    executable(
+        &env.home.join("lensme"),
+        "#!/bin/sh\nif [ \"$1\" = big ]; then\n  yes xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx | head -c 17825792\n  echo big-tail\nelse\n  echo lens-out-$1\nfi\n",
+    );
+    let _daemon = env.start_daemon();
+    let pane = env.new_pane(&[]);
+    env.wait(pane, "prompt");
+    let lens = || env.daemon(&format!("lens {pane}"));
+    let lines = || -> Vec<String> {
+        lens()["blocks"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|b| b["line"].as_str().unwrap_or_default().to_owned())
+            .collect()
+    };
+    let screen = || env.daemon(&format!("capture {pane} --scrollback"))["text"].as_str().unwrap_or_default().to_owned();
+
+    // All preconditions hold: claimed.
+    env.run(pane, "./lensme a");
+    assert_eq!(lines(), ["./lensme a"]);
+
+    // `command_lenses` off: plain grid output.
+    env.daemon("settings --command-lenses off");
+    env.run(pane, "./lensme b");
+    env.daemon("settings --command-lenses on");
+    assert_eq!(lines(), ["./lensme a"], "claimed with lenses off");
+    assert!(screen().contains("lens-out-b"));
+
+    // The shell on the alternate screen: not the main screen, so not claimed.
+    env.run(pane, "printf '\\e[?1049h'");
+    env.run(pane, "./lensme c");
+    assert_eq!(lines(), ["./lensme a"], "claimed on the alternate screen");
+    assert!(env.daemon(&format!("capture {pane}"))["text"].as_str().unwrap_or_default().contains("lens-out-c"));
+    env.run(pane, "printf '\\e[?1049l'");
+
+    // No shell integration: a plain `sh` reports no command start, so nothing is claimed.
+    env.daemon(&format!("run {pane} sh"));
+    std::thread::sleep(Duration::from_millis(300));
+    env.daemon(&format!("run {pane} {}", quote("./lensme d")));
+    wait_for("sh to run the command", || screen().contains("lens-out-d").then_some(()));
+    env.daemon(&format!("run {pane} exit"));
+    env.wait(pane, "prompt");
+    assert_eq!(lines(), ["./lensme a"], "claimed without shell integration");
+
+    // Claimed again once everything holds.
+    env.run(pane, "./lensme e");
+    assert_eq!(lines(), ["./lensme a", "./lensme e"]);
+
+    // Past 16 MiB the capture aborts: the block goes, and everything captured is replayed into
+    // the grid, so the output ends up there as if never claimed.
+    env.daemon(&format!("run {pane} {}", quote("./lensme big")));
+    let done = env.daemon(&format!("wait {pane} --until prompt --timeout 240"));
+    assert!(done.get("timeout").is_none(), "{done}");
+    let after = lens();
+    assert!(after["running"].is_null(), "{after}");
+    // (The earlier blocks scrolled out with their anchors: 17 MiB is past the scrollback.)
+    assert!(!lines().iter().any(|l| l == "./lensme big"), "the aborted block stayed: {after}");
+    let text = screen();
+    assert!(text.contains("big-tail"), "the tail isn't in the grid");
+    assert!(text.contains("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"), "the output isn't in the grid");
+    // And the pane still claims afterwards.
+    env.run(pane, "./lensme f");
+    assert_eq!(lines().last().map(String::as_str), Some("./lensme f"));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Host hooks and the spawn filter, through the daemon (§9.7)
+
+#[test]
+fn the_spawn_filter_never_runs_for_blocks_a_late_answer_is_logged_and_cwd_events_fire() {
+    let env = TestEnv::new(EXE, "spawnblocks");
+    package(
+        &env,
+        "counter",
+        "schema = 1\nid = \"counter\"\nname = \"Counter\"\nversion = \"1\"\nhost = \"host.luau\"\n[[blocks]]\nid = \"b\"\ntitle = \"B\"\n",
+        &[(
+            "host.luau",
+            r#"tern.on("spawn", function(spec)
+                   tern.kv.set("spawns", (tern.kv.get("spawns") or 0) + 1)
+                   spec.env.TERN_COUNTED = "yes"
+                   return spec
+               end)
+               tern.on("cwd", function(ev, cx) cx:toast("info", "cwd " .. ev.path, "pane " .. ev.pane) end)
+               tern.block.define("b", {
+                   init = function() return {} end,
+                   view = function() return { main = tern.ui.col({ tern.ui.text("block up") }) } end,
+               })"#,
+        )],
+    );
+    // A later plugin whose filter answers after its 50 ms: discarded, and logged.
+    package(
+        &env,
+        "slowpoke",
+        "schema = 1\nid = \"slowpoke\"\nname = \"Slowpoke\"\nversion = \"1\"\nhost = \"host.luau\"\n",
+        &[(
+            "host.luau",
+            r#"tern.on("spawn", function(spec)
+                   local t = os.clock()
+                   while os.clock() - t < 0.3 do end
+                   spec.env.TERN_LATE = "yes"
+                   return spec
+               end)"#,
+        )],
+    );
+    let _daemon = env.start_daemon();
+    let window = env.start_headless("w", &[]);
+    let spawns = || kv(&env, "counter")["spawns"].as_u64().unwrap_or(0);
+
+    // A process pane: the filters run.
+    let shell = env.new_pane(&[]);
+    env.wait(shell, "prompt");
+    assert_eq!(spawns(), 1);
+    // The late answer is discarded (fail open) and the daemon logs it.
+    env.run(shell, "echo counted-$TERN_COUNTED late-${TERN_LATE:-no}");
+    let text = env.daemon(&format!("capture {shell}"))["text"].as_str().unwrap_or_default().to_owned();
+    assert!(text.contains("counted-yes late-no"), "{text}");
+    let log = std::fs::read_to_string(env.root.join("daemon.log")).expect("the daemon's log");
+    assert!(
+        log.lines().any(|l| l.contains("spawn filter took over 50 ms") && l.contains("slowpoke")),
+        "{log}"
+    );
+
+    // Blocks never pass through the filter.
+    let block = env.daemon("block counter.b")["pane"].as_u64().expect("a pane");
+    wait_for("the block's view", || daemon_doc(&env, block).contains("block up").then_some(()));
+    std::thread::sleep(Duration::from_millis(400));
+    assert_eq!(spawns(), 1, "the spawn filter ran for a block");
+    // A process pane still does.
+    let other = env.new_pane(&[]);
+    env.wait(other, "prompt");
+    assert_eq!(spawns(), 2);
+
+    // `cwd` reaches host handlers from the daemon's own stream (no window half involved), with
+    // the pane and the new path; its effect goes to the pane's windows.
+    let dir = env.home.join("hooked dir");
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    env.run(shell, "cd 'hooked dir'");
+    let path = dir.canonicalize().expect("canonical").to_string_lossy().into_owned();
+    let toast = wait_effect(&window, "the cwd hook's toast", |e| {
+        e["text"].as_str().is_some_and(|t| t.starts_with("cwd ") && t.ends_with("hooked dir"))
+    });
+    assert_eq!(toast["sub"], format!("pane {shell}"));
+    let shown = toast["text"].as_str().unwrap().trim_start_matches("cwd ").to_owned();
+    assert_eq!(
+        Path::new(&shown).canonicalize().expect("a real path").to_string_lossy(),
+        path,
+        "{toast}"
+    );
 }

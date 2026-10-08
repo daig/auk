@@ -554,7 +554,7 @@ fn main_command(cmd: &str, mut args: Vec<String>, win: usize) -> Result<Value, S
         "toasts" => Ok(json!(state.borrow().plugins.toast_log)),
         "opens" => {
             let s = state.borrow();
-            Ok(json!({"opened": s.plugins.opened, "routed": s.plugins.routed}))
+            Ok(json!({"opened": s.plugins.opened, "routed": s.plugins.routed, "refused": s.plugins.refused}))
         }
         "chrome" => {
             let s = state.borrow();

@@ -59,6 +59,7 @@ impl WinState {
                     "block_types": types,
                     "styles": self.plugins.catalog.styles().map(|(id, _)| id).collect::<Vec<_>>(),
                     "sheets": self.plugins.sheets.iter().map(|(n, _)| n).collect::<Vec<_>>(),
+                    "sheet_css": self.plugins.sheets.iter().map(|(n, c)| (n.clone(), json!(c))).collect::<serde_json::Map<_, _>>(),
                     "card": self.plugins.block_card.as_ref().map(|c| json!({"kind": c.kind, "error": c.error})),
                 }))
             }
@@ -250,7 +251,7 @@ impl WinState {
             return self
                 .open_block(&card.kind, &card.args, card.how, card.reveal, card.cwd)
                 .map(drop)
-                .ok_or_else(|| "the block still could not start".to_owned());
+                .map_err(|()| "the block still could not start".to_owned());
         }
         if name == "card:dismiss" {
             self.plugins.block_card = None;

@@ -112,16 +112,26 @@ impl BlobStore for DiskBlobs {
         self.memory.get(id)
     }
 
+    /// A blob for a window to show (the daemon sends what a window's documents name): loading it
+    /// counts as showing it, so its file becomes the most recently shown (§4.4).
     fn load(&self, id: &str) -> Option<Blob> {
+        let path = self.path(id);
         if let Some(blob) = self.memory.get(id) {
+            if let Some(path) = &path {
+                let _ = touch(path);
+            }
             return Some(blob.clone());
         }
         // Restored panes (§16) find their blobs on disk; the file name is the hash, checked again.
-        let bytes = fs::read(self.path(id)?).ok()?;
-        (auk_tsp::blob::blob_id(&bytes) == id).then(|| Blob {
-            id: id.to_owned(),
-            mime: None,
-            bytes,
+        let path = path?;
+        let bytes = fs::read(&path).ok()?;
+        (auk_tsp::blob::blob_id(&bytes) == id).then(|| {
+            let _ = touch(&path);
+            Blob {
+                id: id.to_owned(),
+                mime: None,
+                bytes,
+            }
         })
     }
 }
@@ -464,6 +474,39 @@ mod tests {
         assert!(fresh.has(&a.id) && !fresh.has("00"));
         assert_eq!(evict_blobs(&dir, 6).unwrap(), 6);
         assert!(!dir.join(&a.id).exists() && dir.join(&b.id).exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn eviction_takes_the_least_recently_shown_blob_first() {
+        let dir = std::env::temp_dir().join(format!("auk-blobs-lru-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let mut store = DiskBlobs::new(dir.clone());
+        let blob = |bytes: &[u8]| Blob {
+            id: auk_tsp::blob::blob_id(bytes),
+            mime: None,
+            bytes: bytes.to_vec(),
+        };
+        let pause = || std::thread::sleep(std::time::Duration::from_millis(20));
+        let (a, b, c) = (blob(b"aaaa"), blob(b"bbbb"), blob(b"cccc"));
+        // Written oldest first: a, b, c.
+        for x in [&a, &b, &c] {
+            store.put(x.clone(), &|_| false);
+            pause();
+        }
+        // A program asks after a (`q blobs`, which touches it), and a restored pane's window is
+        // sent b from disk: both are now newer than c.
+        store.touch(&a.id);
+        pause();
+        let restored = DiskBlobs::new(dir.clone());
+        assert_eq!(restored.load(&b.id).map(|x| x.bytes), Some(b.bytes.clone()));
+        // Room for two: c, the least recently shown, goes first, though written last.
+        assert_eq!(evict_blobs(&dir, 8).unwrap(), 8);
+        assert!(!dir.join(&c.id).exists(), "c was shown least recently");
+        assert!(dir.join(&a.id).is_file() && dir.join(&b.id).is_file());
+        // Room for one: a (touched before b was shown) goes next.
+        assert_eq!(evict_blobs(&dir, 4).unwrap(), 4);
+        assert!(!dir.join(&a.id).exists() && dir.join(&b.id).is_file());
         let _ = fs::remove_dir_all(&dir);
     }
 }

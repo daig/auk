@@ -150,6 +150,9 @@ pub fn run(config: Config) -> io::Result<()> {
 
 /// The daemon's main loop.
 pub async fn serve(config: Config) -> io::Result<()> {
+    // The plugin runtime's diagnostics (a late spawn-filter answer, a disabled hook, §9.7, §9.2)
+    // go to the daemon's log.
+    auk_plugins::diagnostics::to_stderr("auk daemon");
     private_dir(&config.state_dir)?;
     let socket_dir = config.socket.parent().unwrap_or(Path::new("."));
     private_dir(socket_dir)?;
@@ -811,6 +814,16 @@ impl Daemon {
         }
     }
 
+    /// A window's Clear Scrollback (§5.5): a sequenced record, so every replica clears.
+    pub(crate) fn client_clear_scrollback(&self, id: ClientId, pane: PaneId) {
+        if let Some(p) = self.pane(pane) {
+            let mut p = lock(&p);
+            if p.has_viewer(id) {
+                p.push_record(auk_replica::Record::ClearScrollback);
+            }
+        }
+    }
+
     pub(crate) fn client_ack(&self, id: ClientId, pane: PaneId, sf: &str, s: u64) {
         if let Some(p) = self.pane(pane) {
             lock(&p).client_ack(id, sf, s);
@@ -933,6 +946,29 @@ impl Daemon {
                     cwd,
                     agent: true,
                     ..new(place)
+                })?;
+            }
+            LayoutEdit::Block {
+                kind,
+                args,
+                split,
+                session,
+                cwd,
+            } => {
+                use crate::plugins::{BlockPlace, NewBlock};
+                let place = match (split, session) {
+                    (Some((pane, dir)), _) => BlockPlace::Split { pane, dir },
+                    (None, Some(session)) => BlockPlace::NewTab { session },
+                    (None, None) => BlockPlace::NewSession {
+                        window_key: window_key.clone(),
+                    },
+                };
+                self.new_block_pane(NewBlock {
+                    kind,
+                    args,
+                    place,
+                    cwd: cwd.map(PathBuf::from),
+                    size: None,
                 })?;
             }
             LayoutEdit::Zoom { tab, pane } => self.edit_layout(|l| l.zoom(tab, pane))?,

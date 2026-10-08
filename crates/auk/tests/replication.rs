@@ -473,6 +473,149 @@ fn only_the_primary_clients_acks_count_and_client_facts_follow_the_primary() {
     });
 }
 
+/// The TSP bodies the terminal wrote to the program, once `done` holds for them.
+fn program_reads(probe: &Probe, what: &str, done: impl Fn(&[Value]) -> bool) -> Vec<Value> {
+    let input = probe.read_until(what, |b| {
+        done(&auk_conformance::probe::tsp_bodies(&auk_conformance::probe::split_input(b)))
+    });
+    auk_conformance::probe::tsp_bodies(&auk_conformance::probe::split_input(&input))
+}
+
+#[test]
+fn cell_size_reduced_motion_and_the_12_hour_clock_follow_the_primary_client() {
+    let env = env("primaryfacts");
+    env.start_daemon();
+    let probe = Probe::start(&env, &[]);
+    let pane = probe.pane;
+    let x = RawClient::attach(&env, ClientFacts::default());
+    let y = RawClient::attach(
+        &env,
+        ClientFacts {
+            cell_px: [10, 20],
+            dark: false,
+            reduce_motion: true,
+            hour12: true,
+        },
+    );
+    x.send(&ClientMsg::Focus { pane });
+    wait_primary(&env, pane, x.id);
+    // X's facts: the hello reply, and the first-draw resize when X acks the first frame.
+    probe.write(&tsp_hello(&[]));
+    let bodies = program_reads(&probe, "the hello reply", |b| b.iter().any(|v| v["r"] == "hello"));
+    let reply = bodies.iter().find(|v| v["r"] == "hello").unwrap();
+    assert_eq!(
+        (&reply["cell"], &reply["reduceMotion"], &reply["hour12"]),
+        (&json!({"w": 8, "h": 16}), &json!(false), &json!(false)),
+        "{reply}"
+    );
+    probe.write(&open_with("s1", "flow", json!([{"id": "t", "k": "text", "p": {"text": "hi"}}])));
+    x.send(&ClientMsg::Ack { pane, sf: "s1".into(), s: 1 });
+    program_reads(&probe, "X's first-draw resize", |b| {
+        events(b, "resize").iter().any(|r| r["cell"] == json!({"w": 8, "h": 16}))
+    });
+
+    // Y becomes the primary: the program is told of its cell size and reduced motion...
+    y.send(&ClientMsg::Focus { pane });
+    wait_primary(&env, pane, y.id);
+    let bodies = program_reads(&probe, "Y's cell size and motion", |b| {
+        events(b, "resize").iter().any(|r| r["cell"] == json!({"w": 10, "h": 20}))
+            && !events(b, "motion").is_empty()
+    });
+    assert!(
+        events(&bodies, "motion").contains(&&json!({"ev": "motion", "reduce": true})),
+        "{bodies:?}"
+    );
+    // ...asking again gets all of Y's facts, the 12-hour clock included...
+    probe.write(&tsp_hello(&[]));
+    let bodies = program_reads(&probe, "the second hello reply", |b| {
+        b.iter().any(|v| v["r"] == "hello")
+    });
+    let reply = bodies.iter().find(|v| v["r"] == "hello").unwrap();
+    assert_eq!(
+        (&reply["cell"], &reply["reduceMotion"], &reply["hour12"]),
+        (&json!({"w": 10, "h": 20}), &json!(true), &json!(true)),
+        "{reply}"
+    );
+    // ...and the terminal's own cell-size report (CSI 16 t) is Y's.
+    probe.write(b"\x1b[16t");
+    let input = probe.read_until("the cell-size report", |b| {
+        b.windows(10).any(|w| w == b"\x1b[6;20;10t")
+    });
+    assert!(!input.is_empty());
+    let tsp = env.daemon(&format!("tsp {pane}"));
+    assert_eq!(
+        (&tsp["facts"]["reduce_motion"], &tsp["facts"]["hour12"]),
+        (&json!(true), &json!(true)),
+        "{tsp}"
+    );
+
+    // X again: its facts come back.
+    x.send(&ClientMsg::Focus { pane });
+    wait_primary(&env, pane, x.id);
+    let bodies = program_reads(&probe, "X's cell size and motion", |b| {
+        events(b, "resize").iter().any(|r| r["cell"] == json!({"w": 8, "h": 16}))
+            && !events(b, "motion").is_empty()
+    });
+    assert!(
+        events(&bodies, "motion").contains(&&json!({"ev": "motion", "reduce": false})),
+        "{bodies:?}"
+    );
+    probe.write(b"\x1b[16t");
+    probe.read_until("X's cell-size report", |b| {
+        b.windows(9).any(|w| w == b"\x1b[6;16;8t")
+    });
+    let tsp = env.daemon(&format!("tsp {pane}"));
+    assert_eq!(tsp["facts"]["hour12"], false, "{tsp}");
+}
+
+#[test]
+fn clear_scrollback_from_a_window_reaches_every_replica_and_ends_its_surfaces() {
+    let env = env("clearsb");
+    env.start_daemon();
+    let a = env.start_headless("a", &[]);
+    let b = env.start_headless("b", &[]);
+    let probe = Probe::start(&env, &[]);
+    let pane = probe.pane;
+    probe.write(&tsp_hello(&[]));
+    probe.fence_tsp();
+    // A flow surface, then enough lines to push it and the first lines into scrollback.
+    probe.write(&open_with("c", "flow", json!([{"id": "t", "k": "text", "p": {"text": "anchored"}}])));
+    let mut lines = Vec::new();
+    for i in 0..60 {
+        lines.extend(format!("old-line-{i:02}.\r\n").into_bytes());
+    }
+    probe.write(&lines);
+    converge(&env, &a, pane);
+    converge(&env, &b, pane);
+    assert!(a.capture(pane, true).contains("old-line-00."));
+    assert!(b.request(&format!("tsp {pane}"))["surfaces"].to_string().contains("\"c\""));
+
+    // Window A clears the pane's scrollback.
+    a.request(&format!("clear-scrollback {pane}"));
+    let bodies = probe.fence_tsp();
+    assert!(
+        bodies.contains(&json!({"ev": "gone", "sf": "c", "ids": ["c"]})),
+        "the anchored surface didn't end: {bodies:?}"
+    );
+    let at = converge(&env, &a, pane);
+    assert_eq!(converge(&env, &b, pane), at);
+    let daemon_text = env.daemon(&format!("capture {pane} --scrollback"))["text"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    for (who, text, tsp) in [
+        ("the daemon", daemon_text, env.daemon(&format!("tsp {pane}"))),
+        ("window a", a.capture(pane, true), a.request(&format!("tsp {pane}"))),
+        ("window b", b.capture(pane, true), b.request(&format!("tsp {pane}"))),
+    ] {
+        assert!(!text.contains("old-line-00."), "{who} kept the scrollback: {text}");
+        // The screen stays.
+        assert!(text.contains("old-line-59."), "{who}: {text}");
+        assert_eq!(tsp["surfaces"], json!([]), "{who}: {tsp}");
+    }
+    assert!(a.errors().is_empty() && b.errors().is_empty());
+}
+
 #[test]
 fn an_older_client_is_refused_and_offered_an_upgrade() {
     let env = env("older");

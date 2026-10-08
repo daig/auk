@@ -190,6 +190,8 @@ pub struct PaneView {
     /// hidden, and since when it is hidden.
     pub(crate) paused_ms: f64,
     pub(crate) hidden_at: Option<f64>,
+    /// `el` controls never flip (a lens layer's view, §9.6).
+    pub(crate) inert_controls: bool,
 }
 
 impl PaneView {
@@ -209,8 +211,9 @@ impl PaneView {
         let toasts = crate::kinds::layout::ToastHost::new(&mut dom, container);
         // Load the grammars off the main thread before the first code block needs them.
         crate::highlight::warm();
-        // Reduce Motion reaches sheets (`prefers-reduced-motion`) and the CSS motion engine.
-        doc.set_media_preferences(settings.reduce_motion, false, false);
+        // Reduce Motion reaches sheets (`prefers-reduced-motion`) and the CSS motion engine; the
+        // other two preferences reach sheets (§8.4).
+        settings.apply_media(doc);
         PaneView {
             settings,
             written,
@@ -235,6 +238,7 @@ impl PaneView {
             measured: None,
             paused_ms: 0.0,
             hidden_at: None,
+            inert_controls: false,
         }
     }
 

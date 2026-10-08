@@ -234,7 +234,7 @@ mod tests {
     #[tokio::test]
     async fn mode_gate_tracks_raw_mode() {
         let (master, mut child) = spawn(&spec(
-            "echo cooked; read x; stty raw -echo; echo raw; read y",
+            "echo cooked; read x; stty -echo; echo secret; read z; stty echo -icanon; echo half; read w; stty raw -echo; echo raw; read y",
         ))
         .unwrap();
         let master = std::sync::Arc::new(master);
@@ -243,6 +243,16 @@ mod tests {
         read_until(&rx, &mut out, "cooked");
         let mode = master.tty_mode().unwrap();
         assert!(mode.canonical && mode.echo && !mode.accepts_tsp_input());
+        rustix::io::write(&*master, b"\n").unwrap();
+        // A password prompt (`read -s`): canonical with echo off is refused.
+        read_until(&rx, &mut out, "secret");
+        let mode = master.tty_mode().unwrap();
+        assert!(mode.canonical && !mode.echo && !mode.accepts_tsp_input(), "{mode:?}");
+        rustix::io::write(&*master, b"\n").unwrap();
+        // Non-canonical with echo on is refused too.
+        read_until(&rx, &mut out, "half");
+        let mode = master.tty_mode().unwrap();
+        assert!(!mode.canonical && mode.echo && !mode.accepts_tsp_input(), "{mode:?}");
         rustix::io::write(&*master, b"\n").unwrap();
         read_until(&rx, &mut out, "raw");
         let mode = master.tty_mode().unwrap();

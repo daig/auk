@@ -160,6 +160,7 @@ fn on_message(daemon: &Arc<Daemon>, id: ClientId, msg: ClientMsg) {
             }
         }
         ClientMsg::Blobs { pane, ids } => daemon.client_blobs(id, pane, &ids),
+        ClientMsg::ClearScrollback { pane } => daemon.client_clear_scrollback(id, pane),
         // Client environments matter once windows spawn panes with them (M4).
         ClientMsg::Env { .. } => {}
         ClientMsg::Hello(_) | ClientMsg::Detach => {}

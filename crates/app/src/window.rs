@@ -678,6 +678,8 @@ impl WinState {
             cell: ((cw / scale) as f32, (ch / scale) as f32),
             dark: self.dark,
             reduce_motion: self.reduce_motion(),
+            reduce_transparency: auk_platform_macos::system_reduce_transparency(),
+            more_contrast: auk_platform_macos::system_increase_contrast(),
             program_colors: self.settings.program_colors,
             native_editing: self.settings.native_editing,
             links_plain_click: self.settings.links_plain_click,
@@ -971,6 +973,11 @@ impl WinState {
             width: size.width,
             height: size.height,
             dark: self.dark,
+            media: (
+                self.reduce_motion(),
+                auk_platform_macos::system_reduce_transparency(),
+                auk_platform_macos::system_increase_contrast(),
+            ),
             sessions: sessions
                 .sessions
                 .iter()
@@ -1202,10 +1209,14 @@ impl WinState {
                 }
             }
             Cmd::ClearScrollback => {
-                // Clearing is a replicated action (§15.2); the daemon records it. Until the
-                // daemon takes it from a window, ⌘K sends the shell's clear sequence.
+                // A pane operation (§5.5): the daemon records it in-band, so every replica clears
+                // and surfaces anchored in the scrollback end.
                 if let Some(pane) = focused {
-                    self.typed(window, pane, b"\x0c".to_vec());
+                    if let Some(v) = self.views.get_mut(&pane) {
+                        v.selection = None;
+                    }
+                    let _ = self.conn.send(&ClientMsg::ClearScrollback { pane });
+                    window.request_frame();
                 }
             }
             Cmd::CommandPalette => self.open_palette(),

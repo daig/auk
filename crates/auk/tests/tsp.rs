@@ -2969,6 +2969,52 @@ fn ac07_nothing_reaches_a_pty_whose_program_isnt_listening() {
     );
 }
 
+/// The mode gate needs both halves of raw mode (§12.1): a canonical tty with echo off (a password
+/// prompt, `read -s`) and a non-canonical one with echo on each refuse TSP input, though the
+/// engine answers; only non-canonical with echo off lets it through.
+#[test]
+fn the_mode_gate_refuses_canonical_with_echo_off_and_non_canonical_with_echo_on() {
+    let (env, probe) = setup("gate2");
+    let pane = probe.pane;
+    let gate = |what: &str| -> (u64, u64) {
+        let st = env.daemon(&format!("tsp {pane}"))["gate_stats"].clone();
+        match (st["written"].as_u64(), st["dropped"].as_u64()) {
+            (Some(w), Some(d)) => (w, d),
+            _ => panic!("{what}: no gate counts: {st}"),
+        }
+    };
+    for (mode, canonical) in [("cooked-noecho", true), ("raw-echo", false)] {
+        probe.tty(mode);
+        let tty = env.daemon(&format!("tty-mode {pane}"));
+        assert_eq!(
+            (&tty["canonical"], &tty["echo"], &tty["tsp_input"]),
+            (&json!(canonical), &json!(!canonical), &json!(false)),
+            "{mode}: {tty}"
+        );
+        let (written, dropped) = gate(mode);
+        let mut bytes = hello(&[]);
+        bytes.extend(tsp("f", &[], "{bad"));
+        probe.write(&bytes);
+        wait_for(&format!("the gate to drop the answers under {mode}"), || {
+            (gate(mode).1 >= dropped + 2).then_some(())
+        });
+        assert_eq!(gate(mode).0, written, "{mode}: TSP input was written");
+        probe.tty("raw");
+        let items = probe.fence();
+        assert!(
+            items.iter().all(|i| !i.is_tsp()),
+            "{mode}: TSP reached the program: {items:?}"
+        );
+    }
+    // Raw mode, both halves: answered.
+    let tty = env.daemon(&format!("tty-mode {pane}"));
+    assert_eq!(tty["tsp_input"], true, "{tty}");
+    let (written, _) = gate("raw");
+    let bodies = exchange(&probe, &hello(&[]));
+    assert!(bodies.iter().any(|b| b["r"] == "hello"), "{bodies:?}");
+    assert!(gate("raw").0 > written);
+}
+
 /// xorshift64*: deterministic, no dependencies.
 struct Rng(u64);
 

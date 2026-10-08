@@ -81,6 +81,10 @@ pub struct ViewSettings {
     pub dark: bool,
     /// Reduce Motion (the system setting or ours): still equivalents (§7.13).
     pub reduce_motion: bool,
+    /// The system's Reduce Transparency, for `@media (prefers-reduced-transparency)` (§8.4).
+    pub reduce_transparency: bool,
+    /// The system's Increase Contrast, for `@media (prefers-contrast: more)` (§8.4).
+    pub more_contrast: bool,
     /// "Use program colors": apply program palettes (§7.12).
     pub program_colors: bool,
     /// The "Edits" setting: split diffs wider than 112 cells when `mode` is absent or `auto`.
@@ -93,6 +97,20 @@ pub struct ViewSettings {
     pub annotated_headings: bool,
 }
 
+impl ViewSettings {
+    /// The media features sheets match (§8.4): reduced motion, reduced transparency, more
+    /// contrast.
+    pub fn media(&self) -> (bool, bool, bool) {
+        (self.reduce_motion, self.reduce_transparency, self.more_contrast)
+    }
+
+    /// Tells `doc` the media features.
+    pub fn apply_media(&self, doc: &mut auk_ui::Document) {
+        let (motion, transparency, contrast) = self.media();
+        doc.set_media_preferences(motion, transparency, contrast);
+    }
+}
+
 impl Default for ViewSettings {
     fn default() -> Self {
         ViewSettings {
@@ -100,6 +118,8 @@ impl Default for ViewSettings {
             cell: (8.0, 17.0),
             dark: true,
             reduce_motion: false,
+            reduce_transparency: false,
+            more_contrast: false,
             program_colors: true,
             split_diffs: false,
             native_editing: true,

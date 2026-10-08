@@ -401,7 +401,8 @@ pub trait WindowHost {
     /// `cx:open(target, how?, reveal?)`: the built-in open; routes don't run.
     fn open(&mut self, target: &str, how: Option<How>, reveal: Reveal) -> Result<(), String>;
     /// `cx:new_block(kind, args, how, reveal)`: on the window's current host; `None` when no
-    /// Ready plugin there defines the kind (no toast).
+    /// Ready plugin there defines the kind (no toast), and in a remote window, whose link opens
+    /// the block but carries no pane id back.
     fn new_block(&mut self, kind: &str, args: &[String], how: How, reveal: Reveal) -> Option<u64>;
     /// `cx:command(id)`: a built-in command; overrides don't run. Error:
     /// ``unknown command `<id>` ``.
@@ -1218,8 +1219,12 @@ impl WindowPlugins {
         self.after_calls();
     }
 
-    /// When the next timer is due.
+    /// When the next callback is due: now when a completion (a process, a request, a `settle`)
+    /// is waiting for its callback, else the next timer.
     pub fn next_wake(&self) -> Option<Instant> {
+        if self.plugins.iter().any(|p| !p.vm.completion_receiver().is_empty()) {
+            return Some(Instant::now());
+        }
         self.plugins.iter().filter_map(|p| p.vm.next_timer()).min()
     }
 

@@ -12,9 +12,11 @@ Each message is one JSON object per line.
 
 Test -> probe:
     {"write": "<base64>"}         write bytes to stdout
-    {"tty": "raw"|"cooked"|"raw-echo"|"binary"}  set the tty mode (raw: non-canonical, no echo;
-                                  binary: raw with output processing off too, so bytes written
-                                  reach the terminal unchanged, a lone \n included)
+    {"tty": "raw"|"cooked"|"cooked-noecho"|"raw-echo"|"binary"}  set the tty mode (raw:
+                                  non-canonical, no echo; cooked-noecho: canonical with echo off,
+                                  as `read -s` sets it; binary: raw with output processing off
+                                  too, so bytes written reach the terminal unchanged, a lone \n
+                                  included)
     {"exit": <code>}              exit with that status
     {"ping": <n>}                 answered with {"pong": <n>} after everything before it is done
 
@@ -34,8 +36,12 @@ import termios
 
 
 def set_mode(fd, mode, saved):
-    if mode == "cooked":
+    if mode in ("cooked", "cooked-noecho"):
         termios.tcsetattr(fd, termios.TCSANOW, saved)
+        if mode == "cooked-noecho":
+            attrs = termios.tcgetattr(fd)
+            attrs[3] &= ~termios.ECHO
+            termios.tcsetattr(fd, termios.TCSANOW, attrs)
         return
     attrs = termios.tcgetattr(fd)
     attrs[3] &= ~(termios.ICANON | termios.ISIG | termios.IEXTEN)

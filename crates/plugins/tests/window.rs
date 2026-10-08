@@ -416,3 +416,149 @@ fn sheet_urls_inline_plugin_files_as_data_and_refuse_the_rest() {
     assert!(extra.contains("url(https://example.com/a.png)"));
 }
 
+
+/// One window plugin for the order test: its dir name sorts before or after its id's.
+fn order_plugin(root: &Root, dir: &str, id: &str) {
+    let script = r##"
+        local me = tern.plugin.id
+        tern.override("new_tab", function(cx) cx:copy(me .. " override 1") end)
+        tern.override("new_tab", function(cx) cx:copy(me .. " override 2") end)
+        tern.route.link(function(req, cx) cx:copy(me .. " link 1") end)
+        tern.route.link(function(req, cx) cx:copy(me .. " link 2") end)
+        tern.route.open(function(req, cx) cx:copy(me .. " open 1") end)
+        tern.chrome.tab_title(function(tab) return me .. " title" end)
+        tern.chrome.status(function(p) return {{text = me .. " a"}, {text = me .. " b"}} end)
+        local last = nil
+        local function fresh(cx)
+            local verdict = (last == nil and "first") or (rawequal(last, cx) and "same") or "fresh"
+            last = cx
+            return verdict
+        end
+        tern.on("focus", function(ev, cx) cx:copy(me .. " focus 1 " .. fresh(cx)) end)
+        tern.on("focus", function(ev, cx) cx:copy(me .. " focus 2 " .. fresh(cx)) end)
+        tern.command({id = "later", title = "Later", run = function(cx)
+            tern.timer(1, function(tcx)
+                tcx:copy(me .. " timer " .. (tcx ~= nil and fresh(tcx) or "no cx"))
+            end)
+        end})
+    "##;
+    root.package(
+        dir,
+        &[
+            (
+                "plugin.toml",
+                &format!("schema = 1\nid = \"{id}\"\nname = \"{id}\"\nversion = \"1\"\nwindow = \"window.luau\"\n"),
+            ),
+            ("window.luau", script),
+        ],
+    );
+}
+
+/// §9.2 "Order and numbers": across window plugins, overrides, routes, formatters and window
+/// events go in id order (not folder order), then registration order within a plugin; and
+/// window callbacks (handlers and timers) each get a fresh cx (§9.2 "No re-entrancy").
+#[test]
+fn window_plugins_go_in_id_then_registration_order_each_with_a_fresh_cx() {
+    let root = Root::new();
+    // Folder order is b then a; id order is a then b.
+    order_plugin(&root, "1-folder", "zeta");
+    order_plugin(&root, "2-folder", "alpha");
+    let mut win = TestWindow::default();
+    let mut plugins = WindowPlugins::load(root.window_config(BUILTIN), &mut win);
+    assert!(plugins.failures().is_empty(), "{:?}", plugins.failures());
+    assert_eq!(plugins.plugins(), ["alpha", "zeta"]);
+    let copies = |win: &TestWindow| -> Vec<String> {
+        win.calls()
+            .into_iter()
+            .filter_map(|c| match c {
+                Call::Copy(t) => Some(t),
+                _ => None,
+            })
+            .collect()
+    };
+
+    // Overrides: every one runs while none returns true, in order.
+    assert!(!plugins.run_override(&mut win, "new_tab"));
+    assert_eq!(
+        copies(&win),
+        ["alpha override 1", "alpha override 2", "zeta override 1", "zeta override 2"]
+    );
+    // Routes: the same for links and opens (each passes with nil).
+    win.calls.borrow_mut().clear();
+    let link = auk_plugins::window::LinkRequest { url: "https://x".into(), pane: 1, mods: Default::default() };
+    assert_eq!(plugins.route_link(&mut win, &link), None);
+    assert_eq!(copies(&win), ["alpha link 1", "alpha link 2", "zeta link 1", "zeta link 2"]);
+    win.calls.borrow_mut().clear();
+    let open = OpenRequest {
+        path: "/tmp/x".into(),
+        line: None,
+        col: None,
+        host: "local".into(),
+        how: How::Default,
+        origin: "cli".into(),
+    };
+    assert_eq!(plugins.route_open(&mut win, &open), None);
+    assert_eq!(copies(&win), ["alpha open 1", "zeta open 1"]);
+    // Formatters: the first title in id order wins; status segments in id order.
+    let tab = auk_plugins::window::TabInfo { id: 1, title: "zsh".into(), ..Default::default() };
+    assert_eq!(plugins.tab_title(&tab).as_deref(), Some("alpha title"));
+    let segs: Vec<(String, String)> = plugins
+        .status(&StatusPane::default())
+        .into_iter()
+        .map(|s| (s.plugin, s.text))
+        .collect();
+    assert_eq!(
+        segs,
+        [
+            ("alpha".to_owned(), "alpha a".to_owned()),
+            ("alpha".to_owned(), "alpha b".to_owned()),
+            ("zeta".to_owned(), "zeta a".to_owned()),
+            ("zeta".to_owned(), "zeta b".to_owned())
+        ]
+    );
+    // Window events: id order, then registration order, each handler with a fresh cx.
+    win.calls.borrow_mut().clear();
+    plugins.deliver(&mut win, &[WindowEvent::Focus { pane: 1, tab: 1 }]);
+    assert_eq!(
+        copies(&win),
+        ["alpha focus 1 first", "alpha focus 2 fresh", "zeta focus 1 first", "zeta focus 2 fresh"]
+    );
+    // A window timer's callback gets a fresh cx too.
+    win.calls.borrow_mut().clear();
+    plugins.run_action(&mut win, "plugin.alpha.later").expect("runs");
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while copies(&win).is_empty() && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+        plugins.pump(&mut win);
+    }
+    assert_eq!(copies(&win), ["alpha timer fresh"]);
+}
+
+/// A completion (here `cx.session:settle`, which the window resolves) makes the runtime due at
+/// once, so the window pumps it without waiting for a timer; its callback gets a fresh cx.
+#[test]
+fn a_completion_makes_the_window_runtime_due_and_its_callback_gets_a_cx() {
+    let root = Root::new();
+    root.package(
+        "settle",
+        &[
+            ("plugin.toml", "schema = 1\nid = \"settle\"\nname = \"Settle\"\nversion = \"1\"\nwindow = \"w.luau\"\n"),
+            (
+                "w.luau",
+                r#"tern.command({id = "go", title = "Go", run = function(cx)
+                    cx.session:settle(7, 10):next(function(r, e, cb) cb:copy(tostring(r)) end)
+                end})"#,
+            ),
+        ],
+    );
+    let mut win = TestWindow::default();
+    let mut plugins = WindowPlugins::load(root.window_config(BUILTIN), &mut win);
+    assert!(plugins.failures().is_empty(), "{:?}", plugins.failures());
+    assert_eq!(plugins.next_wake(), None, "nothing pending");
+    plugins.run_action(&mut win, "plugin.settle.go").expect("runs");
+    let due = plugins.next_wake().expect("the settled task makes the runtime due");
+    assert!(due <= std::time::Instant::now());
+    plugins.pump(&mut win);
+    assert_eq!(win.calls(), [Call::Copy("settled output".into())]);
+    assert_eq!(plugins.next_wake(), None);
+}

@@ -103,6 +103,16 @@ pub enum LayoutEdit {
     /// Opens an agent pane (§5.1): `agent_command` through the login shell, split right of
     /// `pane` (the window's focused pane), or in a new session when there is none.
     Agent { pane: Option<PaneId> },
+    /// Opens a plugin block pane (§9.5) of `kind` (`<plugin>.<block>`) with launch `args`: split
+    /// off `split`'s pane, else a new tab in `session`, else a new session in the client's window
+    /// key. A remote window opens its host's block types this way (§10.4); a local one may too.
+    Block {
+        kind: String,
+        args: Vec<String>,
+        split: Option<(PaneId, SplitDir)>,
+        session: Option<SessionId>,
+        cwd: Option<String>,
+    },
 }
 
 /// Client to daemon.
@@ -153,6 +163,12 @@ pub enum ClientMsg {
     Blobs {
         pane: PaneId,
         ids: Vec<String>,
+    },
+    /// Clears the pane's scrollback (§5.5): a pane operation the daemon records in-band, so it
+    /// reaches every replica and ends every surface anchored in the scrollback. Taken only from a
+    /// client that shows the pane.
+    ClearScrollback {
+        pane: PaneId,
     },
     Detach,
 }

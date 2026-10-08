@@ -887,6 +887,77 @@ fn c7_adopt() {
 }
 
 #[test]
+fn c6_x_keep_true_on_a_screen_surface_discards_it() {
+    let mut h = Harness::new();
+    text_main(&mut h, "i", "inline");
+    text_main(&mut h, "c", "screen");
+    assert!(h.pane.covered(h.pane.surfaces()[0].key()));
+    // The modes table's screen row: "On x keep:true: discarded". Nothing is kept, the inline
+    // surface underneath is uncovered, and the id is gone.
+    h.send_json("x", json!({"id": "c", "keep": true}));
+    assert!(h.out().is_empty());
+    let left: Vec<(String, State)> = h
+        .pane
+        .surfaces()
+        .iter()
+        .map(|s| (s.id().to_owned(), s.state()))
+        .collect();
+    assert_eq!(left, [("i".to_owned(), State::Live)]);
+    assert!(!h.pane.covered(h.pane.surfaces()[0].key()));
+    h.frame("c", 2, json!([]));
+    assert_eq!(h.out()[0]["msg"], "unknown surface c");
+    // The default (no keep) does the same on the alternate screen.
+    h.grid.alt = true;
+    text_main(&mut h, "a", "screen");
+    h.send_json("x", json!({"id": "a"}));
+    assert!(h.pane.surfaces().iter().all(|s| s.mode() != Mode::Screen));
+}
+
+#[test]
+fn c7_adopt_picks_the_newest_of_several_closed_inline_surfaces() {
+    let mut h = Harness::new();
+    for (text, other) in [("first", "o1"), ("second", "o2")] {
+        h.open("s1", "inline", json!([{"id": "t", "k": "text", "p": {"text": text}}]));
+        h.send_json("x", json!({"id": "s1", "keep": true}));
+        // An unrelated closed inline surface in between, with another id.
+        h.open(other, "inline", json!([]));
+        h.send_json("x", json!({"id": other}));
+    }
+    let closed = |h: &Harness| -> Vec<(String, State)> {
+        h.pane
+            .surfaces()
+            .iter()
+            .map(|s| (s.id().to_owned(), s.state()))
+            .collect()
+    };
+    assert_eq!(
+        closed(&h),
+        [
+            ("s1".into(), State::Closed),
+            ("o1".into(), State::Closed),
+            ("s1".into(), State::Closed),
+            ("o2".into(), State::Closed)
+        ]
+    );
+    h.send_json("o", json!({"id": "s1", "adopt": true}));
+    assert!(h.out().is_empty());
+    assert_eq!(
+        closed(&h),
+        [
+            ("s1".into(), State::Closed),
+            ("o1".into(), State::Closed),
+            ("s1".into(), State::Live),
+            ("o2".into(), State::Closed)
+        ]
+    );
+    // The adopted one is the newer: its text is "second", and frames reach it.
+    h.frame("s1", 2, json!([["text", "t", "append", "!"]]));
+    assert_eq!(h.node("s1", "t").unwrap()["p"]["text"], "second!");
+    let first = &h.pane.surfaces()[0];
+    assert_eq!(first.document().get("t").unwrap().to_json()["p"]["text"], "first");
+}
+
+#[test]
 fn c8_listen_false_is_silent() {
     let mut h = Harness::new();
     h.send_json("o", json!({"id": "ls", "mode": "flow", "listen": false}));

@@ -537,3 +537,122 @@ fn mark_prop_sets_data_mark_pick_draws_a_bar_and_drop_dims() {
     assert_eq!(h.attr(p, "data-mark"), None);
     assert!(!bar(h.doc.computed_style(p).unwrap()));
 }
+
+/// §8.5 Markdown (omp's dialect): GFM strikethrough, GFM tables with their alignments drawn as
+/// table layout, and math delimiters (inline `$…$` and display `$$…$$`) kept as their TeX.
+#[test]
+fn md_gfm_strikethrough_tables_and_math_delimiters() {
+    let mut h = Harness::new();
+    h.hello(&[]);
+    let text = "Some ~~old~~ new text.\n\n| Name | Size | Kind |\n| :--- | ---: | :---: |\n| alpha | 10 | dir |\n| beta | 200 | file |\n\nInline $a^2 + b^2$ math.\n\n$$\n\\int_0^1 x\\,dx\n$$\n";
+    h.surface("s1", "inline", json!([{"id": "md", "k": "md", "p": {"text": text}}]));
+    h.frame();
+    let md = h.el("s1", "md");
+    let tag = |h: &Harness, e| {
+        h.doc
+            .node(e)
+            .element()
+            .map(|el| el.tag.as_str().to_owned())
+            .unwrap_or_default()
+    };
+    let by_tag = |h: &Harness, name: &str| -> Vec<auk_ui::NodeId> {
+        let mut out = Vec::new();
+        let mut stack = vec![md];
+        while let Some(n) = stack.pop() {
+            if tag(h, n) == name {
+                out.push(n);
+            }
+            stack.extend(h.doc.children(n).iter().rev().copied());
+        }
+        out
+    };
+    // Strikethrough: a `del`, drawn struck through.
+    let del = by_tag(&h, "del");
+    assert_eq!(del.len(), 1);
+    assert_eq!(h.text(del[0]), "old");
+    let style = h.doc.computed_style(del[0]).unwrap();
+    assert!(
+        format!("{:?}", style.text_decoration).to_lowercase().contains("through"),
+        "{:?}",
+        style.text_decoration
+    );
+    // The table: a head row and two body rows, alignments as classes, laid out as a table.
+    assert_eq!(h.find_class(md, "md-table").len(), 1);
+    let th = by_tag(&h, "th");
+    let td = by_tag(&h, "td");
+    assert_eq!(th.iter().map(|&c| h.text(c)).collect::<Vec<_>>(), ["Name", "Size", "Kind"]);
+    assert_eq!(
+        td.iter().map(|&c| h.text(c)).collect::<Vec<_>>(),
+        ["alpha", "10", "dir", "beta", "200", "file"]
+    );
+    assert_eq!(by_tag(&h, "thead").len(), 1);
+    assert_eq!(by_tag(&h, "tbody").len(), 1);
+    assert_eq!(by_tag(&h, "tr").len(), 3);
+    assert_eq!(
+        th.iter().map(|&c| h.class(c)).collect::<Vec<_>>(),
+        ["ta-start", "ta-end", "ta-center"]
+    );
+    let b = |e| h.doc.border_box(e).unwrap();
+    // Cells of a column share an x and a width; cells of a row share a y.
+    for col in 0..3 {
+        let (head, r1, r2) = (b(th[col]), b(td[col]), b(td[3 + col]));
+        assert!((head.x - r1.x).abs() < 0.5 && (r1.x - r2.x).abs() < 0.5, "column {col}");
+        assert!((head.w - r1.w).abs() < 0.5 && (r1.w - r2.w).abs() < 0.5, "column {col}");
+    }
+    assert!((b(td[0]).y - b(td[2]).y).abs() < 0.5 && b(td[3]).y > b(td[0]).y);
+    assert!(b(th[1]).x > b(th[0]).x && b(th[2]).x > b(th[1]).x);
+    // Right-aligned: the size column's text sits at the cell's end.
+    let align = |e| format!("{:?}", h.doc.computed_style(e).unwrap().text_align).to_lowercase();
+    assert!(align(td[1]).contains("right") || align(td[1]).contains("end"), "{}", align(td[1]));
+    assert!(align(td[2]).contains("center"), "{}", align(td[2]));
+    // Math delimiters: the TeX, kept (Math rendering is T2, §8.2), inline and display.
+    let inline = h.find_class(md, "math");
+    assert_eq!(inline.len(), 1);
+    assert_eq!(h.attr(inline[0], "data-tex").as_deref(), Some("a^2 + b^2"));
+    assert_eq!(h.text(inline[0]), "a^2 + b^2");
+    let display = h.find_class(md, "math-display");
+    assert_eq!(display.len(), 1);
+    assert_eq!(h.attr(display[0], "data-tex").as_deref().map(str::trim), Some("\\int_0^1 x\\,dx"));
+    assert!(!h.text(md).contains('$'), "the delimiters aren't shown");
+}
+
+/// §8.5 Diff: with `mode` absent or `auto`, the Edits setting decides (unified by default; with
+/// Split, side by side only when wider than 112 cells); an explicit mode wins.
+#[test]
+fn diff_mode_absent_or_auto_follows_the_edits_setting() {
+    let mut h = Harness::new();
+    h.hello(&[]);
+    let text = "@@ -1,2 +1,2 @@\n-old line\n+new line\n same\n";
+    h.surface(
+        "s1",
+        "inline",
+        json!([
+            {"id": "absent", "k": "diff", "p": {"text": text}},
+            {"id": "auto", "k": "diff", "p": {"text": text, "mode": "auto"}},
+            {"id": "unified", "k": "diff", "p": {"text": text, "mode": "unified"}},
+            {"id": "split", "k": "diff", "p": {"text": text, "mode": "split"}}
+        ]),
+    );
+    h.frame();
+    let split = |h: &Harness| {
+        ["absent", "auto", "unified", "split"]
+            .map(|id| h.class(h.el("s1", id)).split(' ').any(|c| c == "split"))
+    };
+    // The default setting: unified, at any width.
+    for cols in [80, 200] {
+        h.view.set_cols(&mut h.doc, &h.pane, cols);
+        h.frame();
+        assert_eq!(split(&h), [false, false, false, true], "{cols} cols");
+    }
+    // Split: side by side when wider than 112 cells.
+    let settings = auk_views::ViewSettings {
+        split_diffs: true,
+        ..h.view.settings().clone()
+    };
+    h.view.set_settings(&mut h.doc, &h.pane, settings);
+    for (cols, wide) in [(112, false), (113, true), (200, true), (80, false)] {
+        h.view.set_cols(&mut h.doc, &h.pane, cols);
+        h.frame();
+        assert_eq!(split(&h), [wide, wide, false, true], "{cols} cols");
+    }
+}

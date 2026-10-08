@@ -69,6 +69,9 @@ pub struct ChromeModel {
     pub width: f64,
     pub height: f64,
     pub dark: bool,
+    /// The media features plugin sheets match (§8.4): reduced motion, reduced transparency,
+    /// more contrast.
+    pub media: (bool, bool, bool),
     /// (session id, name, active).
     pub sessions: Vec<(u64, String, bool)>,
     /// (tab id, title, active, zoomed).
@@ -245,6 +248,10 @@ impl Chrome {
         }
         self.doc
             .set_viewport(model.width as f32, model.height as f32);
+        if self.model.as_ref().is_none_or(|m| m.media != model.media) {
+            let (motion, transparency, contrast) = model.media;
+            self.doc.set_media_preferences(motion, transparency, contrast);
+        }
         let root = self.doc.root();
         self.doc
             .set_attribute(root, "class", if model.dark { "dark" } else { "light" });

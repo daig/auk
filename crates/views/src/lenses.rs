@@ -183,7 +183,9 @@ impl LensLayer {
         let root = doc.root();
         let body = doc.create_element("body");
         doc.append_child(root, body);
-        let view = PaneView::new(&mut doc, settings);
+        let mut view = PaneView::new(&mut doc, settings);
+        // `el` controls don't flip in lens views (§9.6).
+        view.inert_controls = true;
         let el = view.element();
         doc.append_child(body, el);
         let mut kinds: Vec<String> = crate::KINDS.iter().map(|k| (*k).to_owned()).collect();
@@ -579,6 +581,55 @@ mod tests {
         assert!(class.contains("failed"), "{class}");
         // The view's node got an id under the block.
         assert!(layer.element("lens0.native.0").is_some());
+    }
+
+    /// §9.6: "`el` controls don't flip in lens views." A click on a checkbox, a radio or a
+    /// label in a lens view changes nothing and sends nothing; the view's own actions still go
+    /// to `lens:<block>`.
+    #[test]
+    fn el_controls_dont_flip_in_lens_views() {
+        let mut layer = LensLayer::new(ViewSettings::default(), 1.0);
+        let view = json!({"k": "el", "p": {"tag": "form"}, "c": [
+            {"k": "el", "p": {"key": "cb", "tag": "input", "type": "checkbox", "name": "fast"}},
+            {"k": "el", "p": {"key": "lb", "tag": "label"}, "c": [
+                {"k": "el", "p": {"key": "r", "tag": "input", "type": "radio", "name": "size", "value": "s"}},
+                {"k": "el", "p": {"key": "t", "tag": "span", "text": "Small"}}
+            ]},
+            {"k": "el", "p": {"key": "go", "tag": "button", "text": "Apply", "actions": {"click": "apply"}}}
+        ]});
+        layer.sync(&[block(0, Some(view), "out\n", true)], 0.0);
+        layer.layout(40, 400.0, 0.0);
+        assert_eq!(layer.shown(0).as_deref(), Some("native"));
+        let click = |layer: &mut LensLayer, node: &str| {
+            let el = layer.element(node).unwrap_or_else(|| panic!("no {node}"));
+            let b = layer.doc().border_box(el).unwrap();
+            let out = layer.click(PointerEvent {
+                x: b.x + b.w / 2.0,
+                y: b.y + b.h / 2.0,
+                clicks: 1,
+                ..Default::default()
+            });
+            layer.layout(40, 400.0, 1.0);
+            out
+        };
+        let on = |layer: &LensLayer, node: &str| {
+            let el = layer.element(node).unwrap();
+            let class = layer.view().written().class(el).unwrap_or("").to_owned();
+            class.split(' ').any(|c| c == "on")
+        };
+        for node in ["lens0.native.0.cb", "lens0.native.0.lb.r", "lens0.native.0.lb.t"] {
+            assert_eq!(click(&mut layer, node), Vec::new(), "{node}");
+        }
+        assert!(!on(&layer, "lens0.native.0.cb") && !on(&layer, "lens0.native.0.lb.r"));
+        // The button's action is still an event, addressed to the block.
+        let out = click(&mut layer, "lens0.native.0.go");
+        match out.as_slice() {
+            [Outcome::Event { sf, event, .. }] => {
+                assert_eq!(sf, "lens:0");
+                assert!(matches!(**event, auk_tsp::ViewEvent::Action { ref action, .. } if action == "apply"), "{event:?}");
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]

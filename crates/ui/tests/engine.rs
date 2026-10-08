@@ -479,3 +479,126 @@ fn transitions_and_keyframe_animations_run_on_the_document_clock() {
     );
     assert!(!doc.animating());
 }
+
+/// §8.4 "Light and dark": `light-dark()` follows the appearance (the document's, or the nearest
+/// `color-scheme`, which the theme sets under `data-theme`); the three supported media features
+/// match the user's preferences; `prefers-color-scheme` is rejected.
+#[test]
+fn light_dark_and_the_supported_media_features_match_and_prefers_color_scheme_is_rejected() {
+    let mut doc = doc_with(
+        ".ld { color: light-dark(rgb(255, 0, 0), rgb(0, 0, 255)) }
+         [data-theme=dark] { color-scheme: dark }
+         [data-theme=light] { color-scheme: light }
+         @media (prefers-reduced-motion: reduce) { .rm { color: rgb(255, 0, 0) } }
+         @media (prefers-reduced-motion) { .rm2 { color: rgb(255, 0, 0) } }
+         @media (prefers-reduced-transparency: reduce) { .rt { color: rgb(255, 0, 0) } }
+         @media (prefers-contrast: more) { .pc { color: rgb(255, 0, 0) } }
+         @media screen and (prefers-contrast: more) and (prefers-reduced-motion: reduce) { .both { color: rgb(255, 0, 0) } }",
+    );
+    let root = doc.root();
+    let body = el(&mut doc, root, "body", "", None);
+    let ld = el(&mut doc, body, "div", "ld", Some("x"));
+    let dark_theme = el(&mut doc, body, "div", "", None);
+    doc.set_attribute(dark_theme, "data-theme", "dark");
+    let in_dark = el(&mut doc, dark_theme, "div", "ld", Some("x"));
+    let light_theme = el(&mut doc, body, "div", "", None);
+    doc.set_attribute(light_theme, "data-theme", "light");
+    let in_light = el(&mut doc, light_theme, "div", "ld", Some("x"));
+    let [rm, rm2, rt, pc, both] =
+        ["rm", "rm2", "rt", "pc", "both"].map(|c| el(&mut doc, body, "div", c, Some("x")));
+    doc.update();
+    assert_eq!(color(&doc, ld), RED, "light by default");
+    assert_eq!(color(&doc, in_dark), BLUE, "data-theme=dark");
+    assert_eq!(color(&doc, in_light), RED);
+    doc.set_dark(true);
+    doc.update();
+    assert_eq!(color(&doc, ld), BLUE, "the appearance turned dark");
+    assert_eq!(color(&doc, in_light), RED, "a light theme stays light");
+
+    // No preferences: none of the media rules match.
+    for e in [rm, rm2, rt, pc, both] {
+        assert_eq!(color(&doc, e), BLACK);
+    }
+    doc.set_media_preferences(true, false, false);
+    doc.update();
+    assert_eq!(
+        [rm, rm2, rt, pc, both].map(|e| color(&doc, e)),
+        [RED, RED, BLACK, BLACK, BLACK],
+        "reduced motion"
+    );
+    doc.set_media_preferences(false, true, false);
+    doc.update();
+    assert_eq!(
+        [rm, rm2, rt, pc, both].map(|e| color(&doc, e)),
+        [BLACK, BLACK, RED, BLACK, BLACK],
+        "reduced transparency"
+    );
+    doc.set_media_preferences(true, false, true);
+    doc.update();
+    assert_eq!(
+        [rm, rm2, rt, pc, both].map(|e| color(&doc, e)),
+        [RED, RED, BLACK, RED, RED],
+        "more contrast and reduced motion"
+    );
+
+    // prefers-color-scheme is rejected (an error, and the rule never applies), in every sheet
+    // kind; so are other values of the supported features.
+    for (kind, scope) in [
+        (SheetKind::BuiltIn, None),
+        (SheetKind::Plugin, None),
+        (SheetKind::Program, Some("sf1")),
+    ] {
+        let errors = doc.set_stylesheet(
+            "scheme",
+            kind,
+            scope,
+            "@media (prefers-color-scheme: dark) { .ld { color: rgb(0, 128, 0) } }
+             @media (prefers-contrast: less) { .pc { color: rgb(0, 128, 0) } }",
+        );
+        assert_eq!(errors.len(), 2, "{kind:?}: {errors:?}");
+        assert!(errors.iter().all(|e| e.contains("unsupported media query")), "{errors:?}");
+        doc.update();
+        assert_eq!(color(&doc, ld), BLUE);
+        assert_eq!(color(&doc, pc), RED);
+        doc.remove_stylesheet("scheme", scope);
+    }
+}
+
+/// §8.4 cascade step 3: plugin sheets and program sheets apply in the order each was first
+/// installed, whatever their kind; replacing a sheet's text keeps its place.
+#[test]
+fn plugin_and_program_sheets_cascade_in_first_install_order() {
+    let mut doc = doc_with("");
+    let root = doc.root();
+    let body = el(&mut doc, root, "body", "", None);
+    let region = el(&mut doc, body, "main", "sf-region sf-main", None);
+    doc.set_attribute(region, "data-scope", "sf1");
+    let x = el(&mut doc, region, "div", "x", Some("x"));
+    // A plugin sheet, then a program sheet: the program's rule (same specificity) is later.
+    assert!(doc.set_stylesheet("plugin:a", SheetKind::Plugin, None, ".x { color: rgb(255, 0, 0) }").is_empty());
+    assert!(doc.set_stylesheet("app", SheetKind::Program, Some("sf1"), ".x { color: rgb(0, 0, 255) }").is_empty());
+    doc.update();
+    assert_eq!(color(&doc, x), BLUE, "the later-installed program sheet");
+    // A second plugin sheet installed after the program's comes later still.
+    assert!(doc.set_stylesheet("plugin:b", SheetKind::Plugin, None, ".x { color: rgb(0, 128, 0) }").is_empty());
+    doc.update();
+    assert_eq!(color(&doc, x), GREEN);
+    // Replacing the first plugin sheet's and the program sheet's text keeps their places.
+    doc.set_stylesheet("plugin:a", SheetKind::Plugin, None, ".x { color: rgb(255, 0, 0) } .y { color: red }");
+    doc.set_stylesheet("app", SheetKind::Program, Some("sf1"), ".x { color: rgb(0, 0, 255) } .z { color: red }");
+    doc.update();
+    assert_eq!(color(&doc, x), GREEN, "replaced sheets keep their first-install order");
+    // Specificity still decides first; !important declarations go in the same order.
+    doc.set_stylesheet("plugin:a", SheetKind::Plugin, None, ".sf-main .x { color: rgb(255, 0, 0) }");
+    doc.update();
+    assert_eq!(color(&doc, x), RED, "more specific beats a later sheet");
+    doc.set_stylesheet("plugin:a", SheetKind::Plugin, None, ".x { color: rgb(255, 0, 0) !important }");
+    doc.set_stylesheet("plugin:b", SheetKind::Plugin, None, ".x { color: rgb(0, 128, 0) !important }");
+    doc.update();
+    assert_eq!(color(&doc, x), GREEN, "!important in the same order");
+    // Removed and installed again: a new install, so it goes last.
+    doc.remove_stylesheet("plugin:a", None);
+    doc.set_stylesheet("plugin:a", SheetKind::Plugin, None, ".x { color: rgb(255, 0, 0) !important }");
+    doc.update();
+    assert_eq!(color(&doc, x), RED);
+}

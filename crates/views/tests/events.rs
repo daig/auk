@@ -433,3 +433,50 @@ fn hover_sets_state_on_the_chain() {
     let st = h.doc.node(i1).element().unwrap().state;
     assert!(!st.contains(auk_ui::ElementState::HOVER));
 }
+
+/// §7.9: "The terminal draws the text, caret, selection, decorations and IME preedit." A field's
+/// program `decor` ranges (UTF-16 offsets) are drawn as styled runs, and a new `decor` redraws.
+#[test]
+fn a_fields_program_decor_decorations_are_drawn() {
+    let mut h = Harness::new();
+    h.hello(&["edit"]);
+    h.surface(
+        "s1",
+        "inline",
+        json!([{"id": "ed", "k": "editor", "p": {"text": "é let x = 1", "cursor": 0, "decor": [
+            {"from": 2, "to": 5, "s": "strong"},
+            {"from": 6, "to": 7, "s": "error"},
+            {"from": 4, "to": 4, "s": "strong"}
+        ]}}]),
+    );
+    h.frame();
+    let ed = h.el("s1", "ed");
+    let style = |h: &Harness, el| h.doc.computed_style(el).unwrap().clone();
+    let strong = h.find_class(ed, "sf-t-strong");
+    assert_eq!(strong.len(), 1, "an empty range draws nothing");
+    assert_eq!(h.text(strong[0]), "let", "offsets count UTF-16 units");
+    let error = h.find_class(ed, "sf-t-error");
+    assert_eq!(error.len(), 1);
+    assert_eq!(h.text(error[0]), "x");
+    let plain = style(&h, ed);
+    assert!(style(&h, strong[0]).font_weight > plain.font_weight, "strong is bolder");
+    assert_ne!(style(&h, error[0]).color, plain.color, "error has its own color");
+    // A program token (`syntaxString`) draws in its color; a new `decor` replaces the old.
+    h.frame_ops(
+        "s1",
+        2,
+        json!([["set", "ed", {"decor": [{"from": 8, "to": 9, "s": "syntaxString"}]}]]),
+    );
+    h.frame();
+    assert!(h.find_class(ed, "sf-t-strong").is_empty() && h.find_class(ed, "sf-t-error").is_empty());
+    let text_el = h.find_class(ed, "sf-ed-text");
+    let spans: Vec<NodeId> = h
+        .doc
+        .children(text_el[0])
+        .iter()
+        .copied()
+        .filter(|&c| h.doc.node(c).element().is_some() && h.text(c) == "=")
+        .collect();
+    assert_eq!(spans.len(), 1, "the decorated run is its own span");
+    assert_ne!(style(&h, spans[0]).color, plain.color, "drawn in the token's color");
+}
