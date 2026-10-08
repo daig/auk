@@ -315,13 +315,24 @@ pub fn ping(path: &Path) -> bool {
 }
 
 /// Polls `f` until it returns `Some`, for at most [`WAIT`]; panics naming `what` otherwise.
-pub fn wait_for<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {
+pub fn wait_for<T>(what: &str, f: impl FnMut() -> Option<T>) -> T {
+    wait_for_or(what, f, String::new)
+}
+
+/// Like [`wait_for`], adding `context()` (for example the pane's screen) to the failure message.
+pub fn wait_for_or<T>(
+    what: &str,
+    mut f: impl FnMut() -> Option<T>,
+    context: impl FnOnce() -> String,
+) -> T {
     let deadline = Instant::now() + WAIT;
     loop {
         if let Some(value) = f() {
             return value;
         }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
+        if Instant::now() >= deadline {
+            panic!("timed out waiting for {what}\n{}", context());
+        }
         std::thread::sleep(Duration::from_millis(20));
     }
 }
