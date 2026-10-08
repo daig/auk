@@ -1,0 +1,62 @@
+/* Theme variables (research/elements.md §4.8). Light by default; dark under data-theme. */
+:root {
+  color-scheme: light;
+  --page: #fbfbfc; --panel: #f3f3f6; --card: #ffffff; --raise: #ffffff;
+  --code-bg: #f4f5f8; --tbl-head: #f1f2f5; --chip-bg: rgba(20, 22, 30, 0.06);
+  --pop-bg: #ffffff; --well: #f6f7f9; --well-line: rgba(20, 22, 30, 0.12);
+  --glass-hi: rgba(255, 255, 255, 0.7); --fog: rgba(251, 251, 252, 0.8); --dim: rgba(10, 12, 18, 0.28);
+  --rail: rgba(20, 22, 30, 0.08); --grid-dot: rgba(20, 22, 30, 0.08);
+  --ink: #16171c;
+  --t1: #1b1c20; --t2: #4a4d57; --t3: #6c6f7a; --t4: #a2a5ae;
+  --ink2: rgba(22, 23, 28, 0.66); --ink3: rgba(22, 23, 28, 0.44); --ink4: rgba(22, 23, 28, 0.14);
+  --l1: rgba(22, 23, 28, 0.06); --l2: rgba(22, 23, 28, 0.09); --l3: rgba(22, 23, 28, 0.14); --l4: rgba(22, 23, 28, 0.22);
+  --accent: #4f5bd5; --accent-ink: #3f49b8; --accent-fill: #4652cc;
+  --a1: #4f5bd5; --a2: #8a5cf5; --grad: #4f5bd5; --grad-ink: #3f49b8;
+  --ok: #1a7f37; --warn: #9a6700; --bad: #cf222e; --live: #8250df; --info: #0969da;
+  --ok-fill: #1f883d; --bad-fill: #cf222e; --live-fill: #8250df;
+  --ink-pen: #c4571b; --ink-pen-fill: #c4571b;
+  --r-chip: 6px; --r-ctl: 8px; --r-card: 12px; --r-panel: 16px;
+  --sans: system-ui, Helvetica, sans-serif;
+  --mono: Menlo, monospace;
+  --hand: system-ui, sans-serif;
+  --ease: cubic-bezier(.2, .7, .2, 1);
+  --out: cubic-bezier(.16, 1, .3, 1);
+  --tv-bg: #fbfbfc; --tv-fg: #1b1c20; --tv-cur: #4f5bd5; --tv-cur-ink: #ffffff;
+  --tv-sel: rgba(79, 91, 213, 0.2); --tv-m1: rgba(255, 196, 0, 0.35); --tv-m2: rgba(0, 160, 255, 0.3); --tv-m3: rgba(255, 90, 160, 0.3);
+  --ansi0: #1b1c20; --ansi1: #cf222e; --ansi2: #1a7f37; --ansi3: #9a6700; --ansi4: #0969da; --ansi5: #8250df;
+  --ansi6: #1b7c83; --ansi7: #6e7781; --ansi8: #57606a; --ansi9: #a40e26; --ansi10: #2da44e; --ansi11: #bf8700;
+  --ansi12: #218bff; --ansi13: #a475f9; --ansi14: #3192aa; --ansi15: #8c959f;
+  --sf-neutral: var(--t2); --sf-ok: var(--ok); --sf-warn: var(--warn); --sf-bad: var(--bad);
+  --sf-info: var(--info); --sf-muted: var(--t3); --sf-user: var(--ink-pen);
+  --sf-c-muted: var(--t3); --sf-c-dim: var(--t4); --sf-c-accent: var(--accent-ink); --sf-c-success: var(--ok);
+  --sf-c-warning: var(--warn); --sf-c-error: var(--bad); --sf-c-info: var(--info); --sf-c-link: var(--accent-ink);
+  --sf-c-num: #0550ae; --sf-c-path: #7a3fc0; --sf-c-key: var(--t2); --sf-c-ins: var(--ok); --sf-c-del: var(--bad);
+  --sf-c-code: #b5306d;
+  --sf-mark-bg-default: rgba(255, 196, 0, 0.3); --spelling-error-color: #cf222e;
+  --sf-block-gap: 16px; --sf-inner-gap: 8px; --sf-card-bg: #ffffff; --sf-shade: rgba(22, 23, 28, 0.03);
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --page: #15161a; --panel: #1b1c21; --card: #1e1f25; --raise: #25262d;
+  --code-bg: #1a1b20; --tbl-head: #1c1d23; --chip-bg: rgba(255, 255, 255, 0.07);
+  --pop-bg: #23242b; --well: #1a1b20; --well-line: rgba(255, 255, 255, 0.12);
+  --glass-hi: rgba(255, 255, 255, 0.06); --fog: rgba(21, 22, 26, 0.8); --dim: rgba(0, 0, 0, 0.5);
+  --rail: rgba(255, 255, 255, 0.08); --grid-dot: rgba(255, 255, 255, 0.07);
+  --ink: #f2f2f6;
+  --t1: #ececf1; --t2: #b4b6c1; --t3: #8a8d9a; --t4: #5e616d;
+  --ink2: rgba(242, 242, 246, 0.66); --ink3: rgba(242, 242, 246, 0.44); --ink4: rgba(242, 242, 246, 0.14);
+  --l1: rgba(255, 255, 255, 0.06); --l2: rgba(255, 255, 255, 0.09); --l3: rgba(255, 255, 255, 0.14); --l4: rgba(255, 255, 255, 0.22);
+  --accent: #7c8cff; --accent-ink: #9aa6ff; --accent-fill: #5a67e0;
+  --a1: #7c8cff; --a2: #b18cff; --grad: #7c8cff; --grad-ink: #9aa6ff;
+  --ok: #3fb950; --warn: #d29922; --bad: #f85149; --live: #a86af4; --info: #58a6ff;
+  --ok-fill: #238636; --bad-fill: #da3633; --live-fill: #8957e5;
+  --ink-pen: #ff9f4a; --ink-pen-fill: #d9711f;
+  --tv-bg: #15161a; --tv-fg: #ececf1; --tv-cur: #7c8cff; --tv-cur-ink: #15161a;
+  --tv-sel: rgba(124, 140, 255, 0.34);
+  --ansi0: #2b2d35; --ansi1: #f85149; --ansi2: #3fb950; --ansi3: #d29922; --ansi4: #58a6ff; --ansi5: #bc8cff;
+  --ansi6: #39c5cf; --ansi7: #c9cbd4; --ansi8: #6e7081; --ansi9: #ff7b72; --ansi10: #56d364; --ansi11: #e3b341;
+  --ansi12: #79c0ff; --ansi13: #d2a8ff; --ansi14: #56d4dd; --ansi15: #f0f1f5;
+  --sf-c-num: #79c0ff; --sf-c-path: #d2a8ff; --sf-c-code: #ff9bc8;
+  --sf-mark-bg-default: rgba(255, 196, 0, 0.22); --spelling-error-color: #ff7b72;
+  --sf-card-bg: #1c1d23; --sf-shade: rgba(0, 0, 0, 0.18);
+}

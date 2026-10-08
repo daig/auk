@@ -1,0 +1,957 @@
+//! Pointer actions, forms and native editing (§7.8, §7.9): view input becomes local flips and
+//! [`ViewEvent`]s. Keys are never events, except `edit`, `undo` and `send` behind the program's
+//! features; everything else returns [`Outcome::Keys`] so the host sends PTY bytes.
+
+use crate::common::{self, Actions, bool_prop, str_prop};
+use crate::kinds::{el, input};
+use crate::state::{Preedit, Selection, SurfaceState, state_key};
+use crate::view::PaneView;
+use auk_tsp::{Mods, NodeRef, Surface, SurfaceKey, TspPane, ViewEvent};
+use auk_ui::{Document, ElementState, NodeId};
+use serde_json::{Map, Value};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Button {
+    #[default]
+    Primary,
+    Secondary,
+}
+
+/// A pointer press, in document coordinates.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub struct PointerEvent {
+    pub x: f32,
+    pub y: f32,
+    /// 1 for a click, 2 for a double click.
+    pub clicks: u8,
+    pub mods: Mods,
+    pub button: Button,
+}
+
+/// What the host does after view input.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Outcome {
+    /// Send this event through [`TspPane::view_event`] (as a record from the primary).
+    Event {
+        surface: SurfaceKey,
+        sf: String,
+        event: Box<ViewEvent>,
+    },
+    /// Put text on the clipboard.
+    Copy(String),
+    /// Open a link or path.
+    Open(String),
+    /// Show an image in the viewer.
+    Zoom(String),
+    /// The input is keys: send them to the PTY.
+    Keys,
+    /// Only the view changed.
+    Redraw,
+}
+
+/// A context menu entry: its label and the action it runs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MenuEntry {
+    pub label: String,
+    pub action: String,
+}
+
+/// The node under a point: its surface, id and the element path from the hit up.
+struct Hit {
+    surface: SurfaceKey,
+    id: String,
+    /// Elements from the hit element up to the node element (inner parts first).
+    parts: Vec<NodeId>,
+}
+
+impl PaneView {
+    fn surface_for_element(&self, doc: &Document, mut el: NodeId) -> Option<SurfaceKey> {
+        loop {
+            if let Some(scope) = doc.attribute(el, "data-scope")
+                && let Some(sv) = self.surfaces.iter().find(|s| s.scope == scope)
+            {
+                return Some(sv.key);
+            }
+            el = doc.parent(el)?;
+        }
+    }
+
+    /// Every node element containing the hit, innermost first.
+    fn hits(&self, doc: &Document, x: f32, y: f32) -> Vec<Hit> {
+        let Some(mut el) = auk_ui::hit_test(doc, x, y) else {
+            return Vec::new();
+        };
+        let Some(surface) = self.surface_for_element(doc, el) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        let mut parts = Vec::new();
+        loop {
+            if doc.node(el).is_element() {
+                parts.push(el);
+                if let Some(id) = doc.attribute(el, "data-id") {
+                    out.push(Hit {
+                        surface,
+                        id: id.to_owned(),
+                        parts: std::mem::take(&mut parts),
+                    });
+                }
+                if doc.attribute(el, "data-scope").is_some() {
+                    break;
+                }
+            }
+            match doc.parent(el) {
+                Some(p) => el = p,
+                None => break,
+            }
+        }
+        out
+    }
+
+    fn class_has(&self, id: NodeId, class: &str) -> bool {
+        self.written
+            .class
+            .get(&id)
+            .is_some_and(|c| c.split(' ').any(|x| x == class))
+    }
+
+    /// A pointer press (§7.8). Local flips apply at once; the returned outcomes tell the host
+    /// what to send or do.
+    pub fn click(&mut self, doc: &mut Document, pane: &TspPane, ev: PointerEvent) -> Vec<Outcome> {
+        if ev.button != Button::Primary {
+            return Vec::new();
+        }
+        let hits = self.hits(doc, ev.x, ev.y);
+        for hit in hits {
+            let Some(surface) = pane.surface(hit.surface) else {
+                continue;
+            };
+            let Some(node) = surface.document().get(&hit.id) else {
+                continue;
+            };
+            // Links: ⌘-click, or a plain click under the setting (not with ⇧).
+            for &p in &hit.parts {
+                if let Some(h) = doc.attribute(p, "data-href").map(str::to_owned)
+                    && self.class_has(p, "sf-link")
+                    && (ev.mods.meta || (self.settings.links_plain_click && !ev.mods.shift))
+                {
+                    return vec![Outcome::Open(h)];
+                }
+            }
+            if let Some(out) = self.click_part(doc, pane, surface, node, &hit, ev) {
+                return out;
+            }
+            if let Some(out) = self.click_node(doc, pane, surface, node, ev) {
+                return out;
+            }
+        }
+        Vec::new()
+    }
+
+    /// Clicks on terminal-owned parts: fold heads, "more" buttons, tree twisties, tabs, copy.
+    fn click_part(
+        &mut self,
+        doc: &mut Document,
+        pane: &TspPane,
+        surface: &Surface,
+        node: NodeRef,
+        hit: &Hit,
+        ev: PointerEvent,
+    ) -> Option<Vec<Outcome>> {
+        let key = surface.key();
+        for &p in &hit.parts {
+            let class = self.written.class.get(&p).cloned().unwrap_or_default();
+            let has = |c: &str| class.split(' ').any(|x| x == c);
+            if (has("sf-card-head")
+                || has("sf-section-head")
+                || has("sf-tool-head")
+                || has("sf-agent-row"))
+                && bool_prop(node.props(), "collapsible")
+                && !ev.mods.meta
+            {
+                return Some(self.toggle_fold(doc, pane, key, node));
+            }
+            if has("sf-more") || has("sf-tool-more") {
+                return Some(self.toggle_fold(doc, pane, key, node));
+            }
+            if has("sf-ansi-more") {
+                let k = state_key(node);
+                let sv = self.surfaces.iter_mut().find(|s| s.key == key)?;
+                let cur = sv.st.more.get(&k).copied().unwrap_or(false);
+                sv.st.more.insert(k, !cur);
+                self.refresh(doc, pane, key, &[node.id().to_owned()]);
+                return Some(vec![Outcome::Redraw]);
+            }
+            if has("sf-tree-tw") {
+                let item = doc.attribute(p, "data-key")?.to_owned();
+                let sv = self.surfaces.iter_mut().find(|s| s.key == key)?;
+                let k = (node.id().to_owned(), item.clone());
+                let open = sv.st.tree.get(&k).map(|f| f.local).unwrap_or(false);
+                if let Some(f) = sv.st.tree.get_mut(&k) {
+                    f.local = !open;
+                }
+                self.refresh(doc, pane, key, &[node.id().to_owned()]);
+                return Some(vec![self.event(
+                    surface,
+                    ViewEvent::Toggle {
+                        id: node.id().to_owned(),
+                        collapsed: open,
+                        key: Some(Value::String(item)),
+                    },
+                )]);
+            }
+            if has("sf-tab") {
+                let item = doc.attribute(p, "data-tab")?.to_owned();
+                return Some(vec![self.event(
+                    surface,
+                    ViewEvent::Select {
+                        id: node.id().to_owned(),
+                        item,
+                        values: self.values(surface, node.id()),
+                    },
+                )]);
+            }
+            if has("sf-ck-ph") {
+                let phase = doc.attribute(p, "data-phase")?.to_owned();
+                let k = format!("{}\u{1f}phase\u{1f}{phase}", node.id());
+                let sv = self.surfaces.iter_mut().find(|s| s.key == key)?;
+                let cur = sv.st.folds.get(&k).map(|f| f.local).unwrap_or(false);
+                SurfaceState::toggle(&mut sv.st.folds, &k, cur);
+                self.refresh(doc, pane, key, &[node.id().to_owned()]);
+                return Some(vec![Outcome::Redraw]);
+            }
+            if has("sf-ck-pill") {
+                let sv = self.surfaces.iter_mut().find(|s| s.key == key)?;
+                let cur = sv.st.hud.get(node.id()).copied().unwrap_or(false);
+                sv.st.hud.insert(node.id().to_owned(), !cur);
+                self.refresh(doc, pane, key, &[node.id().to_owned()]);
+                return Some(vec![self.event(
+                    surface,
+                    ViewEvent::Activate {
+                        id: node.id().to_owned(),
+                        item: "hud".to_owned(),
+                        values: None,
+                    },
+                )]);
+            }
+            if has("sf-ck-rh") {
+                let k = format!("{}\u{1f}reminder", node.id());
+                let sv = self.surfaces.iter_mut().find(|s| s.key == key)?;
+                let cur = sv.st.more.get(&k).copied().unwrap_or(false);
+                sv.st.more.insert(k, !cur);
+                self.refresh(doc, pane, key, &[node.id().to_owned()]);
+                return Some(vec![Outcome::Redraw]);
+            }
+            if has("code-copy") {
+                // The fence's text: its `pre`.
+                let holder = doc.parent(doc.parent(p)?)?;
+                let pre = doc.element_children(holder).into_iter().find(|c| {
+                    doc.node(*c)
+                        .element()
+                        .is_some_and(|e| e.tag.as_str() == "pre")
+                })?;
+                return Some(vec![Outcome::Copy(text_content(doc, pre))]);
+            }
+            if has("sf-tool-act") {
+                let act = doc.attribute(p, "data-act")?.to_owned();
+                return Some(vec![self.event(
+                    surface,
+                    ViewEvent::Action {
+                        id: node.id().to_owned(),
+                        action: act,
+                        mods: ev.mods,
+                        values: None,
+                    },
+                )]);
+            }
+        }
+        None
+    }
+
+    fn event(&self, surface: &Surface, event: ViewEvent) -> Outcome {
+        Outcome::Event {
+            surface: surface.key(),
+            sf: surface.id().to_owned(),
+            event: Box::new(event),
+        }
+    }
+
+    /// Form `values` for an event from inside an `el` form (§7.8), with local flips.
+    fn values(&self, surface: &Surface, id: &str) -> Option<Map<String, Value>> {
+        let sv = self.surfaces.iter().find(|s| s.key == surface.key())?;
+        let checks = &sv.st.checks;
+        surface
+            .document()
+            .form_values(id, &|ctl| checks.get(ctl).map(|f| f.local))
+    }
+
+    /// Clicks on a node: kind behavior, then its `actions`.
+    fn click_node(
+        &mut self,
+        doc: &mut Document,
+        pane: &TspPane,
+        surface: &Surface,
+        node: NodeRef,
+        ev: PointerEvent,
+    ) -> Option<Vec<Outcome>> {
+        let key = surface.key();
+        let actions = Actions::read(node.props(), node.kind());
+        // el controls flip locally, and a label flips its first control.
+        let control = if el::control_type(node).is_some() {
+            Some(node)
+        } else if node.kind() == "el" && el::requested(node) == "label" && actions.click.is_none() {
+            first_control(node)
+        } else {
+            None
+        };
+        if let Some(ctl) = control {
+            if !surface.interactive() || bool_prop(ctl.props(), "disabled") {
+                return Some(Vec::new());
+            }
+            return Some(self.flip_control(doc, pane, surface, ctl));
+        }
+        match node.kind() {
+            "editor" | "input" if actions.click.is_none() => {
+                return Some(self.click_field(doc, pane, surface, node, ev));
+            }
+            "item" => {
+                let list = node.parent().filter(|l| l.kind() == "list");
+                let act = if ev.clicks >= 2 {
+                    &actions.dblclick
+                } else {
+                    &actions.click
+                };
+                if act.is_none()
+                    && let Some(list) = list
+                {
+                    if bool_prop(node.props(), "disabled") {
+                        return Some(Vec::new());
+                    }
+                    let values = self.values(surface, list.id());
+                    let event = if ev.clicks >= 2 {
+                        ViewEvent::Activate {
+                            id: list.id().to_owned(),
+                            item: node.id().to_owned(),
+                            values,
+                        }
+                    } else {
+                        ViewEvent::Select {
+                            id: list.id().to_owned(),
+                            item: node.id().to_owned(),
+                            values,
+                        }
+                    };
+                    return Some(vec![self.event(surface, event)]);
+                }
+            }
+            _ => {}
+        }
+        let act = if ev.clicks >= 2 {
+            actions.dblclick.clone().or(actions.click.clone())
+        } else {
+            actions.click.clone()
+        }?;
+        let _ = key;
+        Some(self.run_action(doc, pane, surface, node, &act, ev.mods))
+    }
+
+    /// Run an action name on a node (§7.8 table).
+    fn run_action(
+        &mut self,
+        doc: &mut Document,
+        pane: &TspPane,
+        surface: &Surface,
+        node: NodeRef,
+        act: &str,
+        mods: Mods,
+    ) -> Vec<Outcome> {
+        match act {
+            "toggle" => self.toggle_fold(doc, pane, surface.key(), node),
+            "copy" => vec![Outcome::Copy(copy_text(node))],
+            "open" => match str_prop(node.props(), "href").or(str_prop(node.props(), "path")) {
+                Some(h) => vec![Outcome::Open(h.to_owned())],
+                None => Vec::new(),
+            },
+            "zoom" => vec![Outcome::Zoom(node.id().to_owned())],
+            "select" | "activate" => {
+                let (id, item) = match node
+                    .parent()
+                    .filter(|p| p.kind() == "list" && node.kind() == "item")
+                {
+                    Some(list) => (list.id().to_owned(), node.id().to_owned()),
+                    None => (node.id().to_owned(), node.id().to_owned()),
+                };
+                let values = self.values(surface, node.id());
+                let event = if act == "select" {
+                    ViewEvent::Select { id, item, values }
+                } else {
+                    ViewEvent::Activate { id, item, values }
+                };
+                vec![self.event(surface, event)]
+            }
+            other => vec![self.event(
+                surface,
+                ViewEvent::Action {
+                    id: node.id().to_owned(),
+                    action: other.to_owned(),
+                    mods,
+                    values: self.values(surface, node.id()),
+                },
+            )],
+        }
+    }
+
+    /// Fold or unfold a collapsible node locally, and report it (`toggle`).
+    fn toggle_fold(
+        &mut self,
+        doc: &mut Document,
+        pane: &TspPane,
+        key: SurfaceKey,
+        node: NodeRef,
+    ) -> Vec<Outcome> {
+        let Some(surface) = pane.surface(key) else {
+            return Vec::new();
+        };
+        if !matches!(node.kind(), "card" | "section" | "tool" | "agent") {
+            return Vec::new();
+        }
+        let Some(sv) = self.surfaces.iter_mut().find(|s| s.key == key) else {
+            return Vec::new();
+        };
+        let k = state_key(node);
+        let cur = sv.st.fold(node, false);
+        let now = SurfaceState::toggle(&mut sv.st.folds, &k, cur);
+        // The node and everything under it (previews give way inside open folds).
+        let mut ids = vec![node.id().to_owned()];
+        let mut stack: Vec<NodeRef> = node.children().collect();
+        while let Some(n) = stack.pop() {
+            if matches!(n.kind(), "ansi" | "code" | "text") {
+                ids.push(n.id().to_owned());
+            }
+            stack.extend(n.children());
+        }
+        self.refresh(doc, pane, key, &ids);
+        vec![self.event(
+            surface,
+            ViewEvent::Toggle {
+                id: node.id().to_owned(),
+                collapsed: now,
+                key: None,
+            },
+        )]
+    }
+
+    fn flip_control(
+        &mut self,
+        doc: &mut Document,
+        pane: &TspPane,
+        surface: &Surface,
+        ctl: NodeRef,
+    ) -> Vec<Outcome> {
+        let key = surface.key();
+        let Some(sv) = self.surfaces.iter_mut().find(|s| s.key == key) else {
+            return Vec::new();
+        };
+        let radio = el::control_type(ctl) == Some("radio");
+        let cur = el::checked(&mut sv.st, ctl);
+        if radio && cur {
+            // Clicking a checked radio changes nothing.
+            return Vec::new();
+        }
+        let now = SurfaceState::toggle(&mut sv.st.checks, ctl.id(), cur);
+        let mut ids = vec![ctl.id().to_owned()];
+        let name = str_prop(ctl.props(), "name").map(str::to_owned);
+        if radio && let Some(n) = &name {
+            // Uncheck the others in the group: within the nearest form, or outside any form.
+            let form = nearest_form(ctl);
+            let mut stack: Vec<NodeRef> = match form {
+                Some(f) => vec![f],
+                None => vec![surface.document().root()],
+            };
+            while let Some(x) = stack.pop() {
+                if form.is_none() && x.kind() == "el" && el::requested(x) == "form" {
+                    continue;
+                }
+                if x.id() != ctl.id()
+                    && el::control_type(x) == Some("radio")
+                    && str_prop(x.props(), "name") == Some(n.as_str())
+                {
+                    let c = el::checked(&mut sv.st, x);
+                    if c {
+                        SurfaceState::toggle(&mut sv.st.checks, x.id(), c);
+                        ids.push(x.id().to_owned());
+                    }
+                }
+                stack.extend(x.children());
+            }
+        }
+        self.refresh(doc, pane, key, &ids);
+        let value = ctl
+            .prop("value")
+            .cloned()
+            .filter(|v| !v.is_null())
+            .unwrap_or_else(|| Value::String("on".into()));
+        vec![self.event(
+            surface,
+            ViewEvent::Change {
+                id: ctl.id().to_owned(),
+                value,
+                checked: now,
+                name,
+                values: self.values(surface, ctl.id()),
+            },
+        )]
+    }
+
+    /// A click in a field: `focus` when unfocused, else a caret placement (`edit`).
+    fn click_field(
+        &mut self,
+        doc: &mut Document,
+        pane: &TspPane,
+        surface: &Surface,
+        node: NodeRef,
+        ev: PointerEvent,
+    ) -> Vec<Outcome> {
+        if bool_prop(node.props(), "readonly") || !surface.interactive() {
+            return Vec::new();
+        }
+        if surface.document().focus() != Some(node.id()) {
+            return vec![self.event(
+                surface,
+                ViewEvent::Focus {
+                    id: node.id().to_owned(),
+                },
+            )];
+        }
+        let Some(off) = self.offset_at(doc, surface.key(), node, ev.x, ev.y) else {
+            return Vec::new();
+        };
+        if !self.native_ok(pane, node) {
+            return Vec::new();
+        }
+        let key = surface.key();
+        if let Some(sv) = self.surfaces.iter_mut().find(|s| s.key == key) {
+            sv.st.selection.remove(node.id());
+        }
+        self.refresh(doc, pane, key, &[node.id().to_owned()]);
+        let text = input::field_text(node);
+        let len = input::byte_to_utf16(&text, text.len());
+        vec![self.event(
+            surface,
+            ViewEvent::Edit {
+                id: node.id().to_owned(),
+                from: off,
+                to: off,
+                text: String::new(),
+                cursor: off,
+                len,
+            },
+        )]
+    }
+
+    /// The UTF-16 offset in a field nearest a point, from its laid-out text (monospace cells).
+    fn offset_at(
+        &self,
+        doc: &Document,
+        key: SurfaceKey,
+        node: NodeRef,
+        x: f32,
+        y: f32,
+    ) -> Option<u64> {
+        let el = self.node_element(key, node.id())?;
+        let text_el = doc
+            .children(doc.children(el).first().copied()?)
+            .first()
+            .copied()?;
+        let r = doc.border_box(text_el)?;
+        let zoom = self.settings.font_px / 13.0;
+        let (cw, lh) = (self.settings.cell.0, self.settings.cell.1 / zoom * zoom);
+        let text = input::field_text(node);
+        let prompt = crate::spans::spans_text(&crate::spans::parse_spans(node.prop("prompt")));
+        let row = ((y - r.y) / lh).floor().max(0.0) as usize;
+        let col = ((x - r.x) / cw).round().max(0.0) as usize;
+        let lines: Vec<&str> = text.split('\n').collect();
+        let row = row.min(lines.len().saturating_sub(1));
+        let mut byte = lines[..row].iter().map(|l| l.len() + 1).sum::<usize>();
+        let skip = if row == 0 { prompt.chars().count() } else { 0 };
+        let line = lines[row];
+        let col = col.saturating_sub(skip);
+        byte += line
+            .char_indices()
+            .nth(col)
+            .map(|(i, _)| i)
+            .unwrap_or(line.len());
+        Some(input::byte_to_utf16(&text, byte))
+    }
+
+    fn native_ok(&self, pane: &TspPane, node: NodeRef) -> bool {
+        pane.hello().is_some_and(|h| h.has("edit"))
+            && self.settings.native_editing
+            && node.prop("mode").is_none()
+            && !bool_prop(node.props(), "readonly")
+    }
+
+    /// The focused field of a surface, if any.
+    fn focused_field<'p>(&self, pane: &'p TspPane) -> Option<(&'p Surface, NodeRef<'p>)> {
+        for s in pane.surfaces().iter().rev() {
+            if !s.is_live() {
+                continue;
+            }
+            if let Some(id) = s.document().focus()
+                && let Some(n) = s.document().get(id)
+                && matches!(n.kind(), "editor" | "input")
+            {
+                return Some((s, n));
+            }
+        }
+        None
+    }
+
+    /// Typed or pasted text (or an IME commit) in the focused field. With a native selection and
+    /// the `edit` feature it replaces the selection as an `edit` event; otherwise it's keys.
+    pub fn type_text(&mut self, doc: &mut Document, pane: &TspPane, text: &str) -> Outcome {
+        self.replace_selection(doc, pane, text)
+    }
+
+    /// Delete or cut with a native selection: an `edit` that removes it; otherwise keys.
+    pub fn delete_selection(&mut self, doc: &mut Document, pane: &TspPane) -> Outcome {
+        self.replace_selection(doc, pane, "")
+    }
+
+    fn replace_selection(&mut self, doc: &mut Document, pane: &TspPane, with: &str) -> Outcome {
+        let Some((surface, node)) = self.focused_field(pane) else {
+            return Outcome::Keys;
+        };
+        if !self.native_ok(pane, node) {
+            return Outcome::Keys;
+        }
+        let key = surface.key();
+        let sel = self
+            .surfaces
+            .iter()
+            .find(|s| s.key == key)
+            .and_then(|s| s.st.selection.get(node.id()).copied())
+            .filter(|s| !s.is_empty());
+        let Some(sel) = sel else {
+            return Outcome::Keys;
+        };
+        let (from, to) = sel.range();
+        let text = input::field_text(node);
+        let len = input::byte_to_utf16(&text, text.len());
+        let cursor = from + with.encode_utf16().count() as u64;
+        if let Some(sv) = self.surfaces.iter_mut().find(|s| s.key == key) {
+            sv.st.selection.remove(node.id());
+            if sv.st.preedit.as_ref().is_some_and(|p| p.id == node.id()) {
+                sv.st.preedit = None;
+            }
+        }
+        self.refresh(doc, pane, key, &[node.id().to_owned()]);
+        self.event(
+            surface,
+            ViewEvent::Edit {
+                id: node.id().to_owned(),
+                from,
+                to,
+                text: with.to_owned(),
+                cursor,
+                len,
+            },
+        )
+    }
+
+    /// Set the native selection in the focused field (selecting keys, drags, ⌘A). Local only.
+    pub fn select(
+        &mut self,
+        doc: &mut Document,
+        pane: &TspPane,
+        anchor: u64,
+        cursor: u64,
+    ) -> Outcome {
+        let Some((surface, node)) = self.focused_field(pane) else {
+            return Outcome::Keys;
+        };
+        if !self.native_ok(pane, node) {
+            return Outcome::Keys;
+        }
+        let text = input::field_text(node);
+        let len = input::byte_to_utf16(&text, text.len());
+        let key = surface.key();
+        if let Some(sv) = self.surfaces.iter_mut().find(|s| s.key == key) {
+            sv.st.selection.insert(
+                node.id().to_owned(),
+                Selection {
+                    anchor: anchor.min(len),
+                    cursor: cursor.min(len),
+                },
+            );
+        }
+        self.refresh(doc, pane, key, &[node.id().to_owned()]);
+        Outcome::Redraw
+    }
+
+    /// ⌘A in the focused field.
+    pub fn select_all(&mut self, doc: &mut Document, pane: &TspPane) -> Outcome {
+        let Some((_, node)) = self.focused_field(pane) else {
+            return Outcome::Keys;
+        };
+        let text = input::field_text(node);
+        let len = input::byte_to_utf16(&text, text.len());
+        self.select(doc, pane, 0, len)
+    }
+
+    /// Move the caret natively (↑/↓ between drawn lines, Home, End) as an `edit` with no text.
+    pub fn move_caret(&mut self, doc: &mut Document, pane: &TspPane, to: u64) -> Outcome {
+        let Some((surface, node)) = self.focused_field(pane) else {
+            return Outcome::Keys;
+        };
+        if !self.native_ok(pane, node) {
+            return Outcome::Keys;
+        }
+        let text = input::field_text(node);
+        let len = input::byte_to_utf16(&text, text.len());
+        let to = to.min(len);
+        let key = surface.key();
+        if let Some(sv) = self.surfaces.iter_mut().find(|s| s.key == key) {
+            sv.st.selection.remove(node.id());
+        }
+        self.refresh(doc, pane, key, &[node.id().to_owned()]);
+        self.event(
+            surface,
+            ViewEvent::Edit {
+                id: node.id().to_owned(),
+                from: to,
+                to,
+                text: String::new(),
+                cursor: to,
+                len,
+            },
+        )
+    }
+
+    /// ⌘Z or ⌃Z: an `undo` event with the `edit` and `undo` features; otherwise keys.
+    pub fn undo(&mut self, pane: &TspPane) -> Outcome {
+        let Some((surface, node)) = self.focused_field(pane) else {
+            return Outcome::Keys;
+        };
+        if !self.native_ok(pane, node) || !pane.hello().is_some_and(|h| h.has("undo")) {
+            return Outcome::Keys;
+        }
+        self.event(
+            surface,
+            ViewEvent::Undo {
+                id: node.id().to_owned(),
+            },
+        )
+    }
+
+    /// Submit a prompt atomically into a field (feature `send`); the engine holds it until the
+    /// field reports `sendable:true`.
+    pub fn send(&self, pane: &TspPane, id: &str, text: &str) -> Option<Outcome> {
+        if !pane.hello().is_some_and(|h| h.has("send")) {
+            return None;
+        }
+        let s = pane
+            .surfaces()
+            .iter()
+            .rev()
+            .find(|s| s.is_live() && s.document().get(id).is_some())?;
+        let n = s.document().get(id)?;
+        if !matches!(n.kind(), "editor" | "input")
+            || bool_prop(n.props(), "readonly")
+            || bool_prop(n.props(), "hidden")
+        {
+            return None;
+        }
+        Some(self.event(
+            s,
+            ViewEvent::Send {
+                id: id.to_owned(),
+                text: text.to_owned(),
+            },
+        ))
+    }
+
+    /// IME composition at the focused field's caret (drawn as `span.sf-ed-preedit`).
+    pub fn ime_preedit(&mut self, doc: &mut Document, pane: &TspPane, text: &str, cursor: usize) {
+        let Some((surface, node)) = self.focused_field(pane) else {
+            return;
+        };
+        let key = surface.key();
+        if let Some(sv) = self.surfaces.iter_mut().find(|s| s.key == key) {
+            sv.st.preedit = (!text.is_empty()).then(|| Preedit {
+                id: node.id().to_owned(),
+                text: text.to_owned(),
+                cursor,
+            });
+        }
+        self.refresh(doc, pane, key, &[node.id().to_owned()]);
+    }
+
+    /// An IME commit: the preedit goes away and the text is typed.
+    pub fn ime_commit(&mut self, doc: &mut Document, pane: &TspPane, text: &str) -> Outcome {
+        self.ime_preedit(doc, pane, "", 0);
+        self.type_text(doc, pane, text)
+    }
+
+    /// The caret rectangle of the focused field, for placing the IME window.
+    pub fn caret_rect(&self, doc: &Document, pane: &TspPane) -> Option<auk_ui::Rect> {
+        let (surface, node) = self.focused_field(pane)?;
+        let sv = self.surfaces.iter().find(|s| s.key == surface.key())?;
+        let m = sv.mounts.get(node.id())?;
+        let crate::view::Extra::Field(f) = &m.extra else {
+            return None;
+        };
+        doc.border_box(f.caret?)
+    }
+
+    /// Hover: `:hover` on the element under the point and its ancestors.
+    pub fn hover(&mut self, doc: &mut Document, x: f32, y: f32) {
+        let mut chain = Vec::new();
+        let mut cur = auk_ui::hit_test(doc, x, y);
+        while let Some(e) = cur {
+            if doc.node(e).is_element() {
+                chain.push(e);
+            }
+            cur = doc.parent(e);
+        }
+        for &e in &self.hover {
+            if !chain.contains(&e) && doc.try_node(e).is_some() {
+                doc.set_state(e, ElementState::HOVER, false);
+            }
+        }
+        for &e in &chain {
+            if !self.hover.contains(&e) {
+                doc.set_state(e, ElementState::HOVER, true);
+            }
+        }
+        self.hover = chain;
+    }
+
+    /// The context menu for the node under a point: its `menu` actions, then Copy unless named.
+    pub fn menu(&self, doc: &Document, pane: &TspPane, x: f32, y: f32) -> Vec<MenuEntry> {
+        for hit in self.hits(doc, x, y) {
+            let Some(s) = pane.surface(hit.surface) else {
+                continue;
+            };
+            let Some(n) = s.document().get(&hit.id) else {
+                continue;
+            };
+            let a = Actions::read(n.props(), n.kind());
+            if a.menu.is_empty() {
+                continue;
+            }
+            let mut out: Vec<MenuEntry> = a
+                .menu
+                .iter()
+                .map(|m| MenuEntry {
+                    label: common::action_label(m),
+                    action: m.clone(),
+                })
+                .collect();
+            if !a.menu.iter().any(|m| m == "copy") {
+                out.push(MenuEntry {
+                    label: "Copy".into(),
+                    action: "copy".into(),
+                });
+            }
+            return out;
+        }
+        vec![MenuEntry {
+            label: "Copy".into(),
+            action: "copy".into(),
+        }]
+    }
+
+    /// Run a menu pick on the node under a point (no modifiers, §7.7).
+    pub fn menu_pick(
+        &mut self,
+        doc: &mut Document,
+        pane: &TspPane,
+        x: f32,
+        y: f32,
+        action: &str,
+    ) -> Vec<Outcome> {
+        let hits = self.hits(doc, x, y);
+        let Some(hit) = hits.into_iter().find(|h| {
+            pane.surface(h.surface)
+                .and_then(|s| s.document().get(&h.id))
+                .is_some_and(|n| !Actions::read(n.props(), n.kind()).menu.is_empty())
+        }) else {
+            return Vec::new();
+        };
+        let Some(surface) = pane.surface(hit.surface) else {
+            return Vec::new();
+        };
+        let Some(node) = surface.document().get(&hit.id) else {
+            return Vec::new();
+        };
+        self.run_action(doc, pane, surface, node, action, Mods::NONE)
+    }
+}
+
+fn nearest_form(node: NodeRef) -> Option<NodeRef> {
+    let mut cur = node.parent();
+    while let Some(n) = cur {
+        if n.kind() == "el" && el::requested(n) == "form" {
+            return Some(n);
+        }
+        cur = n.parent();
+    }
+    None
+}
+
+fn first_control(node: NodeRef) -> Option<NodeRef> {
+    let mut stack: Vec<NodeRef> = node.children().collect();
+    stack.reverse();
+    while let Some(n) = stack.pop() {
+        if el::control_type(n).is_some() {
+            return Some(n);
+        }
+        let mut kids: Vec<NodeRef> = n.children().collect();
+        kids.reverse();
+        stack.extend(kids);
+    }
+    None
+}
+
+/// What `copy` copies: md source, raw code or ansi, the `href`, or the node's text.
+fn copy_text(node: NodeRef) -> String {
+    if let Some(h) = str_prop(node.props(), "href") {
+        return h.to_owned();
+    }
+    match node.prop("text") {
+        Some(Value::String(s)) => s.clone(),
+        _ => {
+            let mut out = String::new();
+            fn walk(n: NodeRef, out: &mut String) {
+                if let Some(Value::String(s)) = n.prop("text") {
+                    out.push_str(s);
+                } else {
+                    out.push_str(&crate::spans::spans_text(&crate::spans::parse_spans(
+                        n.prop("spans").or(n.prop("head")),
+                    )));
+                }
+                for c in n.children() {
+                    walk(c, out);
+                }
+            }
+            walk(node, &mut out);
+            out
+        }
+    }
+}
+
+/// The text content of a DOM subtree.
+pub(crate) fn text_content(doc: &Document, id: NodeId) -> String {
+    let mut out = String::new();
+    let mut stack = vec![id];
+    while let Some(n) = stack.pop() {
+        if let Some(t) = doc.node(n).text() {
+            out.push_str(t);
+        }
+        for &c in doc.children(n).iter().rev() {
+            stack.push(c);
+        }
+    }
+    out
+}

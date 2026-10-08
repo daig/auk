@@ -13,6 +13,11 @@ pub struct Written {
 }
 
 impl Written {
+    /// The class string last written on `id`, if any.
+    pub fn class(&self, id: NodeId) -> Option<&str> {
+        self.class.get(&id).map(String::as_str)
+    }
+
     /// The inline style last written on `id`, if any.
     pub fn style(&self, id: NodeId) -> Option<&str> {
         self.style.get(&id).map(String::as_str)

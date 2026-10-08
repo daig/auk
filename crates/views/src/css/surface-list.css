@@ -1,0 +1,23 @@
+/* list, item, tabs (book:6038-6240). */
+.sf-list { display: flex; flex-direction: column; min-width: 0; }
+.sf-list-scroll { min-width: 0; }
+.sf-list-scroll.max { overflow-y: auto; }
+.sf-list-slot { display: flex; flex-direction: column; gap: 0; }
+.sf-list-empty { color: var(--t3); padding: 3px 8px; }
+.sf-item {
+  display: flex; align-items: center; gap: 8px; min-width: 0; padding: 3px 8px; border-radius: 6px; cursor: default;
+}
+.sf-item:hover { background-color: var(--l1); }
+.sf-item.sel { background-color: var(--sf-sel, color-mix(in srgb, var(--accent) 14%, transparent)); }
+.sf-item.disabled { opacity: 0.45; }
+.sf-item[data-tone] .sf-item-label { color: var(--tc); }
+.sf-item-ic { flex: none; color: var(--t3); }
+.sf-item-label { flex: 1 1 auto; min-width: 0; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.sf-item-detail { flex: 0 1 auto; min-width: 0; color: var(--t3); white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.sf-item-value { flex: none; max-width: 40%; color: var(--t2); white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.sf-item-hint { flex: none; }
+.sf-mark { background-color: transparent; color: var(--accent-ink); font-weight: 700; }
+.sf-tabs { display: flex; gap: 2px; min-width: 0; overflow: hidden; border-bottom: 1px solid var(--l2); }
+.sf-tab { flex: none; padding: 3px 10px; color: var(--t3); border-bottom: 2px solid transparent; cursor: pointer; white-space: pre; }
+.sf-tab.on { color: var(--t1); border-bottom-color: var(--accent); }
+.sf-tab:hover { color: var(--t1); }

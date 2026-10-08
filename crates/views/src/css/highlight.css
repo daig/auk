@@ -1,0 +1,22 @@
+/* Syntax colors: the 11 tk-* classes (book:5123-5134). Under .sf-pal, syntax* palette tokens. */
+:root {
+  --tk-comment: #6e7781; --tk-keyword: #cf222e; --tk-function: #8250df; --tk-variable: #1b1c20;
+  --tk-string: #0a3069; --tk-number: #0550ae; --tk-type: #953800; --tk-operator: #cf222e;
+  --tk-punct: #57606a; --tk-inserted: #1a7f37; --tk-deleted: #cf222e;
+}
+:root[data-theme='dark'] {
+  --tk-comment: #7d8590; --tk-keyword: #ff7b72; --tk-function: #d2a8ff; --tk-variable: #e6edf3;
+  --tk-string: #a5d6ff; --tk-number: #79c0ff; --tk-type: #ffa657; --tk-operator: #ff7b72;
+  --tk-punct: #9ba1aa; --tk-inserted: #3fb950; --tk-deleted: #f85149;
+}
+.tk-comment { color: var(--tk-comment); font-style: italic; }
+.tk-keyword { color: var(--tk-keyword); }
+.tk-function { color: var(--tk-function); }
+.tk-variable { color: var(--tk-variable); }
+.tk-string { color: var(--tk-string); }
+.tk-number { color: var(--tk-number); }
+.tk-type { color: var(--tk-type); }
+.tk-operator { color: var(--tk-operator); }
+.tk-punct { color: var(--tk-punct); }
+.tk-inserted { color: var(--tk-inserted); }
+.tk-deleted { color: var(--tk-deleted); }

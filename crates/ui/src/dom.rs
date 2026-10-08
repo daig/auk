@@ -243,6 +243,9 @@ pub struct Node {
     pub(crate) scroll: (f32, f32),
     /// Virtualization: an estimated height for children not laid out (see [`crate::Document::set_virtual`]).
     pub(crate) virtual_estimate: Option<f32>,
+    /// The visible part of a virtualized container in its content coordinates, when an ancestor
+    /// scrolls it (see [`crate::Document::set_virtual_window`]).
+    pub(crate) virtual_window: Option<(f32, f32)>,
     /// Measured border-box heights of virtualized children, by child index.
     pub(crate) measured: Vec<Option<f32>>,
     /// Whether this child was laid out in the last pass (virtualized lists skip children).
@@ -273,6 +276,7 @@ impl Node {
             fragments: Vec::new(),
             scroll: (0.0, 0.0),
             virtual_estimate: None,
+            virtual_window: None,
             measured: Vec::new(),
             skipped: false,
         }

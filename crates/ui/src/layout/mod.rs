@@ -247,6 +247,18 @@ impl Document {
         self.invalidate_layout(id);
     }
 
+    /// The visible window of a virtualized container that doesn't scroll itself (an ancestor
+    /// does), in its content coordinates (`top`, `bottom`): children outside it, plus an overscan
+    /// of half a viewport, are not laid out. `None` uses the container's own scroll and height.
+    pub fn set_virtual_window(&mut self, id: NodeId, window: Option<(f32, f32)>) {
+        if self.node(id).virtual_window != window {
+            self.node_mut(id).virtual_window = window;
+            if self.node(id).virtual_estimate.is_some() {
+                self.invalidate_layout(id);
+            }
+        }
+    }
+
     /// How far a scroll container can scroll.
     pub fn max_scroll(&self, id: NodeId) -> (f32, f32) {
         let n = self.node(id);
@@ -326,7 +338,13 @@ impl Document {
             .unwrap_or(self.viewport.1);
         let overscan = view_h * 0.5;
         let scroll_y = self.node(id).scroll.1;
-        let window = (scroll_y - overscan, scroll_y + view_h + overscan);
+        let window = match self.node(id).virtual_window {
+            Some((top, bottom)) => {
+                let over = self.viewport.1 * 0.5;
+                (top - over, bottom + over)
+            }
+            None => (scroll_y - overscan, scroll_y + view_h + overscan),
+        };
 
         let kids: Vec<NodeId> = self.node(id).layout_children.clone();
         let mut measured = std::mem::take(&mut self.node_mut(id).measured);

@@ -61,10 +61,7 @@ pub fn keycap(key: &str) -> (String, Option<&'static str>) {
     if let (Some(c), None) = (chars.next(), chars.next()) {
         return (c.to_uppercase().collect(), None);
     }
-    if lower.len() > 1
-        && lower.starts_with('f')
-        && lower[1..].bytes().all(|b| b.is_ascii_digit())
-    {
+    if lower.len() > 1 && lower.starts_with('f') && lower[1..].bytes().all(|b| b.is_ascii_digit()) {
         return (lower.to_ascii_uppercase(), None);
     }
     (key.to_owned(), None)

@@ -1,0 +1,13 @@
+/* Motion settings (research/elements.md §4.9, §4.10). The view clocks motion itself; these rules
+   cover program sheets' transitions and the still look. */
+@media (prefers-reduced-motion: reduce) {
+  .sf-region, .sf-region * { transition-duration: 0s !important; animation-duration: 0s !important; }
+}
+.sf-still .md.streaming { opacity: 1; }
+.sf-paused .md-caret, .sf-still .md-caret { opacity: 1; }
+@media (prefers-contrast: more) {
+  :root { --t2: var(--t1) !important; --t3: var(--t2) !important; --l1: var(--l2) !important; --l2: var(--l3) !important; }
+}
+@media (prefers-reduced-transparency) {
+  :root { --dim: rgba(0, 0, 0, 0.6) !important; }
+}

@@ -1,0 +1,11 @@
+/* el defaults (book:8556-8800): controls are 15px boxes; label is inline-flex. */
+.sf-el.sf-check, .sf-el.sf-radio {
+  display: inline-block; width: 15px; height: 15px; flex: none; vertical-align: -3px; cursor: pointer;
+  border: 1px solid var(--l4); background-color: var(--card); border-radius: 4px;
+}
+.sf-el.sf-radio { border-radius: 8px; }
+.sf-el.sf-check.on, .sf-el.sf-radio.on { background-color: var(--accent-fill); border-color: var(--accent-fill); }
+.sf-el.sf-radio.on { border-width: 4px; background-color: var(--card); border-color: var(--accent-fill); }
+.sf-el.sf-check[aria-disabled='true'], .sf-el.sf-radio[aria-disabled='true'] { opacity: 0.45; cursor: default; }
+label.sf-el { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+button.sf-el { cursor: pointer; }
