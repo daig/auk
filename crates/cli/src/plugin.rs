@@ -55,7 +55,10 @@ fn reload(control: &mut Control) -> Result<Catalog, Fail> {
     match control.request(&["plugin", "reload"]) {
         Ok(value) => serde_json::from_value(value).map_err(|e| Fail::Failed(e.to_string())),
         Err(ControlError::Io(e))
-            if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) =>
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            ) =>
         {
             Err(Fail::Timeout)
         }
@@ -134,7 +137,12 @@ fn run_verb(socket: &Path, args: &[String], out: &mut impl Write) -> Result<Exit
         }
         Verb::Install { src, force } => {
             let got = manage::install(&plugins_dir, &src, force).map_err(Fail::Failed)?;
-            let text = format!("installed {} {} → {}\n", got.id, got.version, got.dir.display());
+            let text = format!(
+                "installed {} {} → {}\n",
+                got.id,
+                got.version,
+                got.dir.display()
+            );
             print(out, json, got.to_json(), &text)?;
             after_change(socket);
         }
@@ -146,7 +154,12 @@ fn run_verb(socket: &Path, args: &[String], out: &mut impl Write) -> Result<Exit
         }
         Verb::Link(dir) => {
             let got = manage::link(&plugins_dir, &dir).map_err(Fail::Failed)?;
-            let text = format!("linked {} {} → {}\n", got.id, got.version, got.dir.display());
+            let text = format!(
+                "linked {} {} → {}\n",
+                got.id,
+                got.version,
+                got.dir.display()
+            );
             print(out, json, got.to_json(), &text)?;
             after_change(socket);
         }

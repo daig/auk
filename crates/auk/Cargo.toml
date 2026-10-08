@@ -18,6 +18,10 @@ auk-conformance = { path = "../conformance" }
 auk-daemon = { path = "../daemon" }
 auk-mirror = { path = "../mirror" }
 auk-replica = { path = "../replica" }
+# The omp suite encodes keys and reads documents and views like a window.
+auk-term = { path = "../term" }
+auk-tsp = { path = "../tsp" }
+auk-views = { path = "../views" }
 serde_json.workspace = true
 # The SDK's chunker and input parser are the program-side oracles in the tsp suite.
 tern-sdk = { path = "../../third_party/tern-sdk/rust" }

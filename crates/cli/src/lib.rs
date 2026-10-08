@@ -395,7 +395,11 @@ pub enum DaemonAction {
 /// answers and reports it.
 fn upgrade_daemon(socket: &Path, exe: Option<PathBuf>) -> Result<(), VerbError> {
     let exe = absolute(&exe.unwrap_or_else(current_exe));
-    let words = ["upgrade".to_owned(), "--exe".to_owned(), exe.to_string_lossy().into_owned()];
+    let words = [
+        "upgrade".to_owned(),
+        "--exe".to_owned(),
+        exe.to_string_lossy().into_owned(),
+    ];
     let started = connect(socket, false)?.request(&words)?;
     let before = started["upgrades"].as_u64().unwrap_or(0);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
@@ -407,7 +411,9 @@ fn upgrade_daemon(socket: &Path, exe: Option<PathBuf>) -> Result<(), VerbError> 
         {
             println!(
                 "upgraded the daemon (pid {}) from Auk {} to {}",
-                state["pid"], started["from"].as_str().unwrap_or("?"), state["auk"].as_str().unwrap_or("?")
+                state["pid"],
+                started["from"].as_str().unwrap_or("?"),
+                state["auk"].as_str().unwrap_or("?")
             );
             return Ok(());
         }
@@ -459,7 +465,12 @@ fn connect(socket: &Path, start: bool) -> Result<Control, VerbError> {
 }
 
 /// Prints a verb's result: the JSON value with `--json`, else `text` (if any).
-fn report(out: &mut impl Write, g: &Globals, value: &Value, text: Option<String>) -> io::Result<()> {
+fn report(
+    out: &mut impl Write,
+    g: &Globals,
+    value: &Value,
+    text: Option<String>,
+) -> io::Result<()> {
     if g.json {
         writeln!(out, "{value}")
     } else if let Some(text) = text {
@@ -522,7 +533,10 @@ fn run_verb(socket: &Path, g: &Globals, verb: Command) -> Result<ExitCode, VerbE
         } => {
             let mut words = vec!["split".to_owned(), target, dir];
             if let Some(cwd) = cwd {
-                words.extend(["--cwd".to_owned(), absolute(&cwd).to_string_lossy().into_owned()]);
+                words.extend([
+                    "--cwd".to_owned(),
+                    absolute(&cwd).to_string_lossy().into_owned(),
+                ]);
             }
             if !command.is_empty() {
                 words.push("--".to_owned());
@@ -544,7 +558,10 @@ fn run_verb(socket: &Path, g: &Globals, verb: Command) -> Result<ExitCode, VerbE
             control.request(&words)?;
             // Events go out as they come, until the daemon stops or the reader goes away.
             while let Some(line) = control.read_line()? {
-                if writeln!(out, "{}", line.trim_end()).and_then(|()| out.flush()).is_err() {
+                if writeln!(out, "{}", line.trim_end())
+                    .and_then(|()| out.flush())
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -638,7 +655,10 @@ fn run_verb(socket: &Path, g: &Globals, verb: Command) -> Result<ExitCode, VerbE
                 words.extend(["--window".to_owned(), window.clone()]);
             }
             if let Some(cwd) = cwd {
-                words.extend(["--cwd".to_owned(), absolute(&cwd).to_string_lossy().into_owned()]);
+                words.extend([
+                    "--cwd".to_owned(),
+                    absolute(&cwd).to_string_lossy().into_owned(),
+                ]);
             }
             if let Some((c, r)) = size {
                 words.extend(["--size".to_owned(), format!("{c}x{r}")]);
@@ -781,10 +801,14 @@ mod tests {
             (what.as_str(), size, command),
             ("tab", Some((90, 20)), vec!["ls".into(), "-l".into()])
         );
-        let cli = Cli::parse_from(["auk", "--json", "split", "@focused", "down", "--window", "w", "--", "htop"]);
+        let cli = Cli::parse_from([
+            "auk", "--json", "split", "@focused", "down", "--window", "w", "--", "htop",
+        ]);
         assert!(cli.json);
         assert_eq!(cli.window.as_deref(), Some("w"));
-        assert!(matches!(cli.command, Some(Command::Split { ref dir, ref command, .. }) if dir == "down" && command == &["htop"]));
+        assert!(
+            matches!(cli.command, Some(Command::Split { ref dir, ref command, .. }) if dir == "down" && command == &["htop"])
+        );
         let cli = Cli::parse_from(["auk", "events", "--filter", "pane_spawned,layout_changed"]);
         assert!(matches!(cli.command, Some(Command::Events { ref filter }) if filter.len() == 2));
         let cli = Cli::parse_from(["auk", "run", "1", "echo", "-n", "hi"]);

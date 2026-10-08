@@ -109,7 +109,9 @@ pub fn capture(term: &Terminal, tsp: &TspPane, opts: Options) -> String {
         let last = i + 1 == n;
         match piece {
             Piece::Line(line) => {
-                let Some(row) = term.line(*line) else { continue };
+                let Some(row) = term.line(*line) else {
+                    continue;
+                };
                 let text = match opts.format {
                     Format::Text => plain_row(&row.cells),
                     Format::Ansi => ansi_row(&row.cells),
@@ -224,7 +226,11 @@ fn color_sgr(color: Color, base: u8, bright: u8, ext: u8, p: &mut Vec<String>) {
 }
 
 fn style_key(c: &Cell) -> (Color, Color, u16) {
-    (c.fg, c.bg, c.flags.0 & !(Flags::WIDE | Flags::SPACER | Flags::LEADING_SPACER))
+    (
+        c.fg,
+        c.bg,
+        c.flags.0 & !(Flags::WIDE | Flags::SPACER | Flags::LEADING_SPACER),
+    )
 }
 
 fn ansi_row(cells: &[Cell]) -> String {
@@ -285,10 +291,7 @@ fn html_row(cells: &[Cell], links: &[String]) -> String {
 
 fn html_style(fg: Color, bg: Color, flags: Flags) -> String {
     let (fg, bg) = if flags.has(Flags::INVERSE) {
-        (
-            if bg == Color::Default { None } else { Some(bg) },
-            Some(fg),
-        )
+        (if bg == Color::Default { None } else { Some(bg) }, Some(fg))
     } else {
         (Some(fg), Some(bg))
     };
@@ -465,7 +468,19 @@ fn collect(n: NodeRef<'_>, lines: &mut Vec<String>) {
         || (n.kind() == "el"
             && matches!(
                 n.prop("tag").and_then(Value::as_str),
-                Some("span" | "b" | "i" | "em" | "strong" | "code" | "a" | "kbd" | "label" | "td" | "th")
+                Some(
+                    "span"
+                        | "b"
+                        | "i"
+                        | "em"
+                        | "strong"
+                        | "code"
+                        | "a"
+                        | "kbd"
+                        | "label"
+                        | "td"
+                        | "th"
+                )
             ));
     if !inline && !lines.last().is_some_and(String::is_empty) {
         lines.push(String::new());
@@ -535,9 +550,15 @@ mod tests {
         };
         assert_eq!(capture(&t, &p, o(Format::Text)), "red <b>\ngreen\n");
         let ansi = capture(&t, &p, o(Format::Ansi));
-        assert!(ansi.starts_with("\x1b[0;1;31mred\x1b[0m <b>\n\x1b[0;42mgreen\x1b[0m"), "{ansi:?}");
+        assert!(
+            ansi.starts_with("\x1b[0;1;31mred\x1b[0m <b>\n\x1b[0;42mgreen\x1b[0m"),
+            "{ansi:?}"
+        );
         let html = capture(&t, &p, o(Format::Html));
-        assert!(html.contains("<span style=\"color:#cd0000;font-weight:bold\">red</span> &lt;b&gt;"), "{html}");
+        assert!(
+            html.contains("<span style=\"color:#cd0000;font-weight:bold\">red</span> &lt;b&gt;"),
+            "{html}"
+        );
         assert!(html.contains("background-color:#00cd00"), "{html}");
     }
 

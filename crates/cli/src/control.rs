@@ -57,7 +57,12 @@ impl Control {
 
     /// Sends a raw command line and returns the reply object.
     pub fn send_line(&mut self, line: &str) -> io::Result<Value> {
-        debug_assert!(!line.contains('\n'));
+        if line.contains(['\n', '\r']) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "a command line can't hold a line break; send keys for Enter",
+            ));
+        }
         self.writer.write_all(format!("{line}\n").as_bytes())?;
         let mut reply = String::new();
         if self.reader.read_line(&mut reply)? == 0 {
@@ -67,6 +72,12 @@ impl Control {
             ));
         }
         serde_json::from_str(&reply).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    }
+
+    /// Reads one more line (an event stream's); `None` when the endpoint closed.
+    pub fn read_line(&mut self) -> io::Result<Option<String>> {
+        let mut line = String::new();
+        Ok((self.reader.read_line(&mut line)? > 0).then_some(line))
     }
 
     /// Sends a command built from words (quoted as a shell would) and returns its `value`

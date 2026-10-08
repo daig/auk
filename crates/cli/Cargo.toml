@@ -11,9 +11,13 @@ auk-daemon = { version = "0.0.0", path = "../daemon" }
 auk-plugins = { version = "0.0.0", path = "../plugins", default-features = false }
 auk-mirror = { version = "0.0.0", path = "../mirror" }
 auk-remote = { version = "0.0.0", path = "../remote" }
+auk-render = { version = "0.0.0", path = "../render" }
 auk-replica = { version = "0.0.0", path = "../replica" }
 auk-term = { version = "0.0.0", path = "../term" }
+auk-text = { version = "0.0.0", path = "../text" }
 auk-tsp = { version = "0.0.0", path = "../tsp" }
+auk-ui = { version = "0.0.0", path = "../ui" }
+auk-views = { version = "0.0.0", path = "../views" }
 clap = { version = "4.6.7", features = ["derive"] }
 serde_json.workspace = true
 shlex = "2.0.1"

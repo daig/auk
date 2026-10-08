@@ -1,0 +1,74 @@
+{
+  "size": [
+    800,
+    400
+  ],
+  "scale": 1.0,
+  "appearance": "dark",
+  "clock": 0.0,
+  "cell": [
+    8.0,
+    16.0
+  ],
+  "session": 1,
+  "tab": 2,
+  "panes": [
+    {
+      "pane": 1,
+      "rect": [
+        0.0,
+        0.0,
+        400.0,
+        400.0
+      ],
+      "cols": 48,
+      "rows": 24,
+      "focused": false,
+      "alt_screen": false,
+      "first_line": 0,
+      "lines_drawn": 24,
+      "blocks": [],
+      "dock": null,
+      "screen": false,
+      "boxes": []
+    },
+    {
+      "pane": 2,
+      "rect": [
+        401.0,
+        0.0,
+        399.0,
+        200.0
+      ],
+      "cols": 48,
+      "rows": 11,
+      "focused": false,
+      "alt_screen": false,
+      "first_line": 0,
+      "lines_drawn": 11,
+      "blocks": [],
+      "dock": null,
+      "screen": false,
+      "boxes": []
+    },
+    {
+      "pane": 3,
+      "rect": [
+        401.0,
+        201.0,
+        399.0,
+        199.0
+      ],
+      "cols": 48,
+      "rows": 11,
+      "focused": true,
+      "alt_screen": false,
+      "first_line": 0,
+      "lines_drawn": 11,
+      "blocks": [],
+      "dock": null,
+      "screen": false,
+      "boxes": []
+    }
+  ]
+}

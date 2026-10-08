@@ -34,7 +34,12 @@ htop and tmux show the time, so re-recording gives different bytes; the committe
 
 ## `scenarios/`
 
-Step lists for `tools/tsp_record.py --scenario` (see the tool's docstring).
+- `*.json`: step lists for `tools/tsp_record.py --scenario` (see the tool's docstring).
+- `*.auk`: scenario scripts for `auk shot` (spec §11.3; syntax in `crates/cli/src/scenario.rs`). The `cli` suite runs each in a hermetic HOME (the test shell config, plus `sdk`, `python3` and `w/` for `sdk-table`) and compares every `shot` with `goldens/`.
+
+## `goldens/`
+
+`<scenario>/<shot>.png` and `.json` (the layout): what `auk shot` drew, offscreen with wgpu. Tolerances are in `crates/conformance/src/goldens.rs`. Rewrite them only deliberately, after looking at the new PNGs: `AUK_UPDATE_GOLDENS=1 cargo nextest run -p auk --test cli scenario_`.
 
 ## Fonts
 

@@ -1,0 +1,327 @@
+{
+  "size": [
+    800,
+    420
+  ],
+  "scale": 1.0,
+  "appearance": "dark",
+  "clock": 0.0,
+  "cell": [
+    8.0,
+    16.0
+  ],
+  "session": 1,
+  "tab": 2,
+  "panes": [
+    {
+      "pane": 1,
+      "rect": [
+        0.0,
+        0.0,
+        800.0,
+        420.0
+      ],
+      "cols": 98,
+      "rows": 25,
+      "focused": true,
+      "alt_screen": false,
+      "first_line": 0,
+      "lines_drawn": 16,
+      "blocks": [
+        {
+          "sf": "s1",
+          "line": 1,
+          "top": 16.0,
+          "height": 112.0
+        }
+      ],
+      "dock": {
+        "top": 338.0,
+        "height": 70.0
+      },
+      "screen": false,
+      "boxes": [
+        [
+          "s1",
+          "main",
+          "div",
+          "sf-region sf-main sf-h-annotated sf-inline",
+          0.0,
+          0.0,
+          788.0,
+          112.0
+        ],
+        [
+          "s1",
+          "main",
+          "div",
+          "sf sf-text",
+          0.0,
+          0.0,
+          788.0,
+          16.0
+        ],
+        [
+          "s1",
+          "main",
+          "div",
+          "sf sf-text",
+          0.0,
+          32.0,
+          788.0,
+          16.0
+        ],
+        [
+          "s1",
+          "main",
+          "div",
+          "sf sf-text",
+          0.0,
+          64.0,
+          788.0,
+          16.0
+        ],
+        [
+          "s1",
+          "main",
+          "div",
+          "sf sf-text",
+          0.0,
+          96.0,
+          788.0,
+          16.0
+        ],
+        [
+          "s1",
+          "dock",
+          "div",
+          "sf-region sf-dock sf-h-annotated sf-inline",
+          0.0,
+          0.0,
+          788.0,
+          70.0
+        ],
+        [
+          "s1",
+          "dock",
+          "div",
+          "sf sf-editor focused empty",
+          0.0,
+          8.0,
+          788.0,
+          30.0
+        ],
+        [
+          "s1",
+          "dock",
+          "div",
+          "sf-ed-scroll",
+          11.0,
+          15.0,
+          766.0,
+          16.0
+        ],
+        [
+          "s1",
+          "dock",
+          "div",
+          "sf-ed-text",
+          11.0,
+          15.0,
+          766.0,
+          16.0
+        ],
+        [
+          "s1",
+          "dock",
+          "span",
+          "sf-caret",
+          11.0,
+          15.0,
+          2.0,
+          15.0
+        ],
+        [
+          "s1",
+          "dock",
+          "span",
+          "sf-ed-ph",
+          13.0,
+          14.93,
+          93.92,
+          15.13
+        ],
+        [
+          "s1",
+          "dock",
+          "div",
+          "sf sf-status",
+          0.0,
+          46.0,
+          788.0,
+          24.0
+        ],
+        [
+          "s1",
+          "dock",
+          "div",
+          "sf-st-row",
+          0.0,
+          50.0,
+          788.0,
+          16.0
+        ],
+        [
+          "s1",
+          "dock",
+          "div",
+          "sf-st-l",
+          4.0,
+          50.0,
+          728.87,
+          16.0
+        ],
+        [
+          "s1",
+          "dock",
+          "div",
+          "sf sf-seg",
+          4.0,
+          50.0,
+          51.31,
+          16.0
+        ],
+        [
+          "s1",
+          "dock",
+          "span",
+          "sf-seg-ic",
+          4.0,
+          51.5,
+          16.0,
+          13.0
+        ],
+        [
+          "s1",
+          "dock",
+          "span",
+          "ico",
+          4.0,
+          51.5,
+          16.0,
+          13.0
+        ],
+        [
+          "s1",
+          "dock",
+          "span",
+          "sf-seg-t",
+          24.0,
+          50.0,
+          31.31,
+          16.0
+        ],
+        [
+          "s1",
+          "dock",
+          "div",
+          "sf-st-r",
+          744.87,
+          50.0,
+          39.13,
+          16.0
+        ],
+        [
+          "s1",
+          "dock",
+          "div",
+          "sf sf-seg side-right",
+          744.87,
+          50.0,
+          39.13,
+          16.0
+        ],
+        [
+          "s1",
+          "dock",
+          "span",
+          "sf-seg-t",
+          744.87,
+          50.0,
+          39.13,
+          16.0
+        ],
+        [
+          "s1",
+          "layer",
+          "div",
+          "sf-region sf-layer sf-h-annotated sf-inline",
+          0.0,
+          0.0,
+          788.0,
+          182.0
+        ],
+        [
+          "s1",
+          "layer",
+          "div",
+          "sf sf-overlay sz-sm at-top",
+          0.0,
+          0.0,
+          788.0,
+          182.0
+        ],
+        [
+          "s1",
+          "layer",
+          "div",
+          "sf-ov-card",
+          234.0,
+          8.0,
+          320.0,
+          62.0
+        ],
+        [
+          "s1",
+          "layer",
+          "div",
+          "sf-ov-head",
+          235.0,
+          9.0,
+          318.0,
+          28.0
+        ],
+        [
+          "s1",
+          "layer",
+          "span",
+          "sf-ov-title",
+          247.0,
+          17.0,
+          93.92,
+          16.0
+        ],
+        [
+          "s1",
+          "layer",
+          "div",
+          "sf-ov-body",
+          235.0,
+          37.0,
+          318.0,
+          32.0
+        ],
+        [
+          "s1",
+          "layer",
+          "div",
+          "sf sf-text",
+          247.0,
+          43.0,
+          294.0,
+          16.0
+        ]
+      ]
+    }
+  ]
+}

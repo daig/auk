@@ -4,8 +4,10 @@
 //! (`research/sdk-wire.md` §10) and the SDK and omp runs build on these in M3 and M5.
 
 pub mod fuzz;
+pub mod goldens;
 pub mod harness;
 pub mod layout;
+pub mod native;
 pub mod probe;
 pub mod remote;
 pub mod surfaces;

@@ -104,9 +104,10 @@ pub fn pane_events(pane: u64, events: &[auk_replica::Event]) {
     }
     for event in events {
         match event {
-            auk_replica::Event::Title(title) => {
-                emit("title_changed", json!({"pane": pane, "title": title, "by": null}))
-            }
+            auk_replica::Event::Title(title) => emit(
+                "title_changed",
+                json!({"pane": pane, "title": title, "by": null}),
+            ),
             auk_replica::Event::Cwd(url) => {
                 let cwd = crate::pane::osc7_path(url)
                     .map(|p| p.to_string_lossy().into_owned())
@@ -253,10 +254,15 @@ mod tests {
     #[test]
     fn actors_scope_events() {
         let mut rx = bus().subscribe();
-        as_actor(Actor::Client(7), || emit("layout_changed", json!({"window": "w"})));
+        as_actor(Actor::Client(7), || {
+            emit("layout_changed", json!({"window": "w"}))
+        });
         emit("pane_exited", json!({"pane": 1, "status": 0}));
         let first: Value = serde_json::from_str(&rx.try_recv().unwrap()).unwrap();
-        assert_eq!(first, json!({"event": "layout_changed", "window": "w", "by": 7}));
+        assert_eq!(
+            first,
+            json!({"event": "layout_changed", "window": "w", "by": 7})
+        );
         let second: Value = serde_json::from_str(&rx.try_recv().unwrap()).unwrap();
         assert_eq!(second["by"], Value::Null);
     }
