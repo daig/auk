@@ -56,6 +56,7 @@ html.light .sep, html.light .divider { background-color: #d5d5d2; }
 #statusline .sl-plugin[data-tone="muted"] { color: #8d939a; }
 #statusline .sl-plugin[data-tone="error"] { color: #e5534b; }
 #statusline .sl-plugin[data-tone="success"] { color: #57ab5a; }
+#statusline .sl-plugin[data-tone="warning"] { color: #c69026; }
 html.light #statusline { background-color: #ececea; border-top-color: #d5d5d2; color: #6d7177; }
 html.light #statusline .sl-plugin { color: #2a2d31; }
 .tab .tab-app, #statusline .sl-app {

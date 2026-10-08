@@ -437,6 +437,40 @@ impl Document {
                 let first = il.lines.iter().find(|l| l.height > 0.0)?;
                 Some(il.content_origin.1 + first.top + first.baseline)
             }
+            // CSS Flexbox §8.5, as WebKit does it: the baseline of the first item that takes part
+            // in baseline alignment, else of the startmost item, synthesized from its border box
+            // when it has none.
+            Inner::Flex => {
+                let items: Vec<NodeId> = n
+                    .layout_children
+                    .iter()
+                    .copied()
+                    .filter(|&c| {
+                        let cn = self.node(c);
+                        cn.taffy_style.position != taffy::Position::Absolute && !cn.skipped
+                    })
+                    .collect();
+                let row = matches!(
+                    n.taffy_style.flex_direction,
+                    taffy::FlexDirection::Row | taffy::FlexDirection::RowReverse
+                );
+                let aligns_baseline = |c: NodeId| {
+                    let align = self
+                        .node(c)
+                        .taffy_style
+                        .align_self
+                        .or(n.taffy_style.align_items);
+                    row && align == Some(taffy::AlignItems::BASELINE)
+                };
+                let item = items
+                    .iter()
+                    .copied()
+                    .find(|&c| aligns_baseline(c))
+                    .or_else(|| items.first().copied())?;
+                let cn = self.node(item);
+                let own = self.first_baseline(item).unwrap_or(cn.layout.size.height);
+                Some(cn.layout.location.y + own)
+            }
             _ => {
                 for &c in &n.layout_children {
                     let cn = self.node(c);

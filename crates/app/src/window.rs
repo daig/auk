@@ -490,7 +490,10 @@ impl WinState {
                 shared.closed.clone(),
             )
         };
-        if let Some(reason) = closed {
+        // A link that gave up keeps its window open, showing `failed` and why in the status line
+        // (§10.1); a detach or a local daemon that went away closes it.
+        let failed = matches!(self.conn.link_status().state, auk_remote::State::Failed { .. });
+        if let Some(reason) = closed.filter(|_| !failed) {
             eprintln!("auk: window {}: {reason}", self.conn.window_key);
             self.closing = true;
             window.close();

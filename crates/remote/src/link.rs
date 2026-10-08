@@ -297,6 +297,8 @@ struct Shared {
     client: u64,
     /// When the oldest input still unanswered was sent.
     awaiting: Option<Instant>,
+    /// Told after every state change, so a window can redraw its connection state.
+    on_change: Option<Arc<dyn Fn() + Send + std::marker::Sync>>,
 }
 
 impl Shared {
@@ -309,6 +311,9 @@ impl Shared {
             self.history.pop_front();
         }
         self.state = state;
+        if let Some(f) = &self.on_change {
+            f();
+        }
     }
 
     fn synced(&self) -> bool {
@@ -433,6 +438,7 @@ impl Link {
             reconnects: 0,
             client: welcome.client,
             awaiting: None,
+            on_change: None,
         };
         shared.set_state(State::Connected);
         let link = Link {
@@ -516,6 +522,12 @@ impl Link {
 
     pub fn state(&self) -> State {
         self.lock().state.clone()
+    }
+
+    /// Runs `f` after every change of [`Link::state`] (from whichever thread made it, with the
+    /// link locked: `f` must not call back into the link). A window wakes itself with it.
+    pub fn on_change(&self, f: impl Fn() + Send + std::marker::Sync + 'static) {
+        self.lock().on_change = Some(Arc::new(f));
     }
 
     pub fn identity(&self) -> Vec<Hop> {

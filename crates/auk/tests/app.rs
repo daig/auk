@@ -2683,3 +2683,209 @@ fn the_first_window_starts_a_daemon_when_none_answers_and_it_outlives_the_window
     assert_eq!(env.daemon("state")["pid"], state["pid"]);
     assert!(env.pane_info(pane)["exit"].is_null());
 }
+
+/// The status line's link segments as the window drew them: `(identity, state, state tone)`.
+fn link_shown(app: &App) -> (Option<String>, Option<String>, Option<String>) {
+    let link = app.request("link");
+    let seg = |plugin: &str| {
+        link["shown"]
+            .as_array()
+            .and_then(|s| s.iter().find(|s| s["plugin"] == plugin).cloned())
+    };
+    let identity = seg("auk.identity").and_then(|s| s["text"].as_str().map(str::to_owned));
+    let state = seg("auk.link");
+    (
+        identity,
+        state.as_ref().and_then(|s| s["text"].as_str().map(str::to_owned)),
+        state.and_then(|s| s["tone"].as_str().map(str::to_owned)),
+    )
+}
+
+/// Waits until the status line shows the link in `state`; returns the link's status.
+fn wait_link(app: &App, state: &str, tone: &str) -> Value {
+    wait_for(&format!("the status line to show the link {state}"), || {
+        let (_, shown, t) = link_shown(app);
+        (shown.as_deref() == Some(state) && t.as_deref() == Some(tone)).then(|| app.request("link")["status"].clone())
+    })
+}
+
+/// Any string in an accessibility tree node that contains `needle`.
+fn a11y_has(tree: &Value, needle: &str) -> bool {
+    flatten(tree).iter().any(|n| {
+        n.as_object()
+            .is_some_and(|o| o.values().any(|v| v.as_str().is_some_and(|s| s.contains(needle))))
+    })
+}
+
+/// §10.1 "Identity and keys", "Connection behavior": a local window's status line shows its
+/// host's identity chain, the local hop ("dai@mac via local from mac as dai@mac"), and the link's
+/// state, connected; both are in the accessibility tree too.
+#[test]
+fn a_local_windows_status_line_shows_its_local_hop_and_the_link_state() {
+    let env = env("link-local");
+    let app = App::start(&env, "a", &[]);
+    let status = wait_link(&app, "connected", "muted");
+    let hop = &status["identity"][0];
+    assert_eq!(hop["method"], "local", "{status}");
+    assert_eq!(status["identity"].as_array().unwrap().len(), 1, "{status}");
+    let user = std::env::var("USER").expect("USER");
+    let acting = hop["acting"].as_str().unwrap();
+    let origin = hop["origin"].as_str().unwrap();
+    assert_eq!(acting, format!("{user}@{origin}"), "{status}");
+    let chain = format!("{} via local from {origin} as {acting}", hop["principal"].as_str().unwrap());
+    let (identity, ..) = link_shown(&app);
+    assert_eq!(identity.as_deref(), Some(chain.as_str()));
+    let tree = app.request("a11y --depth 12");
+    assert!(a11y_has(&tree, &chain), "the chain isn't in the accessibility tree: {tree}");
+    assert!(a11y_has(&tree, "connected"), "{tree}");
+}
+
+/// §10.1 "Identity and keys", "Connection behavior" on a remote window (the Lima VM): the
+/// status line shows the SSH key hop ("<key> via ssh-key from <this mac> as <user>@<vm>") and
+/// the link's state. When the ssh process dies the window shows "reconnecting (attempt 1)" and
+/// holds what is typed; once the link resyncs it shows "connected" again and the typing reaches
+/// the remote shell once. A link that gives up shows "failed" and why, and the window stays.
+#[test]
+fn remote_window_shows_its_ssh_hop_and_the_link_reconnecting_then_connected_and_typing_arrives_once() {
+    let r = auk_conformance::remote::RemoteEnv::new(env!("CARGO_BIN_EXE_auk"), "app-remote-link");
+    let pane = r.new_pane(&[]);
+    let app = remote_app(&r, "app");
+    assert_eq!(app.state()["focused"], pane, "the window shows the remote pane");
+    r.wait(pane, "prompt");
+
+    let before = wait_link(&app, "connected", "muted");
+    let hop = &before["identity"][0];
+    assert_eq!(hop["method"], "ssh-key", "{before}");
+    let vm_user = r.vm.ssh_ok("id -un").trim().to_owned();
+    let vm_host = r.vm.ssh_ok("hostname").trim().to_owned();
+    assert_eq!(hop["acting"], format!("{vm_user}@{vm_host}"), "{before}");
+    let here = std::process::Command::new("/bin/hostname").output().expect("hostname").stdout;
+    let here = String::from_utf8_lossy(&here).trim().to_owned();
+    let here_short = here.split('.').next().unwrap_or(&here);
+    let origin = hop["origin"].as_str().unwrap();
+    assert!(origin == here || origin == here_short, "origin {origin} isn't this machine ({here}): {before}");
+    let chain = format!(
+        "{} via ssh-key from {origin} as {vm_user}@{vm_host}",
+        hop["principal"].as_str().unwrap()
+    );
+    assert_eq!(link_shown(&app).0.as_deref(), Some(chain.as_str()));
+    let ssh = before["ssh_pid"].as_u64().expect("the ssh pid");
+
+    // Drop the link, and hold the next connection at the gate so the outage lasts.
+    r.vm.ssh_ok(&format!("touch {}", r.gate()));
+    let killed = std::process::Command::new("/bin/kill").args(["-KILL", &ssh.to_string()]).status();
+    assert!(killed.is_ok_and(|s| s.success()), "kill the ssh process");
+    let down = wait_link(&app, "reconnecting (attempt 1)", "warning");
+    assert_eq!(down["reconnects"], 0, "{down}");
+
+    // Typing in the window waits for the resync.
+    app.request("text 'echo typed-while-down-$((6*7))'");
+    app.request("type return");
+    let held = wait_for("the typing held", || {
+        let st = app.request("link")["status"].clone();
+        (st["held"].as_u64()? >= 2).then_some(st)
+    });
+    assert_eq!(held["label"], "reconnecting(1)", "{held}");
+    assert!(!r.capture(pane).contains("typed-while-down"));
+
+    // Open the gate: the link reconnects and resyncs, the status line says connected, and the
+    // typing reaches the remote shell, once.
+    r.vm.ssh_ok(&format!("rm {}", r.gate()));
+    let after = wait_link(&app, "connected", "muted");
+    assert_eq!(after["reconnects"], 1, "{after}");
+    assert_ne!(after["ssh_pid"].as_u64(), Some(ssh));
+    let history: Vec<&str> = after["history"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+    let at = history.iter().position(|s| *s == "reconnecting(1)").unwrap_or_else(|| panic!("{history:?}"));
+    assert_eq!(history.last(), Some(&"connected"), "{history:?}");
+    assert!(at < history.len() - 1, "{history:?}");
+    wait_for("the typing in the window", || {
+        app.request(&format!("capture {pane}"))["text"].as_str()?.contains("\ntyped-while-down-42").then_some(())
+    });
+    r.wait(pane, "prompt");
+    let remote = r.capture(pane);
+    assert_eq!(remote.matches("\ntyped-while-down-42").count(), 1, "{remote}");
+    assert_eq!(remote.matches("echo typed-while-down-$((6*7))").count(), 1, "{remote}");
+    assert_eq!(app.request("link")["status"]["held"], 0);
+    assert_eq!(link_shown(&app).0.as_deref(), Some(chain.as_str()), "the chain after the reconnect");
+
+    // A link that gives up: the host's `auk` is gone when it reconnects. The window stays and
+    // says why.
+    let ssh = after["ssh_pid"].as_u64().expect("the ssh pid");
+    r.vm.ssh_ok(&format!("touch {}", r.gate()));
+    let killed = std::process::Command::new("/bin/kill").args(["-KILL", &ssh.to_string()]).status();
+    assert!(killed.is_ok_and(|s| s.success()), "kill the ssh process");
+    wait_link(&app, "reconnecting (attempt 1)", "warning");
+    r.vm.ssh_ok(&format!("mv {0} {0}.gone && rm {1}", r.auk, r.gate()));
+    let failed = wait_for("the status line to show the link failed", || {
+        let (_, shown, tone) = link_shown(&app);
+        (shown.as_deref()?.starts_with("failed: ") && tone.as_deref() == Some("error")).then_some(shown.unwrap())
+    });
+    assert!(failed.contains("wasn't found"), "{failed}");
+    std::thread::sleep(Duration::from_secs(1));
+    assert_eq!(app.state()["focused"], pane, "the window stays open");
+    assert_eq!(link_shown(&app).1.as_deref(), Some(failed.as_str()));
+}
+
+/// §9.5 "Keys and events": in a focused block pane, the window keymap takes the keys it binds
+/// first: a bound chord runs its action (the palette) and never reaches the block's `key`, while
+/// an unbound key does, as `{name, ctrl, …}`.
+#[test]
+fn the_window_keymap_takes_its_keys_before_a_focused_block() {
+    let env = TestEnv::new(env!("CARGO_BIN_EXE_auk"), "block-keys");
+    let plugin = env.state.join("plugins/keylog");
+    std::fs::create_dir_all(&plugin).expect("mkdir");
+    std::fs::write(
+        plugin.join("plugin.toml"),
+        "schema = 1\nid = \"keylog\"\nname = \"Key log\"\nversion = \"1\"\nhost = \"host.luau\"\n\
+         [[blocks]]\nid = \"log\"\ntitle = \"Key log\"\n",
+    )
+    .expect("write plugin.toml");
+    std::fs::write(
+        plugin.join("host.luau"),
+        r#"tern.block.define("log", {
+            init = function(cx, args, saved) return { keys = "" } end,
+            view = function(s)
+                return { main = { k = "col", c = { { k = "text", p = { key = "log", text = "keys:" .. s.keys } } } } }
+            end,
+            key = function(s, key)
+                s.keys ..= " " .. (key.ctrl and "ctrl+" or "") .. key.name
+                return true
+            end,
+        })"#,
+    )
+    .expect("write host.luau");
+    write_settings(&env, json!({"keybinds": {"ctrl+k": "palette"}}));
+    env.start_daemon();
+    let app = App::start(&env, "a", &[]);
+    let _us = InputSource::select(&app, US_LAYOUT);
+    let first = wait_for("a focused pane", || app.state()["focused"].as_u64());
+    env.wait(first, "prompt");
+    let block = env.daemon("block keylog.log")["pane"].as_u64().expect("a block pane");
+    show(&app, block);
+    wait_for("the block's view, drawn", || node_box(&app, block, "main.log"));
+    let shown = || -> String {
+        let out = env.cli(&["capture", &block.to_string(), "--surfaces"]);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+
+    // An unbound key reaches the block.
+    app.request("type x");
+    wait_for("the unbound key in the block", || shown().contains("keys: x").then_some(()));
+
+    // The bound chord runs its action and never reaches the block.
+    app.request("type ctrl+k");
+    wait_for("the palette", || (app.request("palette")["open"] == true).then_some(()));
+    app.request("type escape");
+    wait_for("the palette to close", || (app.request("palette")["open"] == false).then_some(()));
+    assert_eq!(app.state()["focused"], block);
+
+    // A later unbound chord with ctrl still reaches it, after the bound one: nothing came between.
+    app.request("type ctrl+e");
+    let text = wait_for("the next key in the block", || {
+        let t = shown();
+        t.contains("ctrl+e").then_some(t)
+    });
+    assert!(text.contains("keys: x ctrl+e"), "the bound chord reached the block: {text}");
+    assert!(!text.contains("ctrl+k") && !text.contains(" k"), "{text}");
+}

@@ -116,15 +116,24 @@ impl Fonts {
                 line_spacing: 0.0,
             };
             // WebKit's adjustment for Times, Helvetica and Courier, to match their Windows
-            // counterparts: 15% of the font's height goes on the ascent.
-            let primary = style
+            // counterparts: 15% of the font's height goes on the ascent. It goes by the font
+            // used, so a generic family (`monospace` is Courier, `serif` Times) counts as the
+            // family it resolves to.
+            let mut primary = style
                 .font_family
                 .split(',')
                 .next()
                 .unwrap_or("")
                 .trim()
-                .trim_matches('"')
+                .trim_matches(|c| c == '"' || c == '\'')
                 .to_ascii_lowercase();
+            if let Some(generic) = parley::GenericFamily::parse(&primary) {
+                let collection = &mut self.font_cx.collection;
+                let first = collection.generic_families(generic).next();
+                if let Some(name) = first.and_then(|id| collection.family_name(id)) {
+                    primary = name.to_ascii_lowercase();
+                }
+            }
             if matches!(primary.as_str(), "times" | "helvetica" | "courier") {
                 m.ascent += ((m.ascent + m.descent) * 0.15).round();
             }

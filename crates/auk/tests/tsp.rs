@@ -1589,6 +1589,41 @@ fn d5_add_checks_ids_before_kinds_duplicates_and_limits() {
     assert!(doc_node(&env, &probe, "s1", "big").is_none());
 }
 
+/// §7.6: ids are non-empty. A node whose id is `""` (alone, or deep in an added subtree) is
+/// rejected as that op's error, the frame's other ops still apply, and nothing of the rejected
+/// subtree lands; a missing or non-string id is rejected the same way.
+#[test]
+fn d5_ids_are_non_empty() {
+    let (env, probe) = setup("d5empty");
+    exchange(&probe, &open_with("s1", "flow", json!([])));
+    let node_msg = "a node needs a non-empty string id";
+    let cases = [
+        (json!(["add", "", "main", null, {"id": "", "k": "text", "p": {"text": "x"}}]), "add: id must be a non-empty string"),
+        (json!(["add", "x", "main", null, {"id": "", "k": "text", "p": {"text": "x"}}]), node_msg),
+        (json!(["add", "p", "main", null,
+            {"id": "p", "k": "col", "c": [{"id": "ok1", "k": "text"}, {"id": "", "k": "text"}]}]), node_msg),
+        (json!(["add", "p", "main", null, {"id": "p", "k": "col", "c": [{"k": "text"}]}]), node_msg),
+        (json!(["add", "p", "main", null, {"id": "p", "k": "col", "c": [{"id": 7, "k": "text"}]}]), node_msg),
+    ];
+    for (s, (op, msg)) in (2..).zip(cases) {
+        let bodies = exchange(
+            &probe,
+            &frame("s1", s, json!([op, ["add", format!("good{s}"), "main", null, {"id": format!("good{s}"), "k": "text"}]])),
+        );
+        let errs = errors(&bodies);
+        assert_eq!(errs.len(), 1, "{op}: {bodies:?}");
+        let e = errs[0];
+        assert_eq!((e["sf"].clone(), e["s"].clone(), e["op"].clone()), (json!("s1"), json!(s), json!(0)), "{e}");
+        assert_eq!(e["msg"], msg, "{e}");
+        assert!(doc_node(&env, &probe, "s1", &format!("good{s}")).is_some(), "the next op applied");
+    }
+    let doc = surface(&env, &probe, "s1")["doc"].clone();
+    assert!(node(&doc, "").is_none(), "{doc}");
+    for id in ["x", "p", "ok1"] {
+        assert!(node(&doc, id).is_none(), "{id}: all or nothing: {doc}");
+    }
+}
+
 #[test]
 fn d6_set_merges_shallowly_and_null_deletes() {
     let (env, probe) = setup("d6");
@@ -2033,6 +2068,74 @@ fn e5_the_retention_budget_evicts_closed_surfaces_then_settled_children() {
     );
     let bodies = exchange(&probe, &frame("s1", 99, json!([["set", "c0", {}]])));
     assert_eq!(errors(&bodies).len(), 1, "an evicted id is unknown");
+}
+
+/// §7.10: a palette (`t`) or a stylesheet (`s`) that leaves the pane over budget evicts too, with
+/// no frame or close after it: the palette pushes out the closed surface first, then the sheet
+/// pushes out the oldest settled child of `main`, sending `gone`.
+#[test]
+fn e5_a_palette_or_sheet_over_budget_evicts() {
+    const BUDGET: u64 = 8000;
+    const OVER: u64 = 200;
+    let (env, probe) = setup("e5style");
+    exchange(&probe, &hello(&[]));
+    env.daemon(&format!("settings --retention {BUDGET}"));
+    wait_state(&env, &probe, "the budget", |st| st["retention"] == BUDGET);
+    let filler = |id: &str| json!({"id": id, "k": "text", "p": {"text": "x".repeat(1500)}});
+    exchange(&probe, &open_with("old", "inline", json!([filler("o1")])));
+    exchange(&probe, &tsp_json("x", &json!({"id": "old"})));
+    exchange(&probe, &open_with("s1", "flow", json!([])));
+    let bodies = exchange(
+        &probe,
+        &frame(
+            "s1",
+            2,
+            json!([
+                ["add", "c0", "main", null, filler("c0")], ["settle", "c0"],
+                ["add", "c1", "main", null, filler("c1")], ["settle", "c1"],
+            ]),
+        ),
+    );
+    assert!(events(&bodies, "gone").is_empty(), "{bodies:?}");
+    let ids = |st: &Value| -> Vec<String> {
+        st["surfaces"].as_array().unwrap().iter().map(|s| s["id"].as_str().unwrap().to_owned()).collect()
+    };
+    let st = state(&env, &probe);
+    assert_eq!(ids(&st), ["old", "s1"], "{st}");
+    let cost = st["cost"].as_u64().unwrap();
+    assert!(cost + OVER < BUDGET, "room for the palette: {st}");
+
+    // A palette whose name takes the pane OVER bytes past the budget: the closed surface goes.
+    // The palette costs its token names and values plus its name's JSON.
+    let empty_name = json!({"dark": "", "light": ""}).to_string().len() as u64;
+    let name_len = BUDGET - cost + OVER - empty_name - ("cardBg".len() + "#123456".len()) as u64;
+    let palette = json!({
+        "sf": "s1",
+        "dark": {"cardBg": "#123456"},
+        "light": {},
+        "name": {"dark": "n".repeat(name_len as usize), "light": ""},
+    });
+    let bodies = exchange(&probe, &tsp_json("t", &palette));
+    assert!(errors(&bodies).is_empty() && events(&bodies, "gone").is_empty(), "{bodies:?}");
+    let st = state(&env, &probe);
+    assert_eq!(ids(&st), ["s1"], "the palette evicted the closed surface: {st}");
+    let cost = st["cost"].as_u64().unwrap();
+    assert!(cost <= BUDGET, "{st}");
+    assert!(doc_node(&env, &probe, "s1", "c0").is_some(), "one eviction was enough");
+
+    // A sheet that takes the pane OVER bytes past the budget again: the oldest settled child goes.
+    let css = format!("/*{}*/", "c".repeat((BUDGET - cost + OVER - 4) as usize));
+    let bodies = exchange(&probe, &tsp_json("s", &json!({"sf": "s1", "name": "big", "css": css})));
+    assert!(errors(&bodies).is_empty(), "{bodies:?}");
+    let gone = events(&bodies, "gone");
+    assert_eq!(gone.len(), 1, "{bodies:?}");
+    assert_eq!((gone[0]["sf"].clone(), gone[0]["ids"].clone()), (json!("s1"), json!(["c0"])));
+    let st = state(&env, &probe);
+    assert!(st["cost"].as_u64().unwrap() <= BUDGET, "{st}");
+    assert!(doc_node(&env, &probe, "s1", "c0").is_none());
+    assert!(doc_node(&env, &probe, "s1", "c1").is_some(), "only what the budget needed");
+    let bodies = exchange(&probe, &frame("s1", 3, json!([["set", "c0", {}]])));
+    assert_eq!(errors(&bodies).len(), 1, "an evicted id is unknown: {bodies:?}");
 }
 
 // ---------------------------------------------------------------------------------------------

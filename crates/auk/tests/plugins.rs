@@ -3042,6 +3042,46 @@ fn the_spawn_filter_sees_only_the_identity_set_and_pane_write_reaches_the_pty() 
     assert_eq!(env.pane_info(pane)["exit"], Value::Null, "the pane survived");
 }
 
+/// Through the real daemon (§5.2): the user's shell rc files run after the spawn filter and can
+/// override anything. The filter sets two variables; the test `ZDOTDIR`'s `.zshrc` overrides
+/// one of them, a pane-identity variable and the daemon's `TERM_PROGRAM`, and the shell sees the
+/// rc's values for those and the filter's for the one it left alone.
+#[test]
+fn shell_rc_files_run_after_the_spawn_filter_and_can_override_anything() {
+    let env = TestEnv::new(EXE, "rcafter");
+    package(
+        &env,
+        "setter",
+        "schema = 1\nid = \"setter\"\nname = \"Setter\"\nversion = \"1\"\nhost = \"host.luau\"\n",
+        &[(
+            "host.luau",
+            r#"tern.on("spawn", function(spec)
+                   spec.env.RC_OVERRIDDEN = "from-filter"
+                   spec.env.RC_KEPT = "from-filter"
+                   spec.env.TERN_LENSES = "filter-lenses"
+                   tern.kv.set("ran", true)
+                   return spec
+               end)"#,
+        )],
+    );
+    std::fs::write(
+        env.zdotdir.join(".zshrc"),
+        format!(
+            "{}export RC_OVERRIDDEN=from-rc\nexport AUK_LENSES=rc-lenses\nexport TERM_PROGRAM=rc-term\n",
+            auk_conformance::harness::TEST_ZSHRC
+        ),
+    )
+    .expect("write .zshrc");
+    let _daemon = env.start_daemon();
+    let pane = env.new_pane(&[]);
+    env.wait(pane, "prompt");
+    assert_eq!(kv(&env, "setter")["ran"], true, "the filter ran for the pane");
+    env.run(pane, "print -r -- \"[$RC_OVERRIDDEN|$RC_KEPT|$AUK_LENSES|$TERM_PROGRAM|$AUK_TEST_RC]\"");
+    let want = "[from-rc|from-filter|rc-lenses|rc-term|sourced]";
+    let text = env.daemon(&format!("capture {pane}"))["text"].as_str().unwrap_or_default().to_owned();
+    assert!(text.lines().any(|l| l.trim_end() == want), "want {want} in:\n{text}");
+}
+
 // ---------------------------------------------------------------------------------------------
 // Window half: route decisions, modifier taps and pane/tab events through the app (§9.8)
 

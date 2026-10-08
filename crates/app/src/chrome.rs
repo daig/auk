@@ -462,6 +462,28 @@ impl Chrome {
         }
     }
 
+    /// The status line's segments as drawn: `(data-plugin, text, data-tone)`, in order.
+    pub fn status_segments(&self) -> Vec<(String, String, Option<String>)> {
+        let mut out = Vec::new();
+        let mut stack = vec![self.doc.root()];
+        while let Some(n) = stack.pop() {
+            if let Some(plugin) = self.doc.attribute(n, "data-plugin") {
+                let text: String = self
+                    .doc
+                    .children(n)
+                    .iter()
+                    .filter_map(|&c| self.doc.node(c).text())
+                    .collect();
+                let tone = self.doc.attribute(n, "data-tone").map(str::to_owned);
+                out.push((plugin.to_owned(), text, tone));
+            }
+            for &c in self.doc.children(n).iter().rev() {
+                stack.push(c);
+            }
+        }
+        out
+    }
+
     /// Every element with an action and its box, in points (for the automation endpoint).
     pub fn actions(&self) -> Vec<(String, auk_ui::Rect)> {
         let mut out = Vec::new();

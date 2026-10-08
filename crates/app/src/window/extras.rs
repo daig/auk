@@ -31,6 +31,22 @@ impl WinState {
                     "shown": self.presence_text(),
                 }))
             }
+            // The link as the status line shows it, and its raw status (§10.1).
+            "link" => {
+                let status = self.conn.link_status();
+                let shown: Vec<Value> = self
+                    .chrome
+                    .status_segments()
+                    .into_iter()
+                    .filter(|(plugin, ..)| plugin.starts_with("auk."))
+                    .map(|(plugin, text, tone)| json!({"plugin": plugin, "text": text, "tone": tone}))
+                    .collect();
+                Ok(json!({
+                    "status": status,
+                    "identity": status.identity.iter().map(ToString::to_string).collect::<Vec<_>>(),
+                    "shown": shown,
+                }))
+            }
             "surface-sheets" => pane_arg(args).and_then(|pane| {
                 self.surfaces
                     .get(&pane)
@@ -205,6 +221,43 @@ impl WinState {
                 })
             }),
         })
+    }
+
+    /// The status line's link segments (§10.1): the identity chain of the hops that reached the
+    /// window's host (`local` on this machine, `ssh-key` over SSH), then the link's state.
+    pub fn link_segments(&self) -> Vec<crate::chrome::StatusItem> {
+        use auk_remote::State;
+        let status = self.conn.link_status();
+        let chain = status
+            .identity
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(" → ");
+        let (state, tone) = match &status.state {
+            State::Connected => ("connected".to_owned(), "muted"),
+            State::Connecting => ("connecting".to_owned(), "warning"),
+            State::Stalled => ("stalled".to_owned(), "warning"),
+            State::Reconnecting { attempt } => {
+                (format!("reconnecting (attempt {attempt})"), "warning")
+            }
+            State::Failed { reason } => (format!("failed: {reason}"), "error"),
+        };
+        let segment = |plugin: &str, text: String, icon: &str, tone: &str| {
+            crate::chrome::StatusItem {
+                plugin: plugin.to_owned(),
+                text,
+                icon: Some(icon.to_owned()),
+                tone: Some(tone.to_owned()),
+                command: None,
+            }
+        };
+        let mut out = Vec::new();
+        if !chain.is_empty() {
+            out.push(segment("auk.identity", chain, "key", "muted"));
+        }
+        out.push(segment("auk.link", state, "link", tone));
+        out
     }
 
     /// The other clients attached to the host, for the status line (§10.1): `None` when this

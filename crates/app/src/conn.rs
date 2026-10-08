@@ -309,11 +309,16 @@ impl Connection {
         })
     }
 
-    /// Starts the reader thread. `wake` runs after each batch of messages (from that thread).
-    pub fn start(&self, wake: impl Fn() + Send + 'static) {
+    /// Starts the reader thread. `wake` runs after each batch of messages (from that thread),
+    /// and whenever the link's state changes (§10.1), so the window redraws it.
+    pub fn start(&self, wake: impl Fn() + Send + Sync + 'static) {
         let Some(mut reader) = self.reader.lock().unwrap_or_else(|e| e.into_inner()).take() else {
             return;
         };
+        let wake = Arc::new(wake);
+        let on_change = wake.clone();
+        self.link.on_change(move || on_change());
+        let wake = move || wake();
         let shared = self.shared.clone();
         let arrived = self.arrived.clone();
         let spawned = thread::Builder::new()
@@ -401,6 +406,11 @@ impl Connection {
     /// The link's state (`connected`, `reconnecting(n)`, …).
     pub fn link_state(&self) -> String {
         self.link.state().to_string()
+    }
+
+    /// The link's state, identity chain, ssh process and held input (§10.1).
+    pub fn link_status(&self) -> auk_remote::Status {
+        self.link.status()
     }
 
     /// Sends input for a pane. A failure means the connection is gone, which the reader

@@ -400,3 +400,289 @@ fn descendants(
     }
     out
 }
+
+// ---------------------------------------------------------------------------------------------
+// `el`: every one of its 42 tags (§8.2), drawn and compared with WebKit.
+
+/// An `el` node.
+fn el(id: &str, tag: &str, text: Option<&str>, c: Vec<Value>) -> Value {
+    let mut node = serde_json::json!({"id": id, "k": "el", "p": {"tag": tag}});
+    if let Some(t) = text {
+        node["p"]["text"] = t.into();
+    }
+    if !c.is_empty() {
+        node["c"] = c.into();
+    }
+    node
+}
+
+/// A document using every tag in `auk_tsp::EL_TAGS`, nested as HTML nests them, with the
+/// checkbox and radio controls.
+fn every_el_tag() -> Value {
+    let leaf = |id: &str, tag: &str, text: &str| el(id, tag, Some(text), Vec::new());
+    let inline: Vec<Value> = [
+        "span", "strong", "b", "em", "i", "del", "mark", "code", "kbd",
+    ]
+    .iter()
+    .map(|t| leaf(&format!("in-{t}"), t, &format!("{t} text ")))
+    .collect();
+    let doc = el(
+        "tags",
+        "div",
+        None,
+        vec![
+            el(
+                "header",
+                "header",
+                None,
+                ["h1", "h2", "h3", "h4"]
+                    .iter()
+                    .map(|t| leaf(t, t, &format!("Heading {t}")))
+                    .collect(),
+            ),
+            el(
+                "nav",
+                "nav",
+                None,
+                vec![
+                    el(
+                        "ul",
+                        "ul",
+                        None,
+                        vec![leaf("ul1", "li", "first"), leaf("ul2", "li", "second")],
+                    ),
+                    el(
+                        "ol",
+                        "ol",
+                        None,
+                        vec![leaf("ol1", "li", "one"), leaf("ol2", "li", "two")],
+                    ),
+                ],
+            ),
+            el(
+                "e-main",
+                "main",
+                None,
+                vec![el(
+                    "article",
+                    "article",
+                    None,
+                    vec![
+                        el("section", "section", None, vec![el("p", "p", None, inline)]),
+                        el(
+                            "aside",
+                            "aside",
+                            None,
+                            vec![el(
+                                "blockquote",
+                                "blockquote",
+                                None,
+                                vec![leaf("bq-p", "p", "A quoted line")],
+                            )],
+                        ),
+                        el(
+                            "figure",
+                            "figure",
+                            None,
+                            vec![leaf("pre", "pre", "fn main() {\n    run();\n}")],
+                        ),
+                        el(
+                            "dl",
+                            "dl",
+                            None,
+                            vec![leaf("dt", "dt", "Term"), leaf("dd", "dd", "Its definition")],
+                        ),
+                        el("hr", "hr", None, Vec::new()),
+                        el(
+                            "table",
+                            "table",
+                            None,
+                            vec![
+                                el(
+                                    "thead",
+                                    "thead",
+                                    None,
+                                    vec![el(
+                                        "htr",
+                                        "tr",
+                                        None,
+                                        vec![leaf("th1", "th", "Name"), leaf("th2", "th", "Size")],
+                                    )],
+                                ),
+                                el(
+                                    "tbody",
+                                    "tbody",
+                                    None,
+                                    vec![el(
+                                        "btr",
+                                        "tr",
+                                        None,
+                                        vec![
+                                            leaf("td1", "td", "a.txt"),
+                                            leaf("td2", "td", "12 KB"),
+                                        ],
+                                    )],
+                                ),
+                            ],
+                        ),
+                        el(
+                            "form",
+                            "form",
+                            None,
+                            vec![
+                                el(
+                                    "label",
+                                    "label",
+                                    None,
+                                    vec![
+                                        serde_json::json!({"id": "check", "k": "el", "p": {"tag": "input", "type": "checkbox", "checked": true}}),
+                                        leaf("check-l", "span", "Checked"),
+                                    ],
+                                ),
+                                el(
+                                    "label2",
+                                    "label",
+                                    None,
+                                    vec![
+                                        serde_json::json!({"id": "radio", "k": "el", "p": {"tag": "input", "type": "radio", "name": "r"}}),
+                                        leaf("radio-l", "span", "Radio"),
+                                    ],
+                                ),
+                                leaf("button", "button", "Go"),
+                            ],
+                        ),
+                    ],
+                )],
+            ),
+            el(
+                "footer",
+                "footer",
+                None,
+                vec![leaf("foot", "p", "The footer")],
+            ),
+        ],
+    );
+    serde_json::json!([doc])
+}
+
+/// §8.2 "`el` covers all 42 tags": a program in a daemon pane sends a surface using every tag in
+/// `auk_tsp::EL_TAGS`; a drawing window (`auk-tsp`, `auk-views`, `auk-ui`) builds each node as its
+/// element (`form` as a `div`, the checkbox and radio as `span`s), all lay out, and the page
+/// `auk-views` exports lays out in WebKit within the fixtures' tolerance.
+#[test]
+fn every_el_tag_renders_and_matches_webkit() {
+    let env = env("eltags");
+    let probe = Probe::start(&env, &[]);
+    let mut window = SurfaceWindow::attach(&env, "main");
+    probe.write(&hello(&[]));
+    probe.fence_tsp();
+    probe.write(&open_with("s1", "inline", every_el_tag()));
+    let errors: Vec<Value> = probe
+        .fence_tsp()
+        .into_iter()
+        .filter(|b| b["ev"] == "error")
+        .collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    window.converge(&env, probe.pane);
+
+    let replica = window.replica(probe.pane);
+    let surface = replica
+        .tsp()
+        .surfaces()
+        .iter()
+        .find(|s| s.id() == "s1")
+        .expect("surface s1");
+    let doc = surface.document();
+    let p = window.projection(probe.pane);
+    let mut tags = BTreeSet::new();
+    let mut problems = Vec::new();
+    let mut stack: Vec<_> = doc.region("main").expect("main").children().collect();
+    while let Some(n) = stack.pop() {
+        stack.extend(n.children());
+        let tag = n.props()["tag"].as_str().expect("a tag").to_owned();
+        let want = match (tag.as_str(), n.props().get("type").and_then(Value::as_str)) {
+            ("form", _) => "div",
+            ("input", Some("checkbox" | "radio")) => "span",
+            (t, _) => t,
+        };
+        let Some(el) = window.element(probe.pane, "s1", n.id()) else {
+            problems.push(format!("{} <{tag}>: no element", n.id()));
+            continue;
+        };
+        let have = p
+            .doc
+            .node(el)
+            .element()
+            .map(|e| e.tag.as_str().to_owned())
+            .unwrap_or_default();
+        if have != want {
+            problems.push(format!(
+                "{} <{tag}>: built as <{have}>, want <{want}>",
+                n.id()
+            ));
+        }
+        if !p.class(el).starts_with("sf sf-el") {
+            problems.push(format!("{} <{tag}>: class {:?}", n.id(), p.class(el)));
+        }
+        if p.doc.attribute(el, "data-id") != Some(n.id()) {
+            problems.push(format!(
+                "{} <{tag}>: data-id {:?}",
+                n.id(),
+                p.doc.attribute(el, "data-id")
+            ));
+        }
+        let r = p.doc.border_box(el).unwrap_or_default();
+        if r.w <= 0.0 || r.h <= 0.0 {
+            problems.push(format!("{} <{tag}>: empty box {r:?}", n.id()));
+        }
+        if let Some(text) = n.prop("text").and_then(Value::as_str) {
+            let shown = text_content(&p.doc, el);
+            if shown != text {
+                problems.push(format!("{} <{tag}>: text {shown:?}, want {text:?}", n.id()));
+            }
+        }
+        tags.insert(tag);
+    }
+    let all: BTreeSet<String> = auk_tsp::EL_TAGS.iter().map(|t| (*t).to_owned()).collect();
+    assert_eq!(tags, all, "the surface uses every el tag");
+    assert!(
+        problems.is_empty(),
+        "el tags that don't render:\n{}",
+        problems.join("\n")
+    );
+
+    // WebKit lays out the exported page the same way.
+    let html = p.html();
+    let ours = p.boxes();
+    let wk = webkit::boxes(tmp(), "eltags", &html, PANE_WIDTH, &[]);
+    let c = webkit::compare("eltags", &wk, &ours, real_font_tolerance, |_| false);
+    eprintln!(
+        "eltags: {} boxes, worst difference {:.2} px",
+        c.boxes, c.worst
+    );
+    assert!(c.boxes > 50, "{} boxes", c.boxes);
+    assert_eq!(c.boxes, c.ours, "both engines see the same elements");
+    assert!(
+        c.bad.is_empty(),
+        "{} of {} boxes differ from WebKit:\n{}",
+        c.bad.len(),
+        c.boxes,
+        c.bad.join("\n")
+    );
+}
+
+/// The text under `el`, in document order.
+fn text_content(
+    doc: &auk_conformance::layout::Document,
+    el: auk_conformance::layout::NodeId,
+) -> String {
+    let mut out = String::new();
+    let mut stack = vec![el];
+    while let Some(n) = stack.pop() {
+        if let Some(t) = doc.node(n).text() {
+            out.push_str(t);
+        }
+        stack.extend(doc.children(n).iter().rev().copied());
+    }
+    out
+}

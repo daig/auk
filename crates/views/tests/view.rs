@@ -893,6 +893,99 @@ fn long_lists_code_ansi_md_kv_tables_and_trees_virtualize() {
     }
 }
 
+/// §7.10 Cost: "Ops on off-screen nodes apply immediately; their layout waits until they come
+/// into view." A `set` and a `text` op on rows far below the view of a long, virtualized `col`
+/// land in the document, the DOM and the col's Copy at once, while those rows stay unlaid; when
+/// the view scrolls to them they lay out with the new text.
+#[test]
+fn ops_on_off_screen_nodes_apply_at_once_and_lay_out_in_view() {
+    let n = 400;
+    let mut h = Harness::new();
+    h.hello(&[]);
+    let rows: Vec<_> = (0..n)
+        .map(|i| json!({"id": format!("t{i}"), "k": "text", "p": {"text": format!("entry {i}")}}))
+        .collect();
+    h.surface(
+        "s1",
+        "inline",
+        json!([{"id": "log", "k": "col", "p": {"actions": {"menu": ["copy"]}}, "c": rows}]),
+    );
+    h.frame();
+    let (last, prev) = (h.el("s1", "t399"), h.el("s1", "t398"));
+    assert!(text_laid_out(&h, h.el("s1", "t0")), "the top is laid out");
+    assert!(
+        !text_laid_out(&h, last) && !text_laid_out(&h, prev),
+        "the bottom is estimated"
+    );
+
+    h.frame_ops(
+        "s1",
+        2,
+        json!([
+            ["set", "t399", {"text": "rewritten far below"}],
+            ["text", "t398", "append", " and appended"],
+        ]),
+    );
+    h.frame();
+    assert!(h.errors().is_empty(), "{:?}", h.errors());
+    // Applied: in the document, the DOM and the Copy of the col (run from its visible top).
+    let surface = h
+        .pane
+        .surfaces()
+        .iter()
+        .rev()
+        .find(|s| s.id() == "s1")
+        .unwrap();
+    let doc = surface.document();
+    let prop = |id: &str| {
+        doc.get(id)
+            .unwrap()
+            .prop("text")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned)
+    };
+    assert_eq!(prop("t399").as_deref(), Some("rewritten far below"));
+    assert_eq!(prop("t398").as_deref(), Some("entry 398 and appended"));
+    assert_eq!(h.text(last), "rewritten far below");
+    assert_eq!(h.text(prev), "entry 398 and appended");
+    let top = h.doc.border_box(h.el("s1", "t0")).unwrap();
+    let out = h.view.menu_pick(
+        &mut h.doc,
+        &h.pane,
+        top.x + 4.0,
+        top.y + top.h / 2.0,
+        "copy",
+    );
+    let [auk_views::Outcome::Copy(copied)] = out.as_slice() else {
+        panic!("one copy: {out:?}");
+    };
+    assert!(
+        copied.contains("entry 398 and appended") && copied.ends_with("rewritten far below"),
+        "{copied}"
+    );
+    // Not laid out: the op's layout waits, and the frame laid out only a few boxes.
+    assert!(
+        !text_laid_out(&h, last) && !text_laid_out(&h, prev),
+        "still estimated"
+    );
+    let laid = h.doc.last_update_stats().laid_out;
+    assert!(laid < 50, "the off-screen ops laid out {laid} boxes");
+
+    // Scrolled into view: both lay out, with the new text.
+    let pane = h.doc.border_box(h.view.element()).unwrap();
+    h.view
+        .set_view_rect(Some(auk_ui::Rect::new(0.0, pane.h - 800.0, 960.0, 800.0)));
+    h.view.layout(&mut h.doc);
+    assert!(
+        text_laid_out(&h, last) && text_laid_out(&h, prev),
+        "laid out in view"
+    );
+    for el in [last, prev] {
+        let r = h.doc.border_box(el).unwrap();
+        assert!((r.h - 17.0).abs() < 0.5, "one laid-out line: {r:?}");
+    }
+}
+
 #[test]
 fn accessibility_tree_has_roles() {
     let mut h = Harness::new();

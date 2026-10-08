@@ -73,6 +73,8 @@ impl WinState {
                 command: None,
             });
         }
+        // The host's identity chain and the link's state (§10.1).
+        model.status.extend(self.link_segments());
         model.status_title = self
             .focused_pane()
             .map(|p| {
