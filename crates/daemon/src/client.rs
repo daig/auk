@@ -153,6 +153,19 @@ fn on_message(daemon: &Arc<Daemon>, id: ClientId, msg: ClientMsg) {
                 eprintln!("auk daemon: client {id}: layout edit: {err}");
             }
         }
+        // Answered after the edit's layout went out, on the same queue: the client sees the
+        // change before the reply.
+        ClientMsg::Request { id: request, edit } => {
+            let (value, error) = match daemon.layout_edit(id, edit) {
+                Ok(value) => (value, None),
+                Err(err) => (serde_json::Value::Null, Some(err)),
+            };
+            daemon.reply(id, DaemonMsg::Reply {
+                id: request,
+                value,
+                error,
+            });
+        }
         ClientMsg::Ack { pane, sf, s } => daemon.client_ack(id, pane, &sf, s),
         ClientMsg::ViewEvent { pane, sf, event } => {
             if let Err(err) = daemon.client_view_event(id, pane, &sf, &event) {

@@ -621,6 +621,20 @@ fn dir_arg(s: &str) -> mlua::Result<Dir> {
     Dir::parse(s).ok_or_else(|| err(format!("unknown direction `{s}` (right, down, left or up)")))
 }
 
+/// A `TabTree`'s split sides are `[1]` and `[2]`: JSON carries them as the keys `"1"` and `"2"`,
+/// which become numbers here, through the whole tree.
+fn number_sides(t: &mlua::Table) -> mlua::Result<()> {
+    for i in 1..=2_i64 {
+        let key = i.to_string();
+        if let Value::Table(side) = t.raw_get::<Value>(key.as_str())? {
+            number_sides(&side)?;
+            t.raw_set(key.as_str(), Value::Nil)?;
+            t.raw_set(i, side)?;
+        }
+    }
+    Ok(())
+}
+
 fn reveal_arg(v: &Value) -> mlua::Result<Reveal> {
     match v {
         Value::Table(t) => Ok(Reveal {
@@ -776,7 +790,15 @@ impl UserData for SessionCx<'_> {
         });
         methods.add_method("layout", |_, this, tab: u64| {
             match borrow(this.host)?.layout(tab) {
-                Some(json) => this.vm.to_lua(&json),
+                Some(json) => {
+                    let v = this.vm.to_lua(&json)?;
+                    if let Value::Table(t) = &v
+                        && let Ok(Value::Table(root)) = t.raw_get::<Value>("root")
+                    {
+                        number_sides(&root)?;
+                    }
+                    Ok(v)
+                }
                 None => Ok(Value::Nil),
             }
         });

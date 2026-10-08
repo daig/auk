@@ -67,6 +67,29 @@ pub fn layout_tab(tab: &Tab, area: Rect, divider: f64) -> TabLayout {
     out
 }
 
+/// A split's first child area, its divider and its second child area, honouring its ratio.
+fn split_rects(dir: SplitDir, ratio: u16, area: Rect, divider: f64) -> (Rect, Rect, Rect) {
+    let share = f64::from(ratio.clamp(1, 999)) / 1000.0;
+    match dir {
+        SplitDir::Right => {
+            let avail = (area.w - divider).max(0.0);
+            let w1 = (avail * share).round();
+            let a = Rect::new(area.x, area.y, w1, area.h);
+            let d = Rect::new(area.x + w1, area.y, divider, area.h);
+            let b = Rect::new(d.right(), area.y, (avail - w1).max(0.0), area.h);
+            (a, d, b)
+        }
+        SplitDir::Down => {
+            let avail = (area.h - divider).max(0.0);
+            let h1 = (avail * share).round();
+            let a = Rect::new(area.x, area.y, area.w, h1);
+            let d = Rect::new(area.x, area.y + h1, area.w, divider);
+            let b = Rect::new(area.x, d.bottom(), area.w, (avail - h1).max(0.0));
+            (a, d, b)
+        }
+    }
+}
+
 fn layout_node(node: &Node, area: Rect, divider: f64, out: &mut TabLayout) {
     match node {
         Node::Pane { pane } => out.panes.push((*pane, area)),
@@ -76,30 +99,35 @@ fn layout_node(node: &Node, area: Rect, divider: f64, out: &mut TabLayout) {
             first,
             second,
         } => {
-            let share = f64::from((*ratio).clamp(1, 999)) / 1000.0;
-            match dir {
-                SplitDir::Right => {
-                    let avail = (area.w - divider).max(0.0);
-                    let w1 = (avail * share).round();
-                    let a = Rect::new(area.x, area.y, w1, area.h);
-                    let d = Rect::new(area.x + w1, area.y, divider, area.h);
-                    let b = Rect::new(d.right(), area.y, (avail - w1).max(0.0), area.h);
-                    layout_node(first, a, divider, out);
-                    out.dividers.push(d);
-                    layout_node(second, b, divider, out);
-                }
-                SplitDir::Down => {
-                    let avail = (area.h - divider).max(0.0);
-                    let h1 = (avail * share).round();
-                    let a = Rect::new(area.x, area.y, area.w, h1);
-                    let d = Rect::new(area.x, area.y + h1, area.w, divider);
-                    let b = Rect::new(area.x, d.bottom(), area.w, (avail - h1).max(0.0));
-                    layout_node(first, a, divider, out);
-                    out.dividers.push(d);
-                    layout_node(second, b, divider, out);
-                }
+            let (a, d, b) = split_rects(*dir, *ratio, area, divider);
+            layout_node(first, a, divider, out);
+            out.dividers.push(d);
+            layout_node(second, b, divider, out);
+        }
+    }
+}
+
+/// The area of the node at `path` (as [`Node::divider`] gives it) of a tree laid out in `area`.
+pub fn node_area(root: &Node, area: Rect, divider: f64, path: &[bool]) -> Option<Rect> {
+    match (path.split_first(), root) {
+        (None, _) => Some(area),
+        (
+            Some((&second_side, rest)),
+            Node::Split {
+                dir,
+                ratio,
+                first,
+                second,
+            },
+        ) => {
+            let (a, _, b) = split_rects(*dir, *ratio, area, divider);
+            if second_side {
+                node_area(second, b, divider, rest)
+            } else {
+                node_area(first, a, divider, rest)
             }
         }
+        (Some(_), Node::Pane { .. }) => None,
     }
 }
 
@@ -198,6 +226,30 @@ mod tests {
         assert_eq!(l.dividers.len(), 2);
         assert_eq!(l.pane_at(500.0, 300.0), Some(3));
         assert_eq!(l.pane_at(400.5, 300.0), None);
+    }
+
+    #[test]
+    fn ratios_size_the_sides_and_node_areas_follow_paths() {
+        let root = Node::Split {
+            dir: SplitDir::Right,
+            ratio: 250,
+            first: Box::new(pane(1)),
+            second: Box::new(Node::Split {
+                dir: SplitDir::Down,
+                ratio: 750,
+                first: Box::new(pane(2)),
+                second: Box::new(pane(3)),
+            }),
+        };
+        let area = Rect::new(0.0, 0.0, 801.0, 401.0);
+        let l = layout_tab(&tab(root.clone(), None), area, 1.0);
+        assert_eq!(l.rect(1), Some(Rect::new(0.0, 0.0, 200.0, 401.0)));
+        assert_eq!(l.rect(2), Some(Rect::new(201.0, 0.0, 600.0, 300.0)));
+        assert_eq!(l.rect(3), Some(Rect::new(201.0, 301.0, 600.0, 100.0)));
+        assert_eq!(node_area(&root, area, 1.0, &[]), Some(area));
+        assert_eq!(node_area(&root, area, 1.0, &[true]), Some(Rect::new(201.0, 0.0, 600.0, 401.0)));
+        assert_eq!(node_area(&root, area, 1.0, &[true, true]), l.rect(3));
+        assert_eq!(node_area(&root, area, 1.0, &[false, true]), None);
     }
 
     #[test]

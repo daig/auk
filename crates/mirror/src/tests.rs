@@ -51,6 +51,45 @@ fn client_messages() -> Vec<ClientMsg> {
             session: None,
             cwd: Some("/tmp".into()),
         }),
+        ClientMsg::Request {
+            id: 1,
+            edit: LayoutEdit::Open {
+                place: OpenPlace::Split {
+                    pane: 7,
+                    side: crate::layout::Side::Left,
+                    share: Some(300),
+                },
+                launch: Launch {
+                    cwd: Some("/tmp".into()),
+                    block: Some("demo.panel".into()),
+                    args: vec!["a".into()],
+                    command: None,
+                },
+            },
+        },
+        ClientMsg::Request {
+            id: 2,
+            edit: LayoutEdit::Open {
+                place: OpenPlace::Tab { session: 4 },
+                launch: Launch::default(),
+            },
+        },
+        ClientMsg::Request {
+            id: 3,
+            edit: LayoutEdit::Move {
+                pane: 7,
+                target: 8,
+                side: None,
+            },
+        },
+        ClientMsg::Request {
+            id: 4,
+            edit: LayoutEdit::Resize {
+                pane: 7,
+                side: crate::layout::Side::Up,
+                delta: -120,
+            },
+        },
         ClientMsg::Blobs {
             pane: 7,
             ids: vec!["ab".repeat(32)],
@@ -125,6 +164,16 @@ fn daemon_messages() -> Vec<DaemonMsg> {
         },
         DaemonMsg::Catalog {
             catalog: json!({"plugins": []}),
+        },
+        DaemonMsg::Reply {
+            id: 1,
+            value: json!({"pane": 9}),
+            error: None,
+        },
+        DaemonMsg::Reply {
+            id: 2,
+            value: serde_json::Value::Null,
+            error: Some("no pane 7".into()),
         },
         DaemonMsg::Presence {
             clients: vec![ClientInfo {

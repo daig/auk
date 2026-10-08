@@ -44,6 +44,7 @@ static COUNTER: AtomicU32 = AtomicU32::new(0);
 impl TestEnv {
     /// Creates the directories. `exe` is the `auk` binary (`env!("CARGO_BIN_EXE_auk")`).
     pub fn new(exe: impl Into<PathBuf>, name: &str) -> TestEnv {
+        sweep_stale_roots();
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         // Short: Unix socket paths are limited to 104 bytes on macOS.
         let root =
@@ -202,6 +203,43 @@ impl TestEnv {
     }
 }
 
+/// Deletes every socket under `dir`, so the daemons serving them stop.
+fn remove_sockets(dir: &Path) {
+    use std::os::unix::fs::FileTypeExt;
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let Ok(kind) = entry.file_type() else { continue };
+        if kind.is_dir() {
+            remove_sockets(&entry.path());
+        } else if kind.is_socket() {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// Removes the test roots (`auk-<name>-<pid>-<n>` in the temp dir) of test processes that no
+/// longer exist: a test killed outright (a nextest timeout) never ran its cleanup, and its
+/// daemons stop once their sockets are gone.
+fn sweep_stale_roots() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let Ok(entries) = fs::read_dir(std::env::temp_dir()) else { return };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let Some(rest) = name.strip_prefix("auk-") else { continue };
+            let mut parts = rest.rsplitn(3, '-');
+            let (Some(_n), Some(pid), Some(_name)) = (parts.next(), parts.next(), parts.next())
+            else {
+                continue;
+            };
+            let Ok(pid) = pid.parse::<u32>() else { continue };
+            if pid != std::process::id() && !alive(pid) {
+                let _ = fs::remove_dir_all(entry.path());
+            }
+        }
+    });
+}
+
 impl Drop for TestEnv {
     fn drop(&mut self) {
         if let Ok(mut c) = UnixStream::connect(self.control_path()) {
@@ -219,6 +257,9 @@ impl Drop for TestEnv {
             let _ = child.wait();
         }
         if std::thread::panicking() {
+            // Keep the files for diagnosis, but take the sockets away: a daemon whose socket is
+            // gone stops by itself, so a failed test leaves no daemon behind.
+            remove_sockets(&self.root);
             eprintln!("test files kept in {}", self.root.display());
         } else {
             let _ = fs::remove_dir_all(&self.root);
@@ -371,6 +412,40 @@ fn short(name: &str) -> String {
         .filter(char::is_ascii_alphanumeric)
         .take(12)
         .collect()
+}
+
+/// A layout tree as `R300(5,D500(3,4))`: `R`/`D` for a split right or down with its ratio in
+/// thousandths (left out without `ratios`), its first (left or top) child, then its second.
+pub fn layout_shape(node: &Value, ratios: bool) -> String {
+    match node["node"].as_str() {
+        Some("pane") => node["pane"].to_string(),
+        _ => format!(
+            "{}{}({},{})",
+            if node["dir"] == "right" { "R" } else { "D" },
+            if ratios { node["ratio"].to_string() } else { String::new() },
+            layout_shape(&node["first"], ratios),
+            layout_shape(&node["second"], ratios)
+        ),
+    }
+}
+
+/// The tab holding `pane`, of a window key's sessions (as `layout` answers them).
+pub fn tab_holding(layout: &Value, pane: u64) -> Value {
+    fn holds(node: &Value, pane: u64) -> bool {
+        node["pane"].as_u64() == Some(pane)
+            || holds_side(node, "first", pane)
+            || holds_side(node, "second", pane)
+    }
+    fn holds_side(node: &Value, side: &str, pane: u64) -> bool {
+        node[side].is_object() && holds(&node[side], pane)
+    }
+    layout["sessions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|s| s["tabs"].as_array().cloned().unwrap_or_default())
+        .find(|t| holds(&t["root"], pane))
+        .unwrap_or(Value::Null)
 }
 
 #[cfg(test)]

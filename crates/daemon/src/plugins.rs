@@ -27,7 +27,6 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
-use auk_mirror::layout::SplitDir;
 use auk_mirror::{DaemonMsg, Effect, Message, PaneId};
 use auk_plugins::capture::LensLine;
 use auk_plugins::{
@@ -423,7 +422,12 @@ pub enum BlockPlace {
     NewSession { window_key: Option<String> },
     /// A new tab in a session.
     NewTab { session: auk_mirror::layout::SessionId },
-    Split { pane: PaneId, dir: SplitDir },
+    /// Beside `pane` on `side`; `share` is `pane`'s share in thousandths (half by default).
+    Split {
+        pane: PaneId,
+        side: auk_mirror::layout::Side,
+        share: Option<u16>,
+    },
 }
 
 /// A request for a block pane (§9.5 "Opening").
@@ -506,8 +510,14 @@ impl Daemon {
             BlockPlace::NewTab { session } => {
                 st.layout.new_tab(session, id).map_err(|e| e.to_string())?;
             }
-            BlockPlace::Split { pane: at, dir } => {
-                st.layout.split(at, dir, id).map_err(|e| e.to_string())?;
+            BlockPlace::Split {
+                pane: at,
+                side,
+                share,
+            } => {
+                st.layout
+                    .split_side(at, side, id, share)
+                    .map_err(|e| e.to_string())?;
             }
         }
         st.layout.set_kind(id, auk_mirror::layout::PaneTag::Block);
@@ -954,13 +964,12 @@ impl Daemon {
                 }
                 "--split" => {
                     let target = value("--split")?;
-                    let dir = match it.next().map(String::as_str) {
-                        Some("right") => SplitDir::Right,
-                        Some("down") => SplitDir::Down,
-                        other => return Err(format!("--split: expected right or down, got {other:?}")),
-                    };
+                    let word = it.next();
+                    let side = word.and_then(|w| crate::commands::side(w)).ok_or_else(|| {
+                        format!("--split: expected right, down, left or up, got {word:?}")
+                    })?;
                     let pane: PaneId = target.parse().map_err(|_| format!("bad pane `{target}`"))?;
-                    split = Some((pane, dir));
+                    split = Some((pane, side));
                 }
                 other if other.starts_with("--") => return Err(format!("block: unknown flag {other}")),
                 other if kind.is_none() => kind = Some(other.to_owned()),
@@ -969,7 +978,11 @@ impl Daemon {
         }
         let kind = kind.ok_or("block: expected a block kind (<plugin>.<block>)")?;
         let place = match (split, tab) {
-            (Some((pane, dir)), _) => BlockPlace::Split { pane, dir },
+            (Some((pane, side)), _) => BlockPlace::Split {
+                pane,
+                side,
+                share: None,
+            },
             (None, Some(session)) => BlockPlace::NewTab { session },
             (None, None) => BlockPlace::NewSession { window_key: window },
         };

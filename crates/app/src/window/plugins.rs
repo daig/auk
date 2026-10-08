@@ -14,9 +14,10 @@
 //! `cx:command` runs the built-in, `cx:open` skips routes, and `cx:action` on a plugin action
 //! queues it until the handler returns.
 //!
-//! Layout operations that answer with ids (`new_tab`, `split`, `new_block`, `tab`) go to the
-//! daemon's control endpoint (§11.1), which answers with the new pane; the replicated layout
-//! then brings it to every window.
+//! Layout operations that answer (`new_tab`, `split`, `new_block`, `tab`, `move`, `resize`) are
+//! requests on the window's own link to its host's daemon, local or remote (§15.6): the daemon
+//! answers with the new pane or the outcome after the replicated layout, which brings the change
+//! to every window, so the window's layout already shows it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, BufReader, Write};
@@ -26,8 +27,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use auk_mirror::layout::{Node, PaneTag, SessionId, SplitDir, TabId};
-use auk_mirror::{ClientMsg, LayoutEdit, PaneId};
+use auk_mirror::layout::{Node, PaneTag, SessionId, Side, SplitDir, TabId};
+use auk_mirror::{ClientMsg, LayoutEdit, OpenPlace, PaneId};
 use auk_platform_macos::{KeyInput, Waker, Window};
 use auk_plugins::chord::{self, Chord, Step};
 use auk_plugins::window::{
@@ -196,9 +197,6 @@ pub struct PluginState {
     kinds: BTreeMap<PaneId, (String, Option<String>)>,
     /// A pane a plugin opened with `reveal.focus`: focused once the layout shows it.
     pub focus_when_shown: Option<PaneId>,
-    /// A remote window asked its host for a block it should focus: the next block pane that
-    /// appears (the link carries no pane id back, §10.4).
-    pub focus_next_block: bool,
     pub status: Vec<StatusItem>,
     pub tab_titles: BTreeMap<TabId, String>,
     pub window_title: Option<String>,
@@ -376,11 +374,22 @@ fn control(words: &[String]) -> Result<Value, String> {
     }
 }
 
-fn dir_word(dir: Dir) -> &'static str {
-    // The layout splits to the right or below; left and up place the new pane there too.
+fn side(dir: Dir) -> Side {
     match dir {
-        Dir::Right | Dir::Left => "right",
-        Dir::Down | Dir::Up => "down",
+        Dir::Right => Side::Right,
+        Dir::Down => Side::Down,
+        Dir::Left => Side::Left,
+        Dir::Up => Side::Up,
+    }
+}
+
+/// A plugin `Launch` as the daemon takes it.
+fn launch_of(launch: &Launch, cwd: Option<&str>) -> auk_mirror::Launch {
+    auk_mirror::Launch {
+        cwd: launch.cwd.as_deref().or(cwd).map(str::to_owned),
+        command: launch.command.clone().filter(|c| !c.trim().is_empty()),
+        block: launch.block.clone(),
+        args: launch.args.clone().unwrap_or_default(),
     }
 }
 
@@ -1079,9 +1088,9 @@ impl WinState {
             .filter(|c| !c.is_empty())
     }
 
-    /// Opens a block pane through the daemon, placed by `how`: its pane id, or `None` for a
-    /// remote window, whose link carries the request but no pane id back. `Err` (with the "Could
-    /// not start the block" card up) when no Ready plugin defines the kind, or the daemon refused.
+    /// Opens a block pane through the window's host's daemon, placed by `how`: its pane id. `Err`
+    /// (with the "Could not start the block" card up) when no Ready plugin defines the kind, or
+    /// the daemon refused.
     pub(super) fn open_block(
         &mut self,
         kind: &str,
@@ -1089,7 +1098,7 @@ impl WinState {
         how: How,
         reveal: Reveal,
         cwd: Option<String>,
-    ) -> Result<Option<u64>, ()> {
+    ) -> Result<u64, ()> {
         match self.try_open_block(kind, args, how, reveal, cwd.clone()) {
             Ok(pane) => {
                 self.plugins.block_card = None;
@@ -1122,59 +1131,49 @@ impl WinState {
         how: How,
         reveal: Reveal,
         cwd: Option<String>,
-    ) -> Result<Option<u64>, String> {
+    ) -> Result<u64, String> {
         self.plugins_catalog();
         if self.plugins.catalog.block_type(kind).is_none() {
             return Err(format!("No plugin offers the block type {kind}"));
         }
-        if is_remote() {
-            // The host's daemon takes no control requests from here: the block goes over the
-            // link as a layout edit (§10.4), in the host's directories.
-            let focused = self.focused_pane();
-            let split = match (how, focused) {
-                (How::Below, Some(p)) => Some((p, SplitDir::Down)),
-                (How::Beside | How::Split | How::Default | How::Replace | How::Preview, Some(p)) => {
-                    Some((p, SplitDir::Right))
+        let place = match (how, self.focused_pane()) {
+            (How::Below, Some(pane)) => OpenPlace::Split {
+                pane,
+                side: Side::Down,
+                share: None,
+            },
+            (How::Beside | How::Split | How::Default | How::Replace | How::Preview, Some(pane)) => {
+                OpenPlace::Split {
+                    pane,
+                    side: Side::Right,
+                    share: None,
                 }
-                _ => None,
-            };
-            self.edit(LayoutEdit::Block {
-                kind: kind.to_owned(),
-                args: args.to_vec(),
-                split,
-                session: split.is_none().then_some(self.active_session).flatten(),
-                cwd,
-            });
-            self.plugins.focus_next_block = reveal.focus;
-            return Ok(None);
-        }
-        let mut words = vec!["block".to_owned(), kind.to_owned()];
-        let focused = self.focused_pane();
-        match (how, focused) {
-            (How::Below, Some(p)) => words.extend(["--split".into(), p.to_string(), "down".into()]),
-            (How::Beside | How::Split | How::Default | How::Replace | How::Preview, Some(p)) => {
-                words.extend(["--split".into(), p.to_string(), "right".into()]);
             }
             _ => match self.active_session {
-                Some(s) => words.extend(["--tab".into(), s.to_string()]),
-                None => words.extend(["--window".into(), self.conn.window_key.clone()]),
+                Some(session) => OpenPlace::Tab { session },
+                None => OpenPlace::Session { name: None },
             },
-        }
-        if let Some(dir) = cwd.filter(|d| Path::new(d).is_dir()) {
-            words.extend(["--cwd".into(), dir]);
-        }
-        if !args.is_empty() {
-            words.push("--".into());
-            words.extend(args.iter().cloned());
-        }
-        let v = control(&words)?;
-        let pane = v["pane"]
-            .as_u64()
-            .ok_or_else(|| format!("the daemon answered without a pane: {v}"))?;
+        };
+        let launch = auk_mirror::Launch {
+            cwd,
+            command: None,
+            block: Some(kind.to_owned()),
+            args: args.to_vec(),
+        };
+        let pane = self.open_pane(place, launch)?;
         if reveal.focus {
             self.plugins.focus_when_shown = Some(pane);
         }
-        Ok(Some(pane))
+        Ok(pane)
+    }
+
+    /// Opens a pane through the window's host's daemon: its id, once the window's layout shows
+    /// it.
+    fn open_pane(&self, place: OpenPlace, launch: auk_mirror::Launch) -> Result<u64, String> {
+        let v = self.conn.request(LayoutEdit::Open { place, launch })?;
+        v["pane"]
+            .as_u64()
+            .ok_or_else(|| format!("the daemon answered without a pane: {v}"))
     }
 
     // -----------------------------------------------------------------------------------------
@@ -1301,10 +1300,6 @@ impl WinState {
             }
             for &pane in panes.difference(&self.plugins.seen_panes) {
                 self.plugins.events.push(WindowEvent::PaneCreated { pane });
-                if self.plugins.focus_next_block && sessions.kind(pane) == PaneTag::Block {
-                    self.plugins.focus_next_block = false;
-                    self.plugins.focus_when_shown = Some(pane);
-                }
             }
             for &pane in self.plugins.seen_panes.difference(&panes) {
                 self.plugins.events.push(WindowEvent::PaneClosed { pane });
@@ -1614,121 +1609,66 @@ impl WinState {
     // -----------------------------------------------------------------------------------------
     // Layout operations for the window cx
 
-    fn launch_words(&self, launch: &Launch, cwd: Option<&str>) -> Vec<String> {
-        let mut words = Vec::new();
-        let dir = launch.cwd.as_deref().or(cwd);
-        if let Some(dir) = dir.filter(|d| Path::new(d).is_dir()) {
-            words.extend(["--cwd".to_owned(), dir.to_owned()]);
+    /// Whether a block kind is one this window's host can start: a Ready plugin defines it.
+    fn check_block(&mut self, launch: &Launch) -> Result<(), String> {
+        match &launch.block {
+            Some(kind) => {
+                self.plugins_catalog();
+                if self.plugins.catalog.block_type(kind).is_none() {
+                    return Err(format!("could not start block `{kind}`"));
+                }
+                Ok(())
+            }
+            None => Ok(()),
         }
-        if let Some(cmd) = &launch.command
-            && !cmd.trim().is_empty()
-        {
-            words.extend(["--".to_owned(), cmd.clone()]);
-        }
-        words
     }
 
     /// A new tab in the shown session running `launch`; the new pane.
     fn new_tab_launch(&mut self, launch: &Launch, cwd: Option<&str>) -> Result<u64, String> {
         let session = self.active_session.ok_or("the window shows no session")?;
-        if let Some(block) = &launch.block {
-            let mut words = vec![
-                "block".to_owned(),
-                block.clone(),
-                "--tab".to_owned(),
-                session.to_string(),
-            ];
-            if let Some(dir) = launch
-                .cwd
-                .as_deref()
-                .or(cwd)
-                .filter(|d| Path::new(d).is_dir())
-            {
-                words.extend(["--cwd".to_owned(), dir.to_owned()]);
-            }
-            if let Some(args) = &launch.args {
-                words.push("--".into());
-                words.extend(args.iter().cloned());
-            }
-            return control(&words)?["pane"]
-                .as_u64()
-                .ok_or_else(|| "no pane".into());
-        }
-        let mut words = vec![
-            "new".to_owned(),
-            "tab".to_owned(),
-            "--window".to_owned(),
-            self.conn.window_key.clone(),
-            "--session".to_owned(),
-            session.to_string(),
-        ];
-        words.extend(self.launch_words(launch, cwd));
-        control(&words)?["pane"]
-            .as_u64()
-            .ok_or_else(|| "no pane".into())
+        self.check_block(launch)?;
+        self.open_pane(OpenPlace::Tab { session }, launch_of(launch, cwd))
     }
 
-    /// Splits `target`, running `launch` in the new pane.
+    /// Splits `target`, running `launch` in the new pane on its `dir` side. `share` is the
+    /// target's share of the split, in thousandths (half by default).
     fn split_launch(
         &mut self,
         target: u64,
         dir: Dir,
         launch: &Launch,
         cwd: Option<&str>,
+        share: Option<u16>,
     ) -> Result<u64, String> {
-        if let Some(block) = &launch.block {
-            let mut words = vec![
-                "block".to_owned(),
-                block.clone(),
-                "--split".to_owned(),
-                target.to_string(),
-                dir_word(dir).to_owned(),
-            ];
-            if let Some(d) = launch
-                .cwd
-                .as_deref()
-                .or(cwd)
-                .filter(|d| Path::new(d).is_dir())
-            {
-                words.extend(["--cwd".to_owned(), d.to_owned()]);
-            }
-            if let Some(args) = &launch.args {
-                words.push("--".into());
-                words.extend(args.iter().cloned());
-            }
-            return control(&words)?["pane"]
-                .as_u64()
-                .ok_or_else(|| "no pane".into());
-        }
-        let mut words = vec![
-            "split".to_owned(),
-            target.to_string(),
-            dir_word(dir).to_owned(),
-        ];
-        let mut launch = launch.clone();
-        if launch.cwd.is_none() {
-            launch.cwd = cwd.map(str::to_owned).or_else(|| self.pane_cwd(target));
-        }
-        words.extend(self.launch_words(&launch, None));
-        control(&words)?["pane"]
-            .as_u64()
-            .ok_or_else(|| "no pane".into())
+        self.check_block(launch)?;
+        let place = OpenPlace::Split {
+            pane: target,
+            side: side(dir),
+            share,
+        };
+        self.open_pane(place, launch_of(launch, cwd))
     }
 
     /// The first leaf of a tab spec.
     fn first_leaf(spec: &TabSpec) -> &TabSpec {
         match &spec.first {
-            Some(first) if spec.split.is_some() => Self::first_leaf(first),
+            Some(first) if spec.split.is_some() || spec.second.is_some() => Self::first_leaf(first),
             _ => spec,
         }
     }
 
-    /// Builds the rest of `spec` around its first leaf, already open as `pane`.
+    /// Builds the rest of `spec` around its first leaf, already open as `pane`: `[2]` goes on the
+    /// `split` side of `[1]` (right by default), `[1]` keeping `ratio` of it.
     fn fill(&mut self, spec: &TabSpec, pane: u64, cwd: Option<&str>, problems: &mut Vec<String>) {
         let cwd = spec.cwd.as_deref().or(cwd).map(str::to_owned);
-        let (Some(dir), Some(first), Some(second)) = (spec.split, &spec.first, &spec.second) else {
+        let (Some(first), Some(second)) = (&spec.first, &spec.second) else {
             return;
         };
+        let dir = spec.split.unwrap_or(Dir::Right);
+        let share = spec
+            .ratio
+            .filter(|r| r.is_finite())
+            .map(|r| (r * 1000.0).round().clamp(0.0, 1000.0) as u16);
         let leaf = Self::first_leaf(second);
         let leaf_cwd = leaf
             .cwd
@@ -1736,7 +1676,7 @@ impl WinState {
             .or_else(|| second.cwd.clone())
             .or_else(|| cwd.clone());
         let launch = leaf.launch.clone().unwrap_or_default();
-        match self.split_launch(pane, dir, &launch, leaf_cwd.as_deref()) {
+        match self.split_launch(pane, dir, &launch, leaf_cwd.as_deref(), share) {
             Ok(new) => {
                 self.fill(first, pane, cwd.as_deref(), problems);
                 self.fill(second, new, cwd.as_deref(), problems);
@@ -1749,15 +1689,41 @@ impl WinState {
     }
 
     fn tab_of_pane(&self, pane: u64) -> Option<(SessionId, TabId)> {
-        let ls = control(&["ls".to_owned()]).ok()?;
-        let window: auk_mirror::layout::Window =
-            serde_json::from_value(ls["layout"][&self.conn.window_key].clone()).ok()?;
-        window.sessions.iter().find_map(|s| {
+        self.sessions().sessions.iter().find_map(|s| {
             s.tabs
                 .iter()
                 .find(|t| t.root.contains(pane))
                 .map(|t| (s.id, t.id))
         })
+    }
+
+    /// The thousandths of `pane`'s nearest split on `side` that `cells` of its cells make, as
+    /// this window lays the split out; `None` when no split runs that way.
+    fn resize_delta(&self, pane: u64, side: Side, cells: f64) -> Option<i32> {
+        let sessions = self.sessions();
+        let tab = sessions
+            .sessions
+            .iter()
+            .flat_map(|s| s.tabs.iter())
+            .find(|t| t.root.contains(pane))?;
+        let path = tab.root.divider(pane, side)?;
+        let area = crate::geometry::node_area(
+            &tab.root,
+            self.content_area(),
+            crate::chrome::DIVIDER,
+            &path,
+        )?;
+        let scale = self.size.map_or(2.0, |s| s.scale);
+        let (cell_w, cell_h) = self.gfx.as_ref().map_or((8.0, 16.0), |g| {
+            let m = g.metrics();
+            (f64::from(m.cell_width) / scale, f64::from(m.cell_height) / scale)
+        });
+        let (extent, cell) = match side.axis() {
+            SplitDir::Right => (area.w, cell_w),
+            SplitDir::Down => (area.h, cell_h),
+        };
+        let avail = (extent - crate::chrome::DIVIDER).max(1.0);
+        Some((cells * cell / avail * 1000.0).round() as i32)
     }
 }
 
@@ -1781,7 +1747,7 @@ impl WindowHost for Host<'_> {
 
     fn new_block(&mut self, kind: &str, args: &[String], how: How, reveal: Reveal) -> Option<u64> {
         let cwd = self.w.focused_cwd();
-        self.w.open_block(kind, args, how, reveal, cwd).ok().flatten()
+        self.w.open_block(kind, args, how, reveal, cwd).ok()
     }
 
     fn command(&mut self, id: &str) -> Result<(), String> {
@@ -2035,7 +2001,7 @@ impl WindowHost for Host<'_> {
     }
 
     fn split(&mut self, target: u64, dir: Dir, launch: &Launch, reveal: Reveal) -> Option<u64> {
-        match self.w.split_launch(target, dir, launch, None) {
+        match self.w.split_launch(target, dir, launch, None, None) {
             Ok(pane) => {
                 if reveal.focus {
                     self.w.plugins.focus_when_shown = Some(pane);
@@ -2057,14 +2023,40 @@ impl WindowHost for Host<'_> {
         self.w.edit(LayoutEdit::Close { pane });
     }
 
-    fn move_pane(&mut self, _pane: u64, _target: u64, _dir: Option<Dir>, _reveal: Reveal) -> bool {
-        // The replicated layout has no move operation in v1: nothing moves.
-        false
+    fn move_pane(&mut self, pane: u64, target: u64, dir: Option<Dir>, reveal: Reveal) -> bool {
+        let edit = LayoutEdit::Move {
+            pane,
+            target,
+            side: dir.map(side),
+        };
+        let moved = match self.w.conn.request(edit) {
+            Ok(v) => v == true,
+            Err(e) => {
+                eprintln!("auk: move: {e}");
+                false
+            }
+        };
+        if moved && reveal.focus {
+            self.w.focus_pane(pane);
+        }
+        moved
     }
 
-    fn resize(&mut self, _pane: u64, _dir: Dir, _cells: f64) -> bool {
-        // Split ratios aren't editable from a window in v1: no divider moves.
-        false
+    fn resize(&mut self, pane: u64, dir: Dir, cells: f64) -> bool {
+        let side = side(dir);
+        let Some(delta) = self.w.resize_delta(pane, side, cells) else {
+            return false;
+        };
+        if delta == 0 {
+            return false;
+        }
+        match self.w.conn.request(LayoutEdit::Resize { pane, side, delta }) {
+            Ok(v) => v == true,
+            Err(e) => {
+                eprintln!("auk: resize: {e}");
+                false
+            }
+        }
     }
 
     fn tab(&mut self, spec: &TabSpec, reveal: Reveal) -> (Option<u64>, Option<String>) {
@@ -2089,7 +2081,7 @@ impl WindowHost for Host<'_> {
         if reveal.focus {
             self.w.plugins.focus_when_shown = Some(first);
         }
-        let problem = (!problems.is_empty()).then(|| problems.join("; "));
+        let problem = (!problems.is_empty()).then(|| problems.join(", "));
         (Some(tab), problem)
     }
 }

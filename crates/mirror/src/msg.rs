@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::frame::{Frame, WireError, kind, take_u32, take_u64, write_frame};
-use crate::layout::{Layout, SessionId, SplitDir, TabId, Window};
+use crate::layout::{Layout, SessionId, Side, SplitDir, TabId, Window};
 use crate::{PaneId, Versions};
 
 /// What kind of client is attaching.
@@ -113,6 +113,58 @@ pub enum LayoutEdit {
         session: Option<SessionId>,
         cwd: Option<String>,
     },
+    /// Opens a pane running `launch` at `place` (§9.8 `layout:new_tab`, `split`, `tab` and
+    /// `cx:new_block`). Sent as a [`ClientMsg::Request`], it is answered with `{pane}`, plus
+    /// `failed` when a block couldn't start.
+    Open { place: OpenPlace, launch: Launch },
+    /// Moves `pane` to `side` of `target`, or swaps the two when `side` is absent (§9.8
+    /// `layout:move`). Answered with whether anything moved: not for a missing pane, or one in
+    /// another window key.
+    Move {
+        pane: PaneId,
+        target: PaneId,
+        side: Option<Side>,
+    },
+    /// Moves `pane`'s nearest divider on `side` by `delta` thousandths of its split, toward
+    /// `side` when positive (§9.8 `layout:resize`). Answered with whether it moved.
+    Resize {
+        pane: PaneId,
+        side: Side,
+        delta: i32,
+    },
+}
+
+/// Where [`LayoutEdit::Open`] puts its pane.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "at", rename_all = "snake_case")]
+pub enum OpenPlace {
+    /// A new session in the client's window key.
+    Session { name: Option<String> },
+    /// A new last tab of a session.
+    Tab { session: SessionId },
+    /// Beside `pane`, on `side`; `share` is `pane`'s share of the split in thousandths (half by
+    /// default).
+    Split {
+        pane: PaneId,
+        side: Side,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        share: Option<u16>,
+    },
+}
+
+/// What a pane opened with [`LayoutEdit::Open`] runs (§9.8 `Launch`): a block of `block` with
+/// `args`, else `command` through the login shell, else an interactive shell. `cwd` defaults to
+/// the split target's directory, or home.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Launch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
 }
 
 /// Client to daemon.
@@ -158,6 +210,12 @@ pub enum ClientMsg {
         vars: BTreeMap<String, String>,
     },
     LayoutEdit(LayoutEdit),
+    /// A layout edit whose result the client waits for: the daemon answers with a
+    /// [`DaemonMsg::Reply`] carrying the same `id`, after the layout change it made.
+    Request {
+        id: u64,
+        edit: LayoutEdit,
+    },
     /// Blobs the pane's documents name that this client doesn't hold (§7.12): the daemon answers
     /// with a [`DaemonMsg::Blob`] for each one it has.
     Blobs {
@@ -291,6 +349,14 @@ pub enum DaemonMsg {
     Primary {
         pane: PaneId,
         you: bool,
+    },
+    /// The answer to a [`ClientMsg::Request`]: its value, or why it failed.
+    Reply {
+        id: u64,
+        #[serde(default)]
+        value: Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
     },
     /// A blob of the pane (§7.12), outside the stream: snapshots don't carry blobs, so the daemon
     /// sends those the pane's documents name after a snapshot, and any a client asks for. Blob

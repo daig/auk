@@ -20,6 +20,50 @@ pub enum SplitDir {
     Down,
 }
 
+/// A side of a pane (§9.8 `Dir`): where a split puts the new pane, where a move puts the moved
+/// one, or which divider a resize moves. A split node keeps its children left to right or top to
+/// bottom, so a pane put left of or above another becomes the split's first child.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Side {
+    Right,
+    Down,
+    Left,
+    Up,
+}
+
+impl Side {
+    /// The split direction along this side's axis.
+    pub fn axis(self) -> SplitDir {
+        match self {
+            Side::Right | Side::Left => SplitDir::Right,
+            Side::Down | Side::Up => SplitDir::Down,
+        }
+    }
+
+    /// Whether this side comes first in a split (left or above).
+    pub fn before(self) -> bool {
+        matches!(self, Side::Left | Side::Up)
+    }
+}
+
+impl From<SplitDir> for Side {
+    fn from(dir: SplitDir) -> Side {
+        match dir {
+            SplitDir::Right => Side::Right,
+            SplitDir::Down => Side::Down,
+        }
+    }
+}
+
+/// The smallest share a resize or a requested ratio leaves either side of a split, in thousandths.
+pub const MIN_SHARE: u16 = 50;
+
+/// A share in thousandths, kept within [`MIN_SHARE`] of either end.
+pub fn clamp_share(share: i32) -> u16 {
+    share.clamp(i32::from(MIN_SHARE), 1000 - i32::from(MIN_SHARE)) as u16
+}
+
 /// A split tree.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "node", rename_all = "snake_case")]
@@ -60,22 +104,92 @@ impl Node {
         }
     }
 
-    /// Replaces the leaf `pane` with a split of it and `new`. Returns whether it was found.
-    fn split(&mut self, pane: PaneId, dir: SplitDir, new: PaneId) -> bool {
+    /// Replaces the leaf `pane` with a split of it and `new`, `new` on `side`. `share` is
+    /// `pane`'s share in thousandths. Returns whether it was found.
+    fn split(&mut self, pane: PaneId, side: Side, new: PaneId, share: u16) -> bool {
         match self {
             Node::Pane { pane: p } if *p == pane => {
+                let (old, new) = (Node::Pane { pane }, Node::Pane { pane: new });
+                let (first, second, ratio) = if side.before() {
+                    (new, old, 1000 - share)
+                } else {
+                    (old, new, share)
+                };
                 *self = Node::Split {
-                    dir,
-                    ratio: 500,
-                    first: Box::new(Node::Pane { pane }),
-                    second: Box::new(Node::Pane { pane: new }),
+                    dir: side.axis(),
+                    ratio,
+                    first: Box::new(first),
+                    second: Box::new(second),
                 };
                 true
             }
             Node::Pane { .. } => false,
             Node::Split { first, second, .. } => {
-                first.split(pane, dir, new) || second.split(pane, dir, new)
+                first.split(pane, side, new, share) || second.split(pane, side, new, share)
             }
+        }
+    }
+
+    /// Exchanges the leaves `a` and `b` wherever they are in this tree.
+    fn swap(&mut self, a: PaneId, b: PaneId) {
+        match self {
+            Node::Pane { pane } if *pane == a => *pane = b,
+            Node::Pane { pane } if *pane == b => *pane = a,
+            Node::Pane { .. } => {}
+            Node::Split { first, second, .. } => {
+                first.swap(a, b);
+                second.swap(a, b);
+            }
+        }
+    }
+
+    /// The path (`false` for the first child, `true` for the second) to the split whose divider
+    /// is `pane`'s nearest on `side`: the innermost split along that axis with `pane` on the other
+    /// side of it.
+    pub fn divider(&self, pane: PaneId, side: Side) -> Option<Vec<bool>> {
+        let Node::Split {
+            dir, first, second, ..
+        } = self
+        else {
+            return None;
+        };
+        let (inside, second_side) = if first.contains(pane) {
+            (first, false)
+        } else if second.contains(pane) {
+            (second, true)
+        } else {
+            return None;
+        };
+        if let Some(mut path) = inside.divider(pane, side) {
+            path.insert(0, second_side);
+            return Some(path);
+        }
+        // The divider is on `side` of the pane when the pane is in the child away from it.
+        (*dir == side.axis() && second_side == side.before()).then(Vec::new)
+    }
+
+    /// The node at `path`.
+    pub fn at(&self, path: &[bool]) -> Option<&Node> {
+        match (path.split_first(), self) {
+            (None, node) => Some(node),
+            (Some((&second, rest)), Node::Split { first, second: s, .. }) => {
+                if second { s.at(rest) } else { first.at(rest) }
+            }
+            (Some(_), Node::Pane { .. }) => None,
+        }
+    }
+
+    fn at_mut(&mut self, path: &[bool]) -> Option<&mut Node> {
+        match (path.split_first(), self) {
+            (None, node) => Some(node),
+            (Some((&second, rest)), Node::Split { first, second: s, .. }) => {
+                if second {
+                    s.at_mut(rest)
+                } else {
+                    first.at_mut(rest)
+                }
+            }
+            (Some(_), Node::Pane { .. }) => None,
         }
     }
 
@@ -261,12 +375,79 @@ impl Layout {
         Ok(id)
     }
 
-    /// Splits the tab cell holding `pane`, putting `new` right of or below it.
+    /// Splits the tab cell holding `pane`, putting `new` right of or below it, half and half.
     pub fn split(&mut self, pane: PaneId, dir: SplitDir, new: PaneId) -> Result<(), NotFound> {
+        self.split_side(pane, dir.into(), new, None)
+    }
+
+    /// Splits the tab cell holding `pane`, putting `new` on its `side`. `share` is `pane`'s share
+    /// in thousandths (kept within [`MIN_SHARE`] of either end; half by default).
+    pub fn split_side(
+        &mut self,
+        pane: PaneId,
+        side: Side,
+        new: PaneId,
+        share: Option<u16>,
+    ) -> Result<(), NotFound> {
         let tab = self.tab_of_mut(pane).ok_or(NotFound("pane", pane))?;
         tab.zoom = None;
-        tab.root.split(pane, dir, new);
+        let share = share.map_or(500, |s| clamp_share(i32::from(s)));
+        tab.root.split(pane, side, new, share);
         Ok(())
+    }
+
+    /// Moves `pane` to `side` of `target`, or swaps the two with `None` (§9.8 `layout:move`).
+    /// Both must be in one window key; a tab the move empties goes, and then its session. Returns
+    /// whether anything moved.
+    pub fn move_pane(&mut self, pane: PaneId, target: PaneId, side: Option<Side>) -> bool {
+        if pane == target {
+            return false;
+        }
+        match (self.window_of(pane), self.window_of(target)) {
+            (Some(a), Some(b)) if a == b => {}
+            _ => return false,
+        }
+        let Some(side) = side else {
+            for tab in self.tabs_mut() {
+                if tab.root.contains(pane) || tab.root.contains(target) {
+                    tab.root.swap(pane, target);
+                    if tab.zoom == Some(pane) || tab.zoom == Some(target) {
+                        tab.zoom = None;
+                    }
+                }
+            }
+            return true;
+        };
+        // Out of its cell, keeping its kind, then beside the target.
+        let kind = self.window(self.window_of(pane).unwrap_or_default()).map(|w| w.kind(pane));
+        self.remove_pane(pane);
+        if self.split_side(target, side, pane, None).is_err() {
+            return false;
+        }
+        if let Some(kind) = kind {
+            self.set_kind(pane, kind);
+        }
+        true
+    }
+
+    /// Moves `pane`'s nearest divider on `side` by `delta` thousandths of its split, toward `side`
+    /// for a positive delta (§9.8 `layout:resize`). Returns whether the divider moved: `false`
+    /// when no split runs that way or it is already at its limit.
+    pub fn resize(&mut self, pane: PaneId, side: Side, delta: i32) -> Result<bool, NotFound> {
+        let tab = self.tab_of_mut(pane).ok_or(NotFound("pane", pane))?;
+        let Some(path) = tab.root.divider(pane, side) else {
+            return Ok(false);
+        };
+        let Some(Node::Split { ratio, .. }) = tab.root.at_mut(&path) else {
+            return Ok(false);
+        };
+        let delta = if side.before() { -delta } else { delta };
+        let new = clamp_share(i32::from(*ratio) + delta);
+        if new == *ratio {
+            return Ok(false);
+        }
+        *ratio = new;
+        Ok(true)
     }
 
     /// Removes a pane, collapsing its split; an emptied tab, and then session, goes too.
@@ -480,6 +661,113 @@ mod tests {
         // Older layouts without kinds still read.
         let old: Window = serde_json::from_str(r#"{"sessions":[]}"#).unwrap();
         assert!(old.kinds.is_empty());
+    }
+
+    fn split(dir: SplitDir, ratio: u16, a: Node, b: Node) -> Node {
+        Node::Split {
+            dir,
+            ratio,
+            first: Box::new(a),
+            second: Box::new(b),
+        }
+    }
+
+    fn pane(pane: PaneId) -> Node {
+        Node::Pane { pane }
+    }
+
+    fn root(l: &Layout, tab: usize) -> Node {
+        l.window("w").unwrap().sessions[0].tabs[tab].root.clone()
+    }
+
+    #[test]
+    fn splits_left_and_up_come_first_and_keep_the_targets_share() {
+        let mut l = Layout::default();
+        l.new_session("w", None, 1);
+        l.split_side(1, Side::Left, 2, Some(700)).unwrap();
+        assert_eq!(root(&l, 0), split(SplitDir::Right, 300, pane(2), pane(1)));
+        l.split_side(2, Side::Up, 3, None).unwrap();
+        l.split_side(1, Side::Down, 4, Some(990)).unwrap();
+        assert_eq!(
+            root(&l, 0),
+            split(
+                SplitDir::Right,
+                300,
+                split(SplitDir::Down, 500, pane(3), pane(2)),
+                split(SplitDir::Down, 1000 - MIN_SHARE, pane(1), pane(4)),
+            )
+        );
+        assert_eq!(l.split_side(9, Side::Up, 5, None), Err(NotFound("pane", 9)));
+    }
+
+    #[test]
+    fn dividers_resize_toward_a_side() {
+        let mut l = Layout::default();
+        l.new_session("w", None, 1);
+        l.split(1, SplitDir::Right, 2).unwrap();
+        l.split(2, SplitDir::Down, 3).unwrap();
+        let r = root(&l, 0);
+        assert_eq!(r.divider(1, Side::Right), Some(vec![]));
+        assert_eq!(r.divider(1, Side::Left), None);
+        assert_eq!(r.divider(3, Side::Left), Some(vec![]));
+        assert_eq!(r.divider(3, Side::Up), Some(vec![true]));
+        assert_eq!(r.divider(2, Side::Up), None);
+        // Pane 1 grows right; pane 3 grows up, which moves the inner divider up.
+        assert_eq!(l.resize(1, Side::Right, 100), Ok(true));
+        assert_eq!(l.resize(3, Side::Up, 200), Ok(true));
+        assert_eq!(
+            root(&l, 0),
+            split(
+                SplitDir::Right,
+                600,
+                pane(1),
+                split(SplitDir::Down, 300, pane(2), pane(3)),
+            )
+        );
+        // A negative count moves it the other way; nothing moves past the limit or without a split.
+        assert_eq!(l.resize(3, Side::Left, -50), Ok(true));
+        assert_eq!(root(&l, 0).at(&[]).map(|n| matches!(n, Node::Split { ratio: 650, .. })), Some(true));
+        assert_eq!(l.resize(1, Side::Right, 5000), Ok(true));
+        assert_eq!(l.resize(1, Side::Right, 1), Ok(false));
+        assert_eq!(l.resize(2, Side::Up, 10), Ok(false));
+        assert_eq!(l.resize(8, Side::Up, 10), Err(NotFound("pane", 8)));
+    }
+
+    #[test]
+    fn panes_move_beside_others_or_swap_within_a_window_key() {
+        let mut l = Layout::default();
+        let s = l.new_session("w", None, 1);
+        l.split(1, SplitDir::Right, 2).unwrap();
+        l.new_tab(s, 3).unwrap();
+        l.set_kind(3, PaneTag::Agent);
+        l.new_session("other", None, 9);
+        // Swap within a tab.
+        assert!(l.move_pane(1, 2, None));
+        assert_eq!(root(&l, 0), split(SplitDir::Right, 500, pane(2), pane(1)));
+        // Into another tab, left of its pane: the emptied tab goes, the kind stays.
+        assert!(l.move_pane(3, 1, Some(Side::Left)));
+        let w = l.window("w").unwrap();
+        assert_eq!(w.sessions[0].tabs.len(), 1);
+        assert_eq!(w.kind(3), PaneTag::Agent);
+        assert_eq!(
+            root(&l, 0),
+            split(SplitDir::Right, 500, pane(2), split(SplitDir::Right, 500, pane(3), pane(1)))
+        );
+        // Below another pane in the same tab.
+        assert!(l.move_pane(2, 1, Some(Side::Down)));
+        assert_eq!(
+            root(&l, 0),
+            split(SplitDir::Right, 500, pane(3), split(SplitDir::Down, 500, pane(1), pane(2)))
+        );
+        // Swaps across tabs.
+        l.new_tab(s, 4).unwrap();
+        assert!(l.move_pane(4, 3, None));
+        assert_eq!(root(&l, 1), pane(3));
+        // Not onto itself, a missing pane or another window key's.
+        assert!(!l.move_pane(1, 1, None));
+        assert!(!l.move_pane(1, 77, Some(Side::Right)));
+        assert!(!l.move_pane(1, 9, Some(Side::Right)));
+        assert_eq!(l.window("other").unwrap().panes(), vec![9]);
     }
 
     #[test]

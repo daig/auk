@@ -378,7 +378,10 @@ impl Shared {
 fn expects_answer(msg: &ClientMsg) -> bool {
     matches!(
         msg,
-        ClientMsg::Input { .. } | ClientMsg::ViewEvent { .. } | ClientMsg::LayoutEdit(_)
+        ClientMsg::Input { .. }
+            | ClientMsg::ViewEvent { .. }
+            | ClientMsg::LayoutEdit(_)
+            | ClientMsg::Request { .. }
     )
 }
 

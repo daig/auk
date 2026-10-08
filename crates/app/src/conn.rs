@@ -8,11 +8,15 @@
 use std::collections::BTreeMap;
 use std::io;
 use std::path::Path;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use auk_mirror::layout::Window as Sessions;
-use auk_mirror::{ClientFacts, ClientKind, ClientMsg, DaemonMsg, Effect, Hello, PaneId, Welcome};
+use auk_mirror::{
+    ClientFacts, ClientKind, ClientMsg, DaemonMsg, Effect, Hello, LayoutEdit, PaneId, Welcome,
+};
 use auk_remote::{Link, LinkReader, Target};
 use auk_replica::{Item, Replica, Role};
 
@@ -76,6 +80,9 @@ pub struct Shared {
     pub presence: Vec<auk_mirror::ClientInfo>,
     /// Bumped whenever presence arrives.
     pub presence_generation: u64,
+    /// Replies to this window's requests, by request id, until [`Connection::request`] takes
+    /// them.
+    pub replies: BTreeMap<u64, Result<serde_json::Value, String>>,
 }
 
 impl Shared {
@@ -196,6 +203,9 @@ impl Shared {
                 self.presence = clients;
                 self.presence_generation += 1;
             }
+            DaemonMsg::Reply { id, value, error } => {
+                self.replies.insert(id, error.map_or(Ok(value), Err));
+            }
             DaemonMsg::Welcome { .. } | DaemonMsg::Refused(_) => {}
         }
         self.retry_views();
@@ -236,9 +246,15 @@ pub struct Connection {
     /// The remote host this window attached to (`None`: this machine's daemon).
     pub host: Option<String>,
     shared: Arc<Mutex<Shared>>,
+    /// Signalled after each batch the reader applies, for [`Connection::request`].
+    arrived: Arc<Condvar>,
+    next_request: AtomicU64,
     link: Link,
     reader: Mutex<Option<LinkReader>>,
 }
+
+/// How long a request waits for its reply.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 impl Connection {
     /// Connects and says hello. The welcome lists every window key's sessions; then
@@ -268,6 +284,8 @@ impl Connection {
                 client_id: welcome.client,
                 host,
                 shared: Arc::new(Mutex::new(shared)),
+                arrived: Arc::new(Condvar::new()),
+                next_request: AtomicU64::new(0),
                 link,
                 reader: Mutex::new(Some(reader)),
             },
@@ -290,13 +308,18 @@ impl Connection {
             return;
         };
         let shared = self.shared.clone();
+        let arrived = self.arrived.clone();
         let spawned = thread::Builder::new()
             .name(format!("auk window {}", self.window_key))
             .spawn(move || {
                 let reason = loop {
                     match reader.recv() {
                         Ok(Some(msg)) => {
+                            let reply = matches!(msg, DaemonMsg::Reply { .. });
                             lock(&shared).on_message(msg);
+                            if reply {
+                                arrived.notify_all();
+                            }
                             wake();
                         }
                         Ok(None) => break "the window detached".to_owned(),
@@ -304,6 +327,7 @@ impl Connection {
                     }
                 };
                 lock(&shared).closed = Some(reason);
+                arrived.notify_all();
                 wake();
             });
         if let Err(err) = spawned {
@@ -318,6 +342,34 @@ impl Connection {
     /// Sends a message; while the link resyncs after a reconnect it holds input and drops acks.
     pub fn send(&self, msg: &ClientMsg) -> io::Result<()> {
         self.link.send(msg).map(|_| ())
+    }
+
+    /// Sends a layout edit to the window's own host's daemon, local or remote, and waits for
+    /// its answer (§15.6 requests). The daemon replies after the edit's layout went out, so the
+    /// window's layout already shows the change when this returns.
+    pub fn request(&self, edit: LayoutEdit) -> Result<serde_json::Value, String> {
+        let id = self.next_request.fetch_add(1, Ordering::Relaxed) + 1;
+        self.send(&ClientMsg::Request { id, edit })
+            .map_err(|e| format!("the link to the daemon: {e}"))?;
+        let deadline = Instant::now() + REQUEST_TIMEOUT;
+        let mut shared = self.shared();
+        loop {
+            if let Some(reply) = shared.replies.remove(&id) {
+                return reply;
+            }
+            if let Some(reason) = &shared.closed {
+                return Err(format!("the connection closed: {reason}"));
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                return Err("the daemon didn't answer in 10 s".into());
+            }
+            shared = self
+                .arrived
+                .wait_timeout(shared, deadline - now)
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
+        }
     }
 
     /// The host's name in sheet names (`plugin:<host>:<id>:styles`): `local`, or the SSH

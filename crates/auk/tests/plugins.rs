@@ -1696,7 +1696,7 @@ fn m9_window_cx_recursion_guard_session_and_layout_calls_and_a_bind_on_a_taken_c
     });
     assert_eq!(
         app.request("clipboard"),
-        "sessions=1 layout=table read=table surface=nil split=number move=false resize=false"
+        "sessions=1 layout=table read=table surface=nil split=number move=true resize=true"
     );
     wait_for("the queued action", || infos(&app).contains(&"second ran".to_owned()).then_some(()));
     wait_for("cx:action's built-in tab", || (tab_count(&app) == 3).then_some(()));
@@ -1730,6 +1730,165 @@ fn m9_window_cx_recursion_guard_session_and_layout_calls_and_a_bind_on_a_taken_c
         assert!(std::time::Instant::now() < deadline, "the settle: {got}; {:?}", toasts(&app));
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
+}
+
+/// §9.8 `cx.layout`: `split` puts the new pane on any side (left and up first in the tree, so
+/// the window draws them left of and above the target); `tab(spec)` honours `split` sides and
+/// `ratio`; `resize` moves the pane's nearest divider by about the cells asked, and answers false
+/// without one; `move` puts a pane beside another, in its tab or another, or swaps them, and
+/// answers false for a missing pane. Each change is a session change that a second window shows
+/// too, drawn at the same ratios.
+#[cfg(target_os = "macos")]
+#[test]
+fn m9_window_layout_splits_on_every_side_resizes_moves_and_tab_ratios_replicate_to_a_second_window() {
+    use auk_conformance::harness::{layout_shape, tab_holding};
+    use window_half::*;
+    let env = TestEnv::new(EXE, "m9-layout-ops");
+    package(
+        &env,
+        "arrange",
+        "schema = 1\nid = \"arrange\"\nname = \"Arrange\"\nversion = \"1\"\nwindow = \"window.luau\"\n",
+        &[(
+            "window.luau",
+            r##"
+            local P = {}
+            tern.command({id = "build", title = "Arrange build", run = function(cx)
+                local s, l = cx.session, cx.layout
+                P.a = s:focused()
+                P.left = l:split(P.a, "left", {command = "cat"})
+                P.up = l:split(P.a, "up")
+                local tab, err = l:tab({
+                    name = "ws", split = "down", ratio = 0.25,
+                    {launch = {command = "cat"}},
+                    {split = "left", ratio = 0.7, {}, {}},
+                })
+                P.c = s:layout(tab).root[1].pane
+                cx:copy(string.format("a=%d left=%d up=%d tab=%d c=%d err=%s",
+                    P.a, P.left, P.up, tab, P.c, tostring(err)))
+            end})
+            tern.command({id = "resize", title = "Arrange resize", run = function(cx)
+                local l = cx.layout
+                cx:copy(string.format("%s %s %s %s",
+                    tostring(l:resize(P.left, "right", -3)),
+                    tostring(l:resize(P.a, "up", 2)),
+                    tostring(l:resize(P.left, "left", 1)),
+                    tostring(l:resize(P.up, "up", 1))))
+            end})
+            tern.command({id = "move", title = "Arrange move", run = function(cx)
+                local l = cx.layout
+                cx:copy(string.format("%s %s %s %s %s",
+                    tostring(l:move(P.up, P.left, "down", {focus = false})),
+                    tostring(l:move(P.a, P.left, "swap", {focus = false})),
+                    tostring(l:move(P.c, P.a, "left", {focus = false})),
+                    tostring(l:move(P.a, 999999, "right")),
+                    tostring(l:move(P.a, P.a, "swap"))))
+            end})
+            "##,
+        )],
+    );
+    env.start_daemon();
+    let a = auk_conformance::app::App::start(&env, "a", &[]);
+    let _us = auk_conformance::app::InputSource::select(&a, auk_conformance::app::US_LAYOUT);
+    let b = auk_conformance::app::App::start(&env, "b", &[]);
+    let first = shell(&env, &a);
+    loaded(&a, &["arrange"]);
+
+    // Splits left and up, and a workspace tab with sides and ratios.
+    palette_run(&a, "arrange build", "plugin.arrange.build");
+    let report = wait_for("the build's report", || {
+        let c = a.request("clipboard");
+        c.as_str()?.starts_with("a=").then(|| c.as_str().unwrap().to_owned())
+    });
+    let ids: std::collections::BTreeMap<&str, u64> = report
+        .split(' ')
+        .filter_map(|kv| kv.split_once('='))
+        .filter_map(|(k, v)| Some((k, v.parse().ok()?)))
+        .collect();
+    assert!(report.ends_with("err=nil"), "{report}");
+    let (pa, left, up, c) = (ids["a"], ids["left"], ids["up"], ids["c"]);
+    assert_eq!(pa, first);
+    let tab1 = format!("R500({left},D500({up},{pa}))");
+    let both = |what: &str, f: &dyn Fn(&Value) -> bool| {
+        for app in [&a, &b] {
+            wait_for(what, || f(&app.layout()).then_some(()));
+        }
+    };
+    both("the left and up splits in both windows", &|l| {
+        layout_shape(&tab_holding(l, pa)["root"], true) == tab1
+    });
+    let ws = tab_holding(&a.layout(), c);
+    assert_eq!(ws["title"], "ws");
+    let ws_shape = layout_shape(&ws["root"], true);
+    let (d, e) = {
+        let n = &ws["root"]["second"];
+        (n["second"]["pane"].as_u64().unwrap(), n["first"]["pane"].as_u64().unwrap())
+    };
+    assert_eq!(ws_shape, format!("D250({c},R300({e},{d}))"));
+    both("the workspace tab in both windows", &|l| layout_shape(&tab_holding(l, c)["root"], true) == ws_shape);
+    assert_eq!(env.pane_info(c)["kind"]["line"], "cat");
+    assert_eq!(env.pane_info(left)["kind"]["line"], "cat");
+
+    // The second window shows the first tab: left of and above the target, at half each.
+    let rects = |app: &auk_conformance::app::App| -> std::collections::BTreeMap<u64, [f64; 4]> {
+        app.state()["visible"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|v| {
+                let r: Vec<f64> = v["rect"].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
+                (v["pane"].as_u64().unwrap(), [r[0], r[1], r[2], r[3]])
+            })
+            .collect()
+    };
+    let r = wait_for("the second window to draw three panes", || {
+        let r = rects(&b);
+        (r.len() == 3).then_some(r)
+    });
+    assert!(r[&left][0] < r[&up][0] && r[&up][0] == r[&pa][0], "{r:?}");
+    assert!(r[&up][1] < r[&pa][1] && (r[&up][3] - r[&pa][3]).abs() <= 1.0, "{r:?}");
+    assert!((r[&left][2] - r[&pa][2]).abs() <= 1.0, "{r:?}");
+    // The first window shows the workspace tab at its ratios.
+    let r = wait_for("the first window to draw the workspace", || {
+        let r = rects(&a);
+        (r.len() == 3 && r.contains_key(&c)).then_some(r)
+    });
+    let share = |x: f64, y: f64| x / (x + y);
+    assert!((share(r[&c][3], r[&d][3]) - 0.25).abs() < 0.02, "{r:?}");
+    assert!((share(r[&e][2], r[&d][2]) - 0.3).abs() < 0.02, "{r:?}");
+    assert!(r[&e][0] < r[&d][0], "{r:?}");
+
+    // Resizes: the left pane gives up about 3 cells, the target grows 2 rows up; no divider
+    // runs left of the left pane or above the top one.
+    let before = rects(&b);
+    palette_run(&a, "arrange resize", "plugin.arrange.resize");
+    wait_for("the resize's report", || (a.request("clipboard") == "true true false false").then_some(()));
+    both("the new ratios in both windows", &|l| {
+        let s = layout_shape(&tab_holding(l, pa)["root"], true);
+        s != tab1 && layout_shape(&tab_holding(l, pa)["root"], false) == format!("R({left},D({up},{pa}))")
+    });
+    let after = wait_for("the second window to draw the new sizes", || {
+        let r = rects(&b);
+        (r.len() == 3 && r[&left][2] < before[&left][2] && r[&pa][3] > before[&pa][3]).then_some(r)
+    });
+    // By about the cells asked: the windows are the same size, so their cells are too.
+    let cell = b.request(&format!("pane-layout {pa}"))["cell"].clone();
+    let (cw, ch) = (cell[0].as_f64().unwrap(), cell[1].as_f64().unwrap());
+    let (narrower, taller) = (before[&left][2] - after[&left][2], after[&pa][3] - before[&pa][3]);
+    assert!((narrower - 3.0 * cw).abs() <= 1.5, "{narrower} for 3 cells of {cw}");
+    assert!((taller - 2.0 * ch).abs() <= 1.5, "{taller} for 2 rows of {ch}");
+
+    // Moves: up below left, a swapped with left, the workspace's top pane left of a (its tab
+    // keeps the other two); a missing pane or a pane onto itself moves nothing.
+    palette_run(&a, "arrange move", "plugin.arrange.move");
+    wait_for("the move's report", || (a.request("clipboard") == "true true true false false").then_some(()));
+    let moved = format!("R(D(R({c},{pa}),{up}),{left})");
+    both("the moves in both windows", &|l| {
+        layout_shape(&tab_holding(l, pa)["root"], false) == moved
+            && layout_shape(&tab_holding(l, d)["root"], true) == format!("R300({e},{d})")
+    });
+    // Panes keep their programs and kinds wherever they go.
+    assert_eq!(env.pane_info(c)["kind"]["line"], "cat");
+    assert!(env.pane_info(c)["exit"].is_null());
 }
 
 /// §9.5 "Opening": the palette offers "New <title> block" for Ready plugins' palette block

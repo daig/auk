@@ -2133,6 +2133,21 @@ fn remote_window_half_types_into_a_remote_pane_and_opens_the_hosts_block_types()
             run = function(cx)
                 cx:run(cx.session:focused(), "echo typed-by-the-window-half-$((6*7))\r")
             end,
+        })
+        tern.command({
+            id = "open-remote",
+            title = "Open panes on the host",
+            run = function(cx)
+                local f = cx.session:focused()
+                local b = cx:new_block("rpanel.panel", {"x"}, "below", {focus = false})
+                local s = cx.layout:split(f, "up", {command = "cat"}, {focus = false})
+                local t, err = cx.layout:tab({
+                    split = "left", ratio = 0.4, {}, {launch = {block = "rpanel.panel"}},
+                }, {focus = false})
+                local tree = cx.session:layout(t).root
+                cx:copy(string.format("f=%d block=%d split=%d first=%d second=%d err=%s",
+                    f, b, s, tree[2].pane, tree[1].pane, tostring(err)))
+            end,
         })"#,
     )
     .expect("write window.luau");
@@ -2162,6 +2177,37 @@ fn remote_window_half_types_into_a_remote_pane_and_opens_the_hosts_block_types()
     });
     wait_for("the window to focus the block", || (app.state()["focused"] == block).then_some(()));
     wait_for("the block's view, drawn", || node_box(&app, block, "main.hello"));
+
+    // §9.8 on a remote window: `cx:new_block`, `layout:split` with a launch and `layout:tab` ask
+    // the window's own host over its link and answer with the new panes' ids, placed on the
+    // sides and at the ratio asked.
+    app.request(&format!("focus {pane}"));
+    palette_run(&app, "open panes on the host", "plugin.typer.open-remote");
+    let report = wait_for("the open's report", || {
+        let c = app.request("clipboard");
+        c.as_str()?.starts_with("f=").then(|| c.as_str().unwrap().to_owned())
+    });
+    assert!(report.ends_with("err=nil"), "{report}");
+    let ids: std::collections::BTreeMap<&str, u64> = report
+        .split(' ')
+        .filter_map(|kv| kv.split_once('='))
+        .filter_map(|(k, v)| Some((k, v.parse().ok()?)))
+        .collect();
+    let (f, opened, split, first, second) = (ids["f"], ids["block"], ids["split"], ids["first"], ids["second"]);
+    assert_eq!(f, pane);
+    assert_eq!(r.pane_info(opened)["kind"]["block"], "rpanel.panel");
+    assert_eq!(r.pane_info(split)["kind"]["line"], "cat");
+    assert_eq!(r.pane_info(second)["kind"]["block"], "rpanel.panel");
+    assert!(r.pane_info(first)["kind"]["block"].is_null());
+    let host = r.ls()["layout"]["main"].clone();
+    use auk_conformance::harness::{layout_shape, tab_holding};
+    assert_eq!(
+        layout_shape(&tab_holding(&host, pane)["root"], true),
+        format!("D500(D500({split},{pane}),{opened})"),
+        "{host}"
+    );
+    assert_eq!(layout_shape(&tab_holding(&host, first)["root"], true), format!("R600({second},{first})"));
+    assert_eq!(tab_holding(&app.layout(), first), tab_holding(&host, first), "the window shows the host's tab");
 }
 
 /// §4.1: the first window starts the daemon when none answers, and the daemon outlives it.

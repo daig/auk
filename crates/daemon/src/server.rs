@@ -11,8 +11,10 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use auk_mirror::layout::{Layout, SessionId, SplitDir};
-use auk_mirror::{ClientFacts, ClientKind, DaemonMsg, LayoutEdit, Message, PaneId, Versions};
+use auk_mirror::layout::{Layout, SessionId, Side};
+use auk_mirror::{
+    ClientFacts, ClientKind, DaemonMsg, LayoutEdit, Message, OpenPlace, PaneId, Versions,
+};
 use auk_replica::{Record, Replica, Role, Settings};
 use bytes::Bytes;
 use tokio::net::UnixListener;
@@ -67,7 +69,12 @@ pub enum Closed {
 pub enum Place {
     NewSession { name: Option<String> },
     NewTab { session: SessionId },
-    Split { pane: PaneId, dir: SplitDir },
+    /// Beside `pane` on `side`; `share` is `pane`'s share in thousandths (half by default).
+    Split {
+        pane: PaneId,
+        side: Side,
+        share: Option<u16>,
+    },
 }
 
 /// A request for a new pane.
@@ -239,6 +246,24 @@ pub async fn serve(config: Config) -> io::Result<()> {
             }
         })
     };
+    // A daemon whose socket file was deleted or replaced can't be reached by any client again,
+    // so it stops (saving its state as on SIGTERM) instead of lingering with its shells.
+    let orphan_watch = {
+        let daemon = daemon.clone();
+        let socket = config.socket.clone();
+        let bound = socket_identity(&socket);
+        tokio::spawn(async move {
+            let mut every = tokio::time::interval(Duration::from_secs(1));
+            loop {
+                every.tick().await;
+                if bound.is_some() && socket_identity(&socket) != bound {
+                    eprintln!("auk daemon: {} is gone; stopping", socket.display());
+                    daemon.shutdown.cancel();
+                    return;
+                }
+            }
+        })
+    };
 
     let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     tokio::select! {
@@ -250,6 +275,7 @@ pub async fn serve(config: Config) -> io::Result<()> {
     accept.abort();
     control.abort();
     ticker.abort();
+    orphan_watch.abort();
     checkpointer.abort();
     daemon.save_on_stop();
     let _ = fs::remove_file(&config.socket);
@@ -277,6 +303,12 @@ fn acquire_lock(socket: &Path) -> io::Result<fs::File> {
         },
     )?;
     Ok(file)
+}
+
+/// The device and inode of the socket file at `path`, if it exists.
+fn socket_identity(path: &Path) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    fs::symlink_metadata(path).ok().map(|m| (m.dev(), m.ino()))
 }
 
 /// A listening socket an upgrade handed over.
@@ -380,8 +412,14 @@ impl Daemon {
             Place::NewTab { session } => {
                 st.layout.new_tab(session, id).map_err(|e| e.to_string())?;
             }
-            Place::Split { pane: at, dir } => {
-                st.layout.split(at, dir, id).map_err(|e| e.to_string())?;
+            Place::Split {
+                pane: at,
+                side,
+                share,
+            } => {
+                st.layout
+                    .split_side(at, side, id, share)
+                    .map_err(|e| e.to_string())?;
             }
         }
         st.layout.set_kind(id, tag);
@@ -808,6 +846,13 @@ impl Daemon {
         }
     }
 
+    /// Sends one client a message of its own (a request's reply).
+    pub(crate) fn reply(&self, id: ClientId, msg: DaemonMsg) {
+        if let Some(c) = self.state().clients.get(&id) {
+            c.tx.send(msg.to_bytes().into());
+        }
+    }
+
     pub(crate) fn client_blobs(&self, id: ClientId, pane: PaneId, ids: &[String]) {
         if let Some(p) = self.pane(pane) {
             lock(&p).client_blobs(id, ids);
@@ -886,17 +931,26 @@ impl Daemon {
         }
     }
 
+    /// Applies a client's layout edit; the result is what a [`ClientMsg::Request`] for it is
+    /// answered with (`null` for edits that answer nothing).
+    ///
+    /// [`ClientMsg::Request`]: auk_mirror::ClientMsg::Request
     pub(crate) fn layout_edit(
         self: &Arc<Self>,
         id: ClientId,
         edit: LayoutEdit,
-    ) -> Result<(), String> {
+    ) -> Result<serde_json::Value, String> {
         crate::events::as_actor(crate::events::Actor::Client(id), || {
             self.layout_edit_by(id, edit)
         })
     }
 
-    fn layout_edit_by(self: &Arc<Self>, id: ClientId, edit: LayoutEdit) -> Result<(), String> {
+    fn layout_edit_by(
+        self: &Arc<Self>,
+        id: ClientId,
+        edit: LayoutEdit,
+    ) -> Result<serde_json::Value, String> {
+        use serde_json::Value;
         let window_key = self
             .state()
             .clients
@@ -911,6 +965,11 @@ impl Daemon {
             keep_open: false,
             size: None,
         };
+        let split = |pane, side| Place::Split {
+            pane,
+            side,
+            share: None,
+        };
         match edit {
             LayoutEdit::NewSession { name } => {
                 self.new_pane(new(Place::NewSession { name }))?;
@@ -922,7 +981,7 @@ impl Daemon {
                 let cwd = self.pane(pane).map(|p| lock(&p).cwd());
                 self.new_pane(NewPane {
                     cwd,
-                    ..new(Place::Split { pane, dir })
+                    ..new(split(pane, dir.into()))
                 })?;
             }
             LayoutEdit::Close { pane } => {
@@ -935,10 +994,7 @@ impl Daemon {
                 // Agent placement's default: a split right of the focused pane (book:16916).
                 let at = pane.filter(|p| self.state().layout.window_of(*p).is_some());
                 let place = match at {
-                    Some(pane) => Place::Split {
-                        pane,
-                        dir: SplitDir::Right,
-                    },
+                    Some(pane) => split(pane, Side::Right),
                     None => Place::NewSession { name: None },
                 };
                 let cwd = at.and_then(|p| self.pane(p)).map(|p| lock(&p).cwd());
@@ -957,7 +1013,11 @@ impl Daemon {
             } => {
                 use crate::plugins::{BlockPlace, NewBlock};
                 let place = match (split, session) {
-                    (Some((pane, dir)), _) => BlockPlace::Split { pane, dir },
+                    (Some((pane, dir)), _) => BlockPlace::Split {
+                        pane,
+                        side: dir.into(),
+                        share: None,
+                    },
                     (None, Some(session)) => BlockPlace::NewTab { session },
                     (None, None) => BlockPlace::NewSession {
                         window_key: window_key.clone(),
@@ -971,6 +1031,23 @@ impl Daemon {
                     size: None,
                 })?;
             }
+            LayoutEdit::Open { place, launch } => return self.open_launch(window_key, place, launch),
+            LayoutEdit::Move { pane, target, side } => {
+                let mut moved = false;
+                self.edit_layout(|l| {
+                    moved = l.move_pane(pane, target, side);
+                    Ok::<(), String>(())
+                })?;
+                return Ok(Value::Bool(moved));
+            }
+            LayoutEdit::Resize { pane, side, delta } => {
+                let mut moved = false;
+                self.edit_layout(|l| {
+                    moved = l.resize(pane, side, delta)?;
+                    Ok::<(), auk_mirror::layout::NotFound>(())
+                })?;
+                return Ok(Value::Bool(moved));
+            }
             LayoutEdit::Zoom { tab, pane } => self.edit_layout(|l| l.zoom(tab, pane))?,
             LayoutEdit::RenameSession { session, name } => {
                 self.edit_layout(|l| l.rename_session(session, &name))?
@@ -979,7 +1056,61 @@ impl Daemon {
                 self.edit_layout(|l| l.rename_tab(tab, title.as_deref()))?
             }
         }
-        Ok(())
+        Ok(Value::Null)
+    }
+
+    /// Opens a pane for [`LayoutEdit::Open`]: `{pane}`, plus `failed` when a block couldn't
+    /// start. A split starts in its target's directory unless the launch names one.
+    fn open_launch(
+        self: &Arc<Self>,
+        window_key: Option<String>,
+        place: OpenPlace,
+        launch: auk_mirror::Launch,
+    ) -> Result<serde_json::Value, String> {
+        // A directory that isn't one on this host starts at home (book:15706).
+        let cwd = match (launch.cwd.map(PathBuf::from), &place) {
+            (Some(dir), _) if dir.is_dir() => Some(dir),
+            (Some(_), _) => None,
+            (None, OpenPlace::Split { pane, .. }) => self.pane(*pane).map(|p| lock(&p).cwd()),
+            (None, _) => None,
+        };
+        if let Some(kind) = launch.block {
+            use crate::plugins::{BlockPlace, NewBlock};
+            let place = match place {
+                OpenPlace::Session { .. } => BlockPlace::NewSession { window_key },
+                OpenPlace::Tab { session } => BlockPlace::NewTab { session },
+                OpenPlace::Split { pane, side, share } => BlockPlace::Split { pane, side, share },
+            };
+            let id = self.new_block_pane(NewBlock {
+                kind,
+                args: launch.args,
+                place,
+                cwd,
+                size: None,
+            })?;
+            let failed = self
+                .pane(id)
+                .and_then(|p| lock(&p).block_failed.as_ref().map(|f| f.reason.clone()));
+            return Ok(match failed {
+                Some(reason) => serde_json::json!({"pane": id, "failed": reason}),
+                None => serde_json::json!({"pane": id}),
+            });
+        }
+        let place = match place {
+            OpenPlace::Session { name } => Place::NewSession { name },
+            OpenPlace::Tab { session } => Place::NewTab { session },
+            OpenPlace::Split { pane, side, share } => Place::Split { pane, side, share },
+        };
+        let id = self.new_pane(NewPane {
+            window_key,
+            place,
+            cwd,
+            command: launch.command.filter(|c| !c.trim().is_empty()),
+            agent: false,
+            keep_open: false,
+            size: None,
+        })?;
+        Ok(serde_json::json!({"pane": id}))
     }
 
     pub(crate) fn edit_layout<E: ToString>(

@@ -10,6 +10,8 @@
 //!   Then [`ClientMsg::Attach`] brings the window's layout, a snapshot per visible pane at a
 //!   sequence number, and the live stream after it (§15.3). Blobs the snapshot's documents name
 //!   follow it ([`DaemonMsg::Blob`]); a window asks for others with [`ClientMsg::Blobs`].
+//! - **Requests**: a [`ClientMsg::Request`] is a layout edit the client waits on; the daemon
+//!   answers [`DaemonMsg::Reply`] with the same id once the edit's layout has gone out.
 //! - **Codecs**: blocking ([`read_msg`], [`write_msg`], [`Client`]) and, with the `tokio`
 //!   feature, [`codec::Codec`] for `tokio_util`'s framed streams.
 //!
@@ -28,15 +30,15 @@ use serde::{Deserialize, Serialize};
 
 pub use frame::{Frame, MAX_PAYLOAD, WireError};
 pub use msg::{
-    ClientFacts, ClientInfo, ClientKind, ClientMsg, DaemonMsg, Effect, Hello, Hop, LayoutEdit,
-    Message, Refusal,
+    ClientFacts, ClientInfo, ClientKind, ClientMsg, DaemonMsg, Effect, Hello, Hop, Launch, LayoutEdit,
+    Message, OpenPlace, Refusal,
 };
 
 /// A pane's id, unique for the daemon's lifetime (and kept across restore).
 pub type PaneId = u64;
 
 /// The version of this protocol. Bump it with any change to frames or messages.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// The versions client and daemon must share (§4.5, §15.2).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

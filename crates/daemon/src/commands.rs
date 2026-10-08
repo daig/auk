@@ -39,7 +39,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use auk_mirror::PaneId;
-use auk_mirror::layout::SplitDir;
+use auk_mirror::layout::Side;
 use auk_replica::Record;
 use auk_term::input::{Key, KeyEvent, Mods, encode_key, encode_paste};
 use serde_json::{Value, json};
@@ -320,10 +320,14 @@ impl Daemon {
     fn cmd_split(self: &Arc<Self>, args: &[String]) -> Reply {
         let at = self.target(args.first())?;
         let mut opts = Opts::parse(&args[1..])?;
-        let dir = match opts.positional.first().map(String::as_str) {
-            Some("right") => SplitDir::Right,
-            Some("down") => SplitDir::Down,
-            other => return Err(format!("split: expected `right` or `down`, got {other:?}")),
+        let side = match opts.positional.first().map(String::as_str).and_then(side) {
+            Some(side) => side,
+            None => {
+                return Err(format!(
+                    "split: expected `right`, `down`, `left` or `up`, got {:?}",
+                    opts.positional.first()
+                ));
+            }
         };
         let cwd = match opts.take("cwd") {
             Some(dir) => Some(PathBuf::from(dir)),
@@ -331,7 +335,11 @@ impl Daemon {
         };
         let id = self.new_pane(NewPane {
             window_key: None,
-            place: Place::Split { pane: at, dir },
+            place: Place::Split {
+                pane: at,
+                side,
+                share: None,
+            },
             cwd,
             command: opts.command(),
             agent: opts.switch("agent"),
@@ -627,6 +635,17 @@ impl Daemon {
 }
 
 /// The panes of the tab that holds `pane`.
+/// A side's name: `right`, `down`, `left` or `up`.
+pub(crate) fn side(name: &str) -> Option<Side> {
+    match name {
+        "right" => Some(Side::Right),
+        "down" => Some(Side::Down),
+        "left" => Some(Side::Left),
+        "up" => Some(Side::Up),
+        _ => None,
+    }
+}
+
 fn tab_panes(layout: &auk_mirror::layout::Layout, pane: PaneId) -> Option<Vec<PaneId>> {
     layout
         .windows

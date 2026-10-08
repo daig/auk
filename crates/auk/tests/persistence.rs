@@ -1367,3 +1367,27 @@ fn a_blob_survives_a_daemon_restart_and_a_restored_surface_still_shows_it() {
     );
     assert!(window.errors().is_empty(), "{:?}", window.errors());
 }
+
+/// A daemon whose socket file is deleted can't be reached again, so it stops and takes its
+/// shells with it (no daemon outlives its runtime dir).
+#[test]
+fn a_daemon_whose_socket_is_deleted_stops_with_its_shells() {
+    let env = env("orphan");
+    let daemon = env.start_daemon();
+    let pane = env.new_pane(&[]);
+    let shell = env.daemon("ls --json")["panes"]
+        .as_array()
+        .and_then(|ps| ps.iter().find(|p| p["id"] == pane))
+        .and_then(|p| p["pid"].as_u64())
+        .expect("the pane's shell pid") as u32;
+    assert!(alive(shell));
+    fs::remove_file(&env.socket).expect("delete the socket");
+    // The daemon is this test's child, so once it exits it is a zombie until reaped.
+    let gone = |pid: u32| {
+        let out = Command::new("/bin/ps").args(["-o", "stat=", "-p", &pid.to_string()]).output();
+        out.map(|o| String::from_utf8_lossy(&o.stdout).trim().is_empty() || o.stdout.starts_with(b"Z"))
+            .unwrap_or(false)
+    };
+    wait_for("the daemon to stop", || gone(daemon).then_some(()));
+    wait_for("its shell to end", || gone(shell).then_some(()));
+}

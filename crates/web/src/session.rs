@@ -286,6 +286,8 @@ impl Session {
                     refusal.reason, refusal.daemon.auk
                 ));
             }
+            // The browser client sends no requests.
+            DaemonMsg::Reply { .. } => {}
             DaemonMsg::Snapshot { pane, snapshot } => {
                 // The views' sheet checker, as a drawing window's replica has (§8.4).
                 let tsp = auk_tsp::TspPane::with(
