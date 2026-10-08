@@ -17,6 +17,8 @@ use tokio::process::{Child, Command};
 #[derive(Debug)]
 pub struct Master {
     fd: OwnedFd,
+    /// Set while the reader holds bytes it has read but not yet fed to the replica.
+    in_flight: std::sync::atomic::AtomicBool,
 }
 
 /// What to run in a PTY.
@@ -98,7 +100,7 @@ pub fn spawn(spec: &SpawnSpec) -> io::Result<(Master, Child)> {
     let child = cmd.spawn()?;
     // `cmd` holds the slave copies; dropping it here leaves only the child's.
     drop(cmd);
-    Ok((Master { fd: master }, child))
+    Ok((Master::from_fd(master), child))
 }
 
 impl Master {
@@ -123,7 +125,24 @@ impl Master {
 
     /// A master handed over by an in-place upgrade (§15.7).
     pub fn from_fd(fd: OwnedFd) -> Self {
-        Master { fd }
+        Master {
+            fd,
+            in_flight: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// Whether output is still on its way to the replica: unread bytes in the PTY, or bytes the
+    /// reader holds. Timeouts that measure the program's silence (§7.1's chunk timeout) wait for
+    /// this to clear, so a daemon that falls behind never mistakes its own backlog for silence.
+    pub fn output_pending(&self) -> bool {
+        use std::sync::atomic::Ordering;
+        self.in_flight.load(Ordering::Acquire)
+            || rustix::io::ioctl_fionread(&self.fd).is_ok_and(|n| n > 0)
+    }
+
+    /// Marks bytes read but not yet fed (see [`Master::output_pending`]).
+    pub fn set_in_flight(&self, on: bool) {
+        self.in_flight.store(on, std::sync::atomic::Ordering::Release);
     }
 }
 

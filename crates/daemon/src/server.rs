@@ -881,11 +881,14 @@ pub(crate) fn read_pty(pane: &Mutex<Pane>, master: &pty::Master, generation: u64
         match rustix::io::read(master, &mut buf) {
             Ok(0) => return,
             Ok(n) => {
+                master.set_in_flight(true);
                 let mut p = lock(pane);
                 if p.generation != generation {
+                    master.set_in_flight(false);
                     return;
                 }
                 p.on_output(&buf[..n]);
+                master.set_in_flight(false);
             }
             Err(rustix::io::Errno::INTR) => {}
             // EIO: every slave descriptor closed.

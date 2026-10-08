@@ -305,9 +305,12 @@ impl Pane {
 
     /// Whether a chunk sequence has waited past the timeout; the daemon then sequences
     /// [`Record::ChunkTimeout`].
+    ///
+    /// Only the program's silence counts: while output is still queued in the PTY or held by the
+    /// reader, the sequence hasn't timed out.
     pub fn chunk_expired(&self) -> bool {
-        self.chunk
-            .is_some_and(|(_, at)| at.elapsed() >= CHUNK_TIMEOUT)
+        self.chunk.is_some_and(|(_, at)| at.elapsed() >= CHUNK_TIMEOUT)
+            && !self.io.as_ref().is_some_and(|io| io.master.output_pending())
     }
 
     /// The snapshot at the current position, ages rewritten to now (§15.3).
