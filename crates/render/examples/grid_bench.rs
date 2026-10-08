@@ -195,9 +195,6 @@ fn frame(
     let stats = renderer.prepare(gpu, snap, size);
     let mut encoder = gpu.device.create_command_encoder(&Default::default());
     renderer.render(&mut encoder, target.view(), snap.background, timer);
-    if let Some(timer) = timer {
-        timer.resolve(&mut encoder);
-    }
     gpu.queue.submit([encoder.finish()]);
     let cpu = start.elapsed();
     let gpu_time = match timer {

@@ -46,7 +46,10 @@ pub struct Mods {
 impl Mods {
     /// The xterm and kitty modifier bits (shift 1, alt 2, ctrl 4, meta/super 8).
     fn bits(self) -> u8 {
-        u8::from(self.shift) | u8::from(self.alt) << 1 | u8::from(self.ctrl) << 2 | u8::from(self.meta) << 3
+        u8::from(self.shift)
+            | u8::from(self.alt) << 1
+            | u8::from(self.ctrl) << 2
+            | u8::from(self.meta) << 3
     }
 
     fn any(self) -> bool {
@@ -102,7 +105,11 @@ fn functional(key: Key) -> Option<Functional> {
         Key::F(2) => Letter(b'Q'),
         Key::F(3) => Letter(b'R'),
         Key::F(4) => Letter(b'S'),
-        Key::F(n @ 5..=20) => Tilde([15, 17, 18, 19, 20, 21, 23, 24, 25, 26, 28, 29, 31, 32, 33, 34][usize::from(n - 5)]),
+        Key::F(n @ 5..=20) => Tilde(
+            [
+                15, 17, 18, 19, 20, 21, 23, 24, 25, 26, 28, 29, 31, 32, 33, 34,
+            ][usize::from(n - 5)],
+        ),
         _ => return None,
     })
 }
@@ -138,7 +145,9 @@ fn legacy_key(ev: &KeyEvent, modes: &Modes) -> Vec<u8> {
     };
     if let Some(f) = functional(ev.key) {
         match f {
-            Functional::Letter(c) if mods.any() => csi(&mut out, &format!("1;{param}{}", c as char)),
+            Functional::Letter(c) if mods.any() => {
+                csi(&mut out, &format!("1;{param}{}", c as char))
+            }
             Functional::Letter(c) => {
                 let ss3 = matches!(c, b'P'..=b'S') || modes.app_cursor;
                 out.extend_from_slice(if ss3 { b"\x1bO" } else { b"\x1b[" });
@@ -248,12 +257,23 @@ fn kitty_key(ev: &KeyEvent, modes: &Modes) -> Vec<u8> {
     // Arrows, Home/End, PageUp/Down, Insert/Delete and F1–F12 keep their CSI forms.
     if let Some(f) = functional(ev.key) {
         match f {
-            Functional::Letter(b'R') => csi(&mut out, &if mods.any() { format!("13;{param}~") } else { "13~".into() }),
-            Functional::Letter(c) if mods.any() => csi(&mut out, &format!("1;{param}{}", c as char)),
+            Functional::Letter(b'R') => csi(
+                &mut out,
+                &if mods.any() {
+                    format!("13;{param}~")
+                } else {
+                    "13~".into()
+                },
+            ),
+            Functional::Letter(c) if mods.any() => {
+                csi(&mut out, &format!("1;{param}{}", c as char))
+            }
             Functional::Letter(c) => csi(&mut out, &(c as char).to_string()),
             Functional::Tilde(n) if n >= 25 => {
                 // F13–F20 have their own codes in kitty's table.
-                let Key::F(k) = ev.key else { unreachable!("only F keys have codes ≥ 25") };
+                let Key::F(k) = ev.key else {
+                    unreachable!("only F keys have codes ≥ 25")
+                };
                 return kitty_csi_u(57376 + u32::from(k - 13), None, mods, None);
             }
             Functional::Tilde(n) if mods.any() => csi(&mut out, &format!("{n};{param}~")),
@@ -262,10 +282,16 @@ fn kitty_key(ev: &KeyEvent, modes: &Modes) -> Vec<u8> {
         return out;
     }
 
-    let Some(code) = kitty_code(ev.key) else { return out };
+    let Some(code) = kitty_code(ev.key) else {
+        return out;
+    };
     let text = match ev.key {
         Key::Char(c) => Some(ev.text.clone().unwrap_or_else(|| {
-            if mods.shift { c.to_uppercase().collect() } else { c.to_string() }
+            if mods.shift {
+                c.to_uppercase().collect()
+            } else {
+                c.to_string()
+            }
         })),
         Key::Keypad(c) if c != '\r' => Some(c.to_string()),
         _ => None,
@@ -296,12 +322,20 @@ fn kitty_key(ev: &KeyEvent, modes: &Modes) -> Vec<u8> {
                 let first = chars.next()?;
                 chars.next().is_none().then_some(first)
             });
-            let upper = c.to_uppercase().next().filter(|_| c.to_uppercase().count() == 1);
-            typed.filter(|&t| t != c).or(upper).map(u32::from).filter(|&s| s != code)
+            let upper = c
+                .to_uppercase()
+                .next()
+                .filter(|_| c.to_uppercase().count() == 1);
+            typed
+                .filter(|&t| t != c)
+                .or(upper)
+                .map(u32::from)
+                .filter(|&s| s != code)
         }
         _ => None,
     };
-    let associated = if all && flags & ASSOCIATED_TEXT != 0 && !(mods.ctrl || mods.alt || mods.meta) {
+    let associated = if all && flags & ASSOCIATED_TEXT != 0 && !(mods.ctrl || mods.alt || mods.meta)
+    {
         text
     } else {
         None
@@ -351,7 +385,11 @@ pub fn encode_focus(focused: bool, modes: &Modes) -> Vec<u8> {
     if !modes.focus_reports {
         return Vec::new();
     }
-    if focused { b"\x1b[I".to_vec() } else { b"\x1b[O".to_vec() }
+    if focused {
+        b"\x1b[I".to_vec()
+    } else {
+        b"\x1b[O".to_vec()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -414,7 +452,11 @@ pub fn encode_mouse(
     }
     let (x, y) = (u32::from(col) + 1, u32::from(row) + 1);
     if modes.mouse_sgr {
-        let fin = if action == MouseAction::Release { 'm' } else { 'M' };
+        let fin = if action == MouseAction::Release {
+            'm'
+        } else {
+            'M'
+        };
         return format!("\x1b[<{code};{x};{y}{fin}").into_bytes();
     }
     if action == MouseAction::Release {
@@ -424,5 +466,12 @@ pub fn encode_mouse(
     if x > 223 || y > 223 {
         return Vec::new();
     }
-    vec![0x1b, b'[', b'M', 32 + code as u8, 32 + x as u8, 32 + y as u8]
+    vec![
+        0x1b,
+        b'[',
+        b'M',
+        32 + code as u8,
+        32 + x as u8,
+        32 + y as u8,
+    ]
 }

@@ -64,8 +64,12 @@ pub enum Mark {
     PromptStart,
     PromptEnd,
     /// `C`, with kitty's `cmdline_url` decoded when present.
-    CommandStart { cmdline: Option<String> },
-    CommandEnd { status: Option<i32> },
+    CommandStart {
+        cmdline: Option<String>,
+    },
+    CommandEnd {
+        status: Option<i32>,
+    },
 }
 
 /// Something the caller must see in stream order. `Terminal::advance` stops right after the byte
@@ -82,7 +86,10 @@ pub enum Event {
     /// OSC 0 or 2.
     Title(String),
     /// OSC 1337 `SetUserVar=<name>=<base64>`, decoded.
-    UserVar { name: String, value: Vec<u8> },
+    UserVar {
+        name: String,
+        value: Vec<u8>,
+    },
     Bell,
     /// RIS (`ESC c`). The grid is already reset when this arrives.
     Reset,
@@ -217,7 +224,10 @@ impl Terminal {
     /// A blank terminal. Sizes below 2 columns or 1 row are raised to that.
     pub fn new(cols: u16, rows: u16, config: Config) -> Self {
         let (cols, rows) = clamp_size(cols, rows);
-        Terminal { parser: parser::Parser::new(), core: core::Core::new(cols, rows, config) }
+        Terminal {
+            parser: parser::Parser::new(),
+            core: core::Core::new(cols, rows, config),
+        }
     }
 
     /// Parses `bytes` until they run out or an `Event` arises. Returns how many bytes were
@@ -453,7 +463,11 @@ impl Terminal {
         let mut out = String::new();
         let end = lines.end.min(buf.len());
         let start = lines.start.min(end);
-        for (index, row) in buf.range(start..end).enumerate().map(|(i, r)| (start + i, r)) {
+        for (index, row) in buf
+            .range(start..end)
+            .enumerate()
+            .map(|(i, r)| (start + i, r))
+        {
             let mut line = String::new();
             for cell in &row.cells {
                 if cell.flags.has(Flags::SPACER) || cell.flags.has(Flags::LEADING_SPACER) {

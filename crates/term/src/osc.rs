@@ -38,7 +38,9 @@ impl Core {
                     return;
                 }
                 for pair in params[1..].chunks(2) {
-                    let Some(index) = parse_number(pair[0]) else { continue };
+                    let Some(index) = parse_number(pair[0]) else {
+                        continue;
+                    };
                     if let Some(rgb) = xparse_color(pair[1]) {
                         self.set_override(u16::from(index), rgb);
                     } else if pair[1] == b"?" {
@@ -49,7 +51,8 @@ impl Core {
             }
             b"7" if params.len() >= 2 => {
                 let cwd = params[1..].join(&b';');
-                self.events.push_back(Event::Cwd(String::from_utf8_lossy(&cwd).into_owned()));
+                self.events
+                    .push_back(Event::Cwd(String::from_utf8_lossy(&cwd).into_owned()));
             }
             b"8" if params.len() > 2 => {
                 let mut uri = String::from_utf8_lossy(params[2]).into_owned();
@@ -183,16 +186,16 @@ impl Core {
 
     fn color_reply(&mut self, prefix: &str, rgb: Rgb, terminator: &[u8]) {
         let Rgb(r, g, b) = rgb;
-        let mut text = format!("\x1b]{prefix};rgb:{r:02x}{r:02x}/{g:02x}{g:02x}/{b:02x}{b:02x}").into_bytes();
+        let mut text =
+            format!("\x1b]{prefix};rgb:{r:02x}{r:02x}/{g:02x}{g:02x}/{b:02x}{b:02x}").into_bytes();
         text.extend_from_slice(terminator);
         self.reply(&text);
     }
 
     /// Auk's private `OSC 6464` sequences, which snapshots use for state plain VT can't set.
     fn private_osc(&mut self, params: &[&[u8]]) {
-        let number = |p: Option<&&[u8]>| -> Option<u64> {
-            std::str::from_utf8(p?).ok()?.parse().ok()
-        };
+        let number =
+            |p: Option<&&[u8]>| -> Option<u64> { std::str::from_utf8(p?).ok()?.parse().ok() };
         match params[0] {
             b"anchor" => {
                 if let Some(key) = number(params.get(1)) {
@@ -235,7 +238,11 @@ impl Core {
                 slot.touch(col + 1);
                 let cell = &mut slot.cells[col];
                 for p in &params[1..] {
-                    if let Some(c) = std::str::from_utf8(p).ok().and_then(|p| p.parse().ok()).and_then(char::from_u32) {
+                    if let Some(c) = std::str::from_utf8(p)
+                        .ok()
+                        .and_then(|p| p.parse().ok())
+                        .and_then(char::from_u32)
+                    {
                         if cell.text.is_empty() {
                             cell.text.push(' ');
                         }
@@ -261,7 +268,9 @@ fn parse_mark(params: &[&[u8]]) -> Option<Mark> {
             Some(Mark::CommandStart { cmdline })
         }
         b'D' => {
-            let status = params.get(1).and_then(|p| std::str::from_utf8(p).ok()?.parse().ok());
+            let status = params
+                .get(1)
+                .and_then(|p| std::str::from_utf8(p).ok()?.parse().ok());
             Some(Mark::CommandEnd { status })
         }
         _ => None,
@@ -273,7 +282,9 @@ fn percent_decode(s: &[u8]) -> Vec<u8> {
     let mut i = 0;
     while i < s.len() {
         if s[i] == b'%' && i + 2 < s.len() {
-            let hex = std::str::from_utf8(&s[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok());
+            let hex = std::str::from_utf8(&s[i + 1..i + 3])
+                .ok()
+                .and_then(|h| u8::from_str_radix(h, 16).ok());
             if let Some(b) = hex {
                 out.push(b);
                 i += 3;
@@ -318,7 +329,11 @@ pub(crate) fn xparse_color(color: &[u8]) -> Option<Rgb> {
             let v = usize::from_str_radix(std::str::from_utf8(s).ok()?, 16).ok()? << 4;
             Some((v >> (4 * s.len().saturating_sub(1))) as u8)
         };
-        Some(Rgb(part(&rest[..n])?, part(&rest[n..2 * n])?, part(&rest[2 * n..])?))
+        Some(Rgb(
+            part(&rest[..n])?,
+            part(&rest[n..2 * n])?,
+            part(&rest[2 * n..])?,
+        ))
     } else if let Some(rest) = color.strip_prefix(b"rgb:") {
         let parts: Vec<&str> = std::str::from_utf8(rest).ok()?.split('/').collect();
         if parts.len() != 3 {
@@ -397,10 +412,18 @@ mod tests {
         assert_eq!(parse_mark(&[b"A", b"k=s"]), Some(Mark::PromptStart));
         assert_eq!(
             parse_mark(&[b"C", b"cmdline_url=echo%20%22hi%22%3B%20ls"]),
-            Some(Mark::CommandStart { cmdline: Some("echo \"hi\"; ls".into()) })
+            Some(Mark::CommandStart {
+                cmdline: Some("echo \"hi\"; ls".into())
+            })
         );
-        assert_eq!(parse_mark(&[b"C"]), Some(Mark::CommandStart { cmdline: None }));
-        assert_eq!(parse_mark(&[b"D", b"130"]), Some(Mark::CommandEnd { status: Some(130) }));
+        assert_eq!(
+            parse_mark(&[b"C"]),
+            Some(Mark::CommandStart { cmdline: None })
+        );
+        assert_eq!(
+            parse_mark(&[b"D", b"130"]),
+            Some(Mark::CommandEnd { status: Some(130) })
+        );
         assert_eq!(parse_mark(&[b"Z"]), None);
         assert_eq!(percent_decode(b"100%"), b"100%");
         assert_eq!(percent_decode(b"%zz%41"), b"%zzA");

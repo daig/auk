@@ -18,7 +18,10 @@ pub(crate) struct Hasher {
 
 impl Hasher {
     fn new() -> Hasher {
-        Hasher { inner: blake3::Hasher::new(), buf: Vec::with_capacity(1 << 16) }
+        Hasher {
+            inner: blake3::Hasher::new(),
+            buf: Vec::with_capacity(1 << 16),
+        }
     }
 
     fn flush(&mut self) {
@@ -196,4 +199,47 @@ pub(crate) fn state_hash(core: &Core, parser: &Parser) -> [u8; 32] {
     }
     parser.hash_into(&mut h);
     h.finish()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{AnchorKey, Config, Terminal};
+
+    /// A session touching most of the replicated state: scrollback, wide and combining
+    /// characters, colors, links, an anchor, a resize, saved cursors, modes, kitty stacks, both
+    /// screens, titles, color overrides and a sequence left half-parsed.
+    fn session() -> Terminal {
+        let mut t = Terminal::new(20, 6, Config { scrollback: 50 });
+        for i in 0..12 {
+            t.feed(
+                format!(
+                    "line {i} \x1b[1;3{}m中文e\u{301}\x1b[0m wrapped text past the edge\r\n",
+                    i % 8
+                )
+                .as_bytes(),
+            );
+        }
+        t.open_anchor(AnchorKey(7)).expect("main screen");
+        t.feed(b"\x1b]8;id=a;https://example.com\x1b\\link\x1b]8;;\x1b\\ \x1b[38:2::1:2:3;4:3;58;5;9mx");
+        t.feed(b"\x1b[2;5r\x1b[?6h\x1b7\x1b[?1h\x1b[?2004h\x1b[>5u\x1b]2;title\x07\x1b[22t");
+        t.feed(b"\x1b]4;3;rgb:10/20/30\x1b\\\x1b]11;#abcdef\x07\x1b(0qx\x1b(B\x1b[5 q");
+        t.resize(13, 8);
+        t.feed(b"\x1b[?1049h\x1b[>1u\x1b[44malt\x1bH\x1b[3;3Hz\x1b[38;2;9");
+        t
+    }
+
+    /// The hash of a fixed session is pinned, so any platform where the serialization differs
+    /// (word size, endianness, iteration order) fails here; run on aarch64 and wasm32.
+    #[test]
+    fn state_hash_is_pinned() {
+        let hex: String = session()
+            .state_hash()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(
+            hex,
+            "820baf422bd3768363bd80fdc0d053b7d1129b35cf6beb074a5e94b71c0623ed"
+        );
+    }
 }

@@ -8,12 +8,11 @@ use std::collections::VecDeque;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::screen::{
-    Charset, CursorState, Events, KITTY_STACK_DEPTH, Screen, cell_is_empty, clear_cell,
-    end_anchor, fix_wide, reset_row,
+    Charset, CursorState, Events, KITTY_STACK_DEPTH, Screen, cell_is_empty, clear_cell, end_anchor,
+    fix_wide, reset_row,
 };
 use crate::{
-    AnchorError, AnchorKey, Color, Config, CursorShape, Event, Facts, Flags, Line, MouseMode,
-    Rgb,
+    AnchorError, AnchorKey, Color, Config, CursorShape, Event, Facts, Flags, Line, MouseMode, Rgb,
 };
 
 /// Terminal-wide mode bits.
@@ -44,7 +43,6 @@ pub(crate) enum MouseEncoding {
     Sgr,
 }
 
-
 /// Interned OSC 8 links. A link's identity is its `id` parameter (if any) and its URI.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Links {
@@ -56,7 +54,11 @@ pub(crate) struct Links {
 
 impl Links {
     pub(crate) fn new() -> Links {
-        Links { uris: vec![String::new()], ids: vec![None], lookup: Default::default() }
+        Links {
+            uris: vec![String::new()],
+            ids: vec![None],
+            lookup: Default::default(),
+        }
     }
 
     pub(crate) fn intern(&mut self, id: Option<String>, uri: String) -> u32 {
@@ -147,12 +149,20 @@ impl Core {
 
     #[inline]
     pub(crate) fn scr(&mut self) -> &mut Screen {
-        if self.alt_active { &mut self.alt } else { &mut self.main }
+        if self.alt_active {
+            &mut self.alt
+        } else {
+            &mut self.main
+        }
     }
 
     #[inline]
     pub(crate) fn screen(&self) -> &Screen {
-        if self.alt_active { &self.alt } else { &self.main }
+        if self.alt_active {
+            &self.alt
+        } else {
+            &self.main
+        }
     }
 
     /// The active screen, its scrollback limit and the event queue, borrowed together.
@@ -385,7 +395,13 @@ impl Core {
         let row = &mut s.buf[row_index];
         let (fg, bg, ul, flags, link) = {
             let cell = &row.cells[col];
-            (cell.fg, cell.bg, cell.underline_color, cell.flags.0, cell.link)
+            (
+                cell.fg,
+                cell.bg,
+                cell.underline_color,
+                cell.flags.0,
+                cell.link,
+            )
         };
         row.touch(col + 2);
         row.cells[col].flags.0 |= Flags::WIDE;
@@ -532,7 +548,11 @@ impl Core {
 
     pub(crate) fn goto_col(&mut self, col: usize) {
         let row = self.screen().cursor.row as i64;
-        let line = if self.has(mode::ORIGIN) { row - self.top as i64 } else { row };
+        let line = if self.has(mode::ORIGIN) {
+            row - self.top as i64
+        } else {
+            row
+        };
         self.goto(line, col);
     }
 
@@ -547,7 +567,11 @@ impl Core {
 
     /// CUD: down, stopping at the bottom margin when starting at or above it.
     pub(crate) fn move_down(&mut self, n: usize) {
-        let ceiling = if self.screen().cursor.row < self.bot { self.bot - 1 } else { self.rows - 1 };
+        let ceiling = if self.screen().cursor.row < self.bot {
+            self.bot - 1
+        } else {
+            self.rows - 1
+        };
         let s = self.scr();
         s.cursor.row = s.cursor.row.saturating_add(n).min(ceiling);
         s.cursor.pending_wrap = false;
@@ -612,7 +636,9 @@ impl Core {
     }
 
     pub(crate) fn scroll_down_relative(&mut self, origin: usize, n: usize) {
-        let n = n.min(self.bot.saturating_sub(self.top)).min(self.bot.saturating_sub(origin));
+        let n = n
+            .min(self.bot.saturating_sub(self.top))
+            .min(self.bot.saturating_sub(origin));
         let bot = self.bot;
         let (s, _, events) = self.parts();
         let bg = s.cursor.pen.bg;
@@ -925,7 +951,11 @@ impl Core {
             }
             1004 => self.set_mode_bit(mode::FOCUS, on),
             1005 | 1006 => {
-                let e = if mode_number == 1005 { MouseEncoding::Utf8 } else { MouseEncoding::Sgr };
+                let e = if mode_number == 1005 {
+                    MouseEncoding::Utf8
+                } else {
+                    MouseEncoding::Sgr
+                };
                 if on {
                     self.mouse_encoding = e;
                 } else if self.mouse_encoding == e {
@@ -1041,7 +1071,11 @@ impl Core {
             (5, false) => self.reply(b"\x1b[0n"),
             (6, _) => {
                 let c = self.screen().cursor.clone();
-                let row = if self.has(mode::ORIGIN) { c.row.saturating_sub(self.top) } else { c.row };
+                let row = if self.has(mode::ORIGIN) {
+                    c.row.saturating_sub(self.top)
+                } else {
+                    c.row
+                };
                 let text = if private {
                     format!("\x1b[?{};{};1R", row + 1, c.col + 1)
                 } else {
@@ -1056,7 +1090,11 @@ impl Core {
     pub(crate) fn window_report(&mut self, op: u16) {
         let (w, h) = self.facts.cell_px;
         let text = match op {
-            14 => format!("\x1b[4;{};{}t", self.rows * usize::from(h), self.cols * usize::from(w)),
+            14 => format!(
+                "\x1b[4;{};{}t",
+                self.rows * usize::from(h),
+                self.cols * usize::from(w)
+            ),
             16 => format!("\x1b[6;{h};{w}t"),
             18 => format!("\x1b[8;{};{}t", self.rows, self.cols),
             _ => return,
@@ -1102,13 +1140,16 @@ impl Core {
 
     pub(crate) fn undo_anchor(&mut self, key: AnchorKey) -> bool {
         let s = &mut self.main;
-        let Some(index) = s.find_anchor(key) else { return false };
+        let Some(index) = s.find_anchor(key) else {
+            return false;
+        };
         if index < s.history {
             return false;
         }
         let r = index - s.history;
         let rows = s.rows();
-        let below_clear = (r + 1..rows).all(|i| crate::screen::row_is_clear(s.row(i)) && s.row(i).anchor.is_none());
+        let below_clear = (r + 1..rows)
+            .all(|i| crate::screen::row_is_clear(s.row(i)) && s.row(i).anchor.is_none());
         if self.alt_active || s.cursor.row <= r || !below_clear {
             return false;
         }
@@ -1136,7 +1177,8 @@ impl Core {
 
     /// Marks the cursor row as the anchor `key` (the snapshot's `OSC 6464 ; anchor`).
     pub(crate) fn mark_anchor(&mut self, key: AnchorKey) {
-        if self.alt_active || !self.accept_anchor_sequences || self.main.find_anchor(key).is_some() {
+        if self.alt_active || !self.accept_anchor_sequences || self.main.find_anchor(key).is_some()
+        {
             return;
         }
         let s = &mut self.main;

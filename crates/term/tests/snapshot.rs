@@ -4,6 +4,9 @@
 //! parser is often caught mid-sequence) and from the realistic grammar, mixed with records and
 //! anchor operations.
 
+// Uses dev-dependencies that don't build for wasm32 (see Cargo.toml).
+#![cfg(not(target_family = "wasm"))]
+
 use auk_term::{AnchorKey, Config, Terminal};
 use proptest::prelude::*;
 
@@ -71,14 +74,26 @@ fn op() -> impl Strategy<Value = Op> {
     ]
 }
 
-fn check(cols: u16, rows: u16, scrollback: usize, ops: &[Op], suffix: &[Op]) -> Result<(), TestCaseError> {
+fn check(
+    cols: u16,
+    rows: u16,
+    scrollback: usize,
+    ops: &[Op],
+    suffix: &[Op],
+) -> Result<(), TestCaseError> {
     let config = Config { scrollback };
     let mut t = Terminal::new(cols, rows, config.clone());
     for op in ops {
         apply(&mut t, op);
     }
     let snapshot = t.snapshot();
-    let mut u = Terminal::new(t.cols(), t.rows(), Config { scrollback: t_config_scrollback(ops, scrollback) });
+    let mut u = Terminal::new(
+        t.cols(),
+        t.rows(),
+        Config {
+            scrollback: t_config_scrollback(ops, scrollback),
+        },
+    );
     u.feed(&snapshot);
     u.take_events();
     prop_assert_eq!(
@@ -90,14 +105,23 @@ fn check(cols: u16, rows: u16, scrollback: usize, ops: &[Op], suffix: &[Op]) -> 
     for (i, op) in suffix.iter().enumerate() {
         apply(&mut t, op);
         apply(&mut u, op);
-        prop_assert_eq!(t.state_hash(), u.state_hash(), "after suffix op {} {:?}", i, op);
+        prop_assert_eq!(
+            t.state_hash(),
+            u.state_hash(),
+            "after suffix op {} {:?}",
+            i,
+            op
+        );
     }
     Ok(())
 }
 
 /// The scrollback setting in force after `ops` (records change it).
 fn t_config_scrollback(ops: &[Op], initial: usize) -> usize {
-    ops.iter().fold(initial, |n, op| if let Op::Scrollback(s) = op { *s } else { n })
+    ops.iter().fold(
+        initial,
+        |n, op| if let Op::Scrollback(s) = op { *s } else { n },
+    )
 }
 
 proptest! {
@@ -151,7 +175,10 @@ fn snapshot_keeps_anchors_and_scrollback() {
     u.feed(&snapshot);
     assert_eq!(u.anchor_line(AnchorKey(42)), Some(line));
     assert_eq!(u.history_len(), t.history_len());
-    assert_eq!(u.text(0..u.history_len() + 5), t.text(0..t.history_len() + 5));
+    assert_eq!(
+        u.text(0..u.history_len() + 5),
+        t.text(0..t.history_len() + 5)
+    );
     assert_eq!(u.state_hash(), t.state_hash());
 }
 
@@ -163,7 +190,16 @@ fn hash_covers_state() {
         t
     };
     let reference = base().state_hash();
-    let variants: [&[u8]; 8] = [b"\x1b[1m", b"\x1b[?2004h", b"\x1b]2;x\x07", b"\x1b[2;3r", b"\x1bH", b"\x1b(0", b"\x1b[>1u", b"\x1b["];
+    let variants: [&[u8]; 8] = [
+        b"\x1b[1m",
+        b"\x1b[?2004h",
+        b"\x1b]2;x\x07",
+        b"\x1b[2;3r",
+        b"\x1bH",
+        b"\x1b(0",
+        b"\x1b[>1u",
+        b"\x1b[",
+    ];
     for v in variants {
         let mut t = base();
         t.feed(v);

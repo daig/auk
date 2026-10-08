@@ -97,7 +97,10 @@ pub(crate) struct Slot {
 
 impl Slot {
     pub(crate) fn blank(cols: usize) -> Slot {
-        Slot { row: blank_row(cols), occ: 0 }
+        Slot {
+            row: blank_row(cols),
+            occ: 0,
+        }
     }
 
     /// Notes that cells before `end` may have been written.
@@ -139,7 +142,11 @@ pub(crate) struct Screen {
 
 /// A blank row of `cols` default cells.
 pub(crate) fn blank_row(cols: usize) -> Row {
-    Row { cells: vec![Cell::default(); cols], wrapped: false, anchor: None }
+    Row {
+        cells: vec![Cell::default(); cols],
+        wrapped: false,
+        anchor: None,
+    }
 }
 
 /// Clears a cell to a blank with background `bg`, keeping its text allocation.
@@ -163,7 +170,11 @@ pub(crate) fn end_anchor(row: &mut Row, events: &mut Events) {
 /// Blanks a whole row (ending its anchor): the cells get background `bg`.
 pub(crate) fn reset_row(slot: &mut Slot, bg: Color, events: &mut Events) {
     end_anchor(&mut slot.row, events);
-    let end = if bg == Color::Default { slot.occ } else { slot.row.cells.len() };
+    let end = if bg == Color::Default {
+        slot.occ
+    } else {
+        slot.row.cells.len()
+    };
     for cell in &mut slot.row.cells[..end] {
         clear_cell(cell, bg);
     }
@@ -320,7 +331,14 @@ impl Screen {
 
     /// Visible rows `top..bot` move down by `n`; rows pushed past `bot` are discarded and new
     /// rows at the top are blank with background `bg` (`Grid::scroll_down`).
-    pub(crate) fn scroll_down(&mut self, top: usize, bot: usize, n: usize, bg: Color, events: &mut Events) {
+    pub(crate) fn scroll_down(
+        &mut self,
+        top: usize,
+        bot: usize,
+        n: usize,
+        bg: Color,
+        events: &mut Events,
+    ) {
         if n == 0 || bot <= top {
             return;
         }
@@ -367,7 +385,11 @@ mod tests {
         Row {
             cells: cells
                 .iter()
-                .map(|&(text, flags)| Cell { text: text.into(), flags: Flags(flags), ..Cell::default() })
+                .map(|&(text, flags)| Cell {
+                    text: text.into(),
+                    flags: Flags(flags),
+                    ..Cell::default()
+                })
                 .collect(),
             wrapped,
             anchor: None,
@@ -375,17 +397,30 @@ mod tests {
     }
 
     fn kinds(row: &Row) -> Vec<(String, u16)> {
-        row.cells.iter().map(|c| (c.text.clone(), c.flags.0)).collect()
+        row.cells
+            .iter()
+            .map(|c| (c.text.clone(), c.flags.0))
+            .collect()
     }
 
     #[test]
     fn fix_wide_blanks_unpaired_halves() {
         let (w, s, l) = (Flags::WIDE, Flags::SPACER, Flags::LEADING_SPACER);
-        let mut row = row_of(&[("", s), ("中", w), ("a", 0), ("中", w), ("", s), ("中", w)], false);
+        let mut row = row_of(
+            &[("", s), ("中", w), ("a", 0), ("中", w), ("", s), ("中", w)],
+            false,
+        );
         fix_wide(&mut row);
         assert_eq!(
             kinds(&row),
-            vec![("".into(), 0), ("".into(), 0), ("a".into(), 0), ("中".into(), w), ("".into(), s), ("".into(), 0)]
+            vec![
+                ("".into(), 0),
+                ("".into(), 0),
+                ("a".into(), 0),
+                ("中".into(), w),
+                ("".into(), s),
+                ("".into(), 0)
+            ]
         );
         // A leading spacer stays only in the last column of a wrapped row.
         let mut row = row_of(&[("", l), ("", l)], true);
@@ -410,7 +445,11 @@ mod tests {
         assert_eq!((s.history, s.buf.len()), (1, 3));
         assert_eq!(events.pop_front(), Some(Event::AnchorGone(AnchorKey(7))));
         // The recycled row came back blank.
-        assert!(s.buf.iter().all(|slot| slot.cells.iter().all(|c| *c == Cell::default())));
+        assert!(
+            s.buf
+                .iter()
+                .all(|slot| slot.cells.iter().all(|c| *c == Cell::default()))
+        );
     }
 
     #[test]

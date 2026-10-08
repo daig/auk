@@ -23,7 +23,7 @@
 use std::io::Write as _;
 use std::time::Duration;
 
-use auk_platform_macos::synth::{Stroke, input_source, post_to_pid, settle};
+use auk_platform_macos::synth::{Stroke, can_post_events, input_source, post_to_pid, settle};
 use auk_platform_macos::{
     Event, OptionAsAlt, Window, WindowAttributes, WindowHandler, run, run_on_main,
 };
@@ -159,19 +159,20 @@ fn main() {
             )
         })
         .collect();
-    let reference = if opts.ghostty {
-        Some(ghostty::record(&strokes, opts.kitty))
-    } else {
-        None
-    };
-    let restore = opts.input_source.as_ref().map(|id| {
+    let restore = RestoreSource(opts.input_source.as_ref().and_then(|id| {
         let previous = input_source::current();
         assert!(
             input_source::select(id),
             "input source {id} is not installed"
         );
         previous
-    });
+    }));
+    // After selecting the input source: both terminals interpret the strokes under it.
+    let reference = if opts.ghostty {
+        Some(ghostty::record(&strokes, opts.kitty))
+    } else {
+        None
+    };
     let modes = Modes {
         kitty_flags: if opts.kitty { 1 } else { 0 },
         ..Modes::default()
@@ -190,7 +191,7 @@ fn main() {
         };
         let window = app.create_window(attrs, Box::new(SharedRecorder));
         // Type once the window has had a moment to become key, so the input method is live.
-        PROBE.with(|p| *p.borrow_mut() = Some((window, strokes, reference, restore.flatten())));
+        PROBE.with(|p| *p.borrow_mut() = Some((window, strokes, reference, restore)));
         std::thread::spawn(|| {
             std::thread::sleep(Duration::from_millis(500));
             run_on_main(probe);
@@ -202,8 +203,19 @@ type Probe = (
     Window,
     Vec<(String, Stroke)>,
     Option<Vec<Vec<u8>>>,
-    Option<String>,
+    RestoreSource,
 );
+
+/// Reselects the user's input source when dropped, including on a panic.
+struct RestoreSource(Option<String>);
+
+impl Drop for RestoreSource {
+    fn drop(&mut self) {
+        if let Some(previous) = self.0.take() {
+            input_source::select(&previous);
+        }
+    }
+}
 
 thread_local! {
     static PROBE: std::cell::RefCell<Option<Probe>> = const { std::cell::RefCell::new(None) };
@@ -238,9 +250,8 @@ fn probe() {
             None => println!("{i:3} {name:16} [{ours}] {}", events.join(" ")),
         }
     }
-    if let Some(previous) = restore {
-        input_source::select(&previous);
-    }
+    // `exit` skips destructors.
+    drop(restore);
     let _ = std::io::stdout().flush();
     std::process::exit(if mismatches > 0 { 1 } else { 0 });
 }
@@ -283,15 +294,28 @@ mod ghostty {
     use std::process::Command;
 
     pub fn record(strokes: &[(String, Stroke)], kitty: bool) -> Vec<Vec<u8>> {
+        assert!(
+            can_post_events(),
+            "posting keys to Ghostty needs the Accessibility permission for the terminal running \
+             keyprobe (System Settings > Privacy & Security > Accessibility)"
+        );
         let dir = std::env::temp_dir().join(format!("auk-keyprobe-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("temp dir");
+        let recorded = record_in(&dir, strokes, kitty);
+        let _ = std::fs::remove_dir_all(&dir);
+        recorded
+    }
+
+    fn record_in(dir: &std::path::Path, strokes: &[(String, Stroke)], kitty: bool) -> Vec<Vec<u8>> {
         let out = dir.join("bytes");
+        let ready = dir.join("ready");
         let script = dir.join("record.sh");
         let push = if kitty { "printf '\\033[>1u'; " } else { "" };
         std::fs::write(
             &script,
             format!(
-                "#!/bin/sh\n{push}stty raw -echo; exec cat > '{}'\n",
+                "#!/bin/sh\n{push}stty raw -echo; : > '{}'; exec cat > '{}'\n",
+                ready.display(),
                 out.display()
             ),
         )
@@ -307,7 +331,17 @@ mod ghostty {
             .arg(&script)
             .status()
             .expect("Ghostty is installed (brew install --cask ghostty)");
-        std::thread::sleep(Duration::from_secs(3));
+        let started = std::time::Instant::now();
+        while !ready.exists() {
+            assert!(
+                started.elapsed() < Duration::from_secs(15),
+                "Ghostty didn't run the recorder; open Ghostty once by hand to clear Gatekeeper's \
+                 first-launch prompt"
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        // The shell has set the tty raw; give the window a moment to become key.
+        std::thread::sleep(Duration::from_millis(500));
         let pid = pids()
             .into_iter()
             .find(|p| !before.contains(p))

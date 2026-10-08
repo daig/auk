@@ -79,7 +79,11 @@ impl Writer<'_> {
     /// Writes one row's cells from column 0 of the cursor's row, then its flags and anchor.
     fn row(&mut self, row: &Row) {
         let cols = row.cells.len();
-        let last = row.cells.iter().rposition(|c| *c != Cell::default()).map_or(0, |i| i + 1);
+        let last = row
+            .cells
+            .iter()
+            .rposition(|c| *c != Cell::default())
+            .map_or(0, |i| i + 1);
         let mut col = 0;
         while col < last {
             let cell = &row.cells[col];
@@ -114,7 +118,8 @@ impl Writer<'_> {
             return;
         };
         let mut buf = [0; 4];
-        self.out.extend_from_slice(base.encode_utf8(&mut buf).as_bytes());
+        self.out
+            .extend_from_slice(base.encode_utf8(&mut buf).as_bytes());
         let rest = chars.as_str();
         if rest.is_empty() {
             return;
@@ -145,7 +150,12 @@ impl Writer<'_> {
             };
             self.out.extend_from_slice(&[0x1b, designator, set]);
         }
-        self.osc(&format!("6464;cursor;{};{};{}", c.row, c.col, u8::from(c.pending_wrap)));
+        self.osc(&format!(
+            "6464;cursor;{};{};{}",
+            c.row,
+            c.col,
+            u8::from(c.pending_wrap)
+        ));
     }
 
     fn kitty(&mut self, s: &Screen) {
@@ -225,13 +235,17 @@ fn color(s: &mut String, c: Color, base: u8, bright: u8, extended: u8) {
 }
 
 fn screen_is_blank(s: &Screen) -> bool {
-    s.buf.iter().all(|r| {
-        !r.wrapped && r.anchor.is_none() && r.cells.iter().all(|c| *c == Cell::default())
-    })
+    s.buf
+        .iter()
+        .all(|r| !r.wrapped && r.anchor.is_none() && r.cells.iter().all(|c| *c == Cell::default()))
 }
 
 pub(crate) fn snapshot(core: &Core, parser: &Parser) -> Vec<u8> {
-    let mut w = Writer { core, out: Vec::new(), pen: Pen::default() };
+    let mut w = Writer {
+        core,
+        out: Vec::new(),
+        pen: Pen::default(),
+    };
     let rows = core.rows;
 
     // The alternate screen.
@@ -240,7 +254,10 @@ pub(crate) fn snapshot(core: &Core, parser: &Parser) -> Vec<u8> {
         w.private_mode(47, true);
         for r in 0..rows {
             let row = alt.row(r);
-            if !row.wrapped && row.anchor.is_none() && row.cells.iter().all(|c| *c == Cell::default()) {
+            if !row.wrapped
+                && row.anchor.is_none()
+                && row.cells.iter().all(|c| *c == Cell::default())
+            {
                 continue;
             }
             w.csi(&format!("{};1H", r + 1));
@@ -261,7 +278,10 @@ pub(crate) fn snapshot(core: &Core, parser: &Parser) -> Vec<u8> {
         if k + 1 < total {
             if w.pen.bg != Color::Default {
                 // Rows created by scrolling take the pen's background.
-                let pen = Pen { link: w.pen.link, ..Pen::default() };
+                let pen = Pen {
+                    link: w.pen.link,
+                    ..Pen::default()
+                };
                 w.set_pen(&pen);
             }
             w.out.extend_from_slice(b"\r\n");

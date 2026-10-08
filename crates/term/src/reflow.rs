@@ -23,7 +23,10 @@ struct Cursor {
 }
 
 fn leading_spacer() -> Cell {
-    Cell { flags: Flags(Flags::LEADING_SPACER), ..Cell::default() }
+    Cell {
+        flags: Flags(Flags::LEADING_SPACER),
+        ..Cell::default()
+    }
 }
 
 /// `Point::sub` with `Boundary::Cursor`: moves back `rhs` cells in reading order, then clamps to
@@ -67,7 +70,11 @@ fn shrink(row: &mut Row, columns: usize) -> Option<(Vec<Cell>, bool)> {
         .map_or(0, |i| i + 1);
     split.truncate(keep);
     let tail = wrapped && keep == last + 1;
-    if split.is_empty() { None } else { Some((split, tail)) }
+    if split.is_empty() {
+        None
+    } else {
+        Some((split, tail))
+    }
 }
 
 impl Screen {
@@ -168,7 +175,11 @@ impl Screen {
 
             // A leading spacer goes when its wide character can join the line.
             let mut last_len = last_row.cells.len();
-            if last_len >= 1 && last_row.cells[last_len - 1].flags.has(Flags::LEADING_SPACER) {
+            if last_len >= 1
+                && last_row.cells[last_len - 1]
+                    .flags
+                    .has(Flags::LEADING_SPACER)
+            {
                 last_row.cells.truncate(last_len - 1);
                 last_len -= 1;
             }
@@ -196,7 +207,8 @@ impl Screen {
             let cursor_buffer_line = (lines as i64 - cursor.line - 1) as usize;
             let clear = is_clear(&row);
             if i == cursor_buffer_line && reflow {
-                let (mut tl, mut tc) = point_sub(cursor.line, cursor.col, columns, lines, num_wrapped);
+                let (mut tl, mut tc) =
+                    point_sub(cursor.line, cursor.col, columns, lines, num_wrapped);
                 if tc == 0 && clear {
                     cursor.pending = true;
                     (tl, tc) = point_sub(tl, tc, columns, lines, 1);
@@ -244,13 +256,23 @@ impl Screen {
         }
 
         self.history = out.len() - lines;
-        self.buf = out.into_iter().map(|row| Slot { occ: columns, row }).collect();
+        self.buf = out
+            .into_iter()
+            .map(|row| Slot { occ: columns, row })
+            .collect();
         self.cursor.row = cursor.line as usize;
         self.cursor.col = cursor.col;
         self.cursor.pending_wrap = cursor.pending;
     }
 
-    fn shrink_columns(&mut self, reflow: bool, columns: usize, lines: usize, limit: usize, events: &mut Events) {
+    fn shrink_columns(
+        &mut self,
+        reflow: bool,
+        columns: usize,
+        lines: usize,
+        limit: usize,
+        events: &mut Events,
+    ) {
         let mut cursor = Cursor {
             line: self.cursor.row as i64,
             col: self.cursor.col,
@@ -348,7 +370,11 @@ impl Screen {
                 if occ < columns {
                     wrapped.resize(columns, Cell::default());
                 }
-                row = Row { cells: wrapped, wrapped: wrapped_flag, anchor: None };
+                row = Row {
+                    cells: wrapped,
+                    wrapped: wrapped_flag,
+                    anchor: None,
+                };
             }
         }
 
@@ -361,7 +387,10 @@ impl Screen {
         }
 
         self.history = out.len() - lines;
-        self.buf = out.into_iter().map(|row| Slot { occ: columns, row }).collect();
+        self.buf = out
+            .into_iter()
+            .map(|row| Slot { occ: columns, row })
+            .collect();
 
         if !reflow {
             cursor.col = cursor.col.min(columns - 1);

@@ -48,7 +48,10 @@ impl Params {
     }
 
     pub(crate) fn iter(&self) -> ParamsIter<'_> {
-        ParamsIter { params: self, index: 0 }
+        ParamsIter {
+            params: self,
+            index: 0,
+        }
     }
 
     fn is_full(&self) -> bool {
@@ -615,7 +618,10 @@ impl Parser {
             self.ignore(record, byte);
         } else {
             let old = self.param;
-            self.param = self.param.saturating_mul(10).saturating_add(u16::from(byte - b'0'));
+            self.param = self
+                .param
+                .saturating_mul(10)
+                .saturating_add(u16::from(byte - b'0'));
             // A digit that leaves the value as it was (a leading zero, or past saturation)
             // changes nothing once the parameter has begun.
             let begun = matches!(self.seq.last(), Some(b'0'..=b'9'));
@@ -641,7 +647,12 @@ impl Parser {
             self.params.push(self.param);
         }
         self.enter_ground();
-        performer.csi_dispatch(&self.params, &self.intermediates[..self.intermediate_idx], self.ignoring, byte);
+        performer.csi_dispatch(
+            &self.params,
+            &self.intermediates[..self.intermediate_idx],
+            self.ignoring,
+            byte,
+        );
     }
 
     /// The start of a DCS string's data. No DCS function is supported, so the data is dropped.
@@ -822,24 +833,37 @@ mod tests {
             text.len()
         }
         fn print_ascii(&mut self, text: &[u8]) -> usize {
-            self.0.push(format!("print {:?}", String::from_utf8_lossy(text)));
+            self.0
+                .push(format!("print {:?}", String::from_utf8_lossy(text)));
             text.len()
         }
         fn execute(&mut self, byte: u8) {
             self.0.push(format!("execute {byte:#x}"));
         }
-        fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], ignore: bool, action: u8) {
+        fn csi_dispatch(
+            &mut self,
+            params: &Params,
+            intermediates: &[u8],
+            ignore: bool,
+            action: u8,
+        ) {
             let params: Vec<&[u16]> = params.iter().collect();
-            self.0.push(format!("csi {params:?} {intermediates:?} {ignore} {}", action as char));
+            self.0.push(format!(
+                "csi {params:?} {intermediates:?} {ignore} {}",
+                action as char
+            ));
         }
         fn esc_dispatch(&mut self, intermediates: &[u8], ignore: bool, byte: u8) {
-            self.0.push(format!("esc {intermediates:?} {ignore} {}", byte as char));
+            self.0
+                .push(format!("esc {intermediates:?} {ignore} {}", byte as char));
         }
         fn osc_dispatch(&mut self, body: &[u8], bell: bool) {
-            self.0.push(format!("osc {:?} {bell}", String::from_utf8_lossy(body)));
+            self.0
+                .push(format!("osc {:?} {bell}", String::from_utf8_lossy(body)));
         }
         fn apc_dispatch(&mut self, body: &mut Vec<u8>) {
-            self.0.push(format!("apc {:?}", String::from_utf8_lossy(body)));
+            self.0
+                .push(format!("apc {:?}", String::from_utf8_lossy(body)));
         }
         fn terminated(&self) -> bool {
             false
@@ -914,7 +938,11 @@ mod tests {
                     }
                     out
                 };
-                assert_eq!(join(whole.clone()), join(log), "{sample:?} in chunks of {size}");
+                assert_eq!(
+                    join(whole.clone()),
+                    join(log),
+                    "{sample:?} in chunks of {size}"
+                );
             }
         }
     }
@@ -944,6 +972,9 @@ mod tests {
         bytes.extend_from_slice(b"yz");
         let log = run(&mut parser, &bytes);
         // The byte past the limit is printed on its own, then the rest.
-        assert_eq!(log, vec!["print \"y\"".to_owned(), "print \"z\"".to_owned()]);
+        assert_eq!(
+            log,
+            vec!["print \"y\"".to_owned(), "print \"z\"".to_owned()]
+        );
     }
 }

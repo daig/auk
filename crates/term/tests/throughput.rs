@@ -3,6 +3,9 @@
 //! PTY reader would. Prints MB/s. Release builds must reach 200 MB/s; debug builds run a smaller
 //! stream and only report.
 
+// Uses dev-dependencies that don't build for wasm32 (see Cargo.toml).
+#![cfg(not(target_family = "wasm"))]
+
 use std::time::Instant;
 
 use auk_term::{Config, Terminal};
@@ -37,7 +40,11 @@ fn stream(size: usize) -> Vec<u8> {
 
 #[test]
 fn throughput_100mb() {
-    let size = if cfg!(debug_assertions) { 4 << 20 } else { 100 << 20 };
+    let size = if cfg!(debug_assertions) {
+        4 << 20
+    } else {
+        100 << 20
+    };
     let data = stream(size);
     let mut t = Terminal::new(80, 24, Config { scrollback: 10_000 });
     let start = Instant::now();
@@ -50,9 +57,15 @@ fn throughput_100mb() {
     }
     let secs = start.elapsed().as_secs_f64();
     let mbps = data.len() as f64 / secs / 1e6;
-    println!("throughput: {:.1} MB in {secs:.3} s = {mbps:.0} MB/s", data.len() as f64 / 1e6);
+    println!(
+        "throughput: {:.1} MB in {secs:.3} s = {mbps:.0} MB/s",
+        data.len() as f64 / 1e6
+    );
     assert_eq!(t.history_len(), 10_000);
-    assert!(t.text(t.history_len()..t.history_len() + 24).contains("status=200"));
+    assert!(
+        t.text(t.history_len()..t.history_len() + 24)
+            .contains("status=200")
+    );
     if !cfg!(debug_assertions) {
         assert!(mbps >= 200.0, "{mbps:.0} MB/s is below 200 MB/s");
     }

@@ -8,7 +8,7 @@ use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::cell::Flags as AFlags;
 use alacritty_terminal::term::test::TermSize;
 use alacritty_terminal::vte::ansi::{self, Processor};
-use auk_term::{Color, Config, Event, Flags, Terminal};
+use auk_term::{Color, Config, Flags, Terminal};
 
 /// Auk and the reference, fed the same input.
 pub struct Pair {
@@ -41,7 +41,8 @@ impl Pair {
             // around the broken halves at the very next character (difference 6), so it is fed
             // and repaired a byte at a time.
             for b in bytes {
-                self.processor.advance(&mut self.reference, std::slice::from_ref(b));
+                self.processor
+                    .advance(&mut self.reference, std::slice::from_ref(b));
                 repair_reference(&mut self.reference);
             }
         } else {
@@ -62,7 +63,8 @@ impl Pair {
     pub fn resize(&mut self, cols: u16, rows: u16) {
         self.flush();
         self.auk.resize(cols, rows);
-        self.reference.resize(TermSize::new(usize::from(cols), usize::from(rows)));
+        self.reference
+            .resize(TermSize::new(usize::from(cols), usize::from(rows)));
         repair_reference(&mut self.reference);
     }
 
@@ -74,10 +76,20 @@ impl Pair {
         let rows = usize::from(a.rows());
         let cols = usize::from(a.cols());
         if grid.screen_lines() != rows || grid.columns() != cols {
-            return Err(format!("size {}x{} vs {}x{}", cols, rows, grid.columns(), grid.screen_lines()));
+            return Err(format!(
+                "size {}x{} vs {}x{}",
+                cols,
+                rows,
+                grid.columns(),
+                grid.screen_lines()
+            ));
         }
         if grid.history_size() != a.history_len() {
-            return Err(format!("history {} vs reference {}", a.history_len(), grid.history_size()));
+            return Err(format!(
+                "history {} vs reference {}",
+                a.history_len(),
+                grid.history_size()
+            ));
         }
         let history = a.history_len();
         for index in 0..history + rows {
@@ -86,7 +98,11 @@ impl Pair {
             let rrow = &grid[line];
             let rwrapped = rrow[Column(cols - 1)].flags.contains(AFlags::WRAPLINE);
             if row.wrapped != rwrapped {
-                return Err(format!("line {index}: wrapped {} vs reference {rwrapped}\n{}", row.wrapped, self.dump()));
+                return Err(format!(
+                    "line {index}: wrapped {} vs reference {rwrapped}\n{}",
+                    row.wrapped,
+                    self.dump()
+                ));
             }
             for col in 0..cols {
                 let cell = &row.cells[col];
@@ -106,26 +122,66 @@ impl Pair {
         if (usize::from(cursor.row), usize::from(cursor.col)) != (rc.line.0 as usize, rc.column.0) {
             return Err(format!(
                 "cursor {},{} vs reference {},{}\n{}",
-                cursor.row, cursor.col, rc.line.0, rc.column.0, self.dump()
+                cursor.row,
+                cursor.col,
+                rc.line.0,
+                rc.column.0,
+                self.dump()
             ));
         }
         if a.pending_wrap() != grid.cursor.input_needs_wrap {
-            return Err(format!("pending wrap {} vs reference {}", a.pending_wrap(), grid.cursor.input_needs_wrap));
+            return Err(format!(
+                "pending wrap {} vs reference {}",
+                a.pending_wrap(),
+                grid.cursor.input_needs_wrap
+            ));
         }
         let modes = a.modes();
         let rmode = *r.mode();
         use alacritty_terminal::term::TermMode;
         let pairs = [
-            ("alt screen", modes.alt_screen, rmode.contains(TermMode::ALT_SCREEN)),
-            ("app cursor", modes.app_cursor, rmode.contains(TermMode::APP_CURSOR)),
-            ("app keypad", modes.app_keypad, rmode.contains(TermMode::APP_KEYPAD)),
+            (
+                "alt screen",
+                modes.alt_screen,
+                rmode.contains(TermMode::ALT_SCREEN),
+            ),
+            (
+                "app cursor",
+                modes.app_cursor,
+                rmode.contains(TermMode::APP_CURSOR),
+            ),
+            (
+                "app keypad",
+                modes.app_keypad,
+                rmode.contains(TermMode::APP_KEYPAD),
+            ),
             ("origin", modes.origin, rmode.contains(TermMode::ORIGIN)),
-            ("autowrap", modes.autowrap, rmode.contains(TermMode::LINE_WRAP)),
+            (
+                "autowrap",
+                modes.autowrap,
+                rmode.contains(TermMode::LINE_WRAP),
+            ),
             ("insert", modes.insert, rmode.contains(TermMode::INSERT)),
-            ("cursor visible", modes.cursor_visible, rmode.contains(TermMode::SHOW_CURSOR)),
-            ("bracketed paste", modes.bracketed_paste, rmode.contains(TermMode::BRACKETED_PASTE)),
-            ("sgr mouse", modes.mouse_sgr, rmode.contains(TermMode::SGR_MOUSE)),
-            ("focus", modes.focus_reports, rmode.contains(TermMode::FOCUS_IN_OUT)),
+            (
+                "cursor visible",
+                modes.cursor_visible,
+                rmode.contains(TermMode::SHOW_CURSOR),
+            ),
+            (
+                "bracketed paste",
+                modes.bracketed_paste,
+                rmode.contains(TermMode::BRACKETED_PASTE),
+            ),
+            (
+                "sgr mouse",
+                modes.mouse_sgr,
+                rmode.contains(TermMode::SGR_MOUSE),
+            ),
+            (
+                "focus",
+                modes.focus_reports,
+                rmode.contains(TermMode::FOCUS_IN_OUT),
+            ),
         ];
         for (name, ours, theirs) in pairs {
             if ours != theirs {
@@ -144,10 +200,18 @@ impl Pair {
             let line = Line(index as i32 - history as i32);
             let ours = a.text(index..index + 1);
             let theirs: String = (0..grid.columns())
-                .filter(|&c| !grid[line][Column(c)].flags.intersects(AFlags::WIDE_CHAR_SPACER | AFlags::LEADING_WIDE_CHAR_SPACER))
+                .filter(|&c| {
+                    !grid[line][Column(c)]
+                        .flags
+                        .intersects(AFlags::WIDE_CHAR_SPACER | AFlags::LEADING_WIDE_CHAR_SPACER)
+                })
                 .map(|c| {
                     let cell = &grid[line][Column(c)];
-                    let mut t = if cell.c == '\t' { ' '.to_string() } else { cell.c.to_string() };
+                    let mut t = if cell.c == '\t' {
+                        ' '.to_string()
+                    } else {
+                        cell.c.to_string()
+                    };
                     t.extend(cell.zerowidth().unwrap_or(&[]));
                     t
                 })
@@ -164,8 +228,19 @@ type Described = (String, Color, Color, Color, u16, String);
 const COMPARED_FLAGS: u16 = !(Flags::BLINK | Flags::OVERLINE);
 
 fn describe(cell: &auk_term::Cell, t: &Terminal) -> Described {
-    let link = t.links().get(cell.link as usize).cloned().unwrap_or_default();
-    (cell.text.clone(), cell.fg, cell.bg, cell.underline_color, cell.flags.0 & COMPARED_FLAGS, link)
+    let link = t
+        .links()
+        .get(cell.link as usize)
+        .cloned()
+        .unwrap_or_default();
+    (
+        cell.text.clone(),
+        cell.fg,
+        cell.bg,
+        cell.underline_color,
+        cell.flags.0 & COMPARED_FLAGS,
+        link,
+    )
 }
 
 fn reference_color(c: ansi::Color) -> Color {
@@ -202,10 +277,25 @@ fn describe_reference(cell: &alacritty_terminal::term::cell::Cell) -> Described 
         (AFlags::DOTTED_UNDERLINE, Flags::DOTTED_UNDERLINE),
         (AFlags::DASHED_UNDERLINE, Flags::DASHED_UNDERLINE),
     ];
-    let flags = map.iter().filter(|(a, _)| cell.flags.contains(*a)).fold(0, |f, (_, b)| f | b);
-    let ul = cell.underline_color().map_or(Color::Default, reference_color);
-    let link = cell.hyperlink().map(|h| h.uri().to_owned()).unwrap_or_default();
-    (text, reference_color(cell.fg), reference_color(cell.bg), ul, flags, link)
+    let flags = map
+        .iter()
+        .filter(|(a, _)| cell.flags.contains(*a))
+        .fold(0, |f, (_, b)| f | b);
+    let ul = cell
+        .underline_color()
+        .map_or(Color::Default, reference_color);
+    let link = cell
+        .hyperlink()
+        .map(|h| h.uri().to_owned())
+        .unwrap_or_default();
+    (
+        text,
+        reference_color(cell.fg),
+        reference_color(cell.bg),
+        ul,
+        flags,
+        link,
+    )
 }
 
 /// Applies Auk's wide-character rule (difference 6) to the reference grid: an unpaired wide
@@ -227,7 +317,8 @@ fn repair_reference(term: &mut Term<VoidListener>) {
         for c in 0..cols {
             let flags = row[Column(c)].flags;
             if flags.contains(AFlags::WIDE_CHAR) {
-                let paired = c + 1 < cols && row[Column(c + 1)].flags.contains(AFlags::WIDE_CHAR_SPACER);
+                let paired =
+                    c + 1 < cols && row[Column(c + 1)].flags.contains(AFlags::WIDE_CHAR_SPACER);
                 if !paired {
                     row[Column(c)].clear_wide();
                 }
@@ -236,8 +327,12 @@ fn repair_reference(term: &mut Term<VoidListener>) {
                 if !paired {
                     row[Column(c)].flags.remove(AFlags::WIDE_CHAR_SPACER);
                 }
-            } else if flags.contains(AFlags::LEADING_WIDE_CHAR_SPACER) && (c + 1 != cols || !wrapped) {
-                row[Column(c)].flags.remove(AFlags::LEADING_WIDE_CHAR_SPACER);
+            } else if flags.contains(AFlags::LEADING_WIDE_CHAR_SPACER)
+                && (c + 1 != cols || !wrapped)
+            {
+                row[Column(c)]
+                    .flags
+                    .remove(AFlags::LEADING_WIDE_CHAR_SPACER);
             }
         }
     }
@@ -251,13 +346,21 @@ pub fn allowed(pair: &Pair, bytes: &[u8]) -> bool {
         // 11. RIS would reset the reference's inactive main grid with stale occupancy.
         return !t.modes().alt_screen;
     }
-    let Some(body) = bytes.strip_prefix(b"\x1b[") else { return true };
-    let Some((&fin, params)) = body.split_last() else { return true };
+    let Some(body) = bytes.strip_prefix(b"\x1b[") else {
+        return true;
+    };
+    let Some((&fin, params)) = body.split_last() else {
+        return true;
+    };
     let params = std::str::from_utf8(params).unwrap_or("");
     if params.starts_with(['?', '>', '<', '=']) {
         return true;
     }
-    let first: u16 = params.split(';').next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    let first: u16 = params
+        .split(';')
+        .next()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(0);
     let count = first.max(1);
     let cursor = t.cursor();
     let region = t.scroll_region();
@@ -279,4 +382,3 @@ pub fn allowed(pair: &Pair, bytes: &[u8]) -> bool {
         _ => true,
     }
 }
-

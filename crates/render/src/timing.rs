@@ -5,8 +5,7 @@ use std::time::Duration;
 use crate::Gpu;
 
 /// Measures how long the GPU spends on one render pass: pass it to
-/// [`crate::GridRenderer::render`], call [`GpuTimer::resolve`] on the same encoder, submit, then
-/// [`GpuTimer::read`].
+/// [`crate::GridRenderer::render`], submit, then call [`GpuTimer::read`].
 #[derive(Debug)]
 pub struct GpuTimer {
     queries: wgpu::QuerySet,
@@ -57,14 +56,17 @@ impl GpuTimer {
         }
     }
 
-    /// Copies the pass's timestamps out; encode after the pass.
-    pub fn resolve(&self, encoder: &mut wgpu::CommandEncoder) {
+    /// Waits for the frame's work and returns the pass's duration.
+    ///
+    /// The timestamps are resolved in a submission of their own, after the frame's: on Apple
+    /// GPUs an end-of-pass sample resolved in the pass's own command buffer still holds the
+    /// previous frame's value.
+    pub fn read(&self, gpu: &Gpu) -> Option<Duration> {
+        gpu.wait_idle();
+        let mut encoder = gpu.device.create_command_encoder(&Default::default());
         encoder.resolve_query_set(&self.queries, 0..2, &self.resolved, 0);
         encoder.copy_buffer_to_buffer(&self.resolved, 0, &self.readback, 0, 16);
-    }
-
-    /// Waits for the GPU and returns the pass's duration.
-    pub fn read(&self, gpu: &Gpu) -> Option<Duration> {
+        gpu.queue.submit([encoder.finish()]);
         let data = crate::offscreen::map_read(gpu, &self.readback).ok()?;
         let t: [u64; 2] = bytemuck::pod_read_unaligned(&data);
         t[1].checked_sub(t[0])

@@ -119,8 +119,20 @@ impl Perform for Core {
             (b'p', [b'$']) => {
                 let m = next(0);
                 let state = match m {
-                    4 => if self.has(mode::INSERT) { 1 } else { 2 },
-                    20 => if self.has(mode::NEWLINE) { 1 } else { 2 },
+                    4 => {
+                        if self.has(mode::INSERT) {
+                            1
+                        } else {
+                            2
+                        }
+                    }
+                    20 => {
+                        if self.has(mode::NEWLINE) {
+                            1
+                        } else {
+                            2
+                        }
+                    }
                     _ => 0,
                 };
                 self.reply(format!("\x1b[{m};{state}$y").as_bytes());
@@ -241,7 +253,11 @@ impl Perform for Core {
 
 /// DECSTBM's bottom margin: the second parameter, `None` when missing or 0.
 fn it_bottom(params: &Params) -> Option<usize> {
-    params.iter().nth(1).map(|p| usize::from(p[0])).filter(|&p| p != 0)
+    params
+        .iter()
+        .nth(1)
+        .map(|p| usize::from(p[0]))
+        .filter(|&p| p != 0)
 }
 
 impl Core {
@@ -249,7 +265,10 @@ impl Core {
     pub(crate) fn sgr(&mut self, params: &Params) {
         let pen = &mut self.scr().cursor.pen;
         if params.is_empty() {
-            *pen = Pen { link: pen.link, ..Default::default() };
+            *pen = Pen {
+                link: pen.link,
+                ..Default::default()
+            };
             return;
         }
         const UNDERLINES: u16 = Flags::UNDERLINE
@@ -358,4 +377,3 @@ fn colon_color(rest: &[u16]) -> Option<Color> {
     let mut it = std::iter::once(rest[0]).chain(rest[start..].iter().copied());
     sgr_color(&mut it)
 }
-

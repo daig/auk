@@ -45,6 +45,9 @@
 //!     (difference 6); for the inactive main grid it allows one resize per alternate-screen
 //!     session, so the reference is repaired before it reflows again.
 
+// Uses dev-dependencies that don't build for wasm32 (see Cargo.toml).
+#![cfg(not(target_family = "wasm"))]
+
 use proptest::prelude::*;
 
 mod common;
@@ -78,7 +81,10 @@ fn run(cols: u16, rows: u16, scrollback: usize, steps: &[Step]) -> Result<(), Te
             pair.resized_in_alt = false;
         }
         if let Err(e) = pair.compare() {
-            return Err(TestCaseError::fail(format!("{e}\nafter:\n{}", log.join("\n"))));
+            return Err(TestCaseError::fail(format!(
+                "{e}\nafter:\n{}",
+                log.join("\n")
+            )));
         }
     }
     Ok(())
@@ -100,7 +106,11 @@ fn reflow_matches_reference() {
     for i in 0..60 {
         text.extend_from_slice(format!("line {i}: ").as_bytes());
         for j in 0..(i * 7 % 50) {
-            text.extend_from_slice(if j % 11 == 3 { "中文".as_bytes() } else { b"ab " });
+            text.extend_from_slice(if j % 11 == 3 {
+                "中文".as_bytes()
+            } else {
+                b"ab "
+            });
         }
         text.extend_from_slice(b"\r\n");
     }
@@ -110,9 +120,11 @@ fn reflow_matches_reference() {
             pair.feed(&text);
             pair.feed(b"prompt$ partial");
             pair.resize(width, height);
-            pair.compare().unwrap_or_else(|e| panic!("{width}x{height}: {e}"));
+            pair.compare()
+                .unwrap_or_else(|e| panic!("{width}x{height}: {e}"));
             pair.resize(80, 24);
-            pair.compare().unwrap_or_else(|e| panic!("back from {width}x{height}: {e}"));
+            pair.compare()
+                .unwrap_or_else(|e| panic!("back from {width}x{height}: {e}"));
         }
     }
 }

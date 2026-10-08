@@ -102,8 +102,15 @@ pub fn settle(time: std::time::Duration) {
     objc2_foundation::NSRunLoop::currentRunLoop().runUntilDate(&until);
 }
 
+/// Whether this process may post events to other processes ([`post_to_pid`]): the
+/// Accessibility permission for the app this runs under. Without it, posted events are dropped
+/// silently.
+pub fn can_post_events() -> bool {
+    objc2_core_graphics::CGPreflightPostEventAccess()
+}
+
 /// Posts `stroke` to another process (a reference terminal). Needs the Accessibility permission
-/// for the posting process.
+/// for the posting process ([`can_post_events`]).
 pub fn post_to_pid(pid: i32, stroke: Stroke) -> bool {
     let Some([down, up]) = stroke.cg_events() else {
         return false;
