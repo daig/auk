@@ -26,7 +26,6 @@ pub enum Display {
     TableCell,
     TableColumn,
     TableColumnGroup,
-    TableCaption,
 }
 
 impl Display {
@@ -51,7 +50,6 @@ impl Display {
                 | Display::TableCell
                 | Display::TableColumn
                 | Display::TableColumnGroup
-                | Display::TableCaption
         )
     }
     pub fn is_row_group(self) -> bool {
@@ -417,6 +415,17 @@ pub enum TransformFn {
     Matrix([f32; 6]),
 }
 
+/// A computed `box-shadow`: offsets, blur radius and spread in px, and its color.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Shadow {
+    pub inset: bool,
+    pub x: f32,
+    pub y: f32,
+    pub blur: f32,
+    pub spread: f32,
+    pub color: Color,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Transition {
     pub property: Arc<str>,
@@ -538,7 +547,8 @@ pub struct ComputedStyle {
     pub outline_style: BorderStyle,
     pub outline_color: Color,
     pub outline_offset: f32,
-    pub table_layout_fixed: bool,
+    /// `box-shadow`, in paint order from the top (`None` is `none`).
+    pub box_shadow: Option<Arc<Vec<Shadow>>>,
     pub object_fit: ObjectFit,
     pub image_rendering: ImageRendering,
     pub content: Option<Arc<Vec<ContentItem>>>,
@@ -657,7 +667,7 @@ impl Default for ComputedStyle {
             outline_style: BorderStyle::None,
             outline_color: Color::BLACK,
             outline_offset: 0.0,
-            table_layout_fixed: false,
+            box_shadow: None,
             object_fit: ObjectFit::Fill,
             image_rendering: ImageRendering::Smooth,
             content: None,

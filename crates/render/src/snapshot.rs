@@ -145,6 +145,18 @@ impl Selection {
     }
 }
 
+/// How OSC 8 links in the grid draw (the `hyperlinks` setting).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum LinkStyle {
+    /// A dotted underline in a muted color on every link cell; the hovered link solid.
+    #[default]
+    Dotted,
+    /// Only the hovered link, solid.
+    Hover,
+    /// Links look like the text around them.
+    Off,
+}
+
 /// How the window views a terminal.
 #[derive(Clone, Debug, PartialEq)]
 pub struct View {
@@ -155,6 +167,11 @@ pub struct View {
     pub focused: bool,
     /// The cursor's blink phase is on (always true when not blinking).
     pub cursor_on: bool,
+    pub links: LinkStyle,
+    /// The link under the pointer, ready to open (with ⌘, or on a plain click when links open
+    /// that way), by its terminal link id: its cells draw a solid underline in the theme's link
+    /// accent.
+    pub hover_link: Option<u32>,
 }
 
 impl Default for View {
@@ -164,6 +181,8 @@ impl Default for View {
             selection: None,
             focused: true,
             cursor_on: true,
+            links: LinkStyle::Dotted,
+            hover_link: None,
         }
     }
 }
@@ -269,7 +288,11 @@ impl GridSnapshot {
             for (c, cell) in row.cells.iter().take(usize::from(cols)).enumerate() {
                 let col = c as u16;
                 let selected = view.selection.is_some_and(|s| s.contains(line, col));
-                *snap.cell_mut(col, r) = resolve_cell(cell, &theme, selected);
+                let out = snap.cell_mut(col, r);
+                *out = resolve_cell(cell, &theme, selected);
+                if cell.link != 0 {
+                    decorate_link(out, cell.link, view, &theme);
+                }
             }
         }
 
@@ -321,6 +344,25 @@ impl GridSnapshot {
             }
         }
         self.cursor = Some(cursor);
+    }
+}
+
+/// A link cell's underline: solid in the accent while its link is the hovered one, else (with
+/// [`LinkStyle::Dotted`]) dotted in a color between the text's and the background's, under text
+/// the program didn't underline itself.
+fn decorate_link(cell: &mut SnapCell, link: u32, view: &View, theme: &Theme) {
+    if view.links == LinkStyle::Off {
+        return;
+    }
+    if view.hover_link == Some(link) {
+        cell.attrs.0 = (cell.attrs.0 & !Attrs::ANY_UNDERLINE) | Attrs::UNDERLINE;
+        cell.decoration = theme.link;
+    } else if view.links == LinkStyle::Dotted && !cell.attrs.has(Attrs::ANY_UNDERLINE) {
+        cell.attrs.0 |= Attrs::DOTTED_UNDERLINE;
+        // The decoration color is shared with strikethrough and overline: keep theirs.
+        if !cell.attrs.has(Attrs::STRIKE | Attrs::OVERLINE) {
+            cell.decoration = cell.fg.mix(cell.bg, 0.45);
+        }
     }
 }
 

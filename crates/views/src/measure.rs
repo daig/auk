@@ -7,6 +7,27 @@ use crate::view::{Extra, PaneView};
 use auk_tsp::{RevealAt, ScrollBy};
 use auk_ui::{Document, NodeId};
 
+/// What one [`PaneView::layout`] did, for frame statistics: measure passes run (each with its
+/// document update) and the engine's work summed over them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LayoutWork {
+    /// Document updates: 1 when the measure loop was skipped or settled at once.
+    pub passes: usize,
+    /// Measure targets visited (preview clamps, cuts, tables, strips, anchors), all passes.
+    pub measured: usize,
+    pub restyled: usize,
+    pub inline_rebuilt: usize,
+    pub laid_out: usize,
+}
+
+impl LayoutWork {
+    fn add(&mut self, s: auk_ui::UpdateStats) {
+        self.restyled += s.restyled;
+        self.inline_rebuilt += s.inline_rebuilt;
+        self.laid_out += s.laid_out;
+    }
+}
+
 /// What a measure pass reads besides the document.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct MeasureInputs {
@@ -50,6 +71,8 @@ impl PaneView {
         // The measure loop (as `Document::update_with(8, …)`), skipped when nothing it reads
         // changed since it last settled: a long transcript costs a pass over every mount.
         doc.update();
+        let mut work = LayoutWork::default();
+        work.add(doc.last_update_stats());
         let inputs = MeasureInputs {
             viewport: doc.viewport(),
             view_rect: self.view_rect.map(|r| (r.x, r.y, r.w, r.h)),
@@ -67,17 +90,31 @@ impl PaneView {
                     break;
                 }
                 doc.update();
+                work.add(doc.last_update_stats());
                 passes += 1;
             }
         }
         self.apply_scrolls(doc);
+        work.passes = passes;
+        work.measured = std::mem::take(&mut self.measure_visits);
+        self.work = work;
         passes
+    }
+
+    /// What the last [`PaneView::layout`] did.
+    pub fn last_work(&self) -> LayoutWork {
+        self.work
     }
 
     /// The part of the document the window shows, in document coordinates (the pane's scroll
     /// position). Virtualized containers lay out what's near it. `None`: the document viewport.
     pub fn set_view_rect(&mut self, rect: Option<auk_ui::Rect>) {
         self.view_rect = rect;
+    }
+
+    /// The view rect last set ([`PaneView::set_view_rect`]).
+    pub fn view_rect(&self) -> Option<auk_ui::Rect> {
+        self.view_rect
     }
 
     /// One measure pass; returns whether it changed the document.
@@ -101,6 +138,11 @@ impl PaneView {
                 {
                     continue;
                 }
+                // One inside content that is itself virtualized out of view has only an
+                // estimated box: its window waits until it is laid out.
+                if !doc.laid_out(el) {
+                    continue;
+                }
                 let Some(r) = doc.border_box(el) else {
                     continue;
                 };
@@ -116,16 +158,47 @@ impl PaneView {
                 }
             }
         }
+        // Clamps, cuts and column fits depend only on their element's laid-out size: revisit
+        // just what layout computed since the last pass. A box layout skipped (virtualized out
+        // of view, §7.10, §8.3) or took from its cache is as it was last measured, so a load or
+        // a stream costs in proportion to what changed and what's in view.
+        let since = self.measure_mark;
+        self.measure_mark = doc.layout_count();
+        let mut visits = 0;
         let mut dom = crate::dom::Dom {
             doc,
             w: &mut self.written,
         };
         for sv in &mut self.surfaces {
+            visits += sv.st.fit.len() + sv.st.anchored.len();
+            // Highlighting that waited out of view draws in as its node comes into view, what
+            // the background hasn't finished yet finished here: what's shown is highlighted.
+            let came: Vec<String> = sv
+                .st
+                .hl_waiting
+                .iter()
+                .filter(|(_, el)| dom.doc.laid_out_since(**el, since))
+                .map(|(id, _)| id.clone())
+                .collect();
+            for id in came {
+                let Some(m) = sv.mounts.get_mut(&id) else {
+                    sv.st.hl_waiting.remove(&id);
+                    continue;
+                };
+                visits += 1;
+                for d in std::mem::take(&mut m.hl) {
+                    d.draw_in(&mut dom, true);
+                    changed = true;
+                }
+                sv.st.hl_waiting.remove(&id);
+            }
             // Preview clamps.
-            for (id, m) in &sv.mounts {
-                if !matches!(m.kind.as_str(), "card" | "tool") {
+            for (id, &el) in &sv.st.previews {
+                if !dom.doc.laid_out_since(el, since) {
                     continue;
                 }
+                let Some(m) = sv.mounts.get(id) else { continue };
+                visits += 1;
                 let class = dom.class_of(m.el).to_owned();
                 if !class.split(' ').any(|c| c == "preview") {
                     continue;
@@ -177,29 +250,37 @@ impl PaneView {
                     dom.attr(more, "title", &format!("Show all  {label}"));
                     changed = true;
                 }
-                let _ = id;
             }
             // Text cuts (`truncate` start/middle on one line).
             for t in sv.st.truncs.values() {
-                if dom.doc.try_node(t.el).is_none() {
+                if !dom.doc.laid_out_since(t.el, since) {
                     continue;
                 }
+                visits += 1;
                 let Some(r) = dom.doc.border_box(t.el) else {
                     continue;
                 };
-                let cells = (r.w / cw).floor().max(1.0) as usize;
+                // Half a pixel of slack: a box exactly as wide as its text can come out a hair
+                // under it.
+                let cells = ((r.w + 0.5) / cw).floor().max(1.0) as usize;
                 let want = cut(&t.full, cells, &t.mode);
                 let have = crate::events::text_content(dom.doc, t.el);
-                if have != want {
+                // A box that shrinks to its text is as wide as its cut text, which can be a
+                // little narrower than its cells (the ellipsis): a cut that fits stays, or each
+                // pass would cut one more cell.
+                let fits = dom.doc.scroll_size(t.el).0 <= r.w + 0.5;
+                let shorter = want.chars().count() < have.chars().count();
+                if have != want && !(shorter && have != t.full && fits) {
                     dom.set_only_text(t.el, &want);
                     changed = true;
                 }
             }
             // Table column fitting.
             for info in sv.st.tables.values() {
-                if dom.doc.try_node(info.grid).is_none() {
+                if !dom.doc.laid_out_since(info.grid, since) {
                     continue;
                 }
+                visits += 1;
                 let Some(r) = dom.doc.border_box(info.grid) else {
                     continue;
                 };
@@ -347,6 +428,7 @@ impl PaneView {
                 }
             }
         }
+        self.measure_visits += visits;
         changed
     }
 

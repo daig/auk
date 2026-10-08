@@ -126,7 +126,7 @@ pub fn copy_prop(d: &mut ComputedStyle, s: &ComputedStyle, p: Prop) {
         OutlineStyle => outline_style;
         OutlineColor => outline_color;
         OutlineOffset => outline_offset;
-        TableLayout => table_layout_fixed;
+        BoxShadow => box_shadow;
         ObjectFit => object_fit;
         ImageRendering => image_rendering;
         Content => content;
@@ -516,7 +516,7 @@ pub fn compute_prop(
             "inline-table" => Display::InlineTable, "table-row-group" => Display::TableRowGroup,
             "table-header-group" => Display::TableHeaderGroup, "table-footer-group" => Display::TableFooterGroup,
             "table-row" => Display::TableRow, "table-cell" => Display::TableCell, "table-column" => Display::TableColumn,
-            "table-column-group" => Display::TableColumnGroup, "table-caption" => Display::TableCaption,
+            "table-column-group" => Display::TableColumnGroup,
         }),
         P::Position => kw_map!(cs.position, {
             "static" => Position::Static, "relative" => Position::Relative, "absolute" => Position::Absolute,
@@ -942,7 +942,31 @@ pub fn compute_prop(
             }
             _ => false,
         },
-        P::TableLayout => kw_map!(cs.table_layout_fixed, { "fixed" => true, "auto" => false }),
+        P::BoxShadow => match sv {
+            SV::Shadows(list) => {
+                let dark = cs_dark(parent, env);
+                let px = |e: &Expr| e.compute_px(&cx, 0.0);
+                cs.box_shadow = (!list.is_empty()).then(|| {
+                    Arc::new(
+                        list.iter()
+                            .map(|sh| Shadow {
+                                inset: sh.inset,
+                                x: px(&sh.x),
+                                y: px(&sh.y),
+                                blur: px(&sh.blur).max(0.0),
+                                spread: px(&sh.spread),
+                                color: sh
+                                    .color
+                                    .as_ref()
+                                    .map_or(cs.color, |c| c.compute(cs.color, dark)),
+                            })
+                            .collect(),
+                    )
+                });
+                true
+            }
+            _ => false,
+        },
         P::ObjectFit => kw_map!(cs.object_fit, {
             "fill" => ObjectFit::Fill,
             "contain" => ObjectFit::Contain,

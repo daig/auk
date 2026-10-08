@@ -1685,14 +1685,8 @@ impl WinState {
             })
             .collect();
         self.plugins.tab_titles = titles;
-        if window_title != self.plugins.window_title {
-            self.plugins.window_title = window_title.clone();
-            if let Some(w) = &self.window {
-                w.set_title(
-                    &window_title.unwrap_or_else(|| format!("Auk — {}", self.conn.window_key)),
-                );
-            }
-        }
+        // The window applies it with the frame, over its default (the session's name).
+        self.plugins.window_title = window_title;
     }
 
     // -----------------------------------------------------------------------------------------

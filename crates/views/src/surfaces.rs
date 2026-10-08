@@ -238,30 +238,7 @@ impl PaneSurfaces {
     /// without system fonts (the browser client), so surfaces' text draws in the one font the
     /// host has.
     pub fn use_font(&mut self, data: Vec<u8>) {
-        use parley::fontique::GenericFamily;
-        let collection = &mut self.doc.fonts_mut().font_cx.collection;
-        let blob = parley::fontique::Blob::new(std::sync::Arc::new(data));
-        let ids: Vec<_> = collection
-            .register_fonts(blob, None)
-            .into_iter()
-            .map(|(id, _)| id)
-            .collect();
-        if ids.is_empty() {
-            return;
-        }
-        for generic in [
-            GenericFamily::Serif,
-            GenericFamily::SansSerif,
-            GenericFamily::Monospace,
-            GenericFamily::SystemUi,
-            GenericFamily::UiSerif,
-            GenericFamily::UiSansSerif,
-            GenericFamily::UiMonospace,
-            GenericFamily::Emoji,
-        ] {
-            collection.set_generic_families(generic, ids.iter().copied());
-        }
-        self.doc.update();
+        use_font(&mut self.doc, data);
     }
 
     pub fn doc(&self) -> &Document {
@@ -280,6 +257,11 @@ impl PaneSurfaces {
     /// Takes a batch of the replica's TSP changes. `now` is the view clock in ms.
     pub fn sync(&mut self, tsp: &TspPane, changes: &Changes, now: f64) {
         self.view.sync(&mut self.doc, tsp, changes, now);
+    }
+
+    /// Finishes what renders left to the background ([`PaneView::finish_background`]).
+    pub fn finish_background(&mut self) {
+        self.view.finish_background(&mut self.doc);
     }
 
     /// Applies window settings (appearance, cell size) and the scale; re-renders on a change.
@@ -467,6 +449,61 @@ impl PaneSurfaces {
         }
     }
 
+    /// [`PaneSurfaces::arrange`], then tells the views which part of the document that shows
+    /// ([`PaneSurfaces::show`]) and, while that lays out more of what's in view (virtualized
+    /// content coming into view, §8.3), arranges again. Hosts arrange through this.
+    pub fn arrange_shown(
+        &mut self,
+        term: &Terminal,
+        tsp: &TspPane,
+        cell_px: f32,
+        content_px: f32,
+        scale: f32,
+        scroll: Scroll,
+    ) -> Arranged {
+        let mut arranged = self.arrange(term, tsp, cell_px, content_px, scale, scroll);
+        for _ in 0..3 {
+            if !self.show(&arranged, scale) {
+                break;
+            }
+            arranged = self.arrange(term, tsp, cell_px, content_px, scale, scroll);
+        }
+        arranged
+    }
+
+    /// Tells the views which part of the document `arranged` shows (the visible parts of the
+    /// surface blocks in the flow), so virtualized content lays out what's in view
+    /// ([`PaneView::set_view_rect`]), and re-runs the measure loop if that changed. Returns
+    /// whether it laid anything out: arrange again.
+    pub fn show(&mut self, arranged: &Arranged, scale: f32) -> bool {
+        let mut span: Option<(f32, f32)> = None;
+        for &(i, y) in &arranged.composed.blocks {
+            let b = &arranged.blocks[i];
+            if self.lens_block(b).is_some() {
+                continue;
+            }
+            let Some(r) = self.doc.border_box(b.el) else {
+                continue;
+            };
+            let top = y.max(0.0);
+            let bottom = (y + b.height).min(arranged.flow_px);
+            if bottom <= top {
+                continue;
+            }
+            let a = r.y + (top - y) / scale;
+            let z = r.y + (bottom - y) / scale;
+            span = Some(span.map_or((a, z), |(p, q)| (p.min(a), q.max(z))));
+        }
+        let rect = span.map(|(a, z)| Rect::new(0.0, a, self.doc.viewport().0, z - a));
+        if rect == self.view.view_rect() {
+            return false;
+        }
+        self.view.set_view_rect(rect);
+        let before = self.doc.layout_count();
+        self.view.layout(&mut self.doc);
+        self.doc.layout_count() != before
+    }
+
     /// Paints the surfaces where `arranged` put them, into `scene`, for a content area at
     /// `place`. One pass per container (flow, docks, screen, layers), the others hidden, each
     /// region clipped to where it goes. Returns whether anything was painted.
@@ -641,4 +678,33 @@ impl PaneSurfaces {
             }
         }
     }
+}
+
+/// Makes a font (a TTF/OTF file's bytes) every generic family of `doc`: for hosts without
+/// system fonts (the browser client), so the document's text draws in the one font the host has.
+pub fn use_font(doc: &mut Document, data: Vec<u8>) {
+    use parley::fontique::GenericFamily;
+    let collection = &mut doc.fonts_mut().font_cx.collection;
+    let blob = parley::fontique::Blob::new(std::sync::Arc::new(data));
+    let ids: Vec<_> = collection
+        .register_fonts(blob, None)
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+    if ids.is_empty() {
+        return;
+    }
+    for generic in [
+        GenericFamily::Serif,
+        GenericFamily::SansSerif,
+        GenericFamily::Monospace,
+        GenericFamily::SystemUi,
+        GenericFamily::UiSerif,
+        GenericFamily::UiSansSerif,
+        GenericFamily::UiMonospace,
+        GenericFamily::Emoji,
+    ] {
+        collection.set_generic_families(generic, ids.iter().copied());
+    }
+    doc.update();
 }

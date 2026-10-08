@@ -360,6 +360,70 @@ fn md_streaming_caret_and_tool_and_agent_timers_run_on_the_view_clock() {
 }
 
 #[test]
+fn an_arriving_age_restarts_top_level_timers_and_nested_agent_ages_only_on_a_new_value() {
+    // §7.13 (book:6731, 7864, 8048): a top-level `age` (elapsed, tool) restarts whenever it
+    // arrives, unchanged or a countdown too; an agent's nested ages restart only on a new value.
+    let mut h = Harness::new();
+    h.hello(&[]);
+    h.surface(
+        "s1",
+        "inline",
+        json!([
+            {"id": "el", "k": "elapsed", "p": {"age": 1000}},
+            {"id": "cd", "k": "elapsed", "p": {"age": -3000, "format": "clock"}},
+            {"id": "tl", "k": "tool", "p": {"name": "bash", "title": "Run", "status": "running", "age": 1000}},
+            {"id": "ag", "k": "agent", "p": {"name": "worker", "status": "running",
+                "stats": {"age": 1000}, "tool": {"name": "read", "age": 1000}}}
+        ]),
+    );
+    h.frame();
+    let t0 = h.now;
+    let tool_time = |h: &Harness| h.text(h.find_class(h.el("s1", "tl"), "sf-tool-time")[0]);
+    let agent_times =
+        |h: &Harness| h.find_class(h.el("s1", "ag"), "time").iter().map(|&t| h.text(t)).collect::<Vec<_>>();
+    assert_eq!(h.text(h.el("s1", "el")), "1.0s");
+    assert_eq!(tool_time(&h), "1.0s");
+    assert_eq!(agent_times(&h), ["1.0s", "1.0s"]);
+    h.view.tick(&mut h.doc, &h.pane, t0 + 2000.0);
+    assert_eq!(h.text(h.el("s1", "el")), "3.0s");
+    assert_eq!(h.text(h.el("s1", "cd")), "0:01");
+    // The same values arrive again, 2 s later.
+    h.now = t0 + 2000.0;
+    h.frame_ops(
+        "s1",
+        2,
+        json!([
+            ["set", "el", {"age": 1000}],
+            ["set", "cd", {"age": -3000}],
+            ["set", "tl", {"age": 1000}],
+            ["set", "ag", {"stats": {"age": 1000, "tools": 2}, "tool": {"name": "read", "age": 1000}}]
+        ]),
+    );
+    h.frame();
+    assert_eq!(h.text(h.el("s1", "el")), "1.0s", "elapsed restarts");
+    assert_eq!(h.text(h.el("s1", "cd")), "0:03", "the countdown starts over");
+    assert_eq!(tool_time(&h), "1.0s", "tool restarts");
+    assert_eq!(agent_times(&h), ["3.0s", "3.0s"], "nested ages keep running");
+    // A set of other props leaves the restarted count running.
+    h.now = t0 + 2500.0;
+    h.frame_ops("s1", 3, json!([["set", "el", {"format": "short"}]]));
+    h.frame();
+    assert_eq!(h.text(h.el("s1", "el")), "1.5s");
+    // A node deleted and re-added under the same id, with the same age, anchors fresh.
+    h.now = t0 + 3000.0;
+    h.frame_ops("s1", 4, json!([["del", "el"]]));
+    h.frame();
+    h.now = t0 + 6000.0;
+    h.frame_ops(
+        "s1",
+        5,
+        json!([["add", "el", "main", null, {"id": "el", "k": "elapsed", "p": {"age": 1000}}]]),
+    );
+    h.frame();
+    assert_eq!(h.text(h.el("s1", "el")), "1.0s");
+}
+
+#[test]
 fn reduce_motion_gives_still_equivalents() {
     let s = ViewSettings {
         reduce_motion: true,

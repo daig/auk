@@ -76,7 +76,7 @@ pub fn tree(state: &WinState) -> TreeUpdate {
     let mut nodes = Vec::new();
     let mut root = Node::new(Role::Window);
     root.set_label(format!("Auk — {}", state.conn.window_key));
-    let mut children = ui_nodes(&state.chrome.doc, CHROME_BASE, scale, &mut nodes);
+    let mut children = ui_nodes(state.chrome.doc(), CHROME_BASE, scale, &mut nodes);
 
     let focused = state.focused_pane();
     let mut focus = ROOT;

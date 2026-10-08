@@ -412,7 +412,7 @@ impl PaneDraw {
     /// pixels high with cells `cell_px` high, surface and command blocks at their anchor rows.
     pub fn arrange(&mut self, replica: &Replica, cell_px: f32, content_px: f32) -> &Arranged {
         let term = replica.terminal();
-        let mut arranged = self.surfaces.arrange(
+        let mut arranged = self.surfaces.arrange_shown(
             term,
             replica.tsp(),
             cell_px,
@@ -613,7 +613,47 @@ impl PaneDraw {
                 Button::Primary
             },
         };
-        // A command block in the flow.
+        match self.target(press, content_px)? {
+            Target::Lens { block, x, y } => {
+                let doc = self.lens.get_mut(&block)?;
+                let (d, pv) = doc.surfaces.parts();
+                let outcomes = pv.click(d, &doc.tsp, ev(x, y));
+                Some(actions(
+                    pane,
+                    Some(&format!("{SF_PREFIX}{block}")),
+                    outcomes,
+                ))
+            }
+            Target::Surfaces { x, y } => {
+                let (d, pv) = self.surfaces.parts();
+                let outcomes = pv.click(d, replica.tsp(), ev(x, y));
+                if outcomes.iter().all(|o| matches!(o, Outcome::Keys)) {
+                    return None;
+                }
+                Some(actions(pane, None, outcomes))
+            }
+        }
+    }
+
+    /// The node a press at this point lands on, without pressing: its surface (`lens:<block>`
+    /// for a command block's card) and the innermost node's id. `None` on the grid or between
+    /// nodes.
+    pub fn hit(&self, tsp: &TspPane, press: Press, content_px: f32) -> Option<(String, String)> {
+        match self.target(press, content_px)? {
+            Target::Lens { block, x, y } => {
+                let doc = self.lens.get(&block)?;
+                let (_, id) = node_at(doc.surfaces.doc(), doc.surfaces.view(), &doc.tsp, x, y)?;
+                Some((format!("{SF_PREFIX}{block}"), id))
+            }
+            Target::Surfaces { x, y } => {
+                node_at(self.surfaces.doc(), self.surfaces.view(), tsp, x, y)
+            }
+        }
+    }
+
+    /// Which document a press lands in, and where in it: a command block's card in the flow, or
+    /// the pane's surfaces.
+    fn target(&self, press: Press, content_px: f32) -> Option<Target> {
         if !self.arranged.layers
             && self.arranged.screen.is_none()
             && press.y < self.arranged.flow_px
@@ -622,29 +662,54 @@ impl PaneDraw {
                 .lens_placed
                 .iter()
                 .find(|p| self.flow.get(i).is_some_and(|b| b.line == p.line))
-            && let Some(doc) = self.lens.get_mut(&placed.block)
+            && let Some(doc) = self.lens.get(&placed.block)
             && let Some(el) = doc.el
         {
             let top = doc.surfaces.doc().border_box(el)?.y;
-            let (x, y) = (press.x / self.scale, top + off / self.scale);
-            let block = placed.block;
-            let (d, pv) = doc.surfaces.parts();
-            let outcomes = pv.click(d, &doc.tsp, ev(x, y));
-            return Some(actions(
-                pane,
-                Some(&format!("{SF_PREFIX}{block}")),
-                outcomes,
-            ));
+            return Some(Target::Lens {
+                block: placed.block,
+                x: press.x / self.scale,
+                y: top + off / self.scale,
+            });
         }
         let (x, y) =
             self.surfaces
                 .doc_point(&self.arranged, press.x, press.y, content_px, self.scale)?;
-        let (d, pv) = self.surfaces.parts();
-        let outcomes = pv.click(d, replica.tsp(), ev(x, y));
-        if outcomes.iter().all(|o| matches!(o, Outcome::Keys)) {
-            return None;
+        Some(Target::Surfaces { x, y })
+    }
+}
+
+/// Where a press lands, in a document's coordinates.
+enum Target {
+    Lens { block: u64, x: f32, y: f32 },
+    Surfaces { x: f32, y: f32 },
+}
+
+/// The innermost surface node at a point of a views document, and its surface's id.
+fn node_at(
+    doc: &auk_ui::Document,
+    view: &auk_views::PaneView,
+    tsp: &TspPane,
+    x: f32,
+    y: f32,
+) -> Option<(String, String)> {
+    let mut el = auk_ui::hit_test(doc, x, y)?;
+    let mut id = None;
+    loop {
+        if doc.node(el).is_element() {
+            if id.is_none() {
+                id = doc.attribute(el, "data-id").map(str::to_owned);
+            }
+            if let Some(scope) = doc.attribute(el, "data-scope")
+                && let Some(sf) = tsp
+                    .surfaces()
+                    .iter()
+                    .find(|s| view.scope(s.key()) == Some(scope))
+            {
+                return Some((sf.id().to_owned(), id?));
+            }
         }
-        Some(actions(pane, None, outcomes))
+        el = doc.parent(el)?;
     }
 }
 
@@ -862,6 +927,67 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    /// The hit test (`window.aukHitTest` on the page) names what a press would land on, as
+    /// the click itself finds it, without pressing.
+    #[test]
+    fn the_hit_test_names_the_node_a_press_lands_on() {
+        // A command block's card.
+        let mut r = lensed();
+        let mut d = draw();
+        assert!(r.set_lens_view(
+            0,
+            Some(json!({"k": "col", "c": [
+                {"k": "text", "p": {"text": "1 to add"}},
+                {"id": "go", "k": "text", "p": {"text": "Deploy", "actions": {"click": "deploy"}}},
+            ]}))
+        ));
+        frame(&mut d, &mut r);
+        let go = d.lens_node_rect(0, "go").expect("drawn");
+        assert_eq!(
+            d.hit(r.tsp(), press_at(go), CONTENT.1),
+            Some(("lens:0".to_owned(), "go".to_owned()))
+        );
+        // The grid row after the block: no node.
+        let raw = d.lens_placed[0];
+        let prompt = d
+            .arranged
+            .composed
+            .slot_of(raw.line + 1)
+            .expect("the prompt row");
+        let grid = Press {
+            x: 4.0,
+            y: prompt.top + 2.0,
+            clicks: 1,
+            ..Press::default()
+        };
+        assert_eq!(d.hit(r.tsp(), grid, CONTENT.1), None);
+        // Hit testing presses nothing: the click still finds the node afterwards.
+        assert!(d.click(7, &r, press_at(go), CONTENT.1).is_some());
+
+        // A surface's nested node, innermost first.
+        let mut r = Replica::new(80, 24, Settings::default(), Role::Follower);
+        feed(&mut r, &apc("o", json!({"id": "s1", "mode": "inline"})));
+        let main = json!({"id": "main", "k": "col", "c": [
+            {"id": "row", "k": "row", "c": [
+                {"id": "ok", "k": "text", "p": {"text": "OK", "actions": {"click": "accept"}}},
+            ]},
+        ]});
+        feed(
+            &mut r,
+            &apc(
+                "f",
+                json!({"sf": "s1", "s": 1, "ops": [["add", "main", "s1", null, main]]}),
+            ),
+        );
+        let mut d = draw();
+        frame(&mut d, &mut r);
+        let ok = d.surface_node_rect(r.tsp(), "s1", "ok").expect("drawn");
+        assert_eq!(
+            d.hit(r.tsp(), press_at(ok), CONTENT.1),
+            Some(("s1".to_owned(), "ok".to_owned()))
+        );
     }
 
     #[test]

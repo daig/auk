@@ -234,7 +234,56 @@ pub struct Session {
     /// A locked session refuses closing itself, its tabs and its panes (book:16896): the daemon
     /// answers such a close with a toast instead. New sessions start unlocked.
     pub locked: bool,
+    /// The user gave the session its name (at creation or by renaming it), rather than taking
+    /// the generated one: windows show a named session's chip even when it is the only one.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub named: bool,
     pub tabs: Vec<Tab>,
+}
+
+/// Adjectives and animals for generated session names (`brisk-otter`), as Tern names new
+/// sessions with two random words (book:16894).
+const NAME_ADJECTIVES: &[&str] = &[
+    "amber", "brisk", "calm", "clever", "cosy", "dapper", "eager", "fair", "gentle", "golden",
+    "hardy", "humble", "jolly", "keen", "lively", "lucky", "mellow", "merry", "nimble", "noble",
+    "plucky", "quiet", "rapid", "rosy", "rustic", "sunny", "swift", "tidy", "vivid", "wise",
+    "witty", "zesty",
+];
+const NAME_ANIMALS: &[&str] = &[
+    "badger", "beaver", "bison", "crane", "dingo", "eagle", "falcon", "ferret", "finch", "gecko",
+    "heron", "ibis", "jackal", "koala", "lemur", "lynx", "marten", "moose", "newt", "ocelot",
+    "otter", "panda", "puffin", "quail", "raven", "robin", "seal", "stoat", "tapir", "walrus",
+    "wombat", "yak",
+];
+
+/// A random two-word name not among `taken`: re-rolled on a collision, with a number added once
+/// most pairs are in use.
+fn generated_name(taken: &[&str]) -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let mut seed = std::collections::hash_map::RandomState::new().build_hasher();
+    seed.write_usize(taken.len());
+    let mut x = seed.finish() | 1;
+    let pairs = NAME_ADJECTIVES.len() * NAME_ANIMALS.len();
+    let mut attempt = 0;
+    loop {
+        // xorshift64: a fresh pair per attempt.
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        let pair = (x % pairs as u64) as usize;
+        let mut name = format!(
+            "{}-{}",
+            NAME_ADJECTIVES[pair / NAME_ANIMALS.len()],
+            NAME_ANIMALS[pair % NAME_ANIMALS.len()]
+        );
+        if attempt >= 64 {
+            name = format!("{name}-{}", attempt - 62);
+        }
+        if !taken.contains(&name.as_str()) {
+            return name;
+        }
+        attempt += 1;
+    }
 }
 
 /// What kind of pane a layout cell holds (§5.1), so every window can badge it: an agent pane is
@@ -345,11 +394,19 @@ impl Layout {
         let id = self.alloc();
         let tab = self.alloc();
         let window = self.windows.entry(key.to_owned()).or_default();
-        let name = name.map_or_else(|| (window.sessions.len() + 1).to_string(), str::to_owned);
+        let named = name.is_some();
+        let name = name.map_or_else(
+            || {
+                let taken: Vec<&str> = window.sessions.iter().map(|s| s.name.as_str()).collect();
+                generated_name(&taken)
+            },
+            str::to_owned,
+        );
         window.sessions.push(Session {
             id,
             name,
             locked: false,
+            named,
             tabs: vec![Tab {
                 id: tab,
                 title: None,
@@ -527,9 +584,11 @@ impl Layout {
     }
 
     pub fn rename_session(&mut self, session: SessionId, name: &str) -> Result<(), NotFound> {
-        self.session_mut(session)
-            .ok_or(NotFound("session", session))?
-            .name = name.to_owned();
+        let s = self
+            .session_mut(session)
+            .ok_or(NotFound("session", session))?;
+        s.name = name.to_owned();
+        s.named = true;
         Ok(())
     }
 
@@ -597,7 +656,7 @@ mod tests {
         l.split(3, SplitDir::Down, 4).unwrap();
         let w = l.window("main").unwrap();
         assert_eq!(w.panes(), vec![1, 2, 3, 4]);
-        assert_eq!(w.sessions[0].name, "1");
+        assert!(!w.sessions[0].named);
         assert_eq!(l.window_of(4), Some("main"));
         assert_eq!(l.session_of(3), Some(s));
 
@@ -620,6 +679,36 @@ mod tests {
             l.window("main").unwrap().sessions[0].tabs[1].root,
             Node::Pane { pane: 4 }
         );
+    }
+
+    /// New sessions get two random words (book:16894), unique in their window key; a name the
+    /// user gives (or renames to) is kept and marks the session named.
+    #[test]
+    fn default_session_names_are_two_unique_words_and_given_names_are_kept() {
+        let mut l = Layout::default();
+        for pane in 0..200 {
+            l.new_session("w", None, pane);
+        }
+        let w = l.window("w").unwrap();
+        let names: std::collections::BTreeSet<&str> =
+            w.sessions.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names.len(), 200, "unique within the window key");
+        for s in &w.sessions[..64] {
+            let words: Vec<&str> = s.name.split('-').collect();
+            assert_eq!(words.len(), 2, "{}", s.name);
+            assert!(NAME_ADJECTIVES.contains(&words[0]) && NAME_ANIMALS.contains(&words[1]));
+            assert!(!s.named);
+        }
+        let s = l.new_session("w", Some("work"), 900);
+        assert_eq!(l.session(s).map(|s| (s.name.as_str(), s.named)), Some(("work", true)));
+        let other = l.window("w").unwrap().sessions[0].id;
+        l.rename_session(other, "ops").unwrap();
+        assert!(l.session(other).unwrap().named);
+        // A layout saved before sessions had `named` reads back unnamed, its names as they were.
+        let old = r#"{"id":4,"name":"1","locked":false,"tabs":[]}"#;
+        let s: Session = serde_json::from_str(old).unwrap();
+        assert_eq!((s.name.as_str(), s.named), ("1", false));
+        assert!(!serde_json::to_string(&s).unwrap().contains("named"));
     }
 
     #[test]

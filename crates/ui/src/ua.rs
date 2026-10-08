@@ -39,7 +39,6 @@ tfoot { display: table-footer-group; vertical-align: middle; }
 tr { display: table-row; vertical-align: inherit; }
 td, th { display: table-cell; vertical-align: inherit; padding: 1px; }
 th { font-weight: bold; text-align: center; }
-caption { display: table-caption; text-align: center; }
 col { display: table-column; }
 colgroup { display: table-column-group; }
 button, input { display: inline-block; }

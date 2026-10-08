@@ -4,18 +4,22 @@
 //! hello over `/ws` and attaches to the window key (`?window=`, default `main`). Each frame draws
 //! the shown tab's panes (`?pane=` picks the tab holding that pane) with `auk-render`'s grid
 //! pass, glyphs rasterized by swash (§18.3). Keys are encoded for the pane's modes and sent as
-//! input; paste, input-method text and resizes go through the same session ([`Session`]).
+//! input; paste, input-method text and resizes go through the same session ([`Session`]). The
+//! tab bar, dividers and focus ring are the app's chrome widgets (D3, §13.1), drawn by the UI
+//! engine over the panes.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use auk_mirror::layout::SessionId;
 use auk_mirror::{ClientFacts, PaneId};
 use auk_render::{
     Acquired, Gpu, GridRenderer, GridSnapshot, RowSlot, Theme, UiLayer, View, WindowSurface, wgpu,
 };
 use auk_text::{Backend, FontConfig, GridFonts};
+use auk_views::chrome::{BAR_HEIGHT, ChromeAction, ChromeDoc};
 use auk_views::compose::Scroll;
 use auk_views::{Place, ViewSettings};
 use raw_window_handle::{
@@ -32,7 +36,7 @@ use web_sys::{
 
 use crate::keys::{DomKey, KeyAction, map_key};
 use crate::pane::{Action, PaneDraw, Press};
-use crate::session::{Rect, Session, Status, layout};
+use crate::session::{Rect, Session, Status, dividers, layout};
 
 /// The grid font's size in CSS pixels (points, as in the app).
 const FONT_PT: f32 = 13.0;
@@ -82,14 +86,25 @@ struct App {
     canvas: HtmlCanvasElement,
     input: HtmlTextAreaElement,
     status: HtmlElement,
-    /// The tab bar (a minimal one: the app's chrome widgets aren't shared with this client).
-    tabs: HtmlElement,
-    /// The tab bar as last drawn.
-    tabs_shown: Vec<crate::session::TabEntry>,
+    /// The tab bar with its session chip and menu, the dividers and the focus ring: the app's
+    /// chrome widgets (D3, §13.1), painted into the UI layer over the panes. The browser views
+    /// and switches; it creates no tabs or sessions.
+    chrome: ChromeDoc,
+    /// The chrome changed since the UI layer last rendered.
+    chrome_changed: bool,
+    /// The session chip's menu is open.
+    session_menu: bool,
+    /// The pane last shown in each session, to come back to.
+    session_panes: BTreeMap<SessionId, PaneId>,
+    /// The chrome's roles, mirrored into an offscreen element for assistive technology (the
+    /// canvas has no accessibility tree of its own).
+    chrome_a11y: HtmlElement,
     /// Where toasts show.
     toast: HtmlElement,
     /// Effects performed, newest last (the last 32), for the debug state.
     effects_done: Vec<serde_json::Value>,
+    /// What the last press on the canvas landed on and did, for the debug state.
+    last_press: serde_json::Value,
     /// `?pane=`: show the tab holding this pane and focus it.
     want_pane: Option<PaneId>,
     /// The focused pane; keys go here.
@@ -104,6 +119,25 @@ struct App {
     /// Text a composition just committed: an `input` event repeating it is the same text.
     composed: Option<String>,
     adapter: String,
+}
+
+/// Where a press on the canvas lands ([`App::locate`]).
+enum Located {
+    Chrome(ChromeAction),
+    /// The tab bar's strip, or anywhere while the session menu is open.
+    Bar,
+    NoPane,
+    /// In a pane's padding.
+    Padding(PaneId),
+    /// A pane the client has no state or drawing for yet.
+    NoView(PaneId),
+    /// In a pane's content area, `(x, y)` from its top-left in physical pixels.
+    Pane {
+        pane: PaneId,
+        x: f32,
+        y: f32,
+        content_h: f32,
+    },
 }
 
 thread_local! {
@@ -136,6 +170,15 @@ fn param(name: &str) -> Option<String> {
         .ok()?
         .get(name)
         .filter(|v| !v.is_empty())
+}
+
+/// Whether a media query matches.
+fn media(query: &str) -> bool {
+    window()
+        .match_media(query)
+        .ok()
+        .flatten()
+        .is_some_and(|m| m.matches())
 }
 
 fn prefers_dark() -> bool {
@@ -191,7 +234,7 @@ async fn start_inner() -> Result<(), String> {
     let canvas: HtmlCanvasElement = element("screen")?;
     let input: HtmlTextAreaElement = element("input")?;
     let status: HtmlElement = element("status")?;
-    let tabs: HtmlElement = element("tabs")?;
+    let chrome_a11y: HtmlElement = element("chrome-a11y")?;
     let toast: HtmlElement = element("toast")?;
     status.set_text_content(Some("Connecting…"));
 
@@ -219,6 +262,9 @@ async fn start_inner() -> Result<(), String> {
     }
     .map_err(|e| format!("WebGPU canvas: {e}"))?;
     let ui = UiLayer::new(&gpu, surface.format()).map_err(|e| e.to_string())?;
+    let mut chrome = ChromeDoc::new(scale, "");
+    // The browser has no system fonts: the chrome draws in the server's font.
+    chrome.use_font(font.to_vec());
     let metrics = grid_fonts(&font, scale)?.metrics();
     let cell = (metrics.cell_width, metrics.cell_height);
     let dark = prefers_dark();
@@ -249,10 +295,14 @@ async fn start_inner() -> Result<(), String> {
         canvas: canvas.clone(),
         input: input.clone(),
         status,
-        tabs: tabs.clone(),
-        tabs_shown: Vec::new(),
+        chrome,
+        chrome_changed: true,
+        session_menu: false,
+        session_panes: BTreeMap::new(),
+        chrome_a11y,
         toast,
         effects_done: Vec::new(),
+        last_press: serde_json::Value::Null,
         want_pane,
         focused: None,
         rects: Vec::new(),
@@ -360,25 +410,6 @@ async fn start_inner() -> Result<(), String> {
     });
     on(&canvas, "contextmenu", |e: web_sys::MouseEvent| {
         e.prevent_default()
-    });
-    // A tab clicked in the tab bar shows that tab and focuses its pane.
-    on(&tabs, "click", {
-        let app = app.clone();
-        move |e: web_sys::MouseEvent| {
-            let pane = e
-                .target()
-                .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
-                .and_then(|el| el.closest("[data-pane]").ok().flatten())
-                .and_then(|el| el.get_attribute("data-pane"))
-                .and_then(|p| p.parse::<PaneId>().ok());
-            let mut a = app.borrow_mut();
-            if let Some(pane) = pane {
-                a.want_pane = Some(pane);
-                a.focus(pane);
-            }
-            let _ = a.input.focus();
-            a.request_frame(&app);
-        }
     });
     on(&canvas, "wheel", {
         let app = app.clone();
@@ -502,6 +533,11 @@ impl App {
     }
 
     fn key_down(&mut self, e: &KeyboardEvent) {
+        if self.session_menu && e.key() == "Escape" {
+            e.prevent_default();
+            self.session_menu = false;
+            return;
+        }
         let Some(pane) = self.focused else {
             return;
         };
@@ -554,44 +590,143 @@ impl App {
         }
     }
 
-    /// A press on the canvas: it focuses the pane under it, and a surface or command block there
-    /// takes it as a view event (§7.8).
-    fn mouse_down(&mut self, e: &web_sys::MouseEvent) {
-        let (x, y) = (
-            e.offset_x() as f32 * self.scale,
-            e.offset_y() as f32 * self.scale,
-        );
+    /// Where a press at `(cx, cy)` (CSS pixels from the canvas's top-left) lands. `primary`:
+    /// the chrome takes only the primary button.
+    fn locate(&self, cx: f32, cy: f32, primary: bool) -> Located {
+        // The chrome first: the tab bar, and the session menu over everything while open.
+        if primary && let Some(action) = self.chrome.action_at(cx, cy) {
+            return Located::Chrome(action);
+        }
+        if f64::from(cy) < BAR_HEIGHT || self.session_menu {
+            return Located::Bar;
+        }
+        let (x, y) = (cx * self.scale, cy * self.scale);
         let Some((pane, rect)) = self
             .rects
             .iter()
             .find(|(_, r)| x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h)
             .copied()
         else {
-            return;
+            return Located::NoPane;
         };
-        self.focus(pane);
         let pad = (PADDING * self.scale).round();
-        let press = Press {
-            x: x - rect.x - pad,
-            y: y - rect.y - pad,
-            clicks: e.detail().clamp(1, 2) as u8,
-            mods: auk_tsp::Mods {
-                shift: e.shift_key(),
-                ctrl: e.ctrl_key(),
-                alt: e.alt_key(),
-                meta: e.meta_key(),
-            },
-            secondary: e.button() == 2,
-        };
-        if press.x < 0.0 || press.y < 0.0 {
-            return;
+        let (px, py) = (x - rect.x - pad, y - rect.y - pad);
+        if px < 0.0 || py < 0.0 {
+            return Located::Padding(pane);
         }
-        let content_h = (rect.h - 2.0 * pad).max(0.0);
-        let (Some(p), Some(view)) = (self.session.panes.get(&pane), self.views.get_mut(&pane))
-        else {
-            return;
+        if !self.session.panes.contains_key(&pane) || !self.views.contains_key(&pane) {
+            return Located::NoView(pane);
+        }
+        Located::Pane {
+            pane,
+            x: px,
+            y: py,
+            content_h: (rect.h - 2.0 * pad).max(0.0),
+        }
+    }
+
+    /// What a press at `(cx, cy)` lands on, as JSON: `outcome` (`chrome`, `bar`, `no-pane`,
+    /// `padding`, `no-view`, `no-node` or `node`), the pane, and the node's `sf` and `id`.
+    fn describe(&self, located: &Located) -> serde_json::Value {
+        match located {
+            Located::Chrome(action) => {
+                json!({"outcome": "chrome", "action": format!("{action:?}")})
+            }
+            Located::Bar => json!({"outcome": "bar"}),
+            Located::NoPane => json!({"outcome": "no-pane"}),
+            Located::Padding(pane) => json!({"outcome": "padding", "pane": pane}),
+            Located::NoView(pane) => json!({"outcome": "no-view", "pane": pane}),
+            &Located::Pane {
+                pane,
+                x,
+                y,
+                content_h,
+            } => {
+                let press = Press {
+                    x,
+                    y,
+                    clicks: 1,
+                    ..Press::default()
+                };
+                let hit = match (self.session.panes.get(&pane), self.views.get(&pane)) {
+                    (Some(p), Some(v)) => v.draw.hit(p.replica.tsp(), press, content_h),
+                    _ => None,
+                };
+                match hit {
+                    Some((sf, id)) => json!({
+                        "outcome": "node", "pane": pane, "sf": sf, "id": id, "press": [x, y],
+                    }),
+                    None => json!({"outcome": "no-node", "pane": pane, "press": [x, y]}),
+                }
+            }
+        }
+    }
+
+    /// A press on the canvas: it focuses the pane under it, and a surface or command block there
+    /// takes it as a view event (§7.8). What it landed on is kept for the debug state.
+    fn mouse_down(&mut self, e: &web_sys::MouseEvent) {
+        let (cx, cy) = (e.offset_x() as f32, e.offset_y() as f32);
+        let located = self.locate(cx, cy, e.button() == 0);
+        let mut record = self.describe(&located);
+        // Counts presses, so a test can tell its press from an earlier one.
+        record["n"] = json!(self.last_press["n"].as_u64().unwrap_or(0) + 1);
+        record["client"] = json!([e.client_x(), e.client_y()]);
+        record["offset"] = json!([cx, cy]);
+        record["button"] = json!(e.button());
+        record["scale"] = json!(self.scale);
+        record["canvas"] = json!([self.canvas.width(), self.canvas.height()]);
+        record["dpr"] = json!(window().device_pixel_ratio());
+        let actions = match located {
+            Located::Chrome(action) => {
+                self.chrome_action(action);
+                None
+            }
+            Located::Bar | Located::NoPane => None,
+            Located::Padding(pane) | Located::NoView(pane) => {
+                self.focus(pane);
+                None
+            }
+            Located::Pane {
+                pane,
+                x,
+                y,
+                content_h,
+            } => {
+                self.focus(pane);
+                let press = Press {
+                    x,
+                    y,
+                    clicks: e.detail().clamp(1, 2) as u8,
+                    mods: auk_tsp::Mods {
+                        shift: e.shift_key(),
+                        ctrl: e.ctrl_key(),
+                        alt: e.alt_key(),
+                        meta: e.meta_key(),
+                    },
+                    secondary: e.button() == 2,
+                };
+                match (self.session.panes.get(&pane), self.views.get_mut(&pane)) {
+                    (Some(p), Some(view)) => view.draw.click(pane, &p.replica, press, content_h),
+                    _ => None,
+                }
+            }
         };
-        let Some(actions) = view.draw.click(pane, &p.replica, press, content_h) else {
+        record["actions"] = json!(
+            actions
+                .iter()
+                .flatten()
+                .map(|a| match a {
+                    Action::Send(auk_mirror::ClientMsg::ViewEvent { sf, event, .. }) => {
+                        json!({"view_event": sf, "ev": event["ev"]})
+                    }
+                    Action::Send(_) => json!("send"),
+                    Action::Copy(_) => json!("copy"),
+                    Action::Open(target) => json!({"open": target}),
+                })
+                .collect::<Vec<_>>()
+        );
+        self.last_press = record;
+        let Some(actions) = actions else {
             return;
         };
         for action in actions {
@@ -605,6 +740,78 @@ impl App {
             }
         }
         self.flush();
+    }
+
+    /// [`App::describe`] for a point of the page, in CSS pixels (`window.aukHitTest`).
+    fn hit_at(&self, x: f64, y: f64) -> serde_json::Value {
+        let origin = self.canvas.get_bounding_client_rect();
+        let (cx, cy) = ((x - origin.left()) as f32, (y - origin.top()) as f32);
+        self.describe(&self.locate(cx, cy, true))
+    }
+
+    /// A click on the chrome: the chip toggles the session menu, a session or a tab shows it.
+    /// Creating, renaming and locking are the app's; the browser offers none of them.
+    fn chrome_action(&mut self, action: ChromeAction) {
+        let menu_was_open = self.session_menu;
+        self.session_menu = false;
+        let pane = match action {
+            ChromeAction::SessionMenu => {
+                self.session_menu = !menu_was_open;
+                None
+            }
+            ChromeAction::Session(id) => self
+                .session
+                .session_pane(id, self.session_panes.get(&id).copied()),
+            ChromeAction::Tab(id) => self
+                .session
+                .window
+                .sessions
+                .iter()
+                .flat_map(|s| s.tabs.iter())
+                .find(|t| t.id == id)
+                .and_then(|t| Session::tab_pane(t, self.focused)),
+            _ => None,
+        };
+        if let Some(pane) = pane {
+            self.want_pane = Some(pane);
+            self.focus(pane);
+        }
+    }
+
+    /// Mirrors the chrome's roles into the offscreen element assistive technology reads.
+    fn mirror_chrome_a11y(&self) {
+        let Some(doc) = window().document() else {
+            return;
+        };
+        self.chrome_a11y.set_text_content(None);
+        for n in self.chrome.accessible() {
+            if n.role == "toolbar" {
+                continue;
+            }
+            if let Ok(el) = doc.create_element("div") {
+                let _ = el.set_attribute("role", &n.role);
+                let _ = el.set_attribute("aria-label", &n.label);
+                match n.role.as_str() {
+                    "tab" => {
+                        let _ = el.set_attribute(
+                            "aria-selected",
+                            if n.selected { "true" } else { "false" },
+                        );
+                    }
+                    "menuitemradio" => {
+                        let _ = el.set_attribute(
+                            "aria-checked",
+                            if n.selected { "true" } else { "false" },
+                        );
+                    }
+                    _ => {}
+                }
+                if let Some(a) = &n.action {
+                    let _ = el.set_attribute("data-action", a);
+                }
+                let _ = self.chrome_a11y.append_child(&el);
+            }
+        }
     }
 
     /// Performs the effects the serving host sent (§9.7, §10.3): toasts show over the page,
@@ -671,48 +878,6 @@ impl App {
         }
     }
 
-    /// Draws the tab bar when it changed.
-    fn draw_tabs(&mut self) {
-        let entries = self.session.tab_bar(self.want_pane.or(self.focused));
-        if entries == self.tabs_shown {
-            return;
-        }
-        let Some(doc) = window().document() else {
-            return;
-        };
-        self.tabs.set_text_content(None);
-        for t in &entries {
-            if let Ok(el) = doc.create_element("button") {
-                el.set_class_name(if t.active { "tab active" } else { "tab" });
-                if t.agent {
-                    // The agent icon (§5.1), the glyph the app's tab bar draws.
-                    let _ = el.set_attribute("data-kind", "agent");
-                    if let Ok(badge) = doc.create_element("span") {
-                        badge.set_class_name("tab-agent");
-                        badge.set_text_content(Some(auk_views::chrome::AGENT_GLYPH));
-                        let _ = badge.set_attribute("role", "img");
-                        let _ = badge.set_attribute("aria-label", "Agent");
-                        let _ = badge.set_attribute("data-icon", "agent");
-                        let _ = el.append_child(&badge);
-                    }
-                    if let Ok(title) = doc.create_element("span") {
-                        title.set_text_content(Some(&t.title));
-                        let _ = el.append_child(&title);
-                    }
-                } else {
-                    el.set_text_content(Some(&t.title));
-                }
-                let _ = el.set_attribute("role", "tab");
-                let _ = el.set_attribute("aria-selected", if t.active { "true" } else { "false" });
-                if let Some(p) = t.pane {
-                    let _ = el.set_attribute("data-pane", &p.to_string());
-                }
-                let _ = self.tabs.append_child(&el);
-            }
-        }
-        self.tabs_shown = entries;
-    }
-
     fn set_status(&self, text: &str) {
         if self.status.text_content().as_deref() != Some(text) {
             self.status.set_text_content(Some(text));
@@ -763,15 +928,18 @@ impl App {
             Theme::light()
         };
         let tab = self.session.tab(self.want_pane.or(self.focused)).cloned();
+        // The panes sit below the tab bar.
+        let bar_h = (BAR_HEIGHT as f32 * scale).round();
         let area = Rect {
             x: 0.0,
-            y: 0.0,
+            y: bar_h,
             w: w as f32,
-            h: h as f32,
+            h: (h as f32 - bar_h).max(0.0),
         };
+        let gap = (GAP * scale).round();
         self.rects = tab
             .as_ref()
-            .map(|t| layout(t, area, (GAP * scale).round()))
+            .map(|t| layout(t, area, gap))
             .unwrap_or_default();
         if self.session.status == Status::Attached {
             if tab.is_none() {
@@ -783,7 +951,6 @@ impl App {
                 self.set_status("");
             }
         }
-        self.draw_tabs();
         // Focus the wanted pane, else keep focus in the tab, else its first pane.
         let shown: Vec<PaneId> = self.rects.iter().map(|(p, _)| *p).collect();
         let want = self
@@ -802,6 +969,49 @@ impl App {
             {
                 self.session.focus(pane);
             }
+        }
+
+        // Each session remembers the pane it showed.
+        if let (Some(t), Some(pane)) = (&tab, self.focused)
+            && t.root.contains(pane)
+            && let Some(s) = self
+                .session
+                .window
+                .sessions
+                .iter()
+                .find(|s| s.tabs.iter().any(|x| x.id == t.id))
+        {
+            self.session_panes.insert(s.id, pane);
+        }
+        self.session_panes
+            .retain(|id, _| self.session.window.sessions.iter().any(|s| s.id == *id));
+        // The chrome, rebuilt when what it shows changed.
+        let mut bar = self
+            .session
+            .chrome_bar(self.want_pane.or(self.focused), self.focused);
+        let points =
+            |r: &Rect| auk_ui::Rect::new(r.x / scale, r.y / scale, r.w / scale, r.h / scale);
+        bar.width = f64::from(w) / f64::from(scale);
+        bar.height = f64::from(h) / f64::from(scale);
+        bar.dark = self.dark;
+        bar.media = (
+            self.facts.reduce_motion,
+            media("(prefers-reduced-transparency: reduce)"),
+            media("(prefers-contrast: more)"),
+        );
+        bar.dividers = tab
+            .as_ref()
+            .map(|t| dividers(t, area, gap).iter().map(points).collect())
+            .unwrap_or_default();
+        bar.focus = self
+            .focused
+            .and_then(|f| self.rects.iter().find(|(p, _)| *p == f))
+            .map(|(_, r)| points(r));
+        bar.session_menu = self.session_menu;
+        self.chrome.doc.set_device_scale(scale);
+        if self.session.status == Status::Attached && self.chrome.update(&bar) {
+            self.chrome_changed = true;
+            self.mirror_chrome_a11y();
         }
 
         let frame = match self.surface.acquire(&self.gpu) {
@@ -902,6 +1112,7 @@ impl App {
                     selection: None,
                     focused: pane_focused,
                     cursor_on: true,
+                    ..View::default()
                 },
                 composed.first,
                 lines,
@@ -922,10 +1133,20 @@ impl App {
             let grid_shown = arranged.grid_shown();
             drawn.push((pane, rect, cols, rows, grid_shown));
         }
-        if (painted || self.ui_painted)
-            && let Err(err) = self.ui.render(&self.gpu, &scene, w, h)
-        {
-            self.session.errors.push(err.to_string());
+        // The chrome over everything, in points.
+        let chrome_shown = self.chrome.shown().is_some();
+        if chrome_shown {
+            auk_ui::paint::paint_with_transform(
+                &self.chrome.doc,
+                &mut scene,
+                vello::kurbo::Affine::scale(f64::from(scale)),
+            );
+        }
+        if painted || self.ui_painted || self.chrome_changed || self.ui.size() != (w, h) {
+            if let Err(err) = self.ui.render(&self.gpu, &scene, w, h) {
+                self.session.errors.push(err.to_string());
+            }
+            self.chrome_changed = false;
         }
         self.ui_painted = painted;
         self.animating = animating;
@@ -1006,7 +1227,7 @@ impl App {
     }
 
     fn debug(&self) -> serde_json::Value {
-        // Page coordinates: the canvas sits below the tab bar.
+        // Page coordinates: the canvas fills the page, the tab bar drawn at its top.
         let origin = self.canvas.get_bounding_client_rect();
         let (ox, oy) = (origin.left() as f32, origin.top() as f32);
         let pad = (PADDING * self.scale).round();
@@ -1100,10 +1321,13 @@ impl App {
             "adapter": self.adapter,
             "format": format!("{:?}", self.surface.format()),
             "panes": panes,
-            "tabs": self.tabs_shown.iter().map(|t| json!({
-                "title": t.title, "active": t.active, "pane": t.pane,
+            // The chrome's clickable parts, in page coordinates.
+            "chrome": self.chrome.actions().into_iter().map(|(a, r)| json!({
+                "action": a, "x": ox + r.x, "y": oy + r.y, "w": r.w, "h": r.h,
             })).collect::<Vec<_>>(),
+            "session_menu": self.session_menu,
             "effects": self.effects_done,
+            "last_press": self.last_press,
             "errors": self.session.errors,
         })
     }
@@ -1135,6 +1359,19 @@ pub fn node_rect(pane: f64, sf: &str, id: &str) -> String {
         }))
     });
     rect.unwrap_or(serde_json::Value::Null).to_string()
+}
+
+/// What a press at a point of the page (CSS pixels) would land on, without pressing
+/// (`window.aukHitTest` on the page): `{"outcome", "pane", "sf", "id"}` (see `App::describe`),
+/// or `null` before the client starts.
+#[wasm_bindgen]
+pub fn hit_test(x: f64, y: f64) -> String {
+    let hit = APP.with(|a| {
+        let app = a.borrow().clone()?;
+        let app = app.borrow();
+        Some(app.hit_at(x, y))
+    });
+    hit.unwrap_or(serde_json::Value::Null).to_string()
 }
 
 /// The client's state as JSON, for tests and debugging (`window.aukDebug()` on the page): the

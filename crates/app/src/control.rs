@@ -28,7 +28,7 @@
 //! | `focus PANE` | focuses a pane (its session and tab come forward) |
 //! | `selection` | the focused pane's selected text |
 //! | `pane-layout PANE` | the pane's flow as last drawn (§6.2): first line, blocks, dock, screen |
-//! | `frame-stats [--reset]` | frame times: start of work to GPU and CPU done, less the drawable wait; CPU work |
+//! | `frame-stats [--reset] [--series]` | frame times: start of work to GPU and CPU done, less the drawable wait; CPU work, by phase; the surfaces' layout work |
 //! | `input-source [ID]` | the keyboard input source, or selects one |
 //! | `option-as-alt none|left|right|both` | the Option-as-Alt setting |
 //! | `plugins` | the window halves: loaded, failed, commands, binds and the keymap layer, sheets |
@@ -498,9 +498,21 @@ fn main_command(cmd: &str, mut args: Vec<String>, win: usize) -> Result<Value, S
                 "frame": summary(&gpu),
                 "cpu": summary(&s.stats.cpu),
                 "drawable_wait": summary(&s.stats.drawable_wait),
+                "phases": s.stats.phases.iter().map(|(k, v)| (k.to_string(), summary(v))).collect::<serde_json::Map<_, _>>(),
+                "work": s.stats.work.iter().map(|(k, v)| (k.to_string(), counts(v))).collect::<serde_json::Map<_, _>>(),
                 "size": s.size.map(|z| [z.width, z.height]),
                 "scale": s.size.map(|z| z.scale),
             });
+            let mut stats = stats;
+            // Each frame's CPU time and layout work, in order, to see how they change over a load.
+            if args.iter().any(|a| a == "--series") {
+                let ms = |v: &Vec<Duration>| v.iter().map(|d| d.as_secs_f64() * 1000.0).collect::<Vec<_>>();
+                stats["series"] = json!({
+                    "cpu": ms(&s.stats.cpu),
+                    "phases": s.stats.phases.iter().map(|(k, v)| (k.to_string(), json!(ms(v)))).collect::<serde_json::Map<_, _>>(),
+                    "work": s.stats.work.iter().map(|(k, v)| (k.to_string(), json!(v))).collect::<serde_json::Map<_, _>>(),
+                });
+            }
             drop(s);
             if reset {
                 let mut s = state.borrow_mut();
@@ -585,18 +597,25 @@ fn main_command(cmd: &str, mut args: Vec<String>, win: usize) -> Result<Value, S
                 "tab_apps": s.chrome_tab_apps(),
                 "agent_badges": s.chrome.agent_badges().into_iter().map(|(t, r)| json!({"tab": t, "rect": [r.x, r.y, r.w, r.h]})).collect::<Vec<_>>(),
                 "hover_link": s.hover_link,
+                "armed_link": s.armed_link().map(|(p, l)| json!({"pane": p, "link": l})),
+                "pointer": format!("{:?}", window.pointer()),
                 "tooltip": s.hover_title.as_ref().map(|(t, x, y)| json!({"text": t, "at": [x, y]})),
                 "tooltip_drawn": s.chrome.tooltip().map(|(t, r)| json!({"text": t, "rect": [r.x, r.y, r.w, r.h]})),
                 "find_bar": s.find.as_ref().is_some_and(|f| f.open),
                 "status": model_status,
                 "tab_titles": s.plugins.tab_titles,
                 "window_title": s.plugins.window_title,
+                "title": window.title(),
+                "session_menu": s.overlays.session_menu,
+                "tabs": s.chrome.tabs().into_iter().map(|t| json!({"tab": t.id, "app": t.app, "title": t.title, "label": t.label})).collect::<Vec<_>>(),
                 "actions": actions,
                 "menu": s.overlays.menu.as_ref().map(|m| m.entries.iter().map(|e| json!({"label": e.label, "action": e.action})).collect::<Vec<_>>()),
                 "viewer": s.overlays.viewer.as_ref().map(|v| json!({
                     "pane": v.pane,
                     "index": v.zoom.index,
                     "images": v.zoom.images.iter().map(|i| json!({"id": i.id, "blob": i.blob, "title": i.title})).collect::<Vec<_>>(),
+                    "size": [s.viewer_size.0, s.viewer_size.1],
+                    "decoding": v.decoding,
                 })),
             }))
         }
@@ -605,7 +624,7 @@ fn main_command(cmd: &str, mut args: Vec<String>, win: usize) -> Result<Value, S
             // the chrome.
             let plugin = args.first().ok_or("chrome-style: expected a plugin id")?.clone();
             let s = state.borrow();
-            let doc = &s.chrome.doc;
+            let doc = s.chrome.doc();
             let mut stack = vec![doc.root()];
             while let Some(n) = stack.pop() {
                 if doc.attribute(n, "data-plugin") == Some(plugin.as_str())
@@ -616,6 +635,11 @@ fn main_command(cmd: &str, mut args: Vec<String>, win: usize) -> Result<Value, S
                 stack.extend(doc.children(n).iter().copied());
             }
             Err(format!("no status segment of plugin {plugin}"))
+        }
+        "grid-links" => {
+            // How the pane's visible OSC 8 link cells draw (A13): the same view the frame uses.
+            let pane = pane_arg(&args)?;
+            Ok(json!(state.borrow().grid_link_cells(pane)?))
         }
         "find" => Ok(state
             .borrow()
@@ -707,6 +731,23 @@ fn coords(args: &[String]) -> Result<(f64, f64), String> {
 }
 
 /// Count, p50, p95 and max of durations, in milliseconds.
+/// Per-frame counts: their p50, p95, max and total.
+fn counts(values: &[f64]) -> Value {
+    if values.is_empty() {
+        return json!({"count": 0});
+    }
+    let mut v = values.to_vec();
+    v.sort_by(f64::total_cmp);
+    let at = |q: f64| v[((v.len() - 1) as f64 * q).round() as usize];
+    json!({
+        "count": v.len(),
+        "p50": at(0.5),
+        "p95": at(0.95),
+        "max": v[v.len() - 1],
+        "total": v.iter().sum::<f64>(),
+    })
+}
+
 fn summary(times: &[Duration]) -> Value {
     if times.is_empty() {
         return json!({"count": 0});

@@ -64,7 +64,7 @@ pub fn hour_pattern_is_12h(pattern: &str) -> bool {
 #[cfg(target_os = "macos")]
 pub use clipboard::Clipboard;
 #[cfg(target_os = "macos")]
-pub use window::{Waker, Window, WindowId};
+pub use window::{PointerShape, Waker, Window, WindowId};
 
 pub use auk_term::input::{Key, KeyEvent, Mods};
 pub use keys::OptionAsAlt;

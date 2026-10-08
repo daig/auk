@@ -420,7 +420,10 @@ fn page_state(safari: &Safari, what: &str, mut f: impl FnMut(&Value) -> bool) ->
         }
         if Instant::now() > deadline {
             let err = safari.execute("return window.aukError || null;");
-            panic!("timed out waiting for {what}; page state: {last}; page error: {err}");
+            panic!(
+                "timed out waiting for {what}; page state: {last}; page error: {err}; {}",
+                page_focus(safari)
+            );
         }
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -554,6 +557,88 @@ fn page_node_rect(safari: &Safari, pane: u64, sf: &str, id: &str) -> Value {
     }
 }
 
+/// Whether the page has focus and how big its viewport is, for failure messages.
+fn page_focus(safari: &Safari) -> String {
+    let v = safari.execute(
+        "return {focus: document.hasFocus(), w: window.innerWidth, h: window.innerHeight};",
+    );
+    format!("page focus {}, viewport {}x{}", v["focus"], v["w"], v["h"])
+}
+
+/// Where the page drew a node once nothing is moving it: the page's replica matches the
+/// daemon's (so no output is still arriving), and the node's rect and the viewport read the
+/// same twice, 250 ms apart. Focuses the page's window if it lost focus.
+fn settled_node_rect(safari: &Safari, env: &TestEnv, pane: u64, sf: &str, id: &str) -> Value {
+    page_state(safari, "the page's replica to match the daemon's", |s| {
+        let (hash, seq) = env.daemon_hash(pane);
+        pane_state(s, pane).is_some_and(|p| p["hash"] == hash.as_str() && p["seq"] == seq)
+    });
+    if safari.execute("return document.hasFocus();") != true {
+        safari.execute("window.focus(); return null;");
+    }
+    let viewport = || safari.execute("return [window.innerWidth, window.innerHeight];");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let before = (page_node_rect(safari, pane, sf, id), viewport());
+        std::thread::sleep(Duration::from_millis(250));
+        let after = (page_node_rect(safari, pane, sf, id), viewport());
+        if before == after {
+            return after.0;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{sf}/{id} of pane {pane} kept moving: {before:?}, then {after:?}"
+        );
+    }
+}
+
+/// What a press at a point of the page would land on (`window.aukHitTest`).
+fn page_hit(safari: &Safari, x: f64, y: f64) -> Value {
+    let raw = safari.execute(&format!(
+        "return window.aukHitTest ? window.aukHitTest({x}, {y}) : 'null';"
+    ));
+    raw.as_str()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or(Value::Null)
+}
+
+/// Clicks the center of a node once it has settled ([`settled_node_rect`]), after checking that
+/// a press there lands on it, and checks that the page's press did.
+fn click_node(safari: &Safari, env: &TestEnv, pane: u64, sf: &str, id: &str) {
+    let rect = settled_node_rect(safari, env, pane, sf, id);
+    let c = |k: &str| rect[k].as_f64().unwrap();
+    // WebDriver clicks whole CSS pixels.
+    let (x, y) = (
+        (c("x") + c("w") / 2.0).round(),
+        (c("y") + c("h") / 2.0).round(),
+    );
+    let lands = |hit: &Value| {
+        hit["outcome"] == "node" && hit["pane"] == pane && hit["sf"] == sf && hit["id"] == id
+    };
+    let hit = page_hit(safari, x, y);
+    assert!(
+        lands(&hit),
+        "a press at ({x}, {y}), the center of {sf}/{id} at {rect}, would land on {hit}; {}",
+        page_focus(safari)
+    );
+    let raw = safari.execute("return window.aukDebug ? window.aukDebug() : null;");
+    let before = raw
+        .as_str()
+        .and_then(|s| serde_json::from_str::<Value>(s).ok())
+        .and_then(|s| s["last_press"]["n"].as_u64())
+        .unwrap_or(0);
+    safari.click_at(x, y);
+    let state = page_state(safari, &format!("the page's press on {sf}/{id}"), |s| {
+        s["last_press"]["n"].as_u64() > Some(before)
+    });
+    let press = &state["last_press"];
+    assert!(
+        lands(press),
+        "the click at ({x}, {y}) on {sf}/{id} landed on {press}; {}",
+        page_focus(safari)
+    );
+}
+
 fn click_center(safari: &Safari, rect: &Value) {
     let c = |k: &str| rect[k].as_f64().unwrap();
     safari.click_at(c("x") + c("w") / 2.0, c("y") + c("h") / 2.0);
@@ -625,8 +710,7 @@ fn safari_surfaces_lens_views_and_blocks(safari: &Safari, env: &TestEnv, pane: u
         std::thread::sleep(Duration::from_millis(250));
     }
     // A click on the view's node: the lens copies and toasts, in this page.
-    let go = page_node_rect(safari, pane, "lens:0", "go");
-    click_center(safari, &go);
+    click_node(safari, env, pane, "lens:0", "go");
     page_state(safari, "the lens's toast", |s| {
         s["effects"].as_array().is_some_and(|e| {
             e.iter()
@@ -651,12 +735,33 @@ fn safari_surfaces_lens_views_and_blocks(safari: &Safari, env: &TestEnv, pane: u
     let (sf, id) = wait_for("the block's view in the daemon", || {
         daemon_node(env, block, "block-panel 0")
     });
-    page_state(safari, "the block's tab", |s| {
-        s["tabs"]
-            .as_array()
-            .is_some_and(|t| t.iter().any(|t| t["pane"] == block))
+    // A12: the tab bar is the app's chrome drawn on the canvas. A second session brings the
+    // session chip; its menu's row for the block's session shows the block.
+    let session = wait_for("the block's session", || {
+        env.daemon("ls")["panes"]
+            .as_array()?
+            .iter()
+            .find(|p| p["id"] == block)?["session"]
+            .as_u64()
     });
-    safari.click(&safari.element(&format!("#tabs .tab[data-pane=\"{block}\"]")));
+    let state = page_state(safari, "the session chip", |s| chrome_rect(s, "session-menu").is_some());
+    // The bar is drawn: the strip above the panes isn't the page's background.
+    let strip = serde_json::json!({"x": 0.0, "y": 0.0, "w": 400.0, "h": 28.0});
+    let (ink, _, _) = screen_ink(safari, &strip);
+    assert!(ink > 200, "the tab bar strip shows only {ink} drawn pixels");
+    // Assistive technology hears the tab bar through the page's mirror of it.
+    let selected = safari.execute(
+        "return document.querySelectorAll('#chrome-a11y [role=tab][aria-selected=true]').length;",
+    );
+    assert_eq!(selected.as_u64(), Some(1), "one selected tab in the mirror");
+    click_center(safari, &chrome_rect(&state, "session-menu").unwrap());
+    let row = format!("session:{session}");
+    let state = page_state(safari, "the session menu", |s| chrome_rect(s, &row).is_some());
+    assert!(
+        chrome_rect(&state, "new-session").is_none() && chrome_rect(&state, "new-tab").is_none(),
+        "the browser creates nothing: {state}"
+    );
+    click_center(safari, &chrome_rect(&state, &row).unwrap());
     page_state(safari, "the block to be drawn", |s| {
         pane_state(s, block).is_some_and(|p| {
             !p["rect"].is_null()
@@ -665,8 +770,7 @@ fn safari_surfaces_lens_views_and_blocks(safari: &Safari, env: &TestEnv, pane: u
                     .is_some_and(|a| a.iter().any(|x| x["sf"] == sf.as_str()))
         })
     });
-    let node = page_node_rect(safari, block, &sf, &id);
-    click_center(safari, &node);
+    click_node(safari, env, block, &sf, &id);
     wait_for("the block to take the click", || {
         daemon_node(env, block, "block-panel 1")
     });
@@ -684,6 +788,15 @@ fn safari_surfaces_lens_views_and_blocks(safari: &Safari, env: &TestEnv, pane: u
         state["errors"].as_array().is_some_and(Vec::is_empty),
         "{state}"
     );
+}
+
+/// Where the page drew a chrome element with this action, in page CSS pixels.
+fn chrome_rect(state: &Value, action: &str) -> Option<Value> {
+    state["chrome"]
+        .as_array()?
+        .iter()
+        .find(|c| c["action"] == action)
+        .cloned()
 }
 
 /// Drawn pixels in a page rect (CSS pixels) of a screenshot: (unlike the background, red,
@@ -1190,9 +1303,37 @@ fn web_session_gets_manifest_styles_lens_views_blocks_and_effects_through_the_so
     let (sf, id) = c.until("the block's view", |s| {
         node_with_text(s.panes.get(&block)?.replica.tsp(), "block-panel 0")
     });
-    let tabs = c.s.tab_bar(Some(block));
-    assert_eq!(tabs.len(), 2, "{tabs:?}");
-    assert!(tabs[1].active && tabs[1].pane == Some(block), "{tabs:?}");
+    // A12: the client's tab bar is the app's chrome widgets: the block's session shown (its one
+    // tab), the chip for two sessions, whose menu lists both, and nothing that creates.
+    let mut bar = c.s.chrome_bar(Some(block), None);
+    (bar.width, bar.height, bar.dark) = (800.0, 500.0, true);
+    let block_tab = c.s.tab(Some(block)).expect("the block's tab").id;
+    let ids: Vec<u64> = c.s.window.sessions.iter().map(|s| s.id).collect();
+    assert_eq!(ids.len(), 2, "{:?}", c.s.window);
+    let mut chrome = auk_views::chrome::ChromeDoc::new(2.0, "");
+    assert!(chrome.update(&bar));
+    let acts: Vec<String> = chrome.actions().into_iter().map(|(a, _)| a).collect();
+    assert_eq!(acts, ["session-menu".to_owned(), format!("tab:{block_tab}")], "{acts:?}");
+    let (_, r) = chrome.actions().into_iter().find(|(a, _)| a.starts_with("tab:")).unwrap();
+    assert_eq!(
+        chrome.action_at(r.x + r.w / 2.0, r.y + r.h / 2.0),
+        Some(auk_views::chrome::ChromeAction::Tab(block_tab))
+    );
+    bar.session_menu = true;
+    chrome.update(&bar);
+    let acts: Vec<String> = chrome.actions().into_iter().map(|(a, _)| a).collect();
+    for id in &ids {
+        assert!(acts.contains(&format!("session:{id}")), "{acts:?}");
+    }
+    assert!(!acts.iter().any(|a| a.ends_with("-session") || a == "new-tab"), "{acts:?}");
+    assert!(
+        chrome
+            .accessible()
+            .iter()
+            .any(|n| n.role == "tab" && n.selected && n.action == Some(format!("tab:{block_tab}")))
+    );
+    // The first session's pane is what its row shows.
+    assert_eq!(c.s.session_pane(ids[0], None), Some(pane));
     c.s.focus(block);
     let mut bd = new_web_draw();
     web_draw(&mut c.s, &mut bd, block);

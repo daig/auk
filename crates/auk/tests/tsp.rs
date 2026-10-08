@@ -2908,6 +2908,80 @@ fn h1_snapshots_replay_in_order_without_answers_and_ages_rewritten() {
     let _ = window;
 }
 
+/// Node `id` in a snapshot's `f` messages for surface `sf`, as the snapshot writes it.
+fn snapshot_node(msgs: &[(String, String, Value)], sf: &str, id: &str) -> Value {
+    msgs.iter()
+        .filter(|(v, _, b)| v == "f" && b["sf"] == sf)
+        .flat_map(|(_, _, b)| b["ops"].as_array().cloned().unwrap_or_default())
+        .find_map(|op| op.get(4).and_then(|n| node(n, id)).cloned())
+        .unwrap_or_else(|| panic!("no node {id} in the snapshot: {msgs:?}"))
+}
+
+#[test]
+fn h1_an_arriving_age_restarts_elapsed_and_tool_but_nested_agent_ages_need_a_new_value() {
+    // §7.13 (book:6731, 7864, 8048): the daemon stamps when each age arrived, and a snapshot
+    // rewrites ages from those stamps, so a late window agrees with the live ones.
+    let (env, probe) = setup("h1-ages");
+    exchange(&probe, &hello(&[]));
+    let bodies = exchange(
+        &probe,
+        &open_with(
+            "a",
+            "inline",
+            json!([
+                {"id": "el", "k": "elapsed", "p": {"age": 1000}},
+                {"id": "tl", "k": "tool", "p": {"name": "bash", "status": "running", "age": 1000}},
+                {"id": "ag", "k": "agent", "p": {"name": "w", "status": "running", "stats": {"age": 1000}}}
+            ]),
+        ),
+    );
+    assert!(errors(&bodies).is_empty(), "{bodies:?}");
+    std::thread::sleep(Duration::from_millis(2000));
+    let bodies = exchange(
+        &probe,
+        &frame(
+            "a",
+            2,
+            json!([
+                ["set", "el", {"age": 1000}],
+                ["set", "tl", {"age": 1000}],
+                ["set", "ag", {"stats": {"age": 1000, "tools": 2}}]
+            ]),
+        ),
+    );
+    assert!(errors(&bodies).is_empty(), "{bodies:?}");
+    // A set of other props leaves the restarted counts running.
+    exchange(&probe, &frame("a", 3, json!([["set", "el", {"format": "clock"}]])));
+    std::thread::sleep(Duration::from_millis(300));
+    let msgs = snapshot_messages(&env, probe.pane);
+    let age = |id: &str| snapshot_node(&msgs, "a", id)["p"]["age"].as_i64().unwrap();
+    for id in ["el", "tl"] {
+        let a = age(id);
+        // Unrestarted, it would read at least 1000 + 2000 + 300.
+        assert!((1250..2800).contains(&a), "{id} restarted at the resend: {a}");
+    }
+    let stats = snapshot_node(&msgs, "a", "ag")["p"]["stats"]["age"].as_i64().unwrap();
+    assert!(stats >= 3250, "the agent's nested age kept running: {stats}");
+
+    // Deleted and re-added under the same id with the same age: it anchors fresh.
+    std::thread::sleep(Duration::from_millis(1000));
+    let bodies = exchange(
+        &probe,
+        &frame(
+            "a",
+            4,
+            json!([
+                ["del", "el"],
+                ["add", "el", "main", null, {"id": "el", "k": "elapsed", "p": {"age": 1000}}]
+            ]),
+        ),
+    );
+    assert!(errors(&bodies).is_empty(), "{bodies:?}");
+    let msgs = snapshot_messages(&env, probe.pane);
+    let a = snapshot_node(&msgs, "a", "el")["p"]["age"].as_i64().unwrap();
+    assert!((1000..1700).contains(&a), "re-added: {a}");
+}
+
 #[test]
 fn h2_after_the_program_is_gone_surfaces_come_back_closed_and_read_only() {
     let (env, probe) = setup("h2");
@@ -3294,6 +3368,14 @@ fn ac15_malformed_frames_and_unknown_verbs_never_kill_the_pane_under_fuzzing() {
     probe.write(&batch);
     probe.write(b"\x1b\\\x1bc");
     assert_eq!(sent, 3000);
+    // What the terminal answered the fuzzed stream, read up to a fence first: the recording opens
+    // with omp's hello, so an intact copy of it in the stream gets a reply of its own.
+    let fuzz_replies = probe.fence_tsp();
+    eprintln!(
+        "{} answers to the fuzzed stream, {} of them hello replies",
+        fuzz_replies.len(),
+        fuzz_replies.iter().filter(|b| b["r"] == "hello").count()
+    );
     // The pane is alive, its program still talks TSP, and the window agrees with the daemon.
     let replies = exchange(&probe, &hello(&[]));
     assert_eq!(

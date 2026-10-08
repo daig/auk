@@ -225,6 +225,17 @@ impl Probe {
 
     /// Reads until `done` holds for the input so far (within [`WAIT`]); returns all of it.
     pub fn read_until(&self, what: &str, done: impl Fn(&[u8]) -> bool) -> Vec<u8> {
+        self.read_until_or(what, done, String::new)
+    }
+
+    /// Like [`Probe::read_until`], adding `context()` (the app's input focus, say) to the
+    /// failure message.
+    pub fn read_until_or(
+        &self,
+        what: &str,
+        done: impl Fn(&[u8]) -> bool,
+        context: impl FnOnce() -> String,
+    ) -> Vec<u8> {
         let deadline = Instant::now() + WAIT;
         loop {
             {
@@ -236,10 +247,13 @@ impl Probe {
             match self.recv(deadline) {
                 Some(FromProbe::Read(bytes)) => self.pending.lock().unwrap().extend(bytes),
                 Some(FromProbe::Pong(_)) => {}
-                None => panic!(
-                    "timed out waiting for {what}; the program read {:?}",
-                    String::from_utf8_lossy(&self.pending.lock().unwrap())
-                ),
+                None => {
+                    let read = String::from_utf8_lossy(&self.pending.lock().unwrap()).into_owned();
+                    panic!(
+                        "timed out waiting for {what}; the program read {read:?}\n{}",
+                        context()
+                    )
+                }
             }
         }
         std::mem::take(&mut *self.pending.lock().unwrap())

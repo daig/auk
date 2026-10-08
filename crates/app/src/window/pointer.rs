@@ -102,13 +102,123 @@ impl WinState {
             }
             return None;
         }
+        let (p, link) = self.grid_link_at(x, y)?;
+        let shared = self.conn.shared();
+        shared
+            .panes
+            .get(&p)?
+            .replica
+            .terminal()
+            .links()
+            .get(link as usize)
+            .cloned()
+    }
+
+    /// The OSC 8 link of the grid cell under a window point: its pane and terminal link id.
+    pub(super) fn grid_link_at(&self, x: f64, y: f64) -> Option<(PaneId, u32)> {
+        let pane = self.tab_layout.pane_at(x, y)?;
+        if self.surface_point(pane, x, y).is_some() {
+            return None;
+        }
         let (p, line, col) = self.cell_at(x, y)?;
         let shared = self.conn.shared();
         let term = shared.panes.get(&p)?.replica.terminal();
         let link = term.line(line)?.cells.get(usize::from(col))?.link;
-        (link != 0)
-            .then(|| term.links().get(link as usize).cloned())
-            .flatten()
+        (link != 0).then_some((p, link))
+    }
+
+    /// The grid link a click would open now (A13): the one under the pointer while ⌘ is down,
+    /// or with `links_plain_click` while the program doesn't take the mouse. It draws a solid
+    /// accent underline (none with `hyperlinks` off) and the pointer is a pointing hand.
+    pub fn armed_link(&self) -> Option<(PaneId, u32)> {
+        let (pane, link) = self.hover_grid?;
+        let plain =
+            self.settings.links_plain_click && self.modes(pane).mouse == auk_term::MouseMode::Off;
+        (self.pointer_cmd || plain).then_some((pane, link))
+    }
+
+    /// The grid view the frame draws `pane` with, as far as links go (A13): the `hyperlinks`
+    /// style and the armed link when it is this pane's.
+    pub fn link_view(&self, pane: PaneId) -> (auk_render::LinkStyle, Option<u32>) {
+        let armed = self.armed_link();
+        (
+            self.settings.hyperlinks,
+            armed.filter(|(p, _)| *p == pane).map(|(_, link)| link),
+        )
+    }
+
+    /// How the pane's visible link cells draw: one entry per cell, `{row, col, underline,
+    /// color}`, with `underline` `"dotted"`, `"solid"` or `null`, resolved as the frame resolves
+    /// them.
+    pub fn grid_link_cells(&self, pane: PaneId) -> Result<Vec<serde_json::Value>, String> {
+        let (links, hover_link) = self.link_view(pane);
+        let shared = self.conn.shared();
+        let term = shared
+            .panes
+            .get(&pane)
+            .ok_or_else(|| format!("no replica of pane {pane}"))?
+            .replica
+            .terminal();
+        let view = auk_render::View {
+            links,
+            hover_link,
+            cursor_on: false,
+            ..auk_render::View::default()
+        };
+        let snap = auk_render::GridSnapshot::from_terminal(term, &self.theme, &view);
+        let top = term.history_len();
+        let mut out = Vec::new();
+        for row in 0..snap.rows {
+            let Some(line) = term.line(top + usize::from(row)) else {
+                continue;
+            };
+            for (col, cell) in snap.row(row).iter().enumerate() {
+                if line.cells.get(col).is_none_or(|c| c.link == 0) {
+                    continue;
+                }
+                use auk_render::Attrs;
+                let underline = if cell.attrs.has(Attrs::DOTTED_UNDERLINE) {
+                    Some("dotted")
+                } else if cell.attrs.has(Attrs::UNDERLINE) {
+                    Some("solid")
+                } else {
+                    None
+                };
+                let c = cell.decoration;
+                out.push(serde_json::json!({
+                    "row": row, "col": col, "underline": underline,
+                    "color": format!("#{:02x}{:02x}{:02x}", c.0, c.1, c.2),
+                    "accent": c == self.theme.link,
+                }));
+            }
+        }
+        Ok(out)
+    }
+
+    /// Follows the pointer over grid links and the ⌘ key: what [`WinState::armed_link`] sees.
+    /// Returns whether the armed link changed (the grid and the pointer change with it).
+    pub(super) fn track_grid_link(
+        &mut self,
+        window: &Window,
+        at: Option<(f64, f64)>,
+        cmd: bool,
+    ) -> bool {
+        let before = self.armed_link();
+        if let Some((x, y)) = at {
+            self.hover_grid = self.grid_link_at(x, y);
+        }
+        self.pointer_cmd = cmd;
+        let now = self.armed_link();
+        let shape = if now.is_some() {
+            auk_platform_macos::PointerShape::PointingHand
+        } else {
+            auk_platform_macos::PointerShape::Arrow
+        };
+        if shape != self.pointer_shape {
+            self.pointer_shape = shape;
+            window.set_pointer(shape);
+        }
+        now != before
     }
 
     /// The `title` of the surface node under a window point, or of its nearest ancestor with
@@ -241,6 +351,10 @@ impl WinState {
                 .rev()
                 .find_map(|s| sf.view().node_element(s.key(), id))?
         };
+        // Out of view in virtualized content, its box is only an estimate: not drawn.
+        if !sf.doc().laid_out(el) {
+            return None;
+        }
         let r = sf.doc().border_box(el)?;
         // A layer overlays the pane from its top, over everything else (§7.5).
         if sf.in_layers(el) {

@@ -732,6 +732,7 @@ fn blocks_init_failure_exit_raw_frames_blobs_chunking_and_reload_without_the_typ
                         if key.name == "b" then s.big = true
                         elseif key.name == "f" then cx:frame({{"set", "main.0", {role = "raw"}}})
                         elseif key.name == "i" then cx:copy(cx:blob("png-bytes", "image/png"))
+                        elseif key.name == "e" then cx:copy(cx:blob("evil-bytes", "image/png;\27\\evil"))
                         elseif key.name == "q" then cx:exit(3)
                         elseif key.name == "paste" then cx:copy("pasted " .. key.text)
                         else return false end
@@ -774,6 +775,16 @@ fn blocks_init_failure_exit_raw_frames_blobs_chunking_and_reload_without_the_typ
     let Effect::Copy(id) = copy.effect else { panic!() };
     assert_eq!(id.len(), 64);
     assert!(pane.tsp.blobs().has(&id));
+    assert_eq!(pane.tsp.blobs().get(&id).and_then(|b| b.mime.as_deref()), Some("image/png"));
+    // A mime that isn't a plain type/subtype is left out: unescaped, its `;` would corrupt the
+    // parameters and its ESC \ end the string early, spilling the rest onto the grid.
+    pane.keys(&host, b"e");
+    let copy = pane.next_effect(&host, Duration::from_secs(5), &mut others);
+    let Effect::Copy(evil) = copy.effect else { panic!() };
+    let blob = pane.tsp.blobs().get(&evil).expect("the blob arrived whole");
+    assert_eq!((blob.bytes.as_slice(), blob.mime.as_deref()), (&b"evil-bytes"[..], None));
+    let screen = pane.term.text(0..usize::MAX);
+    assert!(!screen.contains("evil"), "nothing spilled onto the grid: {screen:?}");
     // A reload whose manifest dropped the type ends the block.
     std::fs::write(dir.join("plugin.toml"), "schema = 1\nid = \"blk\"\nname = \"Blk\"\nversion = \"1\"\nhost = \"host.luau\"\n[[blocks]]\nid = \"bad\"\ntitle = \"Bad\"\n").expect("write");
     std::fs::write(dir.join("host.luau"), r#"tern.block.define("bad", {init = function() end, view = function() end})"#).expect("write");

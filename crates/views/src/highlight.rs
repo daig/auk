@@ -309,8 +309,15 @@ impl Highlighter {
 /// Lines a render highlights itself before handing the rest to the background: about a
 /// screenful, so what shows first is highlighted.
 pub const RENDER_LINES: usize = 120;
-/// Lines the worker highlights per turn of its lock.
-const WORKER_CHUNK: usize = 256;
+/// Lines one render pass (a sync, a re-render) lets `code` nodes highlight themselves, across
+/// the nodes it renders, past the first one's [`RENDER_LINES`]: about a screenful (an
+/// 800-point pane at the default font). A pass that brings in a long stretch of transcript at
+/// once (a load, a late attach) pays for about a screenful, not for every block (§7.10 cost,
+/// §18.1); the rest highlights in the background.
+pub const PASS_LINES: usize = 48;
+/// Lines the worker highlights per turn of its lock (the view may wait that long for it, to
+/// finish a text that came into view).
+const WORKER_CHUNK: usize = 32;
 
 /// A text highlighted in the background (§8.5 "background, incremental"). [`Background::update`]
 /// runs on the render path and does at most [`RENDER_LINES`] lines; a worker thread highlights
@@ -337,7 +344,8 @@ impl Background {
         let (first, done) = {
             let mut h = self.lock();
             let first = h.begin(text);
-            h.step(RENDER_LINES);
+            let pending = h.pending.len();
+            h.step(allowance(pending.min(RENDER_LINES)));
             (first, h.done())
         };
         if !done {
@@ -348,11 +356,17 @@ impl Background {
 
     /// Without a worker, highlights a chunk on the caller's thread. Returns whether work is left.
     pub fn pump(&self) -> bool {
-        let mut h = self.lock();
         if cfg!(target_arch = "wasm32") {
+            let mut h = self.lock();
             h.step(WORKER_CHUNK);
+            return !h.done();
         }
-        !h.done()
+        // The worker holds the lock while it highlights a chunk: then work is left.
+        match self.0.try_lock() {
+            Ok(h) => !h.done(),
+            Err(std::sync::TryLockError::Poisoned(e)) => !e.into_inner().done(),
+            Err(std::sync::TryLockError::WouldBlock) => true,
+        }
     }
 
     fn queue(&self) {
@@ -382,6 +396,135 @@ impl Background {
             tx
         });
         let _ = tx.send(std::sync::Arc::downgrade(&self.0));
+    }
+}
+
+/// The current render pass's highlighting budget, and the texts it deferred.
+#[derive(Default)]
+struct Pass {
+    pass: (u64, usize),
+    used: usize,
+    deferred: Vec<Deferred>,
+}
+
+thread_local! {
+    static PASS: std::cell::RefCell<Pass> = std::cell::RefCell::new(Pass::default());
+}
+
+/// Starts render pass `pass`: the view's pass counter and which surface's state it renders
+/// into. A new pass gets a fresh budget.
+pub(crate) fn enter_pass(pass: (u64, usize)) {
+    PASS.with(|p| {
+        let mut p = p.borrow_mut();
+        if p.pass != pass {
+            p.pass = pass;
+            p.used = 0;
+        }
+    });
+}
+
+/// Lines of `wanted` this pass may still highlight itself. The first text of a pass always
+/// gets all it wants, so one node changing at a time (streaming) never waits.
+fn allowance(wanted: usize) -> usize {
+    PASS.with(|p| {
+        let mut p = p.borrow_mut();
+        let n = if p.used == 0 {
+            wanted
+        } else {
+            wanted.min(PASS_LINES.saturating_sub(p.used))
+        };
+        p.used += n;
+        n
+    })
+}
+
+/// A whole text (a Markdown code block, a diff side) to highlight: the caller draws it plain,
+/// hands the lines to [`Later::add`], and the background highlights it. It is drawn in as the
+/// node comes into view (the measure loop finishes what the background hasn't, before the
+/// frame paints), so only what's shown is highlighted on the frame path, and a pass that
+/// brings in a long stretch of transcript (a load, a late attach) doesn't pay for the rest.
+pub(crate) fn later(syntax: &'static SyntaxReference, text: &str) -> Later {
+    let bg = Background::new(syntax);
+    bg.lock().begin(text);
+    bg.queue();
+    Later {
+        job: bg,
+        lines: Vec::new(),
+    }
+}
+
+impl Later {
+    /// Notes a line drawn plain, to draw in once highlighted.
+    pub fn add(&mut self, line: DeferredLine) {
+        self.lines.push(line);
+    }
+
+    /// Hands the text to the node being rendered ([`take_deferred`]).
+    pub fn finish(self) {
+        if !self.lines.is_empty() {
+            PASS.with(|p| p.borrow_mut().deferred.push(Deferred(self)));
+        }
+    }
+}
+
+/// A text highlighting in the background and the plain lines waiting for it.
+#[derive(Debug)]
+pub(crate) struct Later {
+    job: Background,
+    lines: Vec<DeferredLine>,
+}
+
+/// A line drawn plain: its element, its index in the text, its text (the element's content
+/// while it waits), its emphasized ranges, and whether a newline follows it in the element.
+#[derive(Debug)]
+pub(crate) struct DeferredLine {
+    pub el: auk_ui::NodeId,
+    pub idx: usize,
+    pub text: String,
+    pub em: Vec<std::ops::Range<usize>>,
+    pub newline: bool,
+}
+
+/// Texts a render deferred, for its node to draw in ([`Deferred::draw_in`]).
+#[derive(Debug)]
+pub(crate) struct Deferred(Later);
+
+/// The texts deferred since the last call (by the node just rendered).
+pub(crate) fn take_deferred() -> Vec<Deferred> {
+    PASS.with(|p| std::mem::take(&mut p.borrow_mut().deferred))
+}
+
+impl Deferred {
+    /// Draws the highlighting in once the background has finished it; returns whether it's
+    /// still on its way. Lines whose element no longer holds their plain text (re-rendered,
+    /// removed) are left alone. `finish` highlights what's left on this thread first (a host
+    /// that draws deterministically).
+    pub fn draw_in(&self, dom: &mut crate::dom::Dom, finish: bool) -> bool {
+        let l = &self.0;
+        if !finish && l.job.pump() {
+            return true;
+        }
+        let mut h = l.job.lock();
+        h.step(usize::MAX);
+        for line in &l.lines {
+            if dom.doc.try_node(line.el).is_none() || line.idx >= h.line_count() {
+                continue;
+            }
+            let mut want = line.text.clone();
+            if line.newline {
+                want.push('\n');
+            }
+            if crate::events::text_content(dom.doc, line.el) != want {
+                continue;
+            }
+            dom.clear(line.el);
+            let (text, runs) = h.line(line.idx);
+            crate::kinds::rich::line_into(dom, line.el, text, Some(runs), &line.em);
+            if line.newline {
+                dom.text(line.el, "\n");
+            }
+        }
+        false
     }
 }
 

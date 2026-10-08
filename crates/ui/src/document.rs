@@ -31,11 +31,20 @@ pub struct Document {
     pub inline_style_restrictions: Restrictions,
     pub(crate) layout_dirty: bool,
     pub(crate) stats: UpdateStats,
+    /// Counts the layout runs ([`Document::layout_count`]).
+    pub(crate) layout_runs: u64,
+    /// Layout styled a child that came into view and it left its container's flow: lay out
+    /// again on the next update.
+    pub(crate) needs_relayout: bool,
     /// Counts the updates that restyled or laid anything out.
     generation: u64,
     /// Paint's index of where the children of boxes with many children reach, by box.
     pub(crate) child_extents:
         std::sync::Mutex<std::collections::HashMap<NodeId, crate::paint::ChildExtents>>,
+    /// How far the outer shadows of any element styled so far reach past its border box (never
+    /// shrinks): paint's culling keeps boxes that close to the visible part, since layout's
+    /// overflow doesn't count shadows.
+    pub(crate) shadow_reach: f32,
     /// Scroll containers with a nonzero offset (for scroll anchoring).
     pub(crate) scrolled: std::collections::BTreeSet<NodeId>,
     /// Decodes `background-image` URLs (`data:` only reach styles); none decodes nothing.
@@ -98,8 +107,11 @@ impl Document {
             inline_style_restrictions: Restrictions::NONE,
             layout_dirty: true,
             stats: UpdateStats::default(),
+            layout_runs: 0,
+            needs_relayout: false,
             generation: 0,
             child_extents: Default::default(),
+            shadow_reach: 0.0,
             scrolled: Default::default(),
             url_loader: None,
             url_images: Default::default(),
@@ -263,7 +275,14 @@ impl Document {
 
     /// After children change: the parent's boxes and its neighbours' styles (sibling selectors).
     fn structure_changed(&mut self, parent: NodeId, at: usize) {
+        let f = self.node(parent).flags;
+        let full = f & flags::BOX_DIRTY != 0 && f & flags::BOX_FULL != 0;
         self.mark_box_dirty(parent);
+        // Only its children changed: a virtualized container extended at the end needn't
+        // rebuild every box (`build_children`), unless something else asked for that.
+        if self.node(parent).virt_kids.is_some() && !full {
+            self.node_mut(parent).flags &= !flags::BOX_FULL;
+        }
         self.invalidate_layout(parent);
         let kids = &self.node(parent).children;
         let neighbours: Vec<NodeId> = [at.checked_sub(1), Some(at), Some(at + 1)]
@@ -509,7 +528,8 @@ impl Document {
     /// Mark a node's box structure (its layout children) for rebuilding, along with the nearest
     /// block container, which holds the boxes of inline content.
     pub(crate) fn mark_box_dirty(&mut self, id: NodeId) {
-        self.node_mut(id).flags |= flags::BOX_DIRTY;
+        self.node_mut(id).flags |= flags::BOX_DIRTY | flags::BOX_FULL;
+        self.node_mut(id).abspos = None;
         let mut cur = self.node(id).parent;
         let mut need_block = matches!(
             self.node(id).inner,
@@ -518,9 +538,10 @@ impl Document {
         while let Some(p) = cur {
             let pn = self.node_mut(p);
             if need_block {
-                pn.flags |= flags::BOX_DIRTY;
+                pn.flags |= flags::BOX_DIRTY | flags::BOX_FULL;
             }
             pn.flags |= flags::BOX_DESC;
+            pn.abspos = None;
             if !matches!(
                 pn.inner,
                 crate::dom::Inner::InlineBox | crate::dom::Inner::Contents
@@ -635,6 +656,7 @@ impl Document {
                 let changed = style.as_deref() != Some(&*new);
                 if changed {
                     let layout_changed = style.as_deref().is_none_or(|old| !layout_eq(old, &new));
+                    self.note_shadows(&new);
                     self.node_mut(id).style = Some(new.clone());
                     if layout_changed {
                         self.mark_box_dirty(id);
@@ -675,7 +697,16 @@ impl Document {
             None => scope,
         };
         let children = self.node(id).children.clone();
+        // A virtualized container's children out of view wait for layout to bring them into
+        // view (§7.10, §8.3): `style_in_view` styles them then.
+        let virtualized = self.node(id).virtual_estimate.is_some();
         for c in children {
+            if virtualized && self.style_waits(c) {
+                if force_children {
+                    self.node_mut(c).flags |= flags::STYLE_DIRTY | STYLE_SUBTREE;
+                }
+                continue;
+            }
             self.restyle_node(c, &my_style, force_children, child_scope.clone(), caches);
         }
         // Pseudo-element children follow their element.
@@ -749,6 +780,79 @@ impl Document {
             dark: self.dark,
             dpr: self.device_scale,
         }
+    }
+
+    /// Whether a virtualized container's child waits for layout to style it: an element not
+    /// styled yet, or one in the container's flow that the last layout skipped as out of view.
+    /// (One its style takes out of the flow is restyled as usual, so it can come back.)
+    fn style_waits(&self, c: NodeId) -> bool {
+        let n = self.node(c);
+        if !n.is_element() {
+            return false;
+        }
+        match n.style.as_deref() {
+            None => true,
+            Some(s) => {
+                n.skipped
+                    && s.display != Display::None
+                    && !s.is_out_of_flow()
+                    && !s.display.is_inline_level()
+            }
+        }
+    }
+
+    /// Whether a child of a virtualized container still has style work waiting.
+    pub(crate) fn style_pending(&self, c: NodeId) -> bool {
+        self.node(c).flags & (flags::STYLE_DIRTY | flags::STYLE_DESC) != 0
+    }
+
+    /// Styles a virtualized container's child that waited out of view ([`Document::style_waits`])
+    /// as layout brings it into view, and builds its boxes. Returns whether it still lays out
+    /// as a block in the flow; if it doesn't, the container's boxes are rebuilt next update.
+    pub(crate) fn style_in_view(&mut self, container: NodeId, c: NodeId) -> bool {
+        let parent_style = self
+            .node(container)
+            .style
+            .clone()
+            .unwrap_or_else(|| self.initial.clone());
+        let mut scope = None;
+        let mut cur = Some(container);
+        while let Some(e) = cur {
+            if let Some(v) = self.node(e).element().and_then(|el| el.attr("data-scope")) {
+                scope = Some((e, Atom::new(v)));
+                break;
+            }
+            cur = self.node(e).parent;
+        }
+        let was_dirty = self.node(container).flags & flags::BOX_DIRTY != 0;
+        let mut caches = std::mem::take(&mut self.caches);
+        self.restyle_node(c, &parent_style, false, scope, &mut caches);
+        self.caches = caches;
+        let style = self.node(c).style.clone();
+        let block = style.as_ref().is_some_and(|s| {
+            s.display != Display::None && !s.is_out_of_flow() && !s.display.is_inline_level()
+        });
+        if !block {
+            return false;
+        }
+        // Still a block in the container's flow: the container's boxes stand, only the child's
+        // own are built.
+        if !was_dirty {
+            self.node_mut(container).flags &= !flags::BOX_DIRTY;
+        }
+        self.set_virtual_child_box(container, c);
+        self.build_virtual_child(c);
+        // Boxes it changed further up (a containing block of something absolutely positioned
+        // in it) are rebuilt by the next layout.
+        let mut cur = Some(container);
+        while let Some(a) = cur {
+            if self.node(a).flags & flags::BOX_DIRTY != 0 {
+                self.needs_relayout = true;
+                break;
+            }
+            cur = self.node(a).parent;
+        }
+        true
     }
 
     fn update_pseudos(
@@ -841,6 +945,65 @@ impl Document {
     /// styles and the layout read since are the same.
     pub fn generation(&self) -> u64 {
         self.generation
+    }
+
+    /// How many times layout has run. With [`Document::laid_out_since`], a measure loop
+    /// revisits only the boxes laid out since its last pass: a box layout skipped (virtualized
+    /// out of view, §8.3) or took from its cache has the same size as when last measured.
+    pub fn layout_count(&self) -> u64 {
+        self.layout_runs
+    }
+
+    /// Whether layout computed `id`'s box (not from its cache, and not skipped as virtualized
+    /// out of view) in a run after `count` ([`Document::layout_count`]).
+    /// Inline boxes and text go by their formatting context, `display: contents` and table
+    /// parts by the box that lays them out.
+    pub fn laid_out_since(&self, id: NodeId, count: u64) -> bool {
+        use crate::dom::Inner;
+        let mut cur = id;
+        for _ in 0..64 {
+            let Some(n) = self.try_node(cur) else {
+                return false;
+            };
+            let up = match n.inner {
+                Inner::InlineBox | Inner::Text | Inner::TablePart => n.layout_parent,
+                Inner::Contents => n.parent,
+                Inner::None => return false,
+                _ => return n.laid_out_in > count,
+            };
+            let Some(up) = up else { return false };
+            cur = up;
+        }
+        false
+    }
+
+    /// Whether `id`'s box is real: layout has computed it, it isn't `display: none`, and
+    /// neither it nor an ancestor was skipped as virtualized out of view (whose boxes are
+    /// estimates).
+    pub fn laid_out(&self, id: NodeId) -> bool {
+        if !self.laid_out_since(id, 0) {
+            return false;
+        }
+        let mut cur = Some(id);
+        while let Some(c) = cur {
+            let n = self.node(c);
+            if n.skipped
+                || n.is_element() && n.style.as_ref().is_some_and(|s| s.display == Display::None)
+            {
+                return false;
+            }
+            cur = n.parent;
+        }
+        true
+    }
+
+    /// Drops `id`'s cached layout, so the next layout that reaches its box computes it again
+    /// (and [`Document::laid_out_since`] says so): for a measure loop whose inputs changed
+    /// outside layout.
+    pub fn relayout(&mut self, id: NodeId) {
+        if self.try_node(id).is_some() {
+            self.invalidate_layout(id);
+        }
     }
 
     /// A measure-then-layout loop (§8.3): update, then let `adjust` read the layout and change
@@ -1031,6 +1194,7 @@ impl Document {
                     // Text and descendants inherit it: restyle (which shows the motion again).
                     self.mark_style_dirty(id, true);
                 } else {
+                    self.note_shadows(&shown);
                     self.node_mut(id).style = Some(shown);
                 }
             }
@@ -1142,6 +1306,16 @@ impl Document {
         self.stats
     }
 
+    /// Widens `shadow_reach` to cover a style's outer shadows.
+    fn note_shadows(&mut self, s: &ComputedStyle) {
+        if s.box_shadow.is_some() {
+            let reach = crate::paint::shadow_outset(s)
+                .into_iter()
+                .fold(0.0, f32::max);
+            self.shadow_reach = self.shadow_reach.max(reach);
+        }
+    }
+
     /// The border box of an element in document coordinates (scroll offsets of ancestors applied),
     /// as `getBoundingClientRect()` plus the page scroll would report it. Inline boxes report the
     /// union of their fragments. Elements without boxes report None.
@@ -1162,6 +1336,7 @@ fn layout_eq(a: &ComputedStyle, b: &ComputedStyle) -> bool {
     b2.outline_style = a.outline_style;
     b2.outline_width = a.outline_width;
     b2.outline_offset = a.outline_offset;
+    b2.box_shadow = a.box_shadow.clone();
     b2.visibility = a.visibility;
     b2.transitions = a.transitions.clone();
     b2.animations = a.animations.clone();

@@ -9,7 +9,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use objc2::rc::{Retained, Weak};
 use objc2::runtime::{NSObjectProtocol, ProtocolObject};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
-use objc2_app_kit::{NSBackingStoreType, NSWindow, NSWindowDelegate, NSWindowStyleMask};
+use objc2_app_kit::{
+    NSBackingStoreType, NSCursor, NSWindow, NSWindowDelegate, NSWindowStyleMask,
+};
 use objc2_foundation::{NSNotification, NSObject, NSPoint, NSRect, NSSize, NSString};
 use raw_window_handle::{
     AppKitDisplayHandle, AppKitWindowHandle, DisplayHandle, HandleError, HasDisplayHandle,
@@ -22,6 +24,14 @@ use crate::{Appearance, Event, OptionAsAlt, Size, WindowAttributes, WindowHandle
 /// Identifies a window for the life of the process.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct WindowId(pub u64);
+
+/// The pointer's shape over a window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PointerShape {
+    Arrow,
+    /// Over something a click opens (a link).
+    PointingHand,
+}
 
 /// A window. Main thread only; cheap to clone.
 #[derive(Clone)]
@@ -113,6 +123,31 @@ impl Window {
     /// event passes without a request.
     pub fn request_frame(&self) {
         self.view.request_frame();
+    }
+
+    /// Sets the pointer's shape. It stays until the next change.
+    pub fn set_pointer(&self, shape: PointerShape) {
+        let cursor = match shape {
+            PointerShape::Arrow => NSCursor::arrowCursor(),
+            PointerShape::PointingHand => NSCursor::pointingHandCursor(),
+        };
+        cursor.set();
+    }
+
+    /// The pointer's current shape, as AppKit has it.
+    pub fn pointer(&self) -> PointerShape {
+        if NSCursor::currentCursor() == NSCursor::pointingHandCursor() {
+            PointerShape::PointingHand
+        } else {
+            PointerShape::Arrow
+        }
+    }
+
+    /// The title the window shows.
+    pub fn title(&self) -> String {
+        self.ns_window()
+            .map(|w| w.title().to_string())
+            .unwrap_or_default()
     }
 
     pub fn set_title(&self, title: &str) {

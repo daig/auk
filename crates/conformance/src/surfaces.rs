@@ -218,6 +218,9 @@ impl SurfaceWindow {
         let now = self.now();
         let replica = &self.replicas[&pane];
         let p = self.projections.get_mut(&pane).expect("a projection");
+        // Compared against WebKit: highlighting and pictures left to the background are
+        // finished first (the tick draws decoded pictures in).
+        p.view.finish_background(&mut p.doc);
         p.view.tick(&mut p.doc, replica.tsp(), now);
         p.view.layout(&mut p.doc);
         p

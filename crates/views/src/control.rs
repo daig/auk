@@ -118,7 +118,16 @@ impl PaneView {
                     sv.clocked.remove(&id);
                     continue;
                 };
-                if kinds::tick(&mut cx, node, m) {
+                // Highlighting the background finished draws in (§8.5), when the node is in
+                // view; out of view, the measure loop draws it in once it's laid out.
+                let drawing_in = !m.hl.is_empty() && cx.dom.doc.laid_out(m.el) && {
+                    m.hl.retain(|d| d.draw_in(&mut cx.dom, false));
+                    if m.hl.is_empty() {
+                        cx.st.hl_waiting.remove(&id);
+                    }
+                    !m.hl.is_empty()
+                };
+                if kinds::tick(&mut cx, node, m) || drawing_in {
                     any = true;
                 } else {
                     sv.clocked.remove(&id);
@@ -134,6 +143,24 @@ impl PaneView {
             next = Some(next.map_or(frame, |n| n.min(frame)));
         }
         next
+    }
+
+    /// Finishes what renders left to the background and draws it in: the highlighting (on
+    /// this thread), and the pictures decoding (waited for; the next tick draws them). For
+    /// hosts that draw deterministically (headless goldens, tests).
+    pub fn finish_background(&mut self, doc: &mut Document) {
+        crate::image::settle();
+        let mut dom = Dom {
+            doc,
+            w: &mut self.written,
+        };
+        for sv in &mut self.surfaces {
+            for m in sv.mounts.values_mut() {
+                for d in std::mem::take(&mut m.hl) {
+                    d.draw_in(&mut dom, true);
+                }
+            }
+        }
     }
 
     /// Change settings (font, cell size, appearance, Reduce Motion, program colors, Edits,

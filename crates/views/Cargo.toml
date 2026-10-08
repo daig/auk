@@ -32,6 +32,8 @@ auk-conformance = { path = "../conformance" }
 base64 = "0.23.1"
 # Writes the APNG the image tests decode.
 png = "0.18.1"
+# Blocks on wgpu's adapter and device requests in the paint tests.
+pollster = "0.4"
 
 [lints]
 workspace = true

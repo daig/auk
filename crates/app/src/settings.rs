@@ -7,6 +7,7 @@
 //! | `program_colors` | `true` | "Use program colors": apply program palettes (§7.12) |
 //! | `native_editing` | `true` | native editing in program fields (§7.9) |
 //! | `links_plain_click` | `false` | a plain click opens links (otherwise ⌘-click, §7.8) |
+//! | `hyperlinks` | `"dotted"` | grid links: `"dotted"` underline, only on `"hover"`, or `"off"` |
 //! | `reduce_motion` | `"system"` | `true`, `false`, or follow the system setting (§7.13) |
 //! | `keymap` | none | a preset layer: `"tmux"` (§9.8 keymap layers) |
 //! | `keymap_prefix` | `"ctrl+b"` | the preset's prefix |
@@ -15,6 +16,7 @@
 use std::path::{Path, PathBuf};
 
 use auk_plugins::chord::Chord;
+use auk_render::LinkStyle;
 use serde_json::Value;
 
 /// `reduce_motion`: follow the system, or Auk's own choice.
@@ -39,6 +41,8 @@ pub struct Settings {
     pub program_colors: bool,
     pub native_editing: bool,
     pub links_plain_click: bool,
+    /// How OSC 8 links in the grid draw.
+    pub hyperlinks: LinkStyle,
     pub reduce_motion: Motion,
     pub keymap: Option<String>,
     pub keymap_prefix: String,
@@ -53,6 +57,7 @@ impl Default for Settings {
             program_colors: true,
             native_editing: true,
             links_plain_click: false,
+            hyperlinks: LinkStyle::Dotted,
             reduce_motion: Motion::System,
             keymap: None,
             keymap_prefix: "ctrl+b".to_owned(),
@@ -97,6 +102,16 @@ impl Settings {
         flag("program_colors", &mut s.program_colors, &mut problems);
         flag("native_editing", &mut s.native_editing, &mut problems);
         flag("links_plain_click", &mut s.links_plain_click, &mut problems);
+        s.hyperlinks = match v.get("hyperlinks") {
+            None | Some(Value::Null) => LinkStyle::Dotted,
+            Some(Value::String(x)) if x == "dotted" => LinkStyle::Dotted,
+            Some(Value::String(x)) if x == "hover" => LinkStyle::Hover,
+            Some(Value::String(x)) if x == "off" => LinkStyle::Off,
+            Some(_) => {
+                problems.push("hyperlinks: expected \"dotted\", \"hover\" or \"off\"".into());
+                LinkStyle::Dotted
+            }
+        };
         s.reduce_motion = match v.get("reduce_motion") {
             None | Some(Value::Null) => Motion::System,
             Some(Value::Bool(true)) => Motion::Reduce,
@@ -212,12 +227,18 @@ mod tests {
         let s = Settings::from_json(&json!({
             "program_colors": false,
             "links_plain_click": true,
+            "hyperlinks": "hover",
             "reduce_motion": true,
             "keymap": "tmux",
             "keymap_prefix": "ctrl+a",
             "keybinds": {"cmd+t": "unbind", "ctrl+a>c": ["split_down", "new_tab"], "bad+": "x"},
         }));
         assert!(!s.program_colors && s.native_editing && s.links_plain_click);
+        assert_eq!(s.hyperlinks, LinkStyle::Hover);
+        assert_eq!(Settings::default().hyperlinks, LinkStyle::Dotted);
+        let bad = Settings::from_json(&json!({"hyperlinks": "blink"}));
+        assert_eq!(bad.hyperlinks, LinkStyle::Dotted);
+        assert_eq!(bad.problems.len(), 1);
         assert!(s.reduces_motion(false));
         assert_eq!(s.keybinds.len(), 2, "{:?}", s.problems);
         assert_eq!(s.problems.len(), 1);

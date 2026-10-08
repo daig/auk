@@ -8,14 +8,14 @@
   "env": [
     "PI_TUI_TSP_RECORD=/Users/dai/code/tern-clone/fixtures/tsp/omp-session-own.jsonl"
   ],
-  "recorded": "2026-10-08T01:44:30-0600",
+  "recorded": "2026-10-08T14:51:00-0600",
   "recorder": "tools/tsp_record.py",
   "exit_status": 143,
   "counts": {
-    "in e": 560,
+    "in e": 542,
     "in r": 2,
     "out b": 1,
-    "out f": 559,
+    "out f": 541,
     "out o": 1,
     "out osc": 6,
     "out q": 2,
@@ -33,5 +33,5 @@
     "CSI 22;2t": 1,
     "CSI 0 q": 2
   },
-  "note": "omp 18.8.4 (installed binary), three prompts in a scratch copy of tern-sdk; omp-session-own.jsonl is omp's own PI_TUI_TSP_RECORD log"
+  "note": "omp 18.8.5 (installed binary), three prompts in a scratch copy of tern-sdk; omp-session-own.jsonl is omp's own PI_TUI_TSP_RECORD log"
 }

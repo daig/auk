@@ -60,6 +60,7 @@ pub use sheets::{install_fonts, install_sheets};
 pub use state::{Preedit, Selection};
 pub use lenses::{LensInput, LensLayer};
 pub use surfaces::{Arranged, PaneSurfaces, Place, ShownToast, SurfaceBlock};
+pub use measure::LayoutWork;
 pub use view::PaneView;
 
 /// The regions of a surface (§7.5).

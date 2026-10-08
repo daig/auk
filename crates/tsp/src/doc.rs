@@ -110,9 +110,20 @@ struct Node {
     parent: Option<usize>,
     settled: bool,
     cost: u64,
+    /// The blob an `image` node names, lowercase; kept up to date like `cost` (§7.12).
+    blob: Option<Box<str>>,
 }
 
 impl Node {
+    /// The blob id this node names: an `image`'s `blob` prop, lowercase.
+    fn image_blob(&self) -> Option<Box<str>> {
+        if self.kind != "image" {
+            return None;
+        }
+        let id = self.props.get("blob")?.as_str()?;
+        Some(id.to_ascii_lowercase().into_boxed_str())
+    }
+
     fn estimate(&self) -> u64 {
         let props: u64 = self
             .props
@@ -148,13 +159,20 @@ pub struct DocChanges {
     pub children: BTreeSet<String>,
     /// Nodes removed (deleted, evicted, or dropped with a region on close).
     pub removed: BTreeSet<String>,
+    /// Nodes a top-level `age` prop arrived on (an `add` or a `set` naming it), even with an
+    /// unchanged value: their timers restart (§7.13). View-only; no replica state depends on it.
+    pub ages: BTreeSet<String>,
     /// The focus changed.
     pub focus: bool,
 }
 
 impl DocChanges {
     pub fn is_empty(&self) -> bool {
-        self.nodes.is_empty() && self.children.is_empty() && self.removed.is_empty() && !self.focus
+        self.nodes.is_empty()
+            && self.children.is_empty()
+            && self.removed.is_empty()
+            && self.ages.is_empty()
+            && !self.focus
     }
 }
 
@@ -181,6 +199,8 @@ pub struct Document {
     root: usize,
     count: usize,
     cost: u64,
+    /// How many `image` nodes name each blob id (lowercase), kept at every mutation (§7.12).
+    blob_refs: HashMap<Box<str>, u32>,
     focus: Option<String>,
     changes: DocChanges,
     reveal: Option<Reveal>,
@@ -267,6 +287,7 @@ impl Document {
             root: 0,
             count: 0,
             cost: 0,
+            blob_refs: HashMap::new(),
             focus: None,
             tag_errors: Vec::new(),
             changes: DocChanges::default(),
@@ -281,6 +302,7 @@ impl Document {
             parent: None,
             settled: false,
             cost: 0,
+            blob: None,
         });
         doc
     }
@@ -289,6 +311,10 @@ impl Document {
         node.cost = node.estimate();
         self.cost += node.cost;
         self.count += 1;
+        node.blob = node.image_blob();
+        if let Some(blob) = &node.blob {
+            self.add_blob_ref(blob.clone());
+        }
         let id = node.id.clone();
         let slot = match self.free.pop() {
             Some(slot) => {
@@ -427,7 +453,46 @@ impl Document {
         let node = self.node_mut(slot);
         let new = node.estimate();
         let old = std::mem::replace(&mut node.cost, new);
+        let blob = node.image_blob();
+        let renamed = node.blob != blob;
+        let old_blob = if renamed {
+            std::mem::replace(&mut node.blob, blob.clone())
+        } else {
+            None
+        };
         self.cost = self.cost - old + new;
+        if renamed {
+            if let Some(b) = old_blob {
+                self.drop_blob_ref(&b);
+            }
+            if let Some(b) = blob {
+                self.add_blob_ref(b);
+            }
+        }
+    }
+
+    fn add_blob_ref(&mut self, blob: Box<str>) {
+        *self.blob_refs.entry(blob).or_insert(0) += 1;
+    }
+
+    fn drop_blob_ref(&mut self, blob: &str) {
+        if let Some(n) = self.blob_refs.get_mut(blob) {
+            *n -= 1;
+            if *n == 0 {
+                self.blob_refs.remove(blob);
+            }
+        }
+    }
+
+    /// The blob ids this document's `image` nodes name, lowercase, each once. Kept up to date as
+    /// ops apply, so this costs the number of distinct blobs, not the document's size.
+    pub fn blob_refs(&self) -> impl Iterator<Item = &str> + '_ {
+        self.blob_refs.keys().map(|b| &**b)
+    }
+
+    /// Whether an `image` node here names `blob` (lowercase).
+    pub fn names_blob(&self, blob: &str) -> bool {
+        self.blob_refs.contains_key(blob)
     }
 
     /// Takes the node-level changes since the last call.
@@ -521,6 +586,11 @@ impl Document {
         }
         for &slot in &slots {
             self.check_tag(slot);
+            let node = self.node(slot);
+            if node.props.contains_key("age") {
+                let id = node.id.clone();
+                self.changes.ages.insert(id);
+            }
         }
         self.changes.children.insert(parent.to_owned());
         self.unsettle(parent_slot);
@@ -605,6 +675,7 @@ impl Document {
                 parent: None,
                 settled: false,
                 cost: 0,
+                blob: None,
             },
         ));
         let mut height = 0;
@@ -658,6 +729,10 @@ impl Document {
             } else {
                 node.props.insert(k.clone(), v.clone());
             }
+        }
+        // An `age` arriving restarts its timer even when the value is unchanged (§7.13).
+        if props.get("age").is_some_and(|v| !v.is_null()) {
+            self.changes.ages.insert(id.to_owned());
         }
         self.touched(slot);
         Ok(())
@@ -797,6 +872,9 @@ impl Document {
             self.index.remove(&node.id);
             self.count -= 1;
             self.cost -= node.cost;
+            if let Some(b) = &node.blob {
+                self.drop_blob_ref(b);
+            }
             self.free.push(s);
             if self.focus.as_deref() == Some(node.id.as_str()) {
                 self.focus = None;
@@ -808,6 +886,7 @@ impl Document {
             self.scrolls.retain(|r| r.id != node.id);
             self.changes.nodes.remove(&node.id);
             self.changes.children.remove(&node.id);
+            self.changes.ages.remove(&node.id);
             self.changes.removed.insert(node.id);
         }
     }
@@ -1151,10 +1230,12 @@ mod tests {
     use super::*;
 
     fn kinds() -> BTreeSet<String> {
-        ["col", "row", "text", "md", "editor", "el", "card"]
-            .into_iter()
-            .map(String::from)
-            .collect()
+        [
+            "col", "row", "text", "md", "editor", "el", "card", "image", "elapsed",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect()
     }
 
     fn apply(doc: &mut Document, op: Value) -> Result<(), String> {
@@ -1417,5 +1498,146 @@ mod tests {
             Value::Object(d.form_values("x", &|_| None).unwrap()),
             json!({"nested": true})
         );
+    }
+
+    /// The blob ids `image` nodes name, by a full walk: what `blob_refs` must equal.
+    fn walked_blobs(d: &Document) -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        d.walk(d.root, &mut |n| {
+            if n.kind == "image"
+                && let Some(b) = n.props.get("blob").and_then(Value::as_str)
+            {
+                out.insert(b.to_ascii_lowercase());
+            }
+        });
+        out
+    }
+
+    fn tracked_blobs(d: &Document) -> BTreeSet<String> {
+        d.blob_refs().map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn blob_refs_follow_adds_sets_and_removals() {
+        let mut d = doc();
+        let img = |id: &str, blob: &str| json!({"id": id, "k": "image", "p": {"blob": blob}});
+        apply(
+            &mut d,
+            json!(["add", "g", "main", null, {"id": "g", "k": "col", "c": [
+                img("i1", "AAAA"), img("i2", "aaaa"), img("i3", "bbbb")
+            ]}]),
+        )
+        .unwrap();
+        // Mixed case names one blob; two nodes name it.
+        assert_eq!(
+            tracked_blobs(&d),
+            BTreeSet::from(["aaaa".into(), "bbbb".into()])
+        );
+        assert_eq!(d.blob_refs["aaaa"], 2);
+        // A set that renames a blob moves its count.
+        apply(&mut d, json!(["set", "i3", {"blob": "cccc"}])).unwrap();
+        assert_eq!(
+            tracked_blobs(&d),
+            BTreeSet::from(["aaaa".into(), "cccc".into()])
+        );
+        // A set of other props leaves it.
+        apply(&mut d, json!(["set", "i3", {"alt": "x"}])).unwrap();
+        assert!(d.names_blob("cccc"));
+        // Null drops the reference.
+        apply(&mut d, json!(["set", "i3", {"blob": null}])).unwrap();
+        assert!(!d.names_blob("cccc"));
+        // Only `image` nodes count.
+        apply(&mut d, json!(["set", "a", {"blob": "dddd"}])).unwrap();
+        assert!(!d.names_blob("dddd"));
+        // Deleting the subtree holding both namers of one blob drops it whole.
+        apply(&mut d, json!(["del", "g"])).unwrap();
+        assert!(d.blob_refs.is_empty());
+        assert_eq!(tracked_blobs(&d), walked_blobs(&d));
+    }
+
+    #[test]
+    fn blob_refs_match_a_full_walk_through_random_ops() {
+        // A small deterministic generator (xorshift), so the sequence is the same every run.
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = move |n: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed % n
+        };
+        let blobs = ["aa", "AA", "bb", "cc", "Dd"];
+        let mut d = doc();
+        let (mut applied, mut peak) = (0, 0);
+        for step in 0..2000 {
+            let id = format!("n{}", next(40));
+            let blob = blobs[next(blobs.len() as u64) as usize];
+            let parent = if next(3) == 0 {
+                "main".to_owned()
+            } else {
+                format!("n{}", next(40))
+            };
+            let op = match next(5) {
+                0 | 1 => {
+                    json!(["add", id, parent, null, {"id": id, "k": if next(2) == 0 { "image" } else { "col" }, "p": {"blob": blob}, "c": [
+                        {"id": format!("{id}c{step}"), "k": "image", "p": {"blob": blob}}
+                    ]}])
+                }
+                2 => {
+                    json!(["set", id, {"blob": if next(4) == 0 { Value::Null } else { blob.into() }}])
+                }
+                3 => json!(["del", id]),
+                _ => json!(["move", id, parent, null]),
+            };
+            applied += usize::from(apply(&mut d, op).is_ok());
+            assert_eq!(tracked_blobs(&d), walked_blobs(&d), "after step {step}");
+            peak = peak.max(d.blob_refs.len());
+        }
+        assert!(
+            applied > 500 && peak >= 3,
+            "the ops exercise it: {applied} applied, {peak} blobs"
+        );
+        while let Some(main) = d.region("main").map(|m| m.slot) {
+            d.remove(main);
+        }
+        assert!(d.blob_refs.is_empty());
+    }
+
+    #[test]
+    fn an_arriving_age_is_recorded_even_unchanged() {
+        let mut d = doc();
+        apply(
+            &mut d,
+            json!(["add", "e", "main", null, {"id": "e", "k": "elapsed", "p": {"age": 1000}}]),
+        )
+        .unwrap();
+        assert!(d.take_changes().ages.contains("e"), "an add carrying age");
+        apply(&mut d, json!(["set", "e", {"age": 1000}])).unwrap();
+        let dc = d.take_changes();
+        assert!(dc.ages.contains("e"), "the same value, resent");
+        assert!(!dc.is_empty());
+        apply(&mut d, json!(["set", "e", {"format": "clock"}])).unwrap();
+        assert!(d.take_changes().ages.is_empty(), "a set of other props");
+        apply(&mut d, json!(["set", "e", {"age": null}])).unwrap();
+        assert!(d.take_changes().ages.is_empty(), "a null age is a removal");
+        // Nested ages don't count: they restart only on a new value, which views compare.
+        apply(&mut d, json!(["set", "e", {"stats": {"age": 5}}])).unwrap();
+        assert!(d.take_changes().ages.is_empty());
+        // Deleted in the drain: gone; re-added after: there again.
+        apply(&mut d, json!(["set", "e", {"age": 1000}])).unwrap();
+        apply(&mut d, json!(["del", "e"])).unwrap();
+        assert!(d.take_changes().ages.is_empty());
+        apply(
+            &mut d,
+            json!(["add", "e", "main", null, {"id": "e", "k": "elapsed", "p": {"age": 1000}}]),
+        )
+        .unwrap();
+        apply(&mut d, json!(["del", "e"])).unwrap();
+        apply(
+            &mut d,
+            json!(["add", "e", "main", null, {"id": "e", "k": "elapsed", "p": {"age": 1000}}]),
+        )
+        .unwrap();
+        let dc = d.take_changes();
+        assert!(dc.ages.contains("e") && dc.removed.contains("e"));
     }
 }

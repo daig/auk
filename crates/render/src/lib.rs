@@ -22,7 +22,7 @@ pub use gpu::{Gpu, GpuError};
 pub use grid::{GridRenderer, MAX_SLOT_ROWS, PrepareStats, RowSlot};
 pub use offscreen::{Image, OFFSCREEN_FORMAT, OffscreenTarget, ReadbackError};
 pub use snapshot::{
-    Attrs, CellText, CursorStyle, GridSnapshot, Selection, SnapCell, SnapCursor, View,
+    Attrs, CellText, CursorStyle, GridSnapshot, LinkStyle, Selection, SnapCell, SnapCursor, View,
 };
 pub use surface::{Acquired, WindowSurface};
 pub use theme::{

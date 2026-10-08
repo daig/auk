@@ -226,6 +226,9 @@ impl NativeWindow {
         let Some(shown) = self.panes.get_mut(&pane) else {
             return;
         };
+        // A test's window draws deterministically: highlighting and pictures left to the
+        // background are finished first (the tick draws decoded pictures in).
+        shown.view.finish_background(&mut shown.doc);
         shown.view.tick(&mut shown.doc, shown.replica.tsp(), now);
         shown.view.layout(&mut shown.doc);
         if !primary {

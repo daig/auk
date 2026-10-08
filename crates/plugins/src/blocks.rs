@@ -218,11 +218,17 @@ impl BlockRun {
         self.json_message("f", &body)
     }
 
-    /// `cx:blob(bytes, mime)`.
+    /// `cx:blob(bytes, mime)`. A `mime` that isn't a plain `type/subtype` token is left out
+    /// (the terminal sniffs the bytes), so it can't break the APC parameters or end the string.
     pub(crate) fn blob(&mut self, bytes: &[u8], mime: &str) -> Vec<u8> {
         use base64::Engine as _;
         let body = base64::engine::general_purpose::STANDARD.encode(bytes);
-        self.message("b", &[("mime", mime)], body.as_bytes())
+        let params: &[(&str, &str)] = if is_mime_token(mime) {
+            &[("mime", mime)]
+        } else {
+            &[]
+        };
+        self.message("b", params, body.as_bytes())
     }
 
     /// A new title from `title`: the pane's OSC 2 title, when it changed.
@@ -265,6 +271,7 @@ impl BlockRun {
                     }
                 }
                 Item::Event(event) => {
+                    // Acks are dropped: a block writes without waiting for credits (§9.5, D25).
                     if !matches!(event, Event::Ack(_) | Event::Resize(_)) {
                         out.push(BlockInput::Event(event.raw().clone()));
                     }
@@ -274,4 +281,15 @@ impl BlockRun {
         }
         out
     }
+}
+
+/// Whether `mime` is a plain `type/subtype` (RFC 6838 restricted names, no parameters).
+fn is_mime_token(mime: &str) -> bool {
+    let name = |s: &str| {
+        !s.is_empty()
+            && s.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"!#$&^_.+-".contains(&b))
+    };
+    mime.split_once('/')
+        .is_some_and(|(ty, sub)| name(ty) && name(sub))
 }

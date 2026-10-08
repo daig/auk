@@ -50,12 +50,18 @@ impl Document {
             return;
         }
         if f & flags::BOX_DIRTY != 0 {
-            self.build_children(id);
+            if f & flags::BOX_FULL != 0 || !self.extend_virtual_children(id) {
+                self.build_children(id);
+            }
         }
-        self.node_mut(id).flags &= !(flags::BOX_DIRTY | flags::BOX_DESC);
-        let kids = self.node(id).layout_children.clone();
-        for c in kids {
-            self.build_rec(c);
+        self.node_mut(id).flags &= !(flags::BOX_DIRTY | flags::BOX_DESC | flags::BOX_FULL);
+        // Only children with box work (a long list has a few).
+        let mut i = 0;
+        while let Some(&c) = self.node(id).layout_children.get(i) {
+            if self.node(c).flags & (flags::BOX_DIRTY | flags::BOX_DESC) != 0 {
+                self.build_rec(c);
+            }
+            i += 1;
         }
         // Inline boxes inside a formatting context have no layout children but may carry flags.
         if self.node(id).inner == Inner::Ifc {
@@ -201,6 +207,111 @@ impl Document {
         a
     }
 
+    /// A virtualized container's child styled as layout brings it into view: its box as the
+    /// container's build gives a styled child.
+    pub(crate) fn set_virtual_child_box(&mut self, container: NodeId, c: NodeId) {
+        let item = matches!(self.node(container).inner, Inner::Flex | Inner::Grid);
+        let d = self.style_of(c).display;
+        let inner = if item {
+            inner_for(d.blockified(), true)
+        } else {
+            inner_for(d, false)
+        };
+        self.set_child_box(container, c, inner, item, false);
+    }
+
+    /// Builds the boxes under a virtualized container's child styled as it came into view.
+    pub(crate) fn build_virtual_child(&mut self, c: NodeId) {
+        self.build_rec(c);
+    }
+
+    /// How box building treats a child: a virtualized container's element children not styled
+    /// yet (waiting out of view, `Document::style_waits`) stand in as blocks.
+    fn classify_in(&self, parent: NodeId, c: NodeId, parent_ws: WhiteSpace) -> Class {
+        let n = self.node(c);
+        if n.style.is_none() && n.is_element() && self.node(parent).virtual_estimate.is_some() {
+            return Class::Block;
+        }
+        self.classify(c, parent_ws)
+    }
+
+    /// Children added at the end of a virtualized container whose layout children are exactly
+    /// its box children, all blocks (`Node::virt_kids`): their boxes join without rebuilding
+    /// the others, so a transcript growing by a few entries costs those entries. Returns false
+    /// when anything else changed (the full rebuild then runs).
+    fn extend_virtual_children(&mut self, id: NodeId) -> bool {
+        if self.node(id).virtual_estimate.is_none() {
+            return false;
+        }
+        let n = self.node(id);
+        let Some(old) = n.virt_kids.as_ref() else {
+            return false;
+        };
+        // Its box children are its DOM children (no `::before`/`::after`; `display: contents`
+        // children are checked below), the old ones first.
+        if n.before.is_some()
+            || n.after.is_some()
+            || n.children.len() < old.len()
+            || n.children[..old.len()] != old[..]
+        {
+            return false;
+        }
+        let kids = n.children.clone();
+        let tail = kids[old.len()..].to_vec();
+        let inner = self.node(id).inner;
+        let item = matches!(inner, Inner::Flex | Inner::Grid);
+        let positioned = self.node(id).style.as_ref().is_some_and(|s| s.is_positioned());
+        let ws = self.style_of(id).white_space;
+        for &c in &tail {
+            if self.classify_in(id, c, ws) != Class::Block
+                || matches!(self.node(c).kind, NodeKind::Anonymous)
+                || self
+                    .node(c)
+                    .style
+                    .as_ref()
+                    .is_some_and(|s| s.display == Display::Contents)
+                || self.node(c).style.as_ref().is_some_and(|s| s.order != 0)
+            {
+                return false;
+            }
+            if positioned {
+                let mut found = Vec::new();
+                self.collect_abspos_of(c, &mut found);
+                if !found.is_empty() {
+                    return false;
+                }
+            }
+        }
+        for &c in &tail {
+            if item {
+                self.set_virtual_child_box(id, c);
+            } else if self.node(c).style.is_none() {
+                self.set_child_box(id, c, Inner::Flow, false, false);
+            } else {
+                self.set_virtual_child_box(id, c);
+            }
+        }
+        let n = self.node_mut(id);
+        n.layout_children.extend_from_slice(&tail);
+        n.virt_kids = Some(kids);
+        n.cache.clear();
+        true
+    }
+
+    /// `collect_abspos` for one child's subtree (the child itself included).
+    fn collect_abspos_of(&mut self, c: NodeId, out: &mut Vec<NodeId>) {
+        let n = self.node(c);
+        let Some(s) = n.style.as_ref() else { return };
+        if s.display == Display::None {
+            return;
+        }
+        if s.is_out_of_flow() {
+            out.push(c);
+        } else if !s.is_positioned() {
+            self.collect_abspos(c, out);
+        }
+    }
+
     fn build_children(&mut self, id: NodeId) {
         self.free_anons(id);
         let style = self.style_of(id);
@@ -211,7 +322,7 @@ impl Document {
             Inner::Flow | Inner::Ifc => {
                 let classes: Vec<Class> = kids
                     .iter()
-                    .map(|c| self.classify(*c, style.white_space))
+                    .map(|c| self.classify_in(id, *c, style.white_space))
                     .collect();
                 let any_block = classes.contains(&Class::Block);
                 let any_inline = classes.contains(&Class::Inline);
@@ -248,6 +359,9 @@ impl Document {
                     for c in layout_children.clone() {
                         if matches!(self.node(c).kind, NodeKind::Anonymous) {
                             self.set_child_box(id, c, Inner::Flow, false, false);
+                        } else if self.node(c).style.is_none() {
+                            // A virtualized container's child waiting to be styled.
+                            self.set_child_box(id, c, Inner::Flow, false, false);
                         } else {
                             let d = self.style_of(c).display;
                             self.set_child_box(id, c, inner_for(d, false), false, false);
@@ -280,7 +394,7 @@ impl Document {
                             }
                             run.clear();
                             has = false;
-                            if self.classify(*c, style.white_space) != Class::Skip {
+                            if self.classify_in(id, *c, style.white_space) != Class::Skip {
                                 items.push((*c, false));
                             }
                         }
@@ -325,7 +439,6 @@ impl Document {
                         }
                         (pd, Display::TableRow) if pd.is_row_group() => Inner::TablePart,
                         (Display::TableRow, _) => inner_for(d.blockified(), true),
-                        (_, Display::TableCaption) => Inner::Flow,
                         (
                             Display::Table | Display::InlineTable,
                             Display::TableColumn | Display::TableColumnGroup,
@@ -351,12 +464,18 @@ impl Document {
                 layout_children.push(c);
             }
         }
+        // A virtualized container whose boxes are exactly its children, in order, can be
+        // extended later (`extend_virtual_children`).
+        let simple = self.node(id).virtual_estimate.is_some()
+            && self.node(id).anon_children.is_empty()
+            && layout_children == kids;
         let n = self.node_mut(id);
         n.layout_children = layout_children;
+        n.virt_kids = simple.then_some(kids);
         n.cache.clear();
     }
 
-    fn collect_abspos(&self, id: NodeId, out: &mut Vec<NodeId>) {
+    fn collect_abspos(&mut self, id: NodeId, out: &mut Vec<NodeId>) {
         for c in self.box_children(id) {
             let n = self.node(c);
             let Some(s) = n.style.as_ref() else { continue };
@@ -368,7 +487,15 @@ impl Document {
             if s.is_out_of_flow() {
                 out.push(c);
             } else if !s.is_positioned() {
-                self.collect_abspos(c, out);
+                // What a subtree passes up stays the same until a box under it changes.
+                if let Some(found) = &n.abspos {
+                    out.extend_from_slice(found);
+                } else {
+                    let mut found = Vec::new();
+                    self.collect_abspos(c, &mut found);
+                    out.extend_from_slice(&found);
+                    self.node_mut(c).abspos = Some(found.into_boxed_slice());
+                }
             }
         }
     }

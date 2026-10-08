@@ -18,6 +18,12 @@ body { margin: 0; background: white; }
 <div class="clip"><div></div></div><div class="half"></div></body></html>"#;
 
 fn render(doc: &auk_ui::Document, w: u32, h: u32) -> Option<Vec<u8>> {
+    let mut scene = vello::Scene::new();
+    paint(doc, &mut scene);
+    render_scene(&scene, w, h)
+}
+
+fn render_scene(scene: &vello::Scene, w: u32, h: u32) -> Option<Vec<u8>> {
     let instance =
         vello::wgpu::Instance::new(vello::wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = pollster::block_on(
@@ -28,8 +34,6 @@ fn render(doc: &auk_ui::Document, w: u32, h: u32) -> Option<Vec<u8>> {
         pollster::block_on(adapter.request_device(&vello::wgpu::DeviceDescriptor::default()))
             .ok()?;
     let mut renderer = vello::Renderer::new(&device, vello::RendererOptions::default()).ok()?;
-    let mut scene = vello::Scene::new();
-    paint(doc, &mut scene);
     let texture = device.create_texture(&vello::wgpu::TextureDescriptor {
         label: Some("target"),
         size: vello::wgpu::Extent3d {
@@ -49,7 +53,7 @@ fn render(doc: &auk_ui::Document, w: u32, h: u32) -> Option<Vec<u8>> {
         .render_to_texture(
             &device,
             &queue,
-            &scene,
+            scene,
             &view,
             &vello::RenderParams {
                 base_color: vello::peniko::Color::new([1.0, 1.0, 1.0, 1.0]),
@@ -237,5 +241,157 @@ fn plugin_sheet_data_url_backgrounds_paint_tiled_and_program_sheets_drop_url() {
         at(5, 15),
         [255, 255, 255, 255],
         "the program sheet's url() was dropped"
+    );
+}
+
+const SHADOWS: &str = r#"<!DOCTYPE html><html><head><style>
+body { margin: 0; background: white; }
+div { position: absolute; background: rgb(0, 0, 255); }
+.outer { left: 20px; top: 20px; width: 40px; height: 40px; box-shadow: 10px 10px rgb(255, 0, 0); }
+.spread { left: 100px; top: 20px; width: 20px; height: 20px; box-shadow: 0 0 0 5px rgb(0, 128, 0); }
+.inset { left: 150px; top: 20px; width: 40px; height: 40px; border: 2px solid black;
+         box-shadow: inset 4px 0 0 rgb(255, 0, 0), inset 0 0 0 2px rgb(0, 128, 0); }
+.round { left: 220px; top: 20px; width: 40px; height: 40px; border-radius: 20px;
+         box-shadow: 0 0 0 4px rgb(255, 0, 0); }
+.blur { left: 20px; top: 100px; width: 40px; height: 40px; box-shadow: 0 0 10px rgb(255, 0, 0); }
+.iblur { left: 100px; top: 100px; width: 60px; height: 60px; box-shadow: inset 0 0 10px rgb(255, 0, 0); }
+.faded { left: 200px; top: 100px; width: 20px; height: 20px; opacity: 0.5; box-shadow: 10px 0 black; }
+.multi { left: 20px; top: 180px; width: 20px; height: 20px;
+         box-shadow: 4px 0 rgb(0, 128, 0), 8px 0 rgb(255, 0, 0); }
+.turned { left: 260px; top: 100px; width: 20px; height: 20px; transform: rotate(90deg);
+          box-shadow: 10px 0 rgb(255, 0, 0); }
+</style></head><body><div class="outer"></div><div class="spread"></div><div class="inset"></div>
+<div class="round"></div><div class="blur"></div><div class="iblur"></div><div class="faded"></div>
+<div class="multi"></div><div class="turned"></div></body></html>"#;
+
+/// A7: outer shadows (offset, spread, radii, several, under an opacity layer) draw outside the
+/// border box and never inside it; inset shadows draw inside the padding box over the
+/// background, under the border. The first shadow in the list is on top.
+#[test]
+fn box_shadows_paint_outer_inset_spread_and_stacked() {
+    let (doc, _) = common::our_layout(SHADOWS, 300.0, 220.0);
+    let Some(px) = render(&doc, 300, 220) else {
+        panic!("no wgpu adapter for offscreen rendering");
+    };
+    let at = |x: u32, y: u32| -> [u8; 4] {
+        let i = ((y * 300 + x) * 4) as usize;
+        [px[i], px[i + 1], px[i + 2], px[i + 3]]
+    };
+    const WHITE: [u8; 4] = [255, 255, 255, 255];
+    const RED: [u8; 4] = [255, 0, 0, 255];
+    const BLUE: [u8; 4] = [0, 0, 255, 255];
+    const GREEN: [u8; 4] = [0, 128, 0, 255];
+    // Offset: the shadow shows past the box's bottom-right, under the box elsewhere.
+    assert_eq!(at(65, 65), RED, "outer shadow past the box");
+    assert_eq!(at(65, 25), WHITE, "the shadow moved down");
+    assert_eq!(at(25, 65), WHITE, "the shadow moved right");
+    assert_eq!(at(55, 55), BLUE, "the box covers its shadow");
+    // Spread grows the shadow on every side.
+    assert_eq!(at(97, 30), GREEN, "spread left");
+    assert_eq!(at(122, 30), GREEN, "spread right");
+    assert_eq!(at(110, 17), GREEN, "spread top");
+    assert_eq!(at(93, 30), WHITE, "past the spread");
+    // Inset: over the background inside the padding box, the border on top; the first shadow
+    // is on top of the second.
+    assert_eq!(at(151, 40), [0, 0, 0, 255], "the border");
+    assert_eq!(at(153, 40), RED, "the stripe (first) is over the ring");
+    assert_eq!(at(155, 40), RED, "the stripe is 4px");
+    assert_eq!(at(157, 40), BLUE, "the background past the stripe");
+    assert_eq!(at(191, 40), GREEN, "the ring on the right");
+    assert_eq!(at(170, 23), GREEN, "the ring along the top");
+    assert_eq!(at(170, 40), BLUE, "the background inside");
+    assert_eq!(at(147, 40), WHITE, "inset shadows stay inside");
+    // Radii: a ring around a circle follows it, and leaves the corner square empty.
+    assert_eq!(at(240, 18), RED, "ring above the circle");
+    assert_eq!(at(218, 18), WHITE, "the corner stays round");
+    // Under opacity: the shadow is in the layer, half black over white.
+    let faded = at(225, 110);
+    assert!((120..=135).contains(&faded[0]), "faded shadow {faded:?}");
+    // Several shadows: the first on top.
+    assert_eq!(at(42, 190), GREEN, "first shadow on top");
+    assert_eq!(at(46, 190), RED, "second shadow past it");
+    // Transformed with its box: rotated a quarter turn, the shadow's x offset points down.
+    assert_eq!(at(270, 125), RED, "the turned shadow below the box");
+    assert_eq!(at(285, 110), WHITE, "not to the right");
+    assert_eq!(at(270, 110), BLUE, "the box over it");
+}
+
+/// A7: blur softens the shadow's edge (Gaussian, standard deviation half the blur radius), and an
+/// inset blur fades inward without taking out the background.
+#[test]
+fn blurred_box_shadows_fade_with_distance() {
+    let (doc, _) = common::our_layout(SHADOWS, 300.0, 220.0);
+    let Some(px) = render(&doc, 300, 220) else {
+        panic!("no wgpu adapter for offscreen rendering");
+    };
+    let at = |x: u32, y: u32| -> [u8; 4] {
+        let i = ((y * 300 + x) * 4) as usize;
+        [px[i], px[i + 1], px[i + 2], px[i + 3]]
+    };
+    // Outer: the box spans x 20..60; going left from its edge, red fades to white.
+    let g = |x: u32| at(x, 120)[1];
+    assert_eq!(at(18, 120)[0], 255, "red over white");
+    assert!(
+        g(18) < g(14) && g(14) < g(8),
+        "fades: {} {} {}",
+        g(18),
+        g(14),
+        g(8)
+    );
+    assert!(
+        (80..=200).contains(&g(18)),
+        "partial near the edge: {}",
+        g(18)
+    );
+    assert!(g(4) >= 250, "gone well past the blur: {}", g(4));
+    assert_eq!(at(40, 120), [0, 0, 255, 255], "not inside the box");
+    // Inset: the box spans x 100..160; red near the edge, fading inward to the background.
+    let r = |x: u32| at(x, 130)[0];
+    assert!(
+        r(101) > r(105) && r(105) > r(110),
+        "fades: {} {} {}",
+        r(101),
+        r(105),
+        r(110)
+    );
+    assert!(r(100) >= 80, "strong at the edge: {}", r(100));
+    assert_eq!(
+        at(130, 130),
+        [0, 0, 255, 255],
+        "the background in the middle"
+    );
+    assert_eq!(at(98, 130), [255, 255, 255, 255], "nothing outside");
+}
+
+/// A7: culling counts a box's outer shadows, so a shadow that reaches into view is painted
+/// though its box is far outside it.
+#[test]
+fn culling_keeps_boxes_whose_shadows_reach_into_view() {
+    let page = r#"<!DOCTYPE html><html><head><style>
+    body { margin: 0; background: white; }
+    .far { position: absolute; left: 10px; top: 10px; width: 20px; height: 20px;
+           background: rgb(0, 0, 255); box-shadow: 0 300px rgb(255, 0, 0); }
+    </style></head><body><div class="far"></div></body></html>"#;
+    let (doc, _) = common::our_layout(page, 100.0, 400.0);
+    let mut scene = vello::Scene::new();
+    let view = auk_ui::Rect::new(0.0, 300.0, 100.0, 50.0);
+    auk_ui::paint::paint_except(
+        &doc,
+        &mut scene,
+        vello::kurbo::Affine::IDENTITY,
+        &[],
+        Some(view),
+    );
+    let Some(px) = render_scene(&scene, 100, 400) else {
+        panic!("no wgpu adapter for offscreen rendering");
+    };
+    let at = |x: u32, y: u32| -> [u8; 4] {
+        let i = ((y * 100 + x) * 4) as usize;
+        [px[i], px[i + 1], px[i + 2], px[i + 3]]
+    };
+    assert_eq!(
+        at(20, 320),
+        [255, 0, 0, 255],
+        "the shadow in view is painted"
     );
 }

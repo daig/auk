@@ -15,6 +15,10 @@ pub enum RowAction {
     Open(String),
     /// Open a block of this type (`<plugin>.<block>`, §9.5).
     Block(String),
+    /// Show a session of the window key ("Switch Session…").
+    Session(u64),
+    /// Rename a session to the typed name.
+    RenameSession(u64, String),
 }
 
 /// A palette row.
@@ -34,6 +38,8 @@ impl Row {
             RowAction::Plugin(a) => a.clone(),
             RowAction::Open(p) => format!("open:{p}"),
             RowAction::Block(kind) => format!("block:{kind}"),
+            RowAction::Session(id) => format!("session:{id}"),
+            RowAction::RenameSession(id, _) => format!("rename-session:{id}"),
         }
     }
 }
@@ -45,6 +51,11 @@ pub struct Palette {
     pub selected: usize,
     /// Every row the palette offers, before filtering.
     pub all: Vec<Row>,
+    /// What the palette lists, said in its empty query field, when it isn't every command
+    /// ("Switch to a session").
+    pub scope: Option<String>,
+    /// The palette asks for a session's new name: (session, its current name).
+    pub rename: Option<(u64, String)>,
 }
 
 /// The built-in rows, in registry order (the palette doesn't offer itself).
@@ -75,14 +86,44 @@ impl Palette {
             query: String::new(),
             selected: 0,
             all,
+            scope: None,
+            rename: None,
         }
     }
 
-    /// The rows the query shows: an open row for a typed path, then matching commands.
+    /// A palette asking for `session`'s new name: Return renames it to what was typed.
+    pub fn rename_session(session: u64, name: &str) -> Palette {
+        Palette {
+            rename: Some((session, name.to_owned())),
+            ..Palette::new(Vec::new())
+        }
+    }
+
+    /// What the empty query field says, when not the default.
+    pub fn placeholder(&self) -> Option<String> {
+        match &self.rename {
+            Some((_, name)) => Some(format!("Rename session \u{201c}{name}\u{201d} to\u{2026}")),
+            None => self.scope.clone(),
+        }
+    }
+
+    /// The rows the query shows: an open row for a typed path, then matching commands. Asking
+    /// for a name, the one row renames to what was typed.
     pub fn rows(&self) -> Vec<Row> {
         let q = self.query.trim();
         let mut out = Vec::new();
-        if q.starts_with('/') || q.starts_with('~') {
+        if let Some((session, _)) = &self.rename {
+            if !q.is_empty() {
+                out.push(Row {
+                    label: format!("Rename to \u{201c}{q}\u{201d}"),
+                    group: "Session".into(),
+                    icon: String::new(),
+                    action: RowAction::RenameSession(*session, q.to_owned()),
+                });
+            }
+            return out;
+        }
+        if self.scope.is_none() && (q.starts_with('/') || q.starts_with('~')) {
             let path = match q.strip_prefix('~') {
                 Some(rest) => format!(
                     "{}{rest}",
@@ -146,6 +187,18 @@ mod tests {
         assert_eq!(
             p.chosen().map(|r| r.action),
             Some(RowAction::Open("/tmp/a.json".into()))
+        );
+    }
+
+    #[test]
+    fn renaming_a_session_offers_one_row_for_the_typed_name() {
+        let mut p = Palette::rename_session(4, "brisk-otter");
+        assert!(p.rows().is_empty());
+        assert!(p.placeholder().unwrap().contains("brisk-otter"));
+        p.type_text(" ops ");
+        assert_eq!(
+            p.chosen().map(|r| r.action),
+            Some(RowAction::RenameSession(4, "ops".into()))
         );
     }
 }

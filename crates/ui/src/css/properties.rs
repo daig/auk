@@ -132,7 +132,7 @@ props! {
     OutlineStyle = "outline-style";
     OutlineColor = "outline-color";
     OutlineOffset = "outline-offset";
-    TableLayout = "table-layout";
+    BoxShadow = "box-shadow";
     ObjectFit = "object-fit";
     ImageRendering = "image-rendering", inherited;
     Content = "content";
@@ -159,7 +159,6 @@ const ACCEPTED_UNUSED: &[&str] = &[
     "background-repeat",
     "background-origin",
     "background-clip",
-    "box-shadow",
     "translate",
     "rotate",
     "scale",
@@ -287,6 +286,8 @@ pub enum SV {
     Idents(Arc<Vec<Arc<str>>>),
     Content(Arc<Vec<ContentItem>>),
     Decoration(TextDecoration),
+    /// `box-shadow`: an empty list is `none`.
+    Shadows(Arc<Vec<ShadowSpec>>),
     /// A value containing `var()`, parsed after substitution. `shorthand` names the shorthand it
     /// came from, if any.
     Unparsed {
@@ -330,6 +331,18 @@ pub enum TransformSpec {
     Rotate(f32),
     Skew(f32, f32),
     Matrix([f32; 6]),
+}
+
+/// One specified `box-shadow`: offsets, blur and spread lengths, and its color (`None` is
+/// `currentColor`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShadowSpec {
+    pub inset: bool,
+    pub x: Expr,
+    pub y: Expr,
+    pub blur: Expr,
+    pub spread: Expr,
+    pub color: Option<SColor>,
 }
 
 /// Why a declaration was dropped.
@@ -1089,6 +1102,80 @@ fn parse_grid_line<'i>(p: &mut Parser<'i>) -> PResult<GridLine> {
     }
 }
 
+/// `box-shadow`: `none`, or a comma list of `[inset]? <x> <y> [<blur> [<spread>]]? [<color>]?` in
+/// any order (CSS Backgrounds 3 §7.1). Lengths only; a negative blur is invalid.
+fn parse_box_shadow<'i>(p: &mut Parser<'i>) -> PResult<SV> {
+    if p.try_parse(|p| p.expect_ident_matching("none")).is_ok() {
+        return Ok(SV::Shadows(Arc::new(Vec::new())));
+    }
+    let length = |p: &mut Parser<'i>| -> PResult<Expr> {
+        let e = parse_length_pct(p)?;
+        if e.has_pct() {
+            return Err(ParseError::custom(ValueError::UnsupportedUnit(
+                String::new(),
+            )));
+        }
+        Ok(e)
+    };
+    let shadow = |p: &mut Parser<'i>| -> PResult<ShadowSpec> {
+        let mut inset = false;
+        let mut color = None;
+        let mut lengths: Option<[Expr; 4]> = None;
+        loop {
+            if !inset && p.try_parse(|p| p.expect_ident_matching("inset")).is_ok() {
+                inset = true;
+                continue;
+            }
+            if lengths.is_none()
+                && let Ok(x) = p.try_parse(length)
+            {
+                let y = length(p)?;
+                let blur = match p.try_parse(length) {
+                    Ok(b) => {
+                        let negative = matches!(
+                            b,
+                            Expr::Px(v) | Expr::Em(v) | Expr::Rem(v) | Expr::Vw(v) | Expr::Vh(v)
+                                if v < 0.0
+                        );
+                        if negative {
+                            return Err(ParseError::custom(ValueError::UnsupportedUnit(
+                                String::new(),
+                            )));
+                        }
+                        b
+                    }
+                    Err(_) => Expr::Px(0.0),
+                };
+                let spread = p.try_parse(length).unwrap_or(Expr::Px(0.0));
+                lengths = Some([x, y, blur, spread]);
+                continue;
+            }
+            if color.is_none()
+                && let Ok(c) = p.try_parse(parse_color)
+            {
+                color = Some(c);
+                continue;
+            }
+            break;
+        }
+        let Some([x, y, blur, spread]) = lengths else {
+            return Err(ParseError::custom(ValueError::UnsupportedUnit(
+                String::new(),
+            )));
+        };
+        Ok(ShadowSpec {
+            inset,
+            x,
+            y,
+            blur,
+            spread,
+            color,
+        })
+    };
+    let list = p.parse_comma_separated(shadow)?;
+    Ok(SV::Shadows(Arc::new(list)))
+}
+
 fn parse_transform<'i>(p: &mut Parser<'i>) -> PResult<SV> {
     if p.try_parse(|p| p.expect_ident_matching("none")).is_ok() {
         return Ok(SV::Kw("none"));
@@ -1377,7 +1464,6 @@ const DISPLAY_KWS: &[&str] = &[
     "table-cell",
     "table-column",
     "table-column-group",
-    "table-caption",
     "-webkit-box",
     "-webkit-inline-box",
 ];
@@ -1747,7 +1833,7 @@ pub fn parse_longhand<'i>(prop: Prop, p: &mut Parser<'i>) -> PResult<SV> {
             Ok(SV::Origin(a, b))
         }
         OutlineOffset => parse_length_pct(p).map(SV::Len),
-        TableLayout => sv_kw(p, &["auto", "fixed"]),
+        BoxShadow => parse_box_shadow(p),
         ObjectFit => sv_kw(p, &["fill", "contain", "cover", "none", "scale-down"]),
         ImageRendering => sv_kw(
             p,

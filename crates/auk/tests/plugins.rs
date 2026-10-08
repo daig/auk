@@ -427,6 +427,95 @@ fn ac11_a_block_ticks_with_no_window_open_and_a_later_window_sees_it() {
     same_hash(&env, &window, pane);
 }
 
+fn sha256(bytes: &[u8]) -> String {
+    use sha2::Digest as _;
+    sha2::Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// An SVG of `w`×`h` px, padded with a comment of `pad` bytes; the block below builds the same.
+fn svg(w: u32, h: u32, pad: usize) -> String {
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\"><!--{}--><rect width=\"{w}\" height=\"{h}\" fill=\"#22aa55\"/></svg>",
+        "x".repeat(pad)
+    )
+}
+
+/// Waits until a window draws image node `id` of `pane` as a picture (no placeholder) of
+/// `w`×`h` CSS px.
+fn await_picture(window: &Headless, pane: u64, id: &str, w: f64, h: f64, who: &str) {
+    wait_for(&format!("{who} to draw {id}"), || {
+        let tree = window.request(&format!("tree {pane} .sf-image"));
+        let els = tree.as_array()?;
+        let at = els.iter().position(|e| e["id"] == id)?;
+        let missing = els[at]["class"].as_str()?.contains("missing");
+        let pic = els[at + 1..]
+            .iter()
+            .take_while(|e| e["id"].is_null())
+            .find(|e| e["class"].as_str().is_some_and(|c| c.contains("sf-img-svg")))?;
+        (!missing && pic["box"][2].as_f64() == Some(w) && pic["box"][3].as_f64() == Some(h)).then_some(())
+    });
+}
+
+/// §7.12, §9.5: a block's `cx:blob` goes through the daemon's replica into its disk store, and
+/// windows draw it: one attaching later (the daemon sends the blobs its documents name), and one
+/// attached when a handler sends a new blob. The 80 KB blob is chunked under the 64 KiB APC limit.
+#[test]
+fn a_block_blob_reaches_the_disk_store_and_windows_draw_it() {
+    let env = TestEnv::new(EXE, "blockblob");
+    package(
+        &env,
+        "pics",
+        "schema = 1\nid = \"pics\"\nname = \"Pics\"\nversion = \"1\"\nhost = \"host.luau\"\n[[blocks]]\nid = \"show\"\ntitle = \"Show\"\n",
+        &[(
+            "host.luau",
+            r##"local function svg(w, h, pad)
+                return string.format('<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d"><!--%s--><rect width="%d" height="%d" fill="#22aa55"/></svg>', w, h, string.rep("x", pad), w, h)
+            end
+            tern.block.define("show", {
+                init = function(cx)
+                    return { a = cx:blob(svg(24, 12, 0), "image/svg+xml"), b = cx:blob(svg(40, 20, 80000), "image/svg+xml") }
+                end,
+                view = function(s)
+                    local pics = { tern.ui.node("image", { blob = s.a, alt = "PicA" }), tern.ui.node("image", { blob = s.b, alt = "PicB" }) }
+                    if s.c then table.insert(pics, tern.ui.node("image", { blob = s.c, alt = "PicC" })) end
+                    return { main = tern.ui.col(pics) }
+                end,
+                key = function(s, key, cx)
+                    if key.name ~= "n" then return false end
+                    s.c = cx:blob(svg(10, 30, 0), "image/svg+xml")
+                    return nil
+                end,
+            })"##,
+        )],
+    );
+    let _daemon = env.start_daemon();
+    let pane = env.daemon("block pics.show")["pane"].as_u64().expect("a pane");
+    let (a, b, c) = (svg(24, 12, 0), svg(40, 20, 80000), svg(10, 30, 0));
+    assert!(b.len() > 65536 * 3 / 4 + 1024, "the big blob's base64 is over one APC chunk");
+    for bytes in [&a, &b] {
+        let path = env.state.join("blobs").join(sha256(bytes.as_bytes()));
+        let stored = wait_for(&format!("{} in the disk store", path.display()), || std::fs::read(&path).ok());
+        assert_eq!(stored, bytes.as_bytes());
+    }
+    let doc = wait_for("the block's view", || {
+        live(&env.daemon(&format!("tsp {pane}"))).filter(|(_, d)| strings(d).contains("PicB"))
+    });
+    assert!(strings(&doc.1).contains(&sha256(b.as_bytes())), "{}", doc.1);
+
+    // A window attaching later draws both from the blobs the daemon sends it.
+    let window = env.start_headless("w", &[]);
+    window.request(&format!("focus {pane}"));
+    await_picture(&window, pane, "main.0", 24.0, 12.0, "the late window");
+    await_picture(&window, pane, "main.1", 40.0, 20.0, "the late window");
+
+    // Live: a key makes the block send a new blob and re-render; the attached window draws it.
+    window.request(&format!("send {pane} text n"));
+    await_picture(&window, pane, "main.2", 10.0, 30.0, "the window");
+    assert!(env.state.join("blobs").join(sha256(c.as_bytes())).is_file());
+    same_hash(&env, &window, pane);
+    assert!(window.errors().is_empty(), "{:?}", window.errors());
+}
+
 /// AC12: a lens decision is identical on every replica and doesn't depend on any window half.
 #[test]
 fn ac12_lens_decisions_are_identical_on_every_replica() {

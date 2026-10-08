@@ -10,7 +10,7 @@
 use std::time::Duration;
 
 use auk_conformance::app::{App, InputSource, US_LAYOUT};
-use auk_conformance::harness::{TestEnv, alive, wait_for};
+use auk_conformance::harness::{TestEnv, alive, wait_for, wait_for_or};
 use auk_conformance::probe::{
     Probe, events, frame, hello, open_with, split_input, tsp_bodies, tsp_json,
 };
@@ -409,14 +409,56 @@ fn dead_keys_compose_before_reaching_the_program() {
         ("opt+n", "n", "ñ"),
     ] {
         app.request(&format!("type '{dead}'"));
+        let alone = probe.read_for(Duration::from_millis(200));
         assert!(
-            probe.read_for(Duration::from_millis(200)).is_empty(),
-            "{dead} alone reached the program"
+            alone.is_empty(),
+            "{dead} alone reached the program as {:?} ({})",
+            String::from_utf8_lossy(&alone),
+            app.input_focus()
         );
         app.request(&format!("type '{base}'"));
-        let got = probe.read_until(&format!("{dead} {base}"), |b| b.len() >= want.len());
-        assert_eq!(String::from_utf8_lossy(&got), want, "{dead} {base}");
+        let got = probe.read_until_or(
+            &format!("{dead} {base}"),
+            |b| b.len() >= want.len(),
+            || app.input_focus(),
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&got),
+            want,
+            "{dead} {base} ({})",
+            app.input_focus()
+        );
     }
+}
+
+/// The input-source guards nest: the Mac has one input source, so only the last guard dropped
+/// puts back the user's (overlapping guards used to each restore their own snapshot).
+#[test]
+fn input_source_guards_nest_and_the_last_restores_the_users_source() {
+    let env = env("isrc");
+    let app = App::start(&env, "a", &[]);
+    let users = app.request("input-source");
+    assert_eq!(InputSource::users(), None, "no guard is live yet");
+    let first = InputSource::select(&app, US_LAYOUT);
+    let second = InputSource::select(&app, US_LAYOUT);
+    assert_eq!(
+        InputSource::users().as_deref(),
+        users.as_str(),
+        "the first guard's record"
+    );
+    drop(first);
+    assert_eq!(
+        app.request("input-source"),
+        US_LAYOUT,
+        "the second guard still holds US"
+    );
+    drop(second);
+    assert_eq!(
+        app.request("input-source"),
+        users,
+        "the last guard put back the user's"
+    );
+    assert_eq!(InputSource::users(), None);
 }
 
 #[test]
@@ -454,9 +496,22 @@ fn the_accessibility_tree_has_the_pane_text_the_chrome_and_surface_roles() {
         .find(|n| n["role"] == "AXProgressIndicator")
         .unwrap();
     assert_eq!(progress["value"], "25", "{progress}");
-    // The chrome: sessions and tabs as tab groups with tab buttons, and their buttons.
+    // The chrome: the tabs as a tab group with tab buttons, and its buttons. The probe's pane
+    // is a second session, so the session chip is a button naming the shown one (A11).
     let groups: Vec<&&Value> = flat.iter().filter(|n| n["role"] == "AXTabGroup").collect();
-    assert_eq!(groups.len(), 2, "{tree}");
+    assert_eq!(groups.len(), 1, "{tree}");
+    let layout = app.layout();
+    let sessions = layout["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 2, "{layout}");
+    let shown = sessions
+        .iter()
+        .find(|s| s["id"] == app.state()["session"])
+        .unwrap();
+    let chip = format!("Session {}", shown["name"].as_str().unwrap());
+    assert!(
+        flat.iter().any(|n| n["role"] == "AXButton" && n["title"] == chip.as_str()),
+        "{tree}"
+    );
     assert!(flat.iter().any(|n| n["subrole"] == "AXTabButton"));
     assert!(flat.iter().any(|n| n["title"] == "New Tab"));
 }
@@ -805,6 +860,53 @@ fn the_zoom_action_opens_the_image_viewer_over_the_window() {
     wait_for("the viewer to close", || app.request("chrome")["viewer"].is_null().then_some(()));
     let (bodies, bytes) = program_input(&probe, Duration::from_millis(300));
     assert!(bodies.is_empty() && bytes.is_empty(), "{bodies:?} {bytes:?}");
+}
+
+/// Amendment A9: the viewer shows a big picture (over 512×512 pixels) once it is decoded in
+/// the background, without a toast.
+#[test]
+fn a9_the_viewer_shows_a_big_picture_once_it_is_decoded() {
+    use base64::Engine as _;
+    let env = env("viewer-big");
+    let app = App::start(&env, "a", &[]);
+    let probe = focused_probe(&env, &app);
+    probe.write(&hello(&[]));
+    let jpeg = auk_conformance::perf::big_jpeg(1024, 768);
+    let id = auk_tsp::blob::blob_id(&jpeg);
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&jpeg);
+    // Chunked under the APC limit, as the SDKs send it.
+    let mut chunked = Vec::new();
+    auk_tsp::wire::encode_chunked(
+        &mut chunked,
+        "b",
+        &[("mime", "image/jpeg")],
+        b64.as_bytes(),
+        200_000,
+        "big",
+    );
+    probe.write(&chunked);
+    probe.write(&open_with(
+        "s1",
+        "inline",
+        json!([{"id": "photo", "k": "image", "p": {"blob": id, "alt": "Photo", "h": 60}}]),
+    ));
+    probe.read_until("the ack", |b| {
+        !events(&tsp_bodies(&split_input(b)), "ack").is_empty()
+    });
+    // The picture draws in the pane (decoded in the background), then zooms.
+    wait_for("the picture drawn", || {
+        let b = app.try_request(&format!("node-box {} photo", probe.pane))?;
+        (b[3].as_f64()? > 55.0).then_some(())
+    });
+    let (x, y) = block_point(&app, probe.pane, 30.0);
+    app.request(&format!("mouse down {x} {y}"));
+    app.request(&format!("mouse up {x} {y}"));
+    let viewer = wait_for("the viewer with the picture", || {
+        let v = app.request("chrome")["viewer"].clone();
+        (v["size"] == json!([1024.0, 768.0]) && v["decoding"] == false).then_some(v)
+    });
+    assert_eq!(viewer["images"][0]["blob"], id);
+    assert_eq!(app.request("toasts"), json!([]));
 }
 
 #[test]
@@ -1645,23 +1747,37 @@ fn selection_links_mouse_reports_and_the_cursor_follow_rows_a_surface_block_shif
     app.request(&format!("mouse down {} {}", ox + 0.5 * cw, mid(second_top)));
     app.request(&format!("mouse drag {} {}", ox + 5.5 * cw, mid(second_top)));
     app.request(&format!("mouse up {} {}", ox + 5.5 * cw, mid(second_top)));
-    assert_eq!(app.request("selection"), "second");
+    assert_eq!(app.request("selection"), "second", "{}", app.input_focus());
 
     // Links: the hover readout names the link on the shifted row.
     app.request(&format!("mouse move {} {}", ox + 8.5 * cw, mid(link_top)));
-    wait_for("the shifted link's target", || {
-        (app.request("chrome")["hover_link"] == "https://example.com/below").then_some(())
-    });
+    wait_for_or(
+        "the shifted link's target",
+        || (app.request("chrome")["hover_link"] == "https://example.com/below").then_some(()),
+        || format!("chrome {}; {}", app.request("chrome"), app.input_focus()),
+    );
 
     // The cursor: the input method is told where the cursor's row was drawn.
     let cursor_line = anchor + 3;
     let (cursor_top, _) = line_top(&layout, cursor_line).unwrap();
-    let ime = wait_for("the IME area", || {
-        let a = app.state()["ime_area"].clone();
-        a.is_array().then_some(a)
-    });
-    assert!((ime[1].as_f64().unwrap() - cursor_top).abs() < 0.5, "{ime} vs {cursor_top}");
-    assert!((ime[0].as_f64().unwrap() - (ox + 2.0 * cw)).abs() < 0.5, "{ime}");
+    let ime = wait_for_or(
+        "the IME area",
+        || {
+            let a = app.state()["ime_area"].clone();
+            a.is_array().then_some(a)
+        },
+        || app.input_focus(),
+    );
+    assert!(
+        (ime[1].as_f64().unwrap() - cursor_top).abs() < 0.5,
+        "{ime} vs {cursor_top} ({})",
+        app.input_focus()
+    );
+    assert!(
+        (ime[0].as_f64().unwrap() - (ox + 2.0 * cw)).abs() < 0.5,
+        "{ime} ({})",
+        app.input_focus()
+    );
 
     // Mouse reports name the screen cell under the pointer, not a plain grid's row.
     probe.write(b"\x1b[?1000h\x1b[?1006h");
@@ -1670,10 +1786,16 @@ fn selection_links_mouse_reports_and_the_cursor_follow_rows_a_surface_block_shif
     let row = screen.lines().position(|l| l.starts_with("second row")).unwrap() + 1;
     app.request(&format!("mouse down {} {}", ox + 3.5 * cw, mid(second_top)));
     app.request(&format!("mouse up {} {}", ox + 3.5 * cw, mid(second_top)));
-    let got = probe.read_until("the press and release", |b| b.ends_with(b"m"));
+    let got = probe.read_until_or(
+        "the press and release",
+        |b| b.ends_with(b"m"),
+        || app.input_focus(),
+    );
     assert_eq!(
         String::from_utf8_lossy(&got),
-        format!("\x1b[<0;4;{row}M\x1b[<0;4;{row}m")
+        format!("\x1b[<0;4;{row}M\x1b[<0;4;{row}m"),
+        "{}",
+        app.input_focus()
     );
 }
 
@@ -3023,4 +3145,287 @@ fn a_toast_goes_after_its_duration_and_icons_draw_in_the_bundled_nerd_font() {
     probe.write(b"\r\nmore output\r\n");
     std::thread::sleep(Duration::from_millis(300));
     assert!(app.request(&format!("toast {pane}")).is_null());
+}
+
+/// The chrome's actions by name, with their boxes (points).
+fn chrome_actions(app: &App) -> Vec<(String, (f64, f64))> {
+    app.request("chrome")["actions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|a| {
+            let r = &a["rect"];
+            let c = |i: usize| r[i].as_f64();
+            Some((
+                a["action"].as_str()?.to_owned(),
+                (c(0)? + c(2)? / 2.0, c(1)? + c(3)? / 2.0),
+            ))
+        })
+        .collect()
+}
+
+fn has_action(app: &App, name: &str) -> Option<(f64, f64)> {
+    chrome_actions(app)
+        .into_iter()
+        .find(|(a, _)| a == name)
+        .map(|(_, at)| at)
+}
+
+/// Whether the window's accessibility tree shows `needle`, once it does (the tree follows the
+/// chrome a frame later).
+fn a11y_shows(app: &App, needle: &str) -> bool {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if a11y_has(&app.request("a11y --depth 10"), needle) {
+            return true;
+        }
+        if std::time::Instant::now() > deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// A generated session name: two lowercase words (Tern's random names, book:16894).
+fn two_words(name: &str) -> bool {
+    let words: Vec<&str> = name.split('-').collect();
+    words.len() == 2
+        && words
+            .iter()
+            .all(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_lowercase()))
+}
+
+/// A11 (§4.3, §13): one generated-name session shows tabs only; a second session brings the
+/// session chip, whose menu switches sessions; ⌃⌘S lists the sessions in the palette with New,
+/// Rename and Lock; renaming names the chip; the window title is the shown session's name; the
+/// chip goes again with one unnamed session and comes back while it is locked.
+#[test]
+fn a11_the_session_chip_shows_with_two_sessions_switches_them_and_names_the_window() {
+    let env = env("a11-chip");
+    let app = App::start(&env, "a", &[]);
+    let pane = wait_for("a focused pane", || app.state()["focused"].as_u64());
+    env.wait(pane, "prompt");
+    let first = app.layout()["sessions"][0].clone();
+    let first_id = first["id"].as_u64().unwrap();
+    let first_name = first["name"].as_str().unwrap().to_owned();
+    assert!(two_words(&first_name), "{first}");
+    // One session with its generated name: tabs and `+` only; the window says the session.
+    wait_for("the bar without a chip and the window titled", || {
+        let acts = chrome_actions(&app);
+        let title = app.request("chrome")["title"].clone();
+        (acts.iter().any(|(a, _)| a.starts_with("tab:"))
+            && acts.iter().any(|(a, _)| a == "new-tab")
+            && title == first_name.as_str())
+        .then_some(())
+    });
+    assert!(has_action(&app, "session-menu").is_none());
+    assert!(!chrome_actions(&app).iter().any(|(a, _)| a.starts_with("session:") || a == "new-session"));
+
+    // A second session: the chip, and the window takes the new session's name.
+    menu(&app, "Shell", "New Session");
+    let second = wait_for("the second session", || {
+        let s = app.layout()["sessions"].as_array()?.get(1)?.clone();
+        (app.state()["session"] == s["id"]).then_some(s)
+    });
+    let second_id = second["id"].as_u64().unwrap();
+    let second_name = second["name"].as_str().unwrap().to_owned();
+    assert!(two_words(&second_name) && second_name != first_name, "{second}");
+    let chip = wait_for("the session chip", || has_action(&app, "session-menu"));
+    wait_for("the window titled by the new session", || {
+        (app.request("chrome")["title"] == second_name.as_str()).then_some(())
+    });
+    assert!(
+        a11y_shows(&app, &format!("Session {second_name}")),
+        "the chip names the session to assistive technology"
+    );
+
+    // The chip's menu lists both sessions, then New, Rename and Lock; a row switches.
+    click(&app, chip);
+    let row = wait_for("the session menu", || has_action(&app, &format!("session:{first_id}")));
+    for want in [format!("session:{second_id}"), "new-session".into(), "rename-session".into(), "lock-session".into()] {
+        assert!(has_action(&app, &want).is_some(), "{want}");
+    }
+    assert_eq!(app.request("chrome")["session_menu"], true);
+    click(&app, row);
+    wait_for("the first session shown", || {
+        (app.state()["session"] == first_id).then_some(())
+    });
+    assert_eq!(app.request("chrome")["session_menu"], false);
+    wait_for("the window titled by the first session", || {
+        (app.request("chrome")["title"] == first_name.as_str()).then_some(())
+    });
+
+    // Switch Session… (⌃⌘S in the menu): the palette's sessions, the shown one first and marked
+    // current, then the commands.
+    let key = app.request("menu-key Window 'Switch Session…'");
+    assert_eq!(key, json!({"key": "s", "mask": (1u64 << 18) | (1u64 << 20)}), "⌃⌘S");
+    menu(&app, "Window", "Switch Session…");
+    let rows = wait_for("the session switcher", || {
+        let p = app.request("palette");
+        (p["open"] == true).then(|| p["rows"].clone())
+    });
+    let actions: Vec<&str> = rows.as_array().unwrap().iter().map(|r| r["action"].as_str().unwrap()).collect();
+    assert_eq!(
+        actions,
+        [
+            format!("session:{first_id}").as_str(),
+            &format!("session:{second_id}"),
+            "new_session",
+            "rename_session",
+            "lock_session",
+        ],
+        "{rows}"
+    );
+    assert_eq!(rows[0]["label"], first_name.as_str());
+    assert!(rows[0]["group"].as_str().unwrap().contains("current"), "{rows}");
+    app.request("type down");
+    app.request("type return");
+    wait_for("the second session shown", || {
+        (app.state()["session"] == second_id).then_some(())
+    });
+
+    // Rename Session…: the palette takes the name; the chip and the window title follow.
+    menu(&app, "Shell", "Rename Session…");
+    wait_for("the rename prompt", || (app.request("palette")["open"] == true).then_some(()));
+    app.request("text work");
+    let rows = wait_for("the rename row", || {
+        let p = app.request("palette");
+        (p["query"] == "work").then(|| p["rows"].clone())
+    });
+    assert_eq!(rows[0]["action"], format!("rename-session:{second_id}"), "{rows}");
+    app.request("type return");
+    wait_for("the renamed session", || {
+        let s = app.layout()["sessions"][1].clone();
+        (s["name"] == "work" && s["named"] == true).then_some(())
+    });
+    wait_for("the window titled work", || {
+        (app.request("chrome")["title"] == "work").then_some(())
+    });
+    assert!(a11y_shows(&app, "Session work"));
+
+    // Closing the named session leaves one unnamed session: no chip. Locked, it shows again.
+    menu(&app, "Shell", "Close Pane");
+    wait_for("one session left, without the chip", || {
+        let one = app.layout()["sessions"].as_array()?.len() == 1;
+        (one && has_action(&app, "session-menu").is_none() && app.state()["session"] == first_id)
+            .then_some(())
+    });
+    menu(&app, "Shell", "Lock Session");
+    wait_for("the locked session's chip", || has_action(&app, "session-menu"));
+    assert!(a11y_shows(&app, &format!("Session {first_name}, locked")));
+    menu(&app, "Shell", "Lock Session");
+    wait_for("the chip to go with the lock", || {
+        has_action(&app, "session-menu").is_none().then_some(())
+    });
+}
+
+/// A11 (§12.2): a tab whose program's badge says what its title says shows the badge alone,
+/// and both when they differ; its accessible name is always the program and the whole title.
+#[test]
+fn a11_a_tab_whose_title_is_its_app_shows_the_badge_only() {
+    let env = env("a11-badge");
+    let app = App::start(&env, "a", &[]);
+    let probe = focused_probe(&env, &app);
+    probe.write(&hello(&[]));
+    probe.write(&open_with("s1", "inline", json!([{"id": "t", "k": "text", "p": {"text": "hi"}}])));
+    acked(&probe, 1);
+    let tab = app.state()["tab"].as_u64().unwrap();
+    let drawn = |title: &str| {
+        wait_for(&format!("the tab drawn for the title {title}"), || {
+            let c = app.request("chrome");
+            c["tabs"]
+                .as_array()?
+                .iter()
+                .find(|t| t["tab"] == tab && t["label"].as_str().is_some_and(|l| l.ends_with(title)))
+                .cloned()
+        })
+    };
+    // The program titles itself as its app (OSC 2): the badge alone.
+    probe.write(b"\x1b]2;probe\x07");
+    let t = drawn("probe");
+    assert_eq!((t["app"].as_str(), t["title"].as_str()), (Some("probe"), None), "{t}");
+    assert_eq!(t["label"], "probe \u{2014} probe");
+    // A title that says more: badge and title.
+    probe.write("\x1b]2;probe \u{2014} task\x07".as_bytes());
+    let t = drawn("task");
+    assert_eq!(
+        (t["app"].as_str(), t["title"].as_str()),
+        (Some("probe"), Some("probe \u{2014} task")),
+        "{t}"
+    );
+}
+
+/// A13 (§5.3, §6.2, §7.14): OSC 8 link cells draw a dotted underline in a muted color; ⌘ over a
+/// link arms it: a solid accent underline and the pointing hand; off it, or without ⌘, back to
+/// dotted and the arrow. With `links_plain_click` the hovered link arms without ⌘, and
+/// `hyperlinks: "hover"` draws nothing until then.
+#[test]
+fn a13_grid_links_draw_dotted_and_arm_with_cmd_or_plain_click_links() {
+    let env = env("a13-links");
+    let app = App::start(&env, "a", &[]);
+    let probe = focused_probe(&env, &app);
+    let pane = probe.pane;
+    probe.write(b"see \x1b]8;;https://example.com/a13\x1b\\the link\x1b]8;;\x1b\\ here\r\n");
+    caught_up(&env, &app, pane);
+    let cells = |app: &App| app.request(&format!("grid-links {pane}"));
+    let all = |c: &Value, f: &dyn Fn(&Value) -> bool| c.as_array().is_some_and(|a| a.len() == 8 && a.iter().all(f));
+    let c = cells(&app);
+    assert!(all(&c, &|x| x["underline"] == "dotted" && x["accent"] == false && x["row"] == 0), "{c}");
+    assert_eq!(c[0]["col"], 4);
+
+    let layout = pane_layout(&app, pane, "the link's row", |l| line_top(l, 0).is_some());
+    let cw = layout["cell"][0].as_f64().unwrap();
+    let (top, h) = line_top(&layout, 0).unwrap();
+    let (x, y) = (layout["origin"][0].as_f64().unwrap() + cw * 6.5, top + h / 2.0);
+    let (off_x, off_y) = (x, y + 200.0);
+
+    // Hovered without ⌘: the target shows, the link stays dotted, the arrow stays.
+    app.request(&format!("mouse move {x} {y}"));
+    wait_for("the link's target", || {
+        (app.request("chrome")["hover_link"] == "https://example.com/a13").then_some(())
+    });
+    let chrome = app.request("chrome");
+    assert!(chrome["armed_link"].is_null(), "{chrome}");
+    assert_eq!(chrome["pointer"], "Arrow");
+    // With ⌘: armed, solid in the accent, the pointing hand.
+    app.request(&format!("mouse move {x} {y} --cmd"));
+    let chrome = wait_for("the armed link", || {
+        let c = app.request("chrome");
+        (!c["armed_link"].is_null()).then_some(c)
+    });
+    assert_eq!(chrome["armed_link"]["pane"], pane);
+    assert_eq!(chrome["pointer"], "PointingHand", "{chrome}");
+    let c = cells(&app);
+    assert!(all(&c, &|x| x["underline"] == "solid" && x["accent"] == true), "{c}");
+    // Off the link: dotted again, and the arrow.
+    app.request(&format!("mouse move {off_x} {off_y} --cmd"));
+    wait_for("the link disarmed", || {
+        let c = app.request("chrome");
+        (c["armed_link"].is_null() && c["pointer"] == "Arrow").then_some(())
+    });
+    assert!(all(&cells(&app), &|x| x["underline"] == "dotted"));
+
+    // A plain click opens links: hovering arms them. With `hover`, nothing draws until then.
+    write_settings(&env, json!({"links_plain_click": true, "hyperlinks": "hover"}));
+    menu(&app, "View", "Reload Settings");
+    wait_for("the settings", || {
+        let s = app.request("settings");
+        (s["hyperlinks"] == "hover" && s["links_plain_click"] == true).then_some(())
+    });
+    wait_for("no underline off the link", || {
+        all(&cells(&app), &|x| x["underline"].is_null()).then_some(())
+    });
+    app.request(&format!("mouse move {x} {y}"));
+    wait_for("the link armed by a plain hover", || {
+        let c = app.request("chrome");
+        (c["pointer"] == "PointingHand" && !c["armed_link"].is_null()).then_some(())
+    });
+    assert!(all(&cells(&app), &|x| x["underline"] == "solid" && x["accent"] == true));
+    // `off`: no underline even armed; the pointer still says a click opens it.
+    write_settings(&env, json!({"links_plain_click": true, "hyperlinks": "off"}));
+    menu(&app, "View", "Reload Settings");
+    wait_for("no underline at all", || {
+        all(&cells(&app), &|x| x["underline"].is_null()).then_some(())
+    });
+    assert_eq!(app.request("chrome")["pointer"], "PointingHand");
 }

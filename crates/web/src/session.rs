@@ -4,13 +4,14 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use auk_mirror::layout::{Node, Tab, Window};
+use auk_mirror::layout::{Node, SessionId, Tab, Window};
 use auk_mirror::{
     ClientFacts, ClientKind, ClientMsg, DaemonMsg, Effect, Frame, Hello, Message, PaneId,
     WireError, frame::split_frame,
 };
 use auk_replica::{Item, Replica, Role};
 use auk_term::input::{KeyEvent, encode_key, encode_paste};
+use auk_views::chrome::{BarModel, SessionItem, TabItem};
 
 /// Where the connection is.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -416,41 +417,102 @@ impl Session {
             .or_else(|| tabs().next())
     }
 
-    /// The tab bar: every tab of the window key's sessions, in order, the one holding `pane`
-    /// (else the first) active. A tab's title is its own, else its first pane's terminal title,
-    /// else the session's name.
-    pub fn tab_bar(&self, pane: Option<PaneId>) -> Vec<TabEntry> {
-        let active = self.tab(pane).map(|t| t.id);
-        self.window
+    /// The pane a click on a tab shows and focuses: its zoomed pane, else `focused` when the
+    /// tab holds it, else its first pane.
+    pub fn tab_pane(tab: &Tab, focused: Option<PaneId>) -> Option<PaneId> {
+        tab.zoom
+            .or(focused.filter(|p| tab.root.contains(*p)))
+            .or_else(|| tab.root.panes().first().copied())
+    }
+
+    /// The pane to show for a session: `remembered` (the one last shown there) while the
+    /// session still holds it, else its first tab's pane.
+    pub fn session_pane(&self, session: SessionId, remembered: Option<PaneId>) -> Option<PaneId> {
+        let s = self.window.sessions.iter().find(|s| s.id == session)?;
+        remembered
+            .filter(|p| s.tabs.iter().any(|t| t.root.contains(*p)))
+            .or_else(|| s.tabs.first().and_then(|t| Self::tab_pane(t, None)))
+    }
+
+    /// A pane's title: the program's (OSC 0/2), else its cwd's last component, else `shell`,
+    /// as the app titles tabs.
+    fn pane_title(&self, pane: PaneId) -> Option<String> {
+        let p = self.panes.get(&pane)?;
+        let title = p.replica.terminal().title().trim().to_owned();
+        if !title.is_empty() {
+            return Some(title);
+        }
+        p.replica
+            .cwd()
+            .and_then(|c| {
+                c.trim_end_matches('/')
+                    .rsplit('/')
+                    .next()
+                    .map(str::to_owned)
+            })
+            .filter(|s| !s.is_empty())
+    }
+
+    /// The tab bar the shared chrome draws (D3, §13.1) for the tab holding `pane` (else the
+    /// first): every session of the window key (the one shown marked, for the session chip and
+    /// its menu) and the shown session's tabs, each named by its own title, else its pane's, with
+    /// the agent icon (§5.1) and the program's badge while a listening surface is open (§7.2,
+    /// §12.2). The browser views and switches only: it creates nothing (no `+`). Sizes, dividers
+    /// and the focus ring are the caller's.
+    pub fn chrome_bar(&self, pane: Option<PaneId>, focused: Option<PaneId>) -> BarModel {
+        let shown = self.tab(pane).map(|t| t.id);
+        let shown_session = self
+            .window
             .sessions
             .iter()
-            .flat_map(|s| s.tabs.iter().map(move |t| (s, t)))
-            .map(|(s, t)| {
-                let panes = t.root.panes();
-                let first = panes.first().copied();
-                let title = t
-                    .title
-                    .clone()
-                    .filter(|t| !t.is_empty())
-                    .or_else(|| {
-                        first
-                            .and_then(|p| self.panes.get(&p))
-                            .map(|p| p.replica.terminal().title().to_owned())
-                            .filter(|t| !t.is_empty())
-                    })
-                    .unwrap_or_else(|| s.name.clone());
-                TabEntry {
-                    id: t.id,
-                    title,
-                    active: active == Some(t.id),
-                    pane: t.zoom.or(first),
-                    agent: t
-                        .zoom
-                        .or(first)
-                        .is_some_and(|p| self.window.kind(p) == auk_mirror::layout::PaneTag::Agent),
-                }
+            .find(|s| s.tabs.iter().any(|t| Some(t.id) == shown));
+        let sessions = self
+            .window
+            .sessions
+            .iter()
+            .map(|s| SessionItem {
+                id: s.id,
+                name: s.name.clone(),
+                active: shown_session.is_some_and(|x| x.id == s.id),
+                locked: s.locked,
+                named: s.named,
+                tabs: s.tabs.len(),
             })
-            .collect()
+            .collect();
+        let tabs = shown_session
+            .map(|s| {
+                s.tabs
+                    .iter()
+                    .map(|t| {
+                        let pane = Self::tab_pane(t, focused);
+                        let title = t
+                            .title
+                            .clone()
+                            .filter(|t| !t.is_empty())
+                            .or_else(|| pane.and_then(|p| self.pane_title(p)))
+                            .unwrap_or_else(|| "shell".to_owned());
+                        TabItem {
+                            id: t.id,
+                            title,
+                            active: Some(t.id) == shown,
+                            zoomed: t.zoom.is_some(),
+                            app: pane
+                                .and_then(|p| self.panes.get(&p))
+                                .and_then(|p| p.replica.tsp().app().map(str::to_owned)),
+                            agent: pane.is_some_and(|p| {
+                                self.window.kind(p) == auk_mirror::layout::PaneTag::Agent
+                            }),
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        BarModel {
+            sessions,
+            tabs,
+            can_create: false,
+            ..BarModel::default()
+        }
     }
 
     /// Sends input bytes to a pane's PTY.
@@ -545,18 +607,6 @@ impl Session {
     }
 }
 
-/// A tab as the tab bar shows it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TabEntry {
-    pub id: auk_mirror::layout::TabId,
-    pub title: String,
-    pub active: bool,
-    /// The pane a click on the tab shows and focuses.
-    pub pane: Option<PaneId>,
-    /// That pane is an agent pane: the tab shows the agent icon (§5.1).
-    pub agent: bool,
-}
-
 /// A rectangle in physical pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Rect {
@@ -571,12 +621,22 @@ pub fn layout(tab: &Tab, area: Rect, gap: f32) -> Vec<(PaneId, Rect)> {
     let mut out = Vec::new();
     match tab.zoom {
         Some(pane) => out.push((pane, area)),
-        None => split(&tab.root, area, gap, &mut out),
+        None => split(&tab.root, area, gap, &mut out, &mut Vec::new()),
     }
     out
 }
 
-fn split(node: &Node, area: Rect, gap: f32, out: &mut Vec<(PaneId, Rect)>) {
+/// The gaps between a tab's split panes laid out as [`layout`] does: where the chrome draws its
+/// dividers. None while a pane is zoomed.
+pub fn dividers(tab: &Tab, area: Rect, gap: f32) -> Vec<Rect> {
+    let mut lines = Vec::new();
+    if tab.zoom.is_none() {
+        split(&tab.root, area, gap, &mut Vec::new(), &mut lines);
+    }
+    lines
+}
+
+fn split(node: &Node, area: Rect, gap: f32, out: &mut Vec<(PaneId, Rect)>, lines: &mut Vec<Rect>) {
     match node {
         Node::Pane { pane } => out.push((*pane, area)),
         Node::Split {
@@ -589,6 +649,11 @@ fn split(node: &Node, area: Rect, gap: f32, out: &mut Vec<(PaneId, Rect)>) {
             let (a, b) = match dir {
                 auk_mirror::layout::SplitDir::Right => {
                     let w = ((area.w - gap) * r).floor().max(0.0);
+                    lines.push(Rect {
+                        x: area.x + w,
+                        w: gap,
+                        ..area
+                    });
                     (
                         Rect { w, ..area },
                         Rect {
@@ -600,6 +665,11 @@ fn split(node: &Node, area: Rect, gap: f32, out: &mut Vec<(PaneId, Rect)>) {
                 }
                 auk_mirror::layout::SplitDir::Down => {
                     let h = ((area.h - gap) * r).floor().max(0.0);
+                    lines.push(Rect {
+                        y: area.y + h,
+                        h: gap,
+                        ..area
+                    });
                     (
                         Rect { h, ..area },
                         Rect {
@@ -610,8 +680,8 @@ fn split(node: &Node, area: Rect, gap: f32, out: &mut Vec<(PaneId, Rect)>) {
                     )
                 }
             };
-            split(first, a, gap, out);
-            split(second, b, gap, out);
+            split(first, a, gap, out, lines);
+            split(second, b, gap, out, lines);
         }
     }
 }
@@ -959,8 +1029,10 @@ mod tests {
         );
     }
 
+    /// A12: the browser's tab bar is the shared chrome's model: the shown session's tabs (the
+    /// one holding the pane active), every session for the chip and its menu, and no `+`.
     #[test]
-    fn the_tab_bar_lists_every_tab_and_marks_the_shown_one() {
+    fn the_chrome_bar_shows_the_shown_sessions_tabs_and_every_session() {
         let mut s = attached();
         let mut l = Layout::default();
         let session = l.new_session("main", None, 1);
@@ -970,6 +1042,7 @@ mod tests {
             Some("logs"),
         )
         .unwrap();
+        let other = l.new_session("main", Some("ops"), 3);
         // Pane 2 is an agent pane: its tab shows the agent icon (§5.1).
         assert!(l.set_kind(2, auk_mirror::layout::PaneTag::Agent));
         s.on_message(
@@ -979,16 +1052,44 @@ mod tests {
             }
             .to_bytes(),
         );
-        let bar = s.tab_bar(Some(2));
-        assert_eq!((bar[0].agent, bar[1].agent), (false, true));
-        assert_eq!(bar.len(), 2);
-        assert_eq!((bar[0].active, bar[0].pane), (false, Some(1)));
-        assert_eq!(bar[0].title, l.window("main").unwrap().sessions[0].name);
+        let bar = s.chrome_bar(Some(2), None);
+        assert!(!bar.can_create);
+        assert_eq!(bar.tabs.len(), 2, "{bar:?}");
+        assert_eq!((bar.tabs[0].agent, bar.tabs[1].agent), (false, true));
         assert_eq!(
-            (bar[1].title.as_str(), bar[1].active, bar[1].pane),
-            ("logs", true, Some(2))
+            (bar.tabs[0].active, bar.tabs[0].title.as_str()),
+            (false, "shell")
         );
-        assert!(s.tab_bar(None)[0].active, "the first tab by default");
+        assert_eq!(
+            (bar.tabs[1].title.as_str(), bar.tabs[1].active),
+            ("logs", true)
+        );
+        let names: Vec<(&str, bool, usize)> = bar
+            .sessions
+            .iter()
+            .map(|s| (s.name.as_str(), s.active, s.tabs))
+            .collect();
+        assert_eq!(names[1], ("ops", false, 1));
+        assert!(names[0].1 && names[0].2 == 2, "{names:?}");
+        // The other session: its own tab only.
+        let bar = s.chrome_bar(Some(3), None);
+        assert_eq!(bar.tabs.len(), 1);
+        assert!(bar.sessions[1].active && bar.sessions[1].named);
+        assert_eq!(s.session_pane(other, None), Some(3));
+        assert_eq!(
+            s.session_pane(session, Some(2)),
+            Some(2),
+            "the remembered pane"
+        );
+        assert_eq!(
+            s.session_pane(session, Some(3)),
+            Some(1),
+            "not in the session"
+        );
+        assert!(
+            s.chrome_bar(None, None).tabs[0].active,
+            "the first tab by default"
+        );
     }
 
     #[test]
@@ -1013,5 +1114,32 @@ mod tests {
         assert_eq!(rects[1].1.x, 502.0);
         assert_eq!(rects[1].1.h, 300.0);
         assert_eq!(rects[2].1.y, 302.0);
+        let lines = dividers(
+            tab,
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 1002.0,
+                h: 602.0,
+            },
+            2.0,
+        );
+        assert_eq!(
+            lines,
+            [
+                Rect {
+                    x: 500.0,
+                    y: 0.0,
+                    w: 2.0,
+                    h: 602.0
+                },
+                Rect {
+                    x: 502.0,
+                    y: 300.0,
+                    w: 500.0,
+                    h: 2.0
+                },
+            ]
+        );
     }
 }

@@ -101,7 +101,9 @@ fn client_messages() -> Vec<ClientMsg> {
 
 fn daemon_messages() -> Vec<DaemonMsg> {
     let mut layout = Layout::default();
-    let session = layout.new_session("main", None, 7);
+    // A given name (a generated one is random): the messages are the same each time they're
+    // built, and `named` travels too.
+    let session = layout.new_session("main", Some("work"), 7);
     layout.split(7, SplitDir::Right, 8).unwrap();
     // Kinds and locks travel with the layout, inside the tagged messages too.
     layout.set_kind(8, crate::layout::PaneTag::Agent);

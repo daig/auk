@@ -1,19 +1,19 @@
-//! The window chrome (D3): the sessions and tab bar, pane dividers and the focus ring, drawn by
-//! our UI engine as one document per window. The panes' areas stay transparent so the grids
-//! show through.
+//! The window chrome (D3): the tab bar with its session chip and menu, pane dividers and the
+//! focus ring, drawn by our UI engine as one document per window. The panes' areas stay
+//! transparent so the grids show through.
 
-use auk_ui::{Document, NodeId, SheetKind};
+use auk_ui::{Document, NodeId};
 
-use crate::geometry::Rect;
-
-// The portable widgets (tab bar, dividers and focus ring, status line, palette) live in auk-views
-// so the browser client draws the same ones (§22, D3); this module adds the app's own overlays.
-pub use auk_views::chrome::{BAR_HEIGHT, DIVIDER, PaletteView, STATUS_HEIGHT, StatusItem};
-use auk_views::chrome as widgets;
+// The portable widgets and their document (tab bar, session menu, dividers and focus ring,
+// status line, palette) live in auk-views so the browser client draws the same ones (§22, D3);
+// this module adds the app's own overlays.
+use auk_views::chrome::{self as widgets, ChromeDoc};
+pub use auk_views::chrome::{
+    BAR_HEIGHT, BarModel, ChromeAction, DIVIDER, PaletteView, STATUS_HEIGHT, SessionItem,
+    StatusItem, TabItem,
+};
 
 const CSS: &str = r#"
-html { font-family: system-ui, sans-serif; font-size: 12px; color: #d4d7db; }
-body { margin: 0; }
 .toasts { position: absolute; right: 12px; top: 40px; width: 300px; display: flex; flex-direction: column; gap: 6px; }
 .toast {
   padding: 8px 10px; border-radius: 7px; background-color: #2a2d31; border: 1px solid #3a3e44;
@@ -72,19 +72,8 @@ html.light .findbar .f-query { color: #1b1d20; }
 /// What the chrome shows. The document is rebuilt when this changes.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ChromeModel {
-    pub width: f64,
-    pub height: f64,
-    pub dark: bool,
-    /// The media features plugin sheets match (§8.4): reduced motion, reduced transparency,
-    /// more contrast.
-    pub media: (bool, bool, bool),
-    /// (session id, name, active).
-    pub sessions: Vec<(u64, String, bool)>,
-    /// (tab id, title, active, zoomed).
-    pub tabs: Vec<(u64, String, bool, bool)>,
-    pub dividers: Vec<Rect>,
-    /// The focused pane's rectangle, ringed when the tab shows more than one pane.
-    pub focus: Option<Rect>,
+    /// The tab bar, dividers and focus ring, as the portable widgets draw them.
+    pub bar: BarModel,
     /// The status line's left side: the focused pane's title.
     pub status_title: String,
     /// Plugin status segments, in plugin id order.
@@ -93,11 +82,6 @@ pub struct ChromeModel {
     pub palette: Option<PaletteView>,
     pub menu: Option<MenuView>,
     pub viewer: Option<ViewerView>,
-    /// The program a tab's focused pane reports (`app` of its hello), by tab id: only while a
-    /// listening surface is open (§7.2, §12.2).
-    pub tab_apps: std::collections::BTreeMap<u64, String>,
-    /// Tabs whose focused pane is an agent pane, shown with the agent icon (§5.1).
-    pub tab_agents: std::collections::BTreeSet<u64>,
     /// The focused pane's reporting program, in the status line.
     pub pane_app: Option<String>,
     /// The target of the link under the pointer (§7.14).
@@ -127,7 +111,6 @@ pub struct FindView {
     pub count: usize,
 }
 
-
 /// A toast on screen.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ToastItem {
@@ -136,7 +119,6 @@ pub struct ToastItem {
     pub text: String,
     pub sub: Option<String>,
 }
-
 
 /// A context menu (§7.8 `menu` actions) at a point, in points.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -160,35 +142,10 @@ pub struct ViewerView {
     pub open: Option<String>,
 }
 
-/// Something the chrome lets the user do with a click.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ChromeAction {
-    Session(u64),
-    Tab(u64),
-    NewSession,
-    NewTab,
-    /// Run an action by name (a status segment's `command`).
-    Run(String),
-    /// A palette row, by its index among the shown rows.
-    Palette(usize),
-    /// A context menu entry.
-    Menu(usize),
-    /// A toast, to dismiss it.
-    Toast(usize),
-    /// A click outside an overlay: close it.
-    Dismiss,
-    ViewerPrev,
-    ViewerNext,
-    ViewerOpen,
-}
-
 /// The chrome document.
 pub struct Chrome {
-    pub doc: Document,
+    bar: ChromeDoc,
     model: Option<ChromeModel>,
-    body: NodeId,
-    /// Installed plugin sheets `(name, css)`, in order (§9.8 "CSS").
-    sheets: Vec<(String, String)>,
     viewer_image: Option<auk_ui::ImageContent>,
     /// The `title` tooltip element, while one is drawn.
     tooltip_el: Option<NodeId>,
@@ -204,55 +161,37 @@ impl std::fmt::Debug for Chrome {
 
 impl Chrome {
     pub fn new(scale: f32) -> Chrome {
-        let mut doc = Document::new();
-        let errors = doc.set_stylesheet("chrome-widgets", SheetKind::BuiltIn, None, widgets::CSS);
-        debug_assert!(errors.is_empty(), "{errors:?}");
-        let errors = doc.set_stylesheet("chrome", SheetKind::BuiltIn, None, CSS);
-        debug_assert!(errors.is_empty(), "{errors:?}");
-        doc.set_device_scale(scale);
-        // Plugins' chrome styles may set Nerd Font icons (§9.8).
-        auk_views::install_fonts(&mut doc);
-        let root = doc.root();
-        let body = doc.create_element("body");
-        doc.append_child(root, body);
         Chrome {
-            doc,
+            bar: ChromeDoc::new(scale, CSS),
             model: None,
-            body,
-            sheets: Vec::new(),
             viewer_image: None,
             tooltip_el: None,
         }
     }
 
+    /// The chrome's document.
+    pub fn doc(&self) -> &Document {
+        &self.bar.doc
+    }
+
     /// Installs plugin sheets (`plugin:local:<id>:…`) over the chrome's own, replacing the last
     /// set. Returns whether anything changed.
     pub fn set_plugin_sheets(&mut self, sheets: &[(String, String)]) -> bool {
-        if self.sheets == sheets {
-            return false;
+        let (changed, problems) = self.bar.set_plugin_sheets(sheets);
+        for p in problems {
+            eprintln!("auk: {p}");
         }
-        for (name, _) in &self.sheets {
-            self.doc.remove_stylesheet(name, None);
-        }
-        for (name, css) in sheets {
-            let errors = self.doc.set_stylesheet(name, SheetKind::Plugin, None, css);
-            if !errors.is_empty() {
-                report_sheet_errors(name, &errors);
-            }
-        }
-        self.sheets = sheets.to_vec();
-        self.doc.update();
-        true
+        changed
     }
 
     /// The tabs drawn with the agent icon, by tab id, with the icon's box.
     pub fn agent_badges(&self) -> Vec<(u64, auk_ui::Rect)> {
-        widgets::agent_badges(&self.doc)
+        self.bar.agent_badges()
     }
 
     /// The installed plugin sheet names, in order.
     pub fn plugin_sheets(&self) -> Vec<String> {
-        self.sheets.iter().map(|(n, _)| n.clone()).collect()
+        self.bar.plugin_sheets()
     }
 
     /// The picture the viewer shows; the next [`update`](Self::update) puts it in place.
@@ -263,49 +202,13 @@ impl Chrome {
 
     /// Rebuilds the document if `model` differs from what it shows. Returns whether it did.
     pub fn update(&mut self, model: &ChromeModel, scale: f32) -> bool {
-        self.doc.set_device_scale(scale);
+        self.bar.doc.set_device_scale(scale);
         if self.model.as_ref() == Some(model) {
             return false;
         }
-        self.doc
-            .set_viewport(model.width as f32, model.height as f32);
-        if self.model.as_ref().is_none_or(|m| m.media != model.media) {
-            let (motion, transparency, contrast) = model.media;
-            self.doc.set_media_preferences(motion, transparency, contrast);
-        }
-        let root = self.doc.root();
-        self.doc
-            .set_attribute(root, "class", if model.dark { "dark" } else { "light" });
-        for child in self.doc.children(self.body).to_vec() {
-            self.doc.remove(child);
-        }
-        let sessions: Vec<widgets::SessionItem> = model
-            .sessions
-            .iter()
-            .map(|(id, name, active)| widgets::SessionItem {
-                id: *id,
-                name: name.clone(),
-                active: *active,
-            })
-            .collect();
-        let tabs: Vec<widgets::TabItem> = model
-            .tabs
-            .iter()
-            .map(|(id, title, active, zoomed)| widgets::TabItem {
-                id: *id,
-                title: title.clone(),
-                active: *active,
-                zoomed: *zoomed,
-                app: model.tab_apps.get(id).cloned(),
-                agent: model.tab_agents.contains(id),
-            })
-            .collect();
-        widgets::tab_bar(&mut self.doc, self.body, &sessions, &tabs);
-        let rect = |r: &Rect| auk_ui::Rect::new(r.x as f32, r.y as f32, r.w as f32, r.h as f32);
-        let lines: Vec<auk_ui::Rect> = model.dividers.iter().map(rect).collect();
-        widgets::dividers(&mut self.doc, self.body, &lines, model.focus.as_ref().map(rect));
+        self.bar.begin(&model.bar);
         self.overlays(model);
-        self.doc.update();
+        self.bar.finish(&model.bar);
         self.model = Some(model.clone());
         true
     }
@@ -313,43 +216,46 @@ impl Chrome {
     /// The status line, toasts, palette, context menu and image viewer.
     fn overlays(&mut self, model: &ChromeModel) {
         // Boxes that span the window are placed in px: the document's own height is its content.
-        let (w, h) = (model.width, model.height);
+        let (w, h) = (model.bar.width, model.bar.height);
+        let body = self.bar.body();
         widgets::status_line(
-            &mut self.doc,
-            self.body,
+            &mut self.bar.doc,
+            body,
             h - STATUS_HEIGHT,
             model.pane_app.as_deref(),
             &model.status_title,
             &model.status,
         );
         if let Some(link) = &model.hover_link {
-            let hint = self.child(self.body, "div", "linkhint", Some(link));
-            self.doc.set_attribute(hint, "role", "tooltip");
-            self.doc
+            let hint = self.child(body, "div", "linkhint", Some(link));
+            self.bar.doc.set_attribute(hint, "role", "tooltip");
+            self.bar
+                .doc
                 .set_inline_style(hint, &format!("top: {}px", h - STATUS_HEIGHT - 26.0));
         }
         self.tooltip_el = None;
         if let Some((title, x, y)) = &model.tooltip {
-            let tip = self.child(self.body, "div", "tooltip", Some(title));
+            let tip = self.child(body, "div", "tooltip", Some(title));
             self.tooltip_el = Some(tip);
-            self.doc.set_attribute(tip, "role", "tooltip");
+            self.bar.doc.set_attribute(tip, "role", "tooltip");
             // Below and right of the pointer, kept inside the window.
             let left = (x + 4.0).min(w - 120.0).max(4.0);
             let top = (y + 18.0).min(h - STATUS_HEIGHT - 24.0).max(4.0);
-            self.doc
+            self.bar
+                .doc
                 .set_inline_style(tip, &format!("left: {left}px; top: {top}px"));
         }
         if let Some(f) = &model.find {
-            let bar = self.child(self.body, "div", "findbar", None);
-            self.doc.set_attribute(bar, "role", "search");
-            self.doc.set_attribute(bar, "aria-label", "Find");
+            let bar = self.child(body, "div", "findbar", None);
+            self.bar.doc.set_attribute(bar, "role", "search");
+            self.bar.doc.set_attribute(bar, "aria-label", "Find");
             let (class, text) = if f.query.is_empty() {
                 ("f-query empty", "Find")
             } else {
                 ("f-query", f.query.as_str())
             };
             let q = self.child(bar, "div", class, Some(text));
-            self.doc.set_attribute(q, "role", "textbox");
+            self.bar.doc.set_attribute(q, "role", "textbox");
             let count = match (f.count, f.current) {
                 (0, _) if f.query.is_empty() => String::new(),
                 (0, _) => "No matches".to_owned(),
@@ -359,11 +265,12 @@ impl Chrome {
             self.child(bar, "div", "f-count", Some(&count));
         }
         if !model.toasts.is_empty() {
-            let stack = self.child(self.body, "div", "toasts", None);
+            let stack = self.child(body, "div", "toasts", None);
             for (i, t) in model.toasts.iter().enumerate() {
                 let el = self.child(stack, "div", &format!("toast toast-{}", t.level), None);
-                self.doc.set_attribute(el, "role", "alert");
-                self.doc
+                self.bar.doc.set_attribute(el, "role", "alert");
+                self.bar
+                    .doc
                     .set_attribute(el, "data-action", &format!("toast:{i}"));
                 self.child(el, "div", "t-text", Some(&t.text));
                 if let Some(sub) = &t.sub {
@@ -372,28 +279,33 @@ impl Chrome {
             }
         }
         if let Some(c) = &model.card {
-            let card = self.child(self.body, "div", "card", None);
-            self.doc.set_attribute(card, "role", "alertdialog");
+            let card = self.child(body, "div", "card", None);
+            self.bar.doc.set_attribute(card, "role", "alertdialog");
             self.child(card, "div", "c-title", Some(&c.title));
             self.child(card, "div", "c-sub", Some(&c.sub));
             let row = self.child(card, "div", "c-buttons", None);
             let retry = self.child(row, "div", "c-button primary", Some("Retry"));
-            self.doc
+            self.bar
+                .doc
                 .set_attribute(retry, "data-action", &format!("run:{}", c.retry));
             let dismiss = self.child(row, "div", "c-button", Some("Dismiss"));
-            self.doc.set_attribute(dismiss, "data-action", "run:card:dismiss");
+            self.bar
+                .doc
+                .set_attribute(dismiss, "data-action", "run:card:dismiss");
         }
         if let Some(p) = &model.palette {
-            widgets::palette(&mut self.doc, self.body, w, h, p);
+            widgets::palette(&mut self.bar.doc, body, w, h, p);
         }
         if let Some(m) = &model.menu {
-            let back = self.child(self.body, "div", "backdrop", None);
-            self.doc.set_attribute(back, "data-action", "dismiss");
-            self.doc
+            let back = self.child(body, "div", "backdrop", None);
+            self.bar.doc.set_attribute(back, "data-action", "dismiss");
+            self.bar
+                .doc
                 .set_inline_style(back, &format!("width: {w}px; height: {h}px"));
-            let menu = self.child(self.body, "div", "ctxmenu", None);
-            self.doc.set_attribute(menu, "role", "menu");
-            self.doc
+            let menu = self.child(body, "div", "ctxmenu", None);
+            self.bar.doc.set_attribute(menu, "role", "menu");
+            self.bar
+                .doc
                 .set_inline_style(menu, &format!("left: {}px; top: {}px", m.x, m.y));
             for (i, label) in m.entries.iter().enumerate() {
                 let class = if m.selected == Some(i) {
@@ -402,18 +314,20 @@ impl Chrome {
                     "ctx-item"
                 };
                 let item = self.child(menu, "div", class, Some(label));
-                self.doc.set_attribute(item, "role", "menuitem");
-                self.doc
+                self.bar.doc.set_attribute(item, "role", "menuitem");
+                self.bar
+                    .doc
                     .set_attribute(item, "data-action", &format!("menu:{i}"));
             }
         }
         if let Some(v) = &model.viewer {
-            let back = self.child(self.body, "div", "backdrop dim", None);
-            self.doc.set_attribute(back, "data-action", "dismiss");
-            self.doc
+            let back = self.child(body, "div", "backdrop dim", None);
+            self.bar.doc.set_attribute(back, "data-action", "dismiss");
+            self.bar
+                .doc
                 .set_inline_style(back, &format!("width: {w}px; height: {h}px"));
-            let viewer = self.child(self.body, "div", "viewer", None);
-            self.doc.set_inline_style(
+            let viewer = self.child(body, "div", "viewer", None);
+            self.bar.doc.set_inline_style(
                 viewer,
                 &format!(
                     "width: {}px; height: {}px",
@@ -421,13 +335,17 @@ impl Chrome {
                     (h - 90.0).max(1.0)
                 ),
             );
-            self.doc.set_attribute(viewer, "role", "dialog");
-            self.doc.set_attribute(viewer, "aria-label", "Image Viewer");
+            self.bar.doc.set_attribute(viewer, "role", "dialog");
+            self.bar
+                .doc
+                .set_attribute(viewer, "aria-label", "Image Viewer");
             let bar = self.child(viewer, "div", "v-bar", None);
             if v.count > 1 {
                 let prev = self.child(bar, "div", "v-btn", Some("‹"));
-                self.doc.set_attribute(prev, "data-action", "viewer:prev");
-                self.doc.set_attribute(prev, "role", "button");
+                self.bar
+                    .doc
+                    .set_attribute(prev, "data-action", "viewer:prev");
+                self.bar.doc.set_attribute(prev, "role", "button");
             }
             let title = if v.count > 1 {
                 format!("{} ({}/{})", v.title, v.index + 1, v.count)
@@ -437,22 +355,26 @@ impl Chrome {
             self.child(bar, "div", "v-title", Some(&title));
             if v.count > 1 {
                 let next = self.child(bar, "div", "v-btn", Some("›"));
-                self.doc.set_attribute(next, "data-action", "viewer:next");
-                self.doc.set_attribute(next, "role", "button");
+                self.bar
+                    .doc
+                    .set_attribute(next, "data-action", "viewer:next");
+                self.bar.doc.set_attribute(next, "role", "button");
             }
             if v.open.is_some() {
                 let open = self.child(bar, "div", "v-btn", Some("Open"));
-                self.doc.set_attribute(open, "data-action", "viewer:open");
-                self.doc.set_attribute(open, "role", "button");
+                self.bar
+                    .doc
+                    .set_attribute(open, "data-action", "viewer:open");
+                self.bar.doc.set_attribute(open, "role", "button");
             }
             let img = self.child(viewer, "div", "v-img", None);
-            self.doc.set_attribute(img, "role", "img");
-            self.doc.set_attribute(img, "aria-label", &v.title);
+            self.bar.doc.set_attribute(img, "role", "img");
+            self.bar.doc.set_attribute(img, "aria-label", &v.title);
             // Fit the picture in the viewer, never past its own size.
             let (aw, ah) = ((w - 80.0).max(1.0), (h - 130.0).max(1.0));
             let (w, h) = (v.size.0.max(1.0), v.size.1.max(1.0));
             let k = (aw / w).min(ah / h).min(1.0);
-            self.doc.set_inline_style(
+            self.bar.doc.set_inline_style(
                 img,
                 &format!(
                     "width: {}px; height: {}px",
@@ -460,26 +382,27 @@ impl Chrome {
                     (h * k).floor()
                 ),
             );
-            self.doc.set_image(img, self.viewer_image.clone());
+            self.bar.doc.set_image(img, self.viewer_image.clone());
         }
     }
 
     /// The status line's segments as drawn: `(data-plugin, text, data-tone)`, in order.
     pub fn status_segments(&self) -> Vec<(String, String, Option<String>)> {
         let mut out = Vec::new();
-        let mut stack = vec![self.doc.root()];
+        let mut stack = vec![self.bar.doc.root()];
         while let Some(n) = stack.pop() {
-            if let Some(plugin) = self.doc.attribute(n, "data-plugin") {
+            if let Some(plugin) = self.bar.doc.attribute(n, "data-plugin") {
                 let text: String = self
+                    .bar
                     .doc
                     .children(n)
                     .iter()
-                    .filter_map(|&c| self.doc.node(c).text())
+                    .filter_map(|&c| self.bar.doc.node(c).text())
                     .collect();
-                let tone = self.doc.attribute(n, "data-tone").map(str::to_owned);
+                let tone = self.bar.doc.attribute(n, "data-tone").map(str::to_owned);
                 out.push((plugin.to_owned(), text, tone));
             }
-            for &c in self.doc.children(n).iter().rev() {
+            for &c in self.bar.doc.children(n).iter().rev() {
                 stack.push(c);
             }
         }
@@ -488,101 +411,68 @@ impl Chrome {
 
     /// The palette's header as drawn: the program it names (`data-app`) and its text.
     pub fn palette_app(&self) -> Option<(String, String)> {
-        let mut stack = vec![self.doc.root()];
+        let mut stack = vec![self.bar.doc.root()];
         while let Some(n) = stack.pop() {
-            if self.doc.attribute(n, "id") == Some("palette-app") {
-                let app = self.doc.attribute(n, "data-app")?.to_owned();
+            if self.bar.doc.attribute(n, "id") == Some("palette-app") {
+                let app = self.bar.doc.attribute(n, "data-app")?.to_owned();
                 let text: String = self
+                    .bar
                     .doc
                     .children(n)
                     .iter()
-                    .filter_map(|&c| self.doc.node(c).text())
+                    .filter_map(|&c| self.bar.doc.node(c).text())
                     .collect();
                 return Some((app, text));
             }
-            stack.extend(self.doc.children(n).iter().copied());
+            stack.extend(self.bar.doc.children(n).iter().copied());
         }
         None
     }
 
     /// Every element with an action and its box, in points (for the automation endpoint).
     pub fn actions(&self) -> Vec<(String, auk_ui::Rect)> {
-        let mut out = Vec::new();
-        let mut stack = vec![self.doc.root()];
-        while let Some(n) = stack.pop() {
-            if let Some(a) = self.doc.attribute(n, "data-action")
-                && let Some(r) = self.doc.border_box(n)
-            {
-                out.push((a.to_owned(), r));
-            }
-            for &c in self.doc.children(n).iter().rev() {
-                stack.push(c);
-            }
-        }
-        out
+        self.bar.actions()
+    }
+
+    /// The tabs as drawn.
+    pub fn tabs(&self) -> Vec<widgets::DrawnTab> {
+        self.bar.tabs()
+    }
+
+    /// The elements assistive technology sees in the chrome.
+    pub fn accessible(&self) -> Vec<widgets::AccessibleNode> {
+        self.bar.accessible()
     }
 
     fn child(&mut self, parent: NodeId, tag: &str, class: &str, text: Option<&str>) -> NodeId {
-        let e = self.doc.create_element(tag);
-        self.doc.set_attribute(e, "class", class);
+        let e = self.bar.doc.create_element(tag);
+        self.bar.doc.set_attribute(e, "class", class);
         if let Some(text) = text {
-            let t = self.doc.create_text(text);
-            self.doc.append_child(e, t);
+            let t = self.bar.doc.create_text(text);
+            self.bar.doc.append_child(e, t);
         }
-        self.doc.append_child(parent, e);
+        self.bar.doc.append_child(parent, e);
         e
     }
 
     /// The tooltip drawn (role `tooltip`, not the link readout): its text and box, in points.
     pub fn tooltip(&self) -> Option<(String, auk_ui::Rect)> {
-        let el = self.tooltip_el.filter(|&e| self.doc.try_node(e).is_some())?;
+        let el = self
+            .tooltip_el
+            .filter(|&e| self.bar.doc.try_node(e).is_some())?;
         let text: String = self
+            .bar
             .doc
             .children(el)
             .iter()
-            .filter_map(|&c| self.doc.node(c).text())
+            .filter_map(|&c| self.bar.doc.node(c).text())
             .collect();
-        Some((text, self.doc.border_box(el)?))
+        Some((text, self.bar.doc.border_box(el)?))
     }
 
     /// The action under a point (in points), if any.
     pub fn action_at(&self, x: f64, y: f64) -> Option<ChromeAction> {
-        let mut node = auk_ui::hit_test(&self.doc, x as f32, y as f32);
-        while let Some(id) = node {
-            if let Some(action) = self.doc.attribute(id, "data-action") {
-                return parse_action(action);
-            }
-            node = self.doc.parent(id);
-        }
-        None
-    }
-}
-
-fn report_sheet_errors(name: &str, errors: &[impl std::fmt::Debug]) {
-    eprintln!("auk: plugin sheet {name}: {errors:?}");
-}
-
-fn parse_action(s: &str) -> Option<ChromeAction> {
-    match s {
-        "new-session" => Some(ChromeAction::NewSession),
-        "new-tab" => Some(ChromeAction::NewTab),
-        "dismiss" => Some(ChromeAction::Dismiss),
-        "viewer:prev" => Some(ChromeAction::ViewerPrev),
-        "viewer:next" => Some(ChromeAction::ViewerNext),
-        "viewer:open" => Some(ChromeAction::ViewerOpen),
-        _ if s.starts_with("run:") => Some(ChromeAction::Run(s[4..].to_owned())),
-        _ => {
-            let (kind, id) = s.split_once(':')?;
-            let id = id.parse().ok()?;
-            match kind {
-                "session" => Some(ChromeAction::Session(id)),
-                "tab" => Some(ChromeAction::Tab(id)),
-                "palette" => Some(ChromeAction::Palette(id as usize)),
-                "menu" => Some(ChromeAction::Menu(id as usize)),
-                "toast" => Some(ChromeAction::Toast(id as usize)),
-                _ => None,
-            }
-        }
+        self.bar.action_at(x as f32, y as f32)
     }
 }
 
@@ -591,27 +481,37 @@ mod tests {
     use super::*;
 
     fn model() -> ChromeModel {
+        let session = |id, name: &str, active| SessionItem {
+            id,
+            name: name.into(),
+            active,
+            tabs: 1,
+            ..SessionItem::default()
+        };
+        let tab = |id, title: &str, active, zoomed| TabItem {
+            id,
+            title: title.into(),
+            active,
+            zoomed,
+            ..TabItem::default()
+        };
         ChromeModel {
-            width: 800.0,
-            height: 500.0,
-            dark: true,
-            sessions: vec![(1, "1".into(), true), (5, "work".into(), false)],
-            tabs: vec![
-                (2, "~/src".into(), true, false),
-                (3, "vim".into(), false, true),
-            ],
-            dividers: vec![Rect::new(400.0, 30.0, 1.0, 470.0)],
-            focus: Some(Rect::new(0.0, 30.0, 400.0, 470.0)),
+            bar: BarModel {
+                width: 800.0,
+                height: 500.0,
+                dark: true,
+                sessions: vec![session(1, "brisk-otter", true), session(5, "work", false)],
+                tabs: vec![tab(2, "~/src", true, false), tab(3, "vim", false, true)],
+                dividers: vec![auk_ui::Rect::new(400.0, 30.0, 1.0, 470.0)],
+                focus: Some(auk_ui::Rect::new(0.0, 30.0, 400.0, 470.0)),
+                can_create: true,
+                ..BarModel::default()
+            },
             ..ChromeModel::default()
         }
     }
 
-    #[test]
-    fn clicks_find_their_actions() {
-        let mut c = Chrome::new(2.0);
-        assert!(c.update(&model(), 2.0));
-        assert!(!c.update(&model(), 2.0));
-        // Find each tab's box and click its middle.
+    fn bar_actions(c: &Chrome) -> Vec<ChromeAction> {
         let mut found = Vec::new();
         for x in (0..800).step_by(4) {
             if let Some(a) = c.action_at(f64::from(x), 15.0)
@@ -620,17 +520,40 @@ mod tests {
                 found.push(a);
             }
         }
+        found
+    }
+
+    #[test]
+    fn clicks_find_their_actions() {
+        let mut c = Chrome::new(2.0);
+        assert!(c.update(&model(), 2.0));
+        assert!(!c.update(&model(), 2.0));
+        // Find each tab's box and click its middle: two sessions, so the chip leads.
         assert_eq!(
-            found,
+            bar_actions(&c),
             vec![
-                ChromeAction::Session(1),
-                ChromeAction::Session(5),
-                ChromeAction::NewSession,
+                ChromeAction::SessionMenu,
                 ChromeAction::Tab(2),
                 ChromeAction::Tab(3),
                 ChromeAction::NewTab,
             ]
         );
         assert_eq!(c.action_at(200.0, 200.0), None);
+        // The open menu lists both sessions, then New, Rename and Lock, over a backdrop.
+        let mut open = model();
+        open.bar.session_menu = true;
+        assert!(c.update(&open, 2.0));
+        let acts: Vec<String> = c.actions().into_iter().map(|(a, _)| a).collect();
+        for want in [
+            "session:1",
+            "session:5",
+            "new-session",
+            "rename-session",
+            "lock-session",
+            "dismiss",
+        ] {
+            assert!(acts.iter().any(|a| a == want), "{want} in {acts:?}");
+        }
+        assert_eq!(c.action_at(200.0, 300.0), Some(ChromeAction::Dismiss));
     }
 }

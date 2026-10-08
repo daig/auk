@@ -822,8 +822,10 @@ impl Headless {
     /// a remote host is (§10.2): `auk attach --stdio` over a pipe, through `auk-remote`'s link,
     /// with a stand-in for `ssh` that runs the remote command here. No network is involved.
     fn cmd_remote(self: &Arc<Self>, args: &[String]) -> Result<Value, String> {
-        if args.first().map(String::as_str) != Some("loopback") {
-            return Err("remote: expected loopback".into());
+        match args {
+            [l] if l == "loopback" => {}
+            [l, ..] if l == "loopback" => return Err("remote loopback takes no address".into()),
+            _ => return Err("remote: expected loopback".into()),
         }
         let private = crate::scenario::Private::start(&self.exe).map_err(|e| e.to_string())?;
         let ssh = private.root().join("ssh");

@@ -29,6 +29,8 @@ pub struct ContextMenu {
 pub struct Viewer {
     pub pane: PaneId,
     pub zoom: Zoom,
+    /// The shown picture is decoding in the background (amendment A9): frames look again.
+    pub decoding: bool,
 }
 
 /// The window's overlays.
@@ -37,11 +39,13 @@ pub struct Overlays {
     pub palette: Option<Palette>,
     pub menu: Option<ContextMenu>,
     pub viewer: Option<Viewer>,
+    /// The session chip's menu is open.
+    pub session_menu: bool,
 }
 
 impl Overlays {
     pub fn any(&self) -> bool {
-        self.palette.is_some() || self.menu.is_some() || self.viewer.is_some()
+        self.palette.is_some() || self.menu.is_some() || self.viewer.is_some() || self.session_menu
     }
 }
 
@@ -52,9 +56,9 @@ impl WinState {
     /// Adds the status line, toasts, overlays and plugin tab titles to the chrome model.
     pub(super) fn decorate_chrome(&mut self, model: &mut ChromeModel) {
         self.plugins_chrome();
-        for t in &mut model.tabs {
-            if let Some(title) = self.plugins.tab_titles.get(&t.0) {
-                t.1 = title.clone();
+        for t in &mut model.bar.tabs {
+            if let Some(title) = self.plugins.tab_titles.get(&t.id) {
+                t.title = title.clone();
             }
         }
         model.status = self.plugins.status.clone();
@@ -92,6 +96,7 @@ impl WinState {
             query: p.query.clone(),
             rows: p.rows().into_iter().map(|r| (r.label, r.group)).collect(),
             selected: p.selected,
+            placeholder: p.placeholder(),
         });
         model.menu = self.overlays.menu.as_ref().map(|m| MenuView {
             x: m.at.0,
@@ -155,9 +160,72 @@ impl WinState {
 
     pub(super) fn open_palette(&mut self) {
         let rows = self.palette_rows();
+        self.show_palette(Palette::new(rows));
+    }
+
+    fn show_palette(&mut self, palette: Palette) {
         self.overlays.menu = None;
-        self.overlays.palette = Some(Palette::new(rows));
+        self.overlays.session_menu = false;
+        self.overlays.palette = Some(palette);
         self.ui_dirty = true;
+    }
+
+    /// "Switch Session…": the palette lists the window key's sessions, the shown one marked,
+    /// then New Session, Rename Session… and Lock (or Unlock) Session.
+    pub(super) fn open_session_switcher(&mut self) {
+        let sessions = self.sessions();
+        let mut rows: Vec<Row> = sessions
+            .sessions
+            .iter()
+            .map(|s| {
+                let tabs = match s.tabs.len() {
+                    1 => "1 tab".to_owned(),
+                    n => format!("{n} tabs"),
+                };
+                let current = Some(s.id) == self.active_session;
+                Row {
+                    label: s.name.clone(),
+                    group: if current {
+                        format!("{tabs} \u{b7} current")
+                    } else {
+                        tabs
+                    },
+                    icon: if s.locked { "lock" } else { "" }.to_owned(),
+                    action: RowAction::Session(s.id),
+                }
+            })
+            .collect();
+        let locked = self.session(&sessions).is_some_and(|s| s.locked);
+        for (cmd, label) in [
+            (crate::commands::Cmd::NewSession, "New Session"),
+            (crate::commands::Cmd::RenameSession, "Rename Session"),
+            (
+                crate::commands::Cmd::LockSession,
+                if locked {
+                    "Unlock Session"
+                } else {
+                    "Lock Session"
+                },
+            ),
+        ] {
+            rows.push(Row {
+                label: label.to_owned(),
+                group: "Session".to_owned(),
+                icon: String::new(),
+                action: RowAction::Builtin(cmd),
+            });
+        }
+        let mut palette = Palette::new(rows);
+        palette.scope = Some("Switch to a session".to_owned());
+        self.show_palette(palette);
+    }
+
+    /// "Rename Session…": the palette asks for the shown session's new name.
+    pub(super) fn open_session_rename(&mut self) {
+        let sessions = self.sessions();
+        if let Some(s) = self.session(&sessions) {
+            self.show_palette(Palette::rename_session(s.id, &s.name));
+        }
     }
 
     /// Runs a palette row.
@@ -177,6 +245,10 @@ impl WinState {
             }
             RowAction::Open(path) => {
                 self.open_path_from_palette(&path);
+            }
+            RowAction::Session(id) => self.select_session(id),
+            RowAction::RenameSession(session, name) => {
+                self.edit(auk_mirror::LayoutEdit::RenameSession { session, name });
             }
             RowAction::Block(kind) => {
                 let cwd = self.focused_cwd();
@@ -239,6 +311,11 @@ impl WinState {
     pub(super) fn overlay_key(&mut self, window: &Window, key: &KeyInput) -> bool {
         let took = if self.overlays.palette.is_some() {
             self.palette_key(key)
+        } else if self.overlays.session_menu {
+            if key.event.key == Key::Escape {
+                self.overlays.session_menu = false;
+            }
+            true
         } else if let Some(m) = self.overlays.menu.as_mut() {
             let n = m.entries.len();
             match key.event.key {
@@ -449,6 +526,7 @@ impl WinState {
             ChromeAction::Dismiss => {
                 self.overlays.palette = None;
                 self.overlays.menu = None;
+                self.overlays.session_menu = false;
                 self.close_viewer();
             }
             ChromeAction::ViewerPrev => self.viewer_step(false),
@@ -465,10 +543,13 @@ impl WinState {
                     self.open_routed(&t, "link", pane);
                 }
             }
-            ChromeAction::Session(_)
+            ChromeAction::SessionMenu
+            | ChromeAction::Session(_)
             | ChromeAction::Tab(_)
             | ChromeAction::NewSession
-            | ChromeAction::NewTab => {}
+            | ChromeAction::NewTab
+            | ChromeAction::RenameSession
+            | ChromeAction::LockSession => {}
         }
         self.ui_dirty = true;
         window.request_frame();
@@ -608,7 +689,11 @@ impl WinState {
     pub(super) fn show_viewer(&mut self, pane: PaneId, zoom: Zoom) {
         self.overlays.palette = None;
         self.overlays.menu = None;
-        self.overlays.viewer = Some(Viewer { pane, zoom });
+        self.overlays.viewer = Some(Viewer {
+            pane,
+            zoom,
+            decoding: false,
+        });
         self.load_viewer_image();
     }
 
@@ -632,8 +717,10 @@ impl WinState {
         self.load_viewer_image();
     }
 
-    /// Decodes the shown image from the pane's blobs into the chrome.
+    /// Shows the image from the pane's blobs in the chrome: decoded now when small, else in
+    /// the background, the viewer empty until it's ready ([`WinState::poll_viewer`]).
     fn load_viewer_image(&mut self) {
+        use auk_views::image::{Poll, request_blob};
         let Some(v) = &self.overlays.viewer else {
             return;
         };
@@ -645,24 +732,42 @@ impl WinState {
                 .panes
                 .get(&v.pane)
                 .and_then(|p| p.replica.tsp().blobs().get(&blob).cloned())
-                .map(|b| auk_views::image::load_blob(&b, scale))
+                .map(|b| request_blob(&b, scale))
         };
+        let decoding = matches!(picture, Some(Poll::Pending));
         match picture {
-            Some(Ok(p)) => {
+            Some(Poll::Ready(Ok(p))) => {
                 self.viewer_size = (f64::from(p.size.0), f64::from(p.size.1));
                 self.chrome
                     .set_viewer_image(p.frames.first().map(|f| f.content.clone()));
             }
-            Some(Err(e)) => {
+            Some(Poll::Ready(Err(e))) => {
                 self.toast(ToastLevel::Error, "Can't show the image", Some(&e));
                 self.close_viewer();
             }
-            None => {
+            None | Some(Poll::Pending) => {
                 self.viewer_size = (1.0, 1.0);
                 self.chrome.set_viewer_image(None);
             }
         }
+        if let Some(v) = self.overlays.viewer.as_mut() {
+            v.decoding = decoding;
+        }
         self.ui_dirty = true;
+    }
+
+    /// Before a frame: shows the viewer's picture once its background decode is done. Returns
+    /// whether it is still decoding (the window asks for another frame).
+    pub(super) fn poll_viewer(&mut self) -> bool {
+        if !self.overlays.viewer.as_ref().is_some_and(|v| v.decoding) {
+            return false;
+        }
+        let blob = self.overlays.viewer.as_ref().map(|v| v.zoom.images[v.zoom.index].blob.clone());
+        if blob.is_some_and(|b| auk_views::image::decoding_blob(&b.to_ascii_lowercase())) {
+            return true;
+        }
+        self.load_viewer_image();
+        self.overlays.viewer.as_ref().is_some_and(|v| v.decoding)
     }
 
     /// Sends a surface pointer event's outcome that opens a path or link through routes.

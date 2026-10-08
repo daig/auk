@@ -173,6 +173,9 @@ pub(crate) mod flags {
     pub const BOX_DIRTY: u16 = 4;
     pub const BOX_DESC: u16 = 8;
     pub const IFC_DIRTY: u16 = 16;
+    /// The box's children are rebuilt from scratch, not only extended (`BOX_DIRTY` from a
+    /// change other than children added or removed).
+    pub const BOX_FULL: u16 = 32;
 }
 
 /// A rectangle in CSS px.
@@ -252,7 +255,25 @@ pub struct Node {
     pub(crate) skipped: bool,
     /// Replaced content: a picture painted into the content box ([`crate::Document::set_image`]).
     pub(crate) image: Option<Box<crate::image::ImageContent>>,
+    /// The absolutely positioned boxes this in-flow, non-positioned box passes up to its
+    /// containing block (box building's `collect_abspos`), kept until something under it changes
+    /// its boxes ([`crate::Document::mark_box_dirty`] clears it on the way up), so rebuilding a
+    /// big containing block doesn't walk every subtree under it.
+    pub(crate) abspos: Option<Box<[NodeId]>>,
+    /// The layout run ([`crate::Document::layout_count`]) that last computed this box (a cache
+    /// miss); 0 if none has.
+    pub(crate) laid_out_in: u64,
+    /// A virtualized container whose layout children are exactly its box children, all blocks
+    /// (the common case: a transcript's entries): those children, so children added at the end
+    /// extend its boxes without rebuilding them all.
+    pub(crate) virt_kids: Option<Vec<NodeId>>,
+    /// A virtualized container's last size within a layout run, by what it depends on (layout
+    /// run, width, height, window).
+    pub(crate) virt_memo: Option<(VirtKey, taffy::LayoutOutput)>,
 }
+
+/// What a virtualized container's size depends on within one layout run.
+pub(crate) type VirtKey = (u64, u32, Option<u32>, u32, u32);
 
 impl Node {
     pub(crate) fn new(kind: NodeKind) -> Node {
@@ -264,7 +285,7 @@ impl Node {
             style: None,
             before: None,
             after: None,
-            flags: flags::STYLE_DIRTY | flags::BOX_DIRTY | flags::IFC_DIRTY,
+            flags: flags::STYLE_DIRTY | flags::BOX_DIRTY | flags::BOX_FULL | flags::IFC_DIRTY,
             inner: Inner::None,
             layout_children: Vec::new(),
             layout_parent: None,
@@ -282,6 +303,10 @@ impl Node {
             measured: Vec::new(),
             skipped: false,
             image: None,
+            abspos: None,
+            laid_out_in: 0,
+            virt_kids: None,
+            virt_memo: None,
         }
     }
 

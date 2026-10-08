@@ -1,16 +1,16 @@
-//! Painting into a Vello scene (backgrounds, borders with radii, text from Parley glyph runs,
-//! replaced content, overflow clips, opacity layers, 2D transforms) and hit testing in the same
-//! order.
+//! Painting into a Vello scene (box shadows, backgrounds, borders with radii, text from Parley
+//! glyph runs, replaced content, overflow clips, opacity layers, 2D transforms) and hit testing in
+//! the same order.
 
 use crate::css::values::Color;
 use crate::document::Document;
 use crate::dom::{Inner, NodeId, NodeKind, Rect};
 use crate::image::{ImageContent, fit};
 use crate::layout::inline::InlineLayout;
-use crate::style::{BorderStyle, ComputedStyle, Position, TransformFn, Visibility};
+use crate::style::{BorderStyle, ComputedStyle, Position, Shadow, TransformFn, Visibility};
 use vello::Scene;
-use vello::kurbo::{Affine, BezPath, RoundedRect, RoundedRectRadii, Stroke};
-use vello::peniko::{Fill, Mix};
+use vello::kurbo::{Affine, BezPath, RoundedRect, RoundedRectRadii, Shape, Stroke};
+use vello::peniko::{BlendMode, Compose, Fill, Mix};
 
 fn brush(c: Color) -> vello::peniko::Color {
     vello::peniko::Color::new([c.r, c.g, c.b, c.a])
@@ -71,12 +71,161 @@ fn shrink_radii(rr: RoundedRectRadii, by: f64) -> RoundedRectRadii {
     )
 }
 
-/// Draw a box's background and borders.
+/// Radii grown (or, for a negative `by`, shrunk) by a shadow's spread: corners that are square
+/// stay square (CSS Backgrounds 3 §7.1.1).
+fn spread_radii(rr: RoundedRectRadii, by: f64) -> RoundedRectRadii {
+    let f = |c: f64| if c > 0.0 { (c + by).max(0.0) } else { 0.0 };
+    RoundedRectRadii::new(
+        f(rr.top_left),
+        f(rr.top_right),
+        f(rr.bottom_right),
+        f(rr.bottom_left),
+    )
+}
+
+/// The one radius Vello's blurred rounded rectangle takes: the mean of the corners.
+fn mean_radius(rr: RoundedRectRadii) -> f64 {
+    (rr.top_left + rr.top_right + rr.bottom_right + rr.bottom_left) / 4.0
+}
+
+/// How far a blurred edge reaches past its rectangle: Vello cuts its gaussian at 2.5 standard
+/// deviations, and CSS's standard deviation is half the blur radius.
+fn blur_reach(blur: f32) -> f32 {
+    blur * 1.25
+}
+
+/// How far a box's outer shadows reach past its border box: left, top, right, bottom.
+pub(crate) fn shadow_outset(s: &ComputedStyle) -> [f32; 4] {
+    let mut out = [0.0f32; 4];
+    for sh in s.box_shadow.as_deref().map_or(&[][..], Vec::as_slice) {
+        if sh.inset || sh.color.is_transparent() {
+            continue;
+        }
+        let grow = sh.spread + blur_reach(sh.blur);
+        out[0] = out[0].max(grow - sh.x);
+        out[1] = out[1].max(grow - sh.y);
+        out[2] = out[2].max(grow + sh.x);
+        out[3] = out[3].max(grow + sh.y);
+    }
+    out
+}
+
+/// An outer shadow: the border box offset, grown by the spread, blurred, and drawn only outside
+/// the border box.
+fn paint_outer_shadow(
+    scene: &mut Scene,
+    xf: Affine,
+    sh: &Shadow,
+    border_box: vello::kurbo::Rect,
+    rr: RoundedRectRadii,
+) {
+    let spread = sh.spread as f64;
+    let (dx, dy) = (sh.x as f64, sh.y as f64);
+    let rect = vello::kurbo::Rect::new(
+        border_box.x0 - spread + dx,
+        border_box.y0 - spread + dy,
+        border_box.x1 + spread + dx,
+        border_box.y1 + spread + dy,
+    );
+    if sh.color.is_transparent() || rect.width() <= 0.0 || rect.height() <= 0.0 {
+        return;
+    }
+    let srr = spread_radii(rr, spread);
+    let reach = blur_reach(sh.blur) as f64 + 1.0;
+    // Everything around the border box, minus the box (even-odd).
+    let mut clip = border_box
+        .union(rect.inflate(reach, reach))
+        .inflate(1.0, 1.0)
+        .to_path(0.1);
+    clip.extend(RoundedRect::from_rect(border_box, rr).path_elements(0.1));
+    scene.push_clip_layer(Fill::EvenOdd, xf, &clip);
+    if sh.blur > 0.0 {
+        scene.draw_blurred_rounded_rect(
+            xf,
+            rect,
+            brush(sh.color),
+            mean_radius(srr),
+            sh.blur as f64 / 2.0,
+        );
+    } else {
+        scene.fill(
+            Fill::NonZero,
+            xf,
+            brush(sh.color),
+            None,
+            &RoundedRect::from_rect(rect, srr),
+        );
+    }
+    scene.pop_layer();
+}
+
+/// An inset shadow: the padding box everywhere outside its offset copy shrunk by the spread,
+/// that edge blurred, clipped to the padding box.
+fn paint_inset_shadow(
+    scene: &mut Scene,
+    xf: Affine,
+    sh: &Shadow,
+    pad: vello::kurbo::Rect,
+    prr: RoundedRectRadii,
+) {
+    if sh.color.is_transparent() || pad.width() <= 0.0 || pad.height() <= 0.0 {
+        return;
+    }
+    let spread = sh.spread as f64;
+    let hole = vello::kurbo::Rect::new(
+        pad.x0 + spread + sh.x as f64,
+        pad.y0 + spread + sh.y as f64,
+        pad.x1 - spread + sh.x as f64,
+        pad.y1 - spread + sh.y as f64,
+    );
+    let hole_rr = spread_radii(prr, -spread);
+    let shape = RoundedRect::from_rect(pad, prr);
+    let empty = hole.width() <= 0.0 || hole.height() <= 0.0;
+    if sh.blur > 0.0 && !empty {
+        // The color over the padding box, then the blurred hole taken out of it, in a layer of
+        // its own so the hole doesn't take out what's under the shadow.
+        scene.push_layer(Fill::NonZero, Mix::Normal, 1.0, xf, &shape);
+        scene.fill(Fill::NonZero, xf, brush(sh.color), None, &shape);
+        scene.push_layer(
+            Fill::NonZero,
+            BlendMode::new(Mix::Normal, Compose::DestOut),
+            1.0,
+            xf,
+            &shape,
+        );
+        scene.draw_blurred_rounded_rect(
+            xf,
+            hole,
+            vello::peniko::Color::BLACK,
+            mean_radius(hole_rr),
+            sh.blur as f64 / 2.0,
+        );
+        scene.pop_layer();
+        scene.pop_layer();
+        return;
+    }
+    scene.push_clip_layer(Fill::NonZero, xf, &shape);
+    // The padding box (with room for the offset), minus the hole (even-odd).
+    let room = (sh.x.abs() + sh.y.abs() + sh.spread.abs()) as f64 + 1.0;
+    let mut path = pad.inflate(room, room).to_path(0.1);
+    if !empty {
+        path.extend(RoundedRect::from_rect(hole, hole_rr).path_elements(0.1));
+    }
+    scene.fill(Fill::EvenOdd, xf, brush(sh.color), None, &path);
+    scene.pop_layer();
+}
+
+/// Draw a box's outer shadows, background, inset shadows and borders.
 fn paint_decorations(scene: &mut Scene, xf: Affine, s: &ComputedStyle, r: Rect, border: [f32; 4]) {
     if s.visibility != Visibility::Visible {
         return;
     }
     let rr = radii(s, r);
+    let shadows = s.box_shadow.as_deref().map_or(&[][..], Vec::as_slice);
+    // The first shadow is on top.
+    for sh in shadows.iter().rev().filter(|sh| !sh.inset) {
+        paint_outer_shadow(scene, xf, sh, kr(r), rr);
+    }
     if !s.background_color.is_transparent() {
         scene.fill(
             Fill::NonZero,
@@ -87,6 +236,23 @@ fn paint_decorations(scene: &mut Scene, xf: Affine, s: &ComputedStyle, r: Rect, 
         );
     }
     let [bt, br, bb, bl] = border;
+    if shadows.iter().any(|sh| sh.inset) {
+        let pad = vello::kurbo::Rect::new(
+            r.x as f64 + bl as f64,
+            r.y as f64 + bt as f64,
+            (r.x + r.w) as f64 - br as f64,
+            (r.y + r.h) as f64 - bb as f64,
+        );
+        let prr = RoundedRectRadii::new(
+            (rr.top_left - bt.max(bl) as f64).max(0.0),
+            (rr.top_right - bt.max(br) as f64).max(0.0),
+            (rr.bottom_right - bb.max(br) as f64).max(0.0),
+            (rr.bottom_left - bb.max(bl) as f64).max(0.0),
+        );
+        for sh in shadows.iter().rev().filter(|sh| sh.inset) {
+            paint_inset_shadow(scene, xf, sh, pad, prr);
+        }
+    }
     if bt + br + bb + bl <= 0.0 {
         return;
     }
@@ -149,6 +315,8 @@ struct Painter<'a> {
     /// The part of the document that can show, in document coordinates: boxes whose border box
     /// and content overflow both miss it are left out. `None` below a transformed box.
     cull: Option<Rect>,
+    /// How far past `cull` a box's overflow may end and the box still be painted.
+    margin: f32,
 }
 
 /// Boxes with at least this many children find the ones a cull rectangle reaches by binary
@@ -208,7 +376,8 @@ impl ChildExtents {
 }
 
 /// How far past the cull rectangle a box may reach and still be painted: room for ink that
-/// layout's overflow doesn't count (outlines, borders drawn outside).
+/// layout's overflow doesn't count (outlines, borders drawn outside). Outer shadows add the
+/// document's `shadow_reach` to it.
 const CULL_MARGIN: f32 = 64.0;
 
 impl Painter<'_> {
@@ -243,11 +412,8 @@ impl Painter<'_> {
             let y0 = r.y.min(py + o.top);
             let x1 = (r.x + r.w).max(px + o.right);
             let y1 = (r.y + r.h).max(py + o.bottom);
-            if x1 < c.x - CULL_MARGIN
-                || y1 < c.y - CULL_MARGIN
-                || x0 > c.x + c.w + CULL_MARGIN
-                || y0 > c.y + c.h + CULL_MARGIN
-            {
+            let m = self.margin;
+            if x1 < c.x - m || y1 < c.y - m || x0 > c.x + c.w + m || y0 > c.y + c.h + m {
                 return;
             }
         }
@@ -277,8 +443,8 @@ impl Painter<'_> {
         if ext.generation != generation || ext.ends.len() != kids.len() {
             *ext = ChildExtents::build(doc, kids, generation);
         }
-        let top = c.y - CULL_MARGIN - origin_y;
-        let bottom = c.y + c.h + CULL_MARGIN - origin_y;
+        let top = c.y - self.margin - origin_y;
+        let bottom = c.y + c.h + self.margin - origin_y;
         let start = ext.ends.partition_point(|&e| e < top);
         let end = ext.starts.partition_point(|&s| s <= bottom).max(start);
         start..end
@@ -295,8 +461,11 @@ impl Painter<'_> {
         };
         let layered = s.opacity < 1.0;
         if layered {
+            // The layer holds the box and its outer shadows.
+            let [sl, st, sr, sb] = shadow_outset(s);
+            let bounds = Rect::new(r.x - sl, r.y - st, r.w + sl + sr, r.h + st + sb);
             self.scene
-                .push_layer(Fill::NonZero, Mix::Normal, s.opacity, xf, &kr(r));
+                .push_layer(Fill::NonZero, Mix::Normal, s.opacity, xf, &kr(bounds));
         }
         if !matches!(n.kind, NodeKind::Anonymous) {
             paint_decorations(
@@ -663,6 +832,7 @@ pub fn paint_except(
         scene,
         skip,
         cull,
+        margin: CULL_MARGIN + doc.shadow_reach,
     };
     p.paint_box(root, (0.0, 0.0), xf);
 }

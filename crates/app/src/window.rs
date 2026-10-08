@@ -22,7 +22,9 @@ use auk_term::{Line, Modes, MouseMode};
 use auk_views::compose::{Hit, Scroll};
 use auk_views::{Arranged, Outcome, PaneSurfaces, Place, ViewSettings};
 
-use crate::chrome::{BAR_HEIGHT, Chrome, ChromeAction, ChromeModel, DIVIDER};
+use crate::chrome::{
+    BAR_HEIGHT, BarModel, Chrome, ChromeAction, ChromeModel, DIVIDER, SessionItem, TabItem,
+};
 use crate::commands::{self, Cmd};
 use crate::conn::{Connection, Shared};
 use crate::geometry::{self, Rect, TabLayout};
@@ -78,6 +80,34 @@ pub struct Stats {
     /// CPU work per frame: snapshots, chrome and encoding, without the drawable wait.
     pub cpu: Vec<Duration>,
     pub drawable_wait: Vec<Duration>,
+    /// CPU time per frame by phase ([`Phase`]), in frame order.
+    pub phases: BTreeMap<&'static str, Vec<Duration>>,
+    /// The surfaces' layout work per frame (`auk_views::LayoutWork`, summed over panes): measure
+    /// passes, measure targets visited, elements restyled, inline contexts rebuilt, boxes laid
+    /// out.
+    pub work: BTreeMap<&'static str, Vec<f64>>,
+}
+
+/// A frame's CPU time split by phase, for `frame-stats`: `blobs` (asking for missing blobs),
+/// `sync` (the surfaces taking the replica's changes, settings, plugin sheets, lenses),
+/// `layout` (the views' tick, restyle, layout and measure loops), `paint` (arranging the flow
+/// and painting surfaces), `grid` (grid snapshots), `chrome` (the chrome's update and the UI
+/// layer's render), `draw` (encoding and submitting) and `tail` (acks, accessibility).
+#[derive(Debug, Default)]
+struct Phase {
+    at: Option<Instant>,
+    spent: BTreeMap<&'static str, Duration>,
+}
+
+impl Phase {
+    /// Charges the time since the last lap to `phase`.
+    fn lap(&mut self, phase: &'static str) {
+        let now = Instant::now();
+        if let Some(at) = self.at {
+            *self.spent.entry(phase).or_default() += now - at;
+        }
+        self.at = Some(now);
+    }
 }
 
 pub struct WinState {
@@ -135,13 +165,21 @@ pub struct WinState {
     /// The palette, context menu and image viewer.
     pub overlays: overlays::Overlays,
     /// The viewer's picture size, in CSS px.
-    viewer_size: (f64, f64),
+    pub(crate) viewer_size: (f64, f64),
     /// Bumped whenever the chrome document is rebuilt, for the accessibility tree.
     chrome_updates: u64,
     /// Find (§6.2): the bar, the matches and the current one.
     pub find: Option<find::Find>,
     /// The target of the link under the pointer, shown while hovering (§7.14, §12.2).
     pub hover_link: Option<String>,
+    /// The title the window shows.
+    pub title_shown: Option<String>,
+    /// The grid link under the pointer (pane, terminal link id), opening or not.
+    pub hover_grid: Option<(PaneId, u32)>,
+    /// ⌘ is down, as the last pointer or modifier event said.
+    pub pointer_cmd: bool,
+    /// The pointer shape last set.
+    pub pointer_shape: auk_platform_macos::PointerShape,
     /// The `title` tooltip of the surface node under the pointer, and where the pointer is, in
     /// window points (§8.1).
     pub hover_title: Option<(String, f64, f64)>,
@@ -258,6 +296,10 @@ impl WinState {
             chrome_updates: 0,
             find: None,
             hover_link: None,
+            title_shown: None,
+            hover_grid: None,
+            pointer_cmd: false,
+            pointer_shape: auk_platform_macos::PointerShape::Arrow,
             hover_title: None,
             field_drag: None,
             ime_area: None,
@@ -316,7 +358,13 @@ impl WinState {
                 self.preedit = if in_field { None } else { preedit };
                 window.request_frame();
             }
-            Event::ModifiersChanged(mods) => self.plugin_modifiers(mods),
+            Event::ModifiersChanged(mods) => {
+                // ⌘ arms the link under the pointer (A13).
+                if self.track_grid_link(window, None, mods.meta) {
+                    window.request_frame();
+                }
+                self.plugin_modifiers(mods);
+            }
             Event::Mouse(m) => self.mouse(window, m),
             Event::Scroll(s) => self.scroll(window, s),
             Event::Focus(focused) => {
@@ -687,6 +735,10 @@ impl WinState {
             f64::from(metrics.cell_height),
         );
         self.find_before_frame();
+        // The image viewer's picture, once its background decode is done (A9).
+        if self.poll_viewer() {
+            window.request_frame();
+        }
         let sessions = self.sessions();
         let focused = self.focused_pane();
         let mut draws = Vec::new();
@@ -713,6 +765,12 @@ impl WinState {
         let mut painted = false;
         let mut animating = false;
         let mut find_synced = false;
+        // The grid link a click would open now draws solid (A13).
+        let armed = self.armed_link();
+        let link_style = self.settings.hyperlinks;
+        let mut phase = Phase::default();
+        let mut work = auk_views::LayoutWork::default();
+        phase.lap("");
         {
             let conn = self.conn.clone();
             let mut shared = conn.shared();
@@ -735,6 +793,7 @@ impl WinState {
                         ids: missing,
                     });
                 }
+                phase.lap("blobs");
                 let changes = data.replica.take_tsp_changes();
                 let tsp = data.replica.tsp();
                 let sf = self
@@ -754,6 +813,7 @@ impl WinState {
                     let blocks = lens_inputs(&data.replica);
                     sf.sync_lenses(&blocks, now);
                 }
+                phase.lap("sync");
             }
             // The views may have rebuilt marked elements: mark the matches again.
             if find_synced {
@@ -782,6 +842,7 @@ impl WinState {
                 // The pane's flow (§6.2): grid rows, and surface blocks at their anchor rows.
                 let sf = self.surfaces.get_mut(&pane).expect("synced above");
                 let pane_focused = self.key_window && Some(pane) == focused;
+                phase.lap("sync");
                 if sf
                     .layout(
                         term,
@@ -794,7 +855,15 @@ impl WinState {
                 {
                     animating = true;
                 }
-                let arranged = sf.arrange(term, tsp, ch as f32, area_h, scale as f32, view.scroll);
+                let w = sf.view().last_work();
+                work.passes += w.passes;
+                work.measured += w.measured;
+                work.restyled += w.restyled;
+                work.inline_rebuilt += w.inline_rebuilt;
+                work.laid_out += w.laid_out;
+                phase.lap("layout");
+                let arranged =
+                    sf.arrange_shown(term, tsp, ch as f32, area_h, scale as f32, view.scroll);
                 view.scroll = arranged.composed.scroll;
                 if sf.paint(
                     &arranged,
@@ -809,12 +878,17 @@ impl WinState {
                 ) {
                     painted = true;
                 }
+                phase.lap("paint");
                 let composed = &arranged.composed;
                 let render_view = View {
                     scroll: 0,
                     selection: view.selection.map(|s| s.for_render(term)),
                     focused: pane_focused,
                     cursor_on: true,
+                    links: link_style,
+                    hover_link: armed
+                        .filter(|(p, _)| *p == pane)
+                        .map(|(_, link)| link),
                 };
                 let rows = composed.slots.len().clamp(1, usize::from(u16::MAX)) as u16;
                 let mut snap =
@@ -870,6 +944,7 @@ impl WinState {
                         slots,
                     });
                 }
+                phase.lap("grid");
                 // Acks (§7.10, §15.5): the surfaces this frame draws, only as the pane's primary.
                 if data.primary {
                     for s in data.replica.tsp().surfaces() {
@@ -883,6 +958,7 @@ impl WinState {
                 }
             }
         }
+        phase.lap("tail");
         if let Some((x, y, w, h)) = ime_area {
             window.set_ime_cursor_area(x, y, w, h);
         }
@@ -896,6 +972,7 @@ impl WinState {
         // The chrome, over the surfaces.
         let mut model = self.chrome_model(&sessions, &titles, size);
         self.decorate_chrome(&mut model);
+        self.apply_window_title(window, &sessions);
         if self.chrome.update(&model, scale as f32) {
             self.ui_dirty = true;
             self.chrome_updates += 1;
@@ -903,7 +980,7 @@ impl WinState {
         let gfx = self.gfx.as_mut().expect("checked");
         if self.ui_dirty || painted || self.surfaces_painted || gfx.ui_stale() {
             auk_ui::paint::paint_with_transform(
-                &self.chrome.doc,
+                self.chrome.doc(),
                 &mut scene,
                 auk_render::vello::kurbo::Affine::scale(scale),
             );
@@ -915,8 +992,10 @@ impl WinState {
             window.request_frame();
         }
         let background = self.theme.background;
+        phase.lap("chrome");
         let (ticket, on_done) = self.clock.begin(start);
         let cost: FrameCost = gfx.draw(background, &draws, on_done);
+        phase.lap("draw");
         if cost.presented {
             self.clock.submitted();
             for (pane, sf, s) in to_ack {
@@ -947,15 +1026,61 @@ impl WinState {
         let cpu = start.elapsed().saturating_sub(cost.drawable_wait);
         push_capped(&mut self.stats.cpu, cpu);
         push_capped(&mut self.stats.drawable_wait, cost.drawable_wait);
+        phase.lap("tail");
+        // The drawable wait is pacing, not drawing.
+        if let Some(d) = phase.spent.get_mut("draw") {
+            *d = d.saturating_sub(cost.drawable_wait);
+        }
+        for name in [
+            "blobs", "sync", "layout", "paint", "grid", "chrome", "draw", "tail",
+        ] {
+            let spent = phase.spent.get(name).copied().unwrap_or_default();
+            push_capped(self.stats.phases.entry(name).or_default(), spent);
+        }
+        for (name, n) in [
+            ("passes", work.passes),
+            ("measured", work.measured),
+            ("restyled", work.restyled),
+            ("inline_rebuilt", work.inline_rebuilt),
+            ("laid_out", work.laid_out),
+        ] {
+            let v = self.stats.work.entry(name).or_default();
+            if v.len() >= 4096 {
+                v.remove(0);
+            }
+            v.push(n as f64);
+        }
         // Window events go to plugins after each render (§9.8).
         self.plugins_after_frame();
+    }
+
+    /// The window's title: a plugin's (`tern.chrome.window_title`), else the shown session's
+    /// name, with the host's name for a remote window.
+    fn window_title(&self, sessions: &Sessions) -> Option<String> {
+        if let Some(t) = &self.plugins.window_title {
+            return Some(t.clone());
+        }
+        let name = self.session(sessions)?.name.clone();
+        Some(match &self.conn.host {
+            Some(host) => format!("{name} \u{2014} {host}"),
+            None => name,
+        })
+    }
+
+    fn apply_window_title(&mut self, window: &Window, sessions: &Sessions) {
+        if let Some(title) = self.window_title(sessions)
+            && self.title_shown.as_ref() != Some(&title)
+        {
+            window.set_title(&title);
+            self.title_shown = Some(title);
+        }
     }
 
     fn chrome_generation(&self) -> u64 {
         // The chrome model's identity is enough: a hash of its debug form.
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        format!("{:?}", self.chrome.doc.viewport()).hash(&mut h);
+        format!("{:?}", self.chrome.doc().viewport()).hash(&mut h);
         self.active_session.hash(&mut h);
         self.active_tab_id().hash(&mut h);
         // Toasts, the status line and overlays change the chrome's tree too.
@@ -971,6 +1096,8 @@ impl WinState {
         size: Size,
     ) -> ChromeModel {
         let active_tab = self.active_tab_id();
+        let (tab_apps, pane_app) = (self.chrome_tab_apps_in(sessions), self.chrome_pane_app());
+        let tab_agents = self.chrome_tab_agents_in(sessions);
         let tabs = self
             .session(sessions)
             .map(|s| {
@@ -986,39 +1113,52 @@ impl WinState {
                             pane.and_then(|p| titles.get(&p).cloned())
                                 .unwrap_or_else(|| "shell".to_owned())
                         });
-                        (t.id, title, Some(t.id) == active_tab, t.zoom.is_some())
+                        TabItem {
+                            id: t.id,
+                            title,
+                            active: Some(t.id) == active_tab,
+                            zoomed: t.zoom.is_some(),
+                            app: tab_apps.get(&t.id).cloned(),
+                            agent: tab_agents.contains(&t.id),
+                        }
                     })
                     .collect()
             })
             .unwrap_or_default();
-        let (tab_apps, pane_app) = (self.chrome_tab_apps_in(sessions), self.chrome_pane_app());
+        let rect = |r: &crate::geometry::Rect| {
+            auk_ui::Rect::new(r.x as f32, r.y as f32, r.w as f32, r.h as f32)
+        };
         ChromeModel {
-            width: size.width,
-            height: size.height,
-            dark: self.dark,
-            media: (
-                self.reduce_motion(),
-                auk_platform_macos::system_reduce_transparency(),
-                auk_platform_macos::system_increase_contrast(),
-            ),
-            sessions: sessions
-                .sessions
-                .iter()
-                .map(|s| {
-                    // A locked session says so in its chip (§4.3).
-                    let name = if s.locked {
-                        format!("{} (locked)", s.name)
-                    } else {
-                        s.name.clone()
-                    };
-                    (s.id, name, Some(s.id) == self.active_session)
-                })
-                .collect(),
-            tabs,
-            dividers: self.tab_layout.dividers.clone(),
-            focus: self.focused_pane().and_then(|p| self.tab_layout.rect(p)),
-            tab_apps,
-            tab_agents: self.chrome_tab_agents_in(sessions),
+            bar: BarModel {
+                width: size.width,
+                height: size.height,
+                dark: self.dark,
+                media: (
+                    self.reduce_motion(),
+                    auk_platform_macos::system_reduce_transparency(),
+                    auk_platform_macos::system_increase_contrast(),
+                ),
+                sessions: sessions
+                    .sessions
+                    .iter()
+                    .map(|s| SessionItem {
+                        id: s.id,
+                        name: s.name.clone(),
+                        active: Some(s.id) == self.active_session,
+                        locked: s.locked,
+                        named: s.named,
+                        tabs: s.tabs.len(),
+                    })
+                    .collect(),
+                tabs,
+                dividers: self.tab_layout.dividers.iter().map(rect).collect(),
+                focus: self
+                    .focused_pane()
+                    .and_then(|p| self.tab_layout.rect(p))
+                    .map(|r| rect(&r)),
+                can_create: true,
+                session_menu: self.overlays.session_menu,
+            },
             pane_app,
             hover_link: self.hover_link.clone(),
             tooltip: self.hover_title.clone(),
@@ -1245,6 +1385,8 @@ impl WinState {
                 }
             }
             Cmd::CommandPalette => self.open_palette(),
+            Cmd::SwitchSession => self.open_session_switcher(),
+            Cmd::RenameSession => self.open_session_rename(),
             Cmd::ReloadPlugins => self.plugins_reload(),
             Cmd::ReloadSettings => self.reload_settings(),
             // Locks the shown session, or unlocks it (§4.3).
@@ -1400,7 +1542,10 @@ impl WinState {
                 self.press_anchor = None;
             }
             MouseKind::Moved => {
-                if self.hover_at(m.x, m.y) | self.hover_link_at(m.x, m.y) {
+                if self.hover_at(m.x, m.y)
+                    | self.hover_link_at(m.x, m.y)
+                    | self.track_grid_link(window, Some((m.x, m.y)), m.mods.meta)
+                {
                     window.request_frame();
                 }
                 if let Some(pane) = self.tab_layout.pane_at(m.x, m.y)
@@ -1409,7 +1554,17 @@ impl WinState {
                     self.report_motion(pane, &m);
                 }
             }
-            MouseKind::Entered | MouseKind::Exited => {}
+            MouseKind::Exited => {
+                // Off the window, no link is under the pointer.
+                let was_armed = self.armed_link().is_some();
+                self.hover_grid = None;
+                let cmd = self.pointer_cmd;
+                self.track_grid_link(window, None, cmd);
+                if was_armed {
+                    window.request_frame();
+                }
+            }
+            MouseKind::Entered => {}
         }
     }
 
@@ -1679,16 +1834,28 @@ impl WinState {
     }
 
     fn chrome_action(&mut self, action: ChromeAction) {
-        match action.clone() {
+        // A choice in the session menu closes it; the chip toggles it.
+        let menu_was_open = self.overlays.session_menu;
+        self.overlays.session_menu = false;
+        match action {
+            ChromeAction::SessionMenu => {
+                self.overlays.palette = None;
+                self.overlays.menu = None;
+                self.overlays.session_menu = !menu_was_open;
+            }
             ChromeAction::Session(id) => self.select_session(id),
             ChromeAction::Tab(id) => self.select_tab(id),
-            // The bar's buttons run the commands, overrides first.
-            ChromeAction::NewSession | ChromeAction::NewTab => {
+            // The bar's and the session menu's buttons run the commands, overrides first.
+            ChromeAction::NewSession
+            | ChromeAction::NewTab
+            | ChromeAction::RenameSession
+            | ChromeAction::LockSession => {
                 if let Some(window) = self.window.clone() {
-                    let cmd = if action == ChromeAction::NewTab {
-                        Cmd::NewTab
-                    } else {
-                        Cmd::NewSession
+                    let cmd = match action {
+                        ChromeAction::NewTab => Cmd::NewTab,
+                        ChromeAction::NewSession => Cmd::NewSession,
+                        ChromeAction::RenameSession => Cmd::RenameSession,
+                        _ => Cmd::LockSession,
                     };
                     self.command(&window, cmd);
                 }

@@ -11,12 +11,14 @@
 
 use std::path::PathBuf;
 use std::process::{Child, Stdio};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
 use crate::harness::{Control, TestEnv, WAIT, ping, wait_for};
+use crate::screen::{self, ScreenGuard};
 
 /// The US keyboard layout: the synthesized and posted strokes name ANSI keys, so tests type
 /// with it selected (and put the user's back after).
@@ -30,6 +32,8 @@ pub struct App {
     pub pid: u32,
     pub control: PathBuf,
     child: Option<Child>,
+    /// The app has the screen ([`screen::lock`]) while it runs; dropped after the child.
+    _screen: ScreenGuard,
 }
 
 impl App {
@@ -41,6 +45,7 @@ impl App {
 
     /// [`App::start`] with extra environment variables (a stand-in `AUK_OPENER`, say).
     pub fn start_with(env: &TestEnv, name: &str, extra: &[&str], vars: &[(&str, &str)]) -> App {
+        let screen = screen::lock(&format!("the app {name}"));
         let control = env.root.join(format!("{name}.ctl"));
         let log = std::fs::File::create(env.root.join(format!("{name}.log"))).expect("a log");
         let board = format!(
@@ -64,6 +69,7 @@ impl App {
             pid: child.id(),
             control,
             child: Some(child),
+            _screen: screen,
         };
         wait_for("the app's control endpoint", || {
             ping(&app.control).then_some(())
@@ -100,6 +106,21 @@ impl App {
     /// The window key's sessions, as this app's window replicated them.
     pub fn layout(&self) -> Value {
         self.request("layout")
+    }
+
+    /// What a keyboard or pointer failure depends on, for its message: the Mac's input source,
+    /// whether the window is key, and the focused pane and preedit. Never panics.
+    pub fn input_focus(&self) -> String {
+        let source = self.send("input-source");
+        let state = self.send("state");
+        let s = &state["value"];
+        format!(
+            "input source {}; key window {}; focused pane {}; preedit {}",
+            source.get("value").unwrap_or(&source),
+            s["key_window"],
+            s["focused"],
+            s["preedit"]
+        )
     }
 
     /// Waits until the app's replica of `pane` has applied at least `seq`.
@@ -153,15 +174,27 @@ impl Drop for App {
 
 /// Selects an input source through an app for as long as it lives, then puts back the one the
 /// user had.
+///
+/// Guards nest: the Mac has one input source, so the first guard in the process records the
+/// user's and only the last one dropped puts it back (overlapping guards would otherwise each
+/// restore their own snapshot and undo each other).
 #[derive(Debug)]
 pub struct InputSource {
     control: PathBuf,
-    previous: String,
+}
+
+/// The user's input source, and how many guards are live.
+static SELECTED: Mutex<Option<(String, usize)>> = Mutex::new(None);
+
+fn selected() -> std::sync::MutexGuard<'static, Option<(String, usize)>> {
+    SELECTED.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 impl InputSource {
-    /// Selects `id` through `app`; panics naming the input source if it isn't installed.
+    /// Selects `id` through `app`; panics naming the input source if it isn't installed, or if
+    /// the Mac's input source isn't `id` afterwards.
     pub fn select(app: &App, id: &str) -> InputSource {
+        let mut live = selected();
         let reply = app.send(&format!("input-source {id}"));
         assert_eq!(
             reply["ok"], true,
@@ -171,18 +204,41 @@ impl InputSource {
             .as_str()
             .expect("the previous input source")
             .to_owned();
-        InputSource {
-            control: app.control.clone(),
-            previous,
+        match &mut *live {
+            Some((_, count)) => *count += 1,
+            None => *live = Some((previous, 1)),
         }
+        // Released before the check: a failing check drops the guard, which takes it again.
+        drop(live);
+        let guard = InputSource {
+            control: app.control.clone(),
+        };
+        let now = app.request("input-source");
+        assert_eq!(
+            now, id,
+            "selected the input source {id}, but the Mac's is {now}"
+        );
+        guard
+    }
+
+    /// The input source the user had before the first live guard, if any guard is live.
+    pub fn users() -> Option<String> {
+        selected().as_ref().map(|(user, _)| user.clone())
     }
 }
 
 impl Drop for InputSource {
     fn drop(&mut self) {
-        if ping(&self.control) {
-            let _ =
-                Control::connect(&self.control).send(&format!("input-source {}", self.previous));
+        let mut live = selected();
+        let Some((user, count)) = &mut *live else {
+            return;
+        };
+        *count -= 1;
+        if *count == 0 {
+            if ping(&self.control) {
+                let _ = Control::connect(&self.control).send(&format!("input-source {user}"));
+            }
+            *live = None;
         }
     }
 }

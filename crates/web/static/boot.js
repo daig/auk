@@ -1,6 +1,6 @@
 // Loads the wasm client (§10.3). window.aukDebug() reports the client's state as JSON, and
-// window.aukNodeRect(pane, sf, id) where a surface's node was drawn, for tests and for looking
-// at a stuck page.
+// window.aukNodeRect(pane, sf, id) where a surface's node was drawn, and window.aukHitTest(x, y)
+// what a press at a point of the page would land on, for tests and for looking at a stuck page.
 import init, * as auk from '/auk_web.js';
 
 const status = document.getElementById('status');
@@ -14,6 +14,13 @@ window.aukDebug = () => {
 window.aukNodeRect = (pane, sf, id) => {
   try {
     return auk.node_rect(pane, sf, id);
+  } catch (e) {
+    return 'null';
+  }
+};
+window.aukHitTest = (x, y) => {
+  try {
+    return auk.hit_test(x, y);
   } catch (e) {
     return 'null';
   }

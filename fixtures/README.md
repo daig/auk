@@ -11,8 +11,8 @@ Each `.jsonl` file uses Tern's recording format (book:11579): one message per li
 | `docs-regions` | The book's inline surface with `main`, `dock` and `layer` (book:11205-11221). The `o` is implied by the book and added. |
 | `docs-frames` | The book's two frames to a flow surface (book:11298-11314). The `o` is implied by the book and added. |
 | `python-{table,ask,progress,chat}` | The tern-sdk Python examples at `19658cb`, run under `tools/tsp_record.py` with the scenarios in `scenarios/`. |
-| `omp-session` | omp 18.8.4, three prompts (an overview, an edit with a diff, a shell command) in a scratch copy of tern-sdk, under `tools/tsp_record.py` with `scenarios/omp-session.json`. About 99 s and 559 frames. |
-| `omp-session-own` | omp's own log of the same session (`PI_TUI_TSP_RECORD`), for cross-checking the recorder. |
+| `omp-session` | omp 18.8.5 (re-recorded 2026-10-08; the 18.8.4 recording is in git history at `75f3bb6`), three prompts (an overview, an edit with a diff, a shell command) in a scratch copy of tern-sdk, under `tools/tsp_record.py` with `scenarios/omp-session.json`. About 91 s and 541 frames. |
+| `omp-session-own` | omp's own log of the same session (`PI_TUI_TSP_RECORD`), for cross-checking the recorder. omp appends to that file, so empty it before re-recording. |
 
 Re-record with the commands in each `.meta.json` (`argv`, `cwd`, `env`). Recordings of model output aren't reproducible; keep the originals.
 

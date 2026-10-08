@@ -1,7 +1,7 @@
 //! The omp suite (GOAL.md row `omp`, spec §7, §8.2, M5, AC9): omp, the main TSP client, against
 //! the real daemon and a window that draws, acks and edits natively.
 //!
-//! - **Replay:** `fixtures/tsp/omp-session.jsonl` (omp 18.8.4 on three prompts) is played into a
+//! - **Replay:** `fixtures/tsp/omp-session.jsonl` (omp 18.8.5 on three prompts) is played into a
 //!   daemon pane with `surface-play`; the window's replica projects it through `auk-views` into
 //!   `auk-ui`, and the transcript, tool cards and diffs are drawn as their kinds.
 //! - **Live:** the installed omp runs in a hermetic daemon pane: a zsh with the test `ZDOTDIR`, in
@@ -11,7 +11,7 @@
 //! - **Fallback:** with TSP off, omp runs as plain text. Under Auk's T0+T1 hello (D22), omp's own
 //!   record of what it sent (`PI_TUI_TSP_RECORD`) shows which T2 kinds it sends anyway, which it
 //!   replaces, and which ops the daemon rejected as a result.
-//! - **Version:** every test first checks that the installed omp is the recorded 18.8.4.
+//! - **Version:** every test first checks that the installed omp is the recorded 18.8.5.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -25,7 +25,7 @@ use auk_views::Outcome;
 use serde_json::Value;
 
 /// The omp version the fixtures were recorded with (`fixtures/tsp/omp-session.meta.json`).
-const OMP_VERSION: &str = "18.8.4";
+const OMP_VERSION: &str = "18.8.5";
 
 /// How long a live turn may take, from the prompt to the turn's usage row.
 const TURN: Duration = Duration::from_secs(180);
@@ -47,13 +47,10 @@ fn real_home() -> PathBuf {
     PathBuf::from(std::env::var("HOME").expect("HOME is set for the test process"))
 }
 
-/// The installed omp (`~/.local/bin/omp`, or the binary `AUK_OMP` names, for when omp has
-/// updated itself past the recorded version), checked to be the recorded version. Fails clearly
+/// The installed omp (`~/.local/bin/omp`), checked to be the recorded version. Fails clearly
 /// otherwise.
 fn omp() -> PathBuf {
-    let path = std::env::var_os("AUK_OMP")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| real_home().join(".local/bin/omp"));
+    let path = real_home().join(".local/bin/omp");
     assert!(
         path.is_file(),
         "omp is not installed at {} (the omp suite needs omp {OMP_VERSION}, logged in)",
@@ -69,8 +66,7 @@ fn omp() -> PathBuf {
         version,
         format!("omp/{OMP_VERSION}"),
         "the installed omp ({}) must be the recorded {OMP_VERSION}; re-record the omp fixtures \
-         (tools/tsp_record.py) and update this suite before moving to another version, or point \
-         AUK_OMP at an omp {OMP_VERSION} binary",
+         (tools/tsp_record.py) and update this suite before moving to another version",
         path.display()
     );
     path
@@ -326,12 +322,11 @@ fn added_kinds(records: &[Value]) -> Vec<(String, String, String)> {
 }
 
 /// CSS effects the engine accepts but doesn't draw (§8.4 "Effects": filters, backdrop-filter,
-/// masks, 3D transforms, and box-shadow among the other accepted-unused properties of
+/// and 3D transforms among the other accepted-unused properties of
 /// `auk-ui`'s `properties.rs`).
-const UNDRAWN: [&str; 14] = [
+const UNDRAWN: [&str; 13] = [
     "filter",
     "backdrop-filter",
-    "box-shadow",
     "clip-path",
     "mix-blend-mode",
     "isolation",
@@ -421,7 +416,7 @@ fn t2_report(records: &[Value]) -> T2Report {
                 .map(str::to_owned)
                 .collect()
         })
-        // omp 18.8.4 doesn't record the hello reply; the kinds it saw are the daemon's (D22).
+        // omp 18.8.5 doesn't record the hello reply; the kinds it saw are the daemon's (D22).
         .unwrap_or_else(|| {
             auk_tsp::T0_KINDS
                 .iter()
@@ -563,15 +558,28 @@ fn ac09_replay_draws_transcript_tool_cards_and_diffs_natively() {
     let pane = env.new_pane(&[]);
     env.wait(pane, "prompt");
     let mut window = NativeWindow::attach(&env, "main", SIZE);
-    let path = auk_conformance::fixtures_dir().join("omp-session.jsonl");
-    let recorded_frames = auk_conformance::load(&path)
+    let fixture = auk_conformance::fixtures_dir().join("omp-session.jsonl");
+    let recorded_frames = auk_conformance::load(&fixture)
         .expect("load the recording")
         .iter()
         .filter(|r| r.dir == auk_conformance::Dir::Out && r.verb == "f")
         .count() as u64;
-    // Every frame, but not omp's final close: the session stays live, `dock` and `layer` included.
+    // Everything but omp's final close: the session stays live, `dock` and `layer` included. (Not
+    // `until` the last frame: the chart's blob comes after the frame that names it, and omp's
+    // last frame can be that one.)
+    let path = env.root.join("omp-session-open.jsonl");
+    let open: String = std::fs::read_to_string(&fixture)
+        .expect("read the recording")
+        .lines()
+        .filter(|l| {
+            let r: Value = serde_json::from_str(l).expect("a record");
+            !(r["dir"] == "out" && r["verb"] == "x")
+        })
+        .map(|l| format!("{l}\n"))
+        .collect();
+    std::fs::write(&path, open).expect("write the recording without its close");
     let played = env.daemon(&format!(
-        "surface-play --pane {pane} {} until {recorded_frames}",
+        "surface-play --pane {pane} {}",
         quote(&path.to_string_lossy())
     ));
     assert_eq!(played["frames"].as_u64(), Some(recorded_frames), "{played}");
@@ -672,22 +680,31 @@ fn ac09_replay_draws_transcript_tool_cards_and_diffs_natively() {
     );
 
     // The recording's `image` nodes draw (D24): the welcome card's logo is omp's built-in mark,
-    // and the chart of a numeric table is an SVG blob sent after the frame that names it.
+    // and the chart of a numeric table (the `ls -la` summary) is an SVG blob sent after the frame
+    // that names it, in an assistant message. Its id depends on the model's reply, so it's found
+    // as the recording's one other image.
     assert!(doc.get("1").is_some(), "the welcome card arrived");
     let logo = doc.get("1.lockup/logo").expect("the welcome logo");
     assert_eq!(logo.prop("builtin"), Some(&Value::from("omp")));
-    let chart = doc.get("1g.t1.1").expect("the table's chart");
+    let charts: Vec<&str> = all
+        .iter()
+        .filter(|(id, k)| k == "image" && id != "1.lockup/logo")
+        .map(|(id, _)| id.as_str())
+        .collect();
+    assert_eq!(charts.len(), 1, "one chart in the recording: {charts:?}");
+    let chart = doc.get(charts[0]).expect("the table's chart");
     let blob = chart.prop("blob").and_then(Value::as_str).expect("a blob");
     assert!(tsp.blobs().has(blob), "the chart's blob reached the window");
-    for id in ["1.lockup/logo", "1g.t1.1"] {
+    assert!(
+        std::iter::successors(chart.parent(), |p| p.parent())
+            .any(|p| p.prop("role") == Some(&Value::from("omp.assistant"))),
+        "the chart is in an assistant message"
+    );
+    for id in ["1.lockup/logo", charts[0]] {
         let size = image_drawn(&window, pane, s, id)
             .unwrap_or_else(|| panic!("{id} isn't drawn as a picture"));
         eprintln!("image {id}: {size:?}");
     }
-    assert!(
-        doc.get("1g.t1.2").is_some(),
-        "the text after the chart arrived"
-    );
 
     // The composer: a focused editor in `dock`.
     let focus = doc.focus().expect("a focused field");
@@ -714,14 +731,14 @@ fn ac09_replay_draws_transcript_tool_cards_and_diffs_natively() {
 /// surfaces built from T1 kinds. ⌃D quits omp, and the shell's next prompt discards the inline
 /// surface.
 /// §8.4: the effects the engine accepts but doesn't draw (filters, backdrop-filter, masks, 3D
-/// transforms, box-shadow) are only a gap if omp sends them. It doesn't: neither recording holds a
+/// transforms) are only a gap if omp sends them. It doesn't: neither recording holds a
 /// stylesheet or an `el` style that names one, and after the replay through the daemon, the
 /// window's surfaces hold no program sheet that does. (The live T2 test checks omp's own record.)
 #[test]
 fn omp_sends_none_of_the_css_effects_the_engine_leaves_undrawn() {
     assert_eq!(
-        undrawn_effects(".a { box-shadow: 0 1px red; color: red } .b{transform: rotate3d(1,0,0,9deg)} .c { mask-image: none; transform: rotate(3deg) }"),
-        ["box-shadow: 0 1px red", "transform: rotate3d(1,0,0,9deg)", "mask-image: none"],
+        undrawn_effects(".a { filter: blur(2px); box-shadow: 0 1px red; color: red } .b{transform: rotate3d(1,0,0,9deg)} .c { mask-image: none; transform: rotate(3deg) }"),
+        ["filter: blur(2px)", "transform: rotate3d(1,0,0,9deg)", "mask-image: none"],
         "the check itself"
     );
     for name in ["omp-session.jsonl", "omp-session-own.jsonl"] {
@@ -994,7 +1011,7 @@ fn ac09_live_transcript_send_and_tool_card() {
     let id = omp.ready();
     let pane = omp.pane;
 
-    // A numeric table with four rows: omp 18.8.4 draws a chart of such a table as an `image`.
+    // A numeric table with four rows: omp 18.8.5 draws a chart of such a table as an `image`.
     let prompt = "Reply with only this markdown table and nothing else:\n\n| Name | Size |\n| --- | --- |\n| a | 10 |\n| b | 20 |\n| c | 30 |\n| d | 40 |";
     let o = omp
         .window
@@ -1178,7 +1195,7 @@ fn omp_t2_fallback_under_t0_t1_hello() {
     assert!(report.advertised.contains("image"), "image is T1 (D24)");
     assert!(
         report.sent_anyway.is_empty(),
-        "omp 18.8.4 sends nothing unadvertised: {:?}",
+        "omp 18.8.5 sends nothing unadvertised: {:?}",
         report.sent_anyway
     );
     assert!(

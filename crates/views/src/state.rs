@@ -79,6 +79,11 @@ pub(crate) struct SurfaceState {
     pub toasts: Vec<crate::kinds::layout::ToastReq>,
     /// Lists with `max`: their scroll element.
     pub scrollers: HashMap<String, NodeId>,
+    /// Nodes with highlighting drawn plain until the background finishes it, by node id: their
+    /// element. It draws in once the node is in view (laid out), not before.
+    pub hl_waiting: HashMap<String, NodeId>,
+    /// Cards and tools showing a preview (clamped after layout), by node id: their element.
+    pub previews: HashMap<String, NodeId>,
     /// Text cut after layout.
     pub truncs: HashMap<String, crate::kinds::data::Trunc>,
     /// Tables fitted after layout.
@@ -169,6 +174,10 @@ impl SurfaceState {
 
     /// A node's state went away with it. Folds are kept by key so a re-added node keeps them.
     pub fn forget(&mut self, id: &str) {
+        // A node re-added under the same id anchors its timers fresh (§7.13).
+        for path in crate::motion::AGE_PATHS {
+            self.anchors.remove(&crate::motion::anchor_key(id, path));
+        }
         self.checks.remove(id);
         self.selection.remove(id);
         self.hud.remove(id);
@@ -178,6 +187,8 @@ impl SurfaceState {
         self.anchor_caret.remove(id);
         self.scrollers.remove(id);
         self.truncs.remove(id);
+        self.previews.remove(id);
+        self.hl_waiting.remove(id);
         self.tables.remove(id);
         if let Some(c) = self.follow.remove(id) {
             self.follow_at.remove(&c);

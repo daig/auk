@@ -80,7 +80,19 @@ pub fn format_duration(ms: f64, clock: bool) -> String {
     }
 }
 
-/// Anchor an age prop: a new value re-anchors, the same value keeps running.
+/// The age props timers anchor, by path: top-level `age` (`elapsed`, `tool`) and an agent's
+/// nested ones.
+pub(crate) const AGE_PATHS: [&str; 4] = ["age", "stats.age", "tool.age", "retry.age"];
+
+/// The [`SurfaceState::anchors`](crate::state::SurfaceState) key of node `id`'s age at `path`.
+pub(crate) fn anchor_key(id: &str, path: &str) -> String {
+    format!("{id}/{path}")
+}
+
+/// Anchor an age prop: a new value re-anchors, the same value keeps running. A top-level `age`
+/// also re-anchors whenever it arrives, even unchanged: the view does that from the drain's
+/// `ages` (§7.13). Nested agent ages (`stats.age`, `tool.age`, `retry.age`) restart only on a new
+/// value (book:8048).
 pub(crate) fn anchor(cx: &mut Cx, key: String, age: Option<&Value>) -> Option<f64> {
     let age_v = age?.clone();
     let age_ms = age_v.as_f64()?;
@@ -104,7 +116,7 @@ pub(crate) fn elapsed(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look
     let clock = str_prop(p, "format") == Some("clock");
     let start = anchor(
         cx,
-        format!("{}/age", node.id()),
+        anchor_key(node.id(), "age"),
         p.get("age").or(Some(&Value::from(0))),
     )
     .unwrap_or(cx.now);

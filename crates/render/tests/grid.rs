@@ -454,3 +454,95 @@ fn snapshot_from_terminal_carries_text_colors_and_cursor() {
     );
     assert_eq!(snap.row(1)[9].bg, theme.cursor);
 }
+
+/// A13: OSC 8 link cells draw a dotted underline in a muted color; the armed (hovered) link a
+/// solid one in the theme's link accent; `hyperlinks: off` neither. Text the program underlined
+/// keeps its own underline.
+#[test]
+fn osc8_links_draw_dotted_and_the_hovered_link_solid() {
+    let theme = Theme::dark();
+    let mut term = auk_term::Terminal::new(12, 2, auk_term::Config::default());
+    // Spaces under the links, so only the decoration inks the underline row.
+    term.feed(b"\x1b]8;;https://a.example\x1b\\    \x1b]8;;\x1b\\ \x1b]8;;https://b.example\x1b\\   \x1b]8;;\x1b\\\r\n\x1b[4m\x1b]8;;https://c.example\x1b\\ul\x1b]8;;\x1b\\\x1b[0m");
+    let link_a = term.line(term.history_len()).unwrap().cells[0].link;
+    let link_b = term.line(term.history_len()).unwrap().cells[5].link;
+    assert!(link_a != 0 && link_b != 0 && link_a != link_b);
+    let hidden = auk_render::View {
+        cursor_on: false,
+        ..auk_render::View::default()
+    };
+    let mut r = renderer();
+    let m = r.metrics();
+    let under = |image: &Image, col: u16, span: u16| -> Vec<Rgba> {
+        let (x0, y0, x1, _) = cell_rect(m, col, 0, span);
+        let y = y0 + m.underline_position;
+        (x0..x1).map(|x| image.pixel(x, y)).collect()
+    };
+
+    // Dotted, muted: ink and gaps along the run, in a color between text and background.
+    let snap = GridSnapshot::from_terminal(&term, &theme, &hidden);
+    let cell = &snap.row(0)[0];
+    assert!(cell.attrs.has(Attrs::DOTTED_UNDERLINE), "{cell:?}");
+    let muted = cell.decoration;
+    assert!(
+        muted != theme.foreground && muted != theme.background,
+        "{muted:?}"
+    );
+    assert!(
+        !snap.row(0)[4].attrs.has(Attrs::ANY_UNDERLINE),
+        "not a link"
+    );
+    // The program's own underline stays.
+    let ul = &snap.row(1)[0];
+    assert!(ul.attrs.has(Attrs::UNDERLINE) && !ul.attrs.has(Attrs::DOTTED_UNDERLINE));
+    let image = render(&mut r, &snap, "links-dotted");
+    let row = under(&image, 0, 4);
+    let on = row.iter().filter(|p| **p == muted).count();
+    let off = row.iter().filter(|p| **p == theme.background).count();
+    assert!(
+        on > 0 && off > 0 && on + off == row.len(),
+        "{on} on, {off} off of {}",
+        row.len()
+    );
+    assert!(under(&image, 4, 1).iter().all(|p| *p == theme.background));
+
+    // Hovered: link A solid in the accent across its whole run; link B stays dotted.
+    let armed = auk_render::View {
+        hover_link: Some(link_a),
+        ..hidden.clone()
+    };
+    let snap = GridSnapshot::from_terminal(&term, &theme, &armed);
+    let image = render(&mut r, &snap, "links-hovered");
+    assert!(
+        under(&image, 0, 4).iter().all(|p| *p == theme.link),
+        "solid accent"
+    );
+    assert!(
+        under(&image, 5, 3).contains(&theme.background),
+        "B still dotted"
+    );
+    assert!(under(&image, 5, 3).contains(&muted));
+
+    // `hover`: only the hovered link; `off`: none, hovered or not.
+    let hover_only = auk_render::View {
+        links: auk_render::LinkStyle::Hover,
+        ..armed.clone()
+    };
+    let image = render(
+        &mut r,
+        &GridSnapshot::from_terminal(&term, &theme, &hover_only),
+        "links-hover-only",
+    );
+    assert!(under(&image, 0, 4).iter().all(|p| *p == theme.link));
+    assert!(under(&image, 5, 3).iter().all(|p| *p == theme.background));
+    let off = auk_render::View {
+        links: auk_render::LinkStyle::Off,
+        ..armed
+    };
+    let image = render(
+        &mut r,
+        &GridSnapshot::from_terminal(&term, &theme, &off),
+        "links-off",
+    );
+    assert!(under(&image, 0, 8).iter().all(|p| *p == theme.background));
+}

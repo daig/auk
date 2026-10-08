@@ -55,6 +55,8 @@ pub struct Theme {
     pub palette: [Rgba; 256],
     /// Bold text in colors 0–7 draws in 8–15.
     pub bold_is_bright: bool,
+    /// The accent a hovered link's underline draws in.
+    pub link: Rgba,
 }
 
 /// The palette index OSC 10 (default foreground) overrides use in
@@ -81,6 +83,7 @@ impl Theme {
             selection_foreground: None,
             palette: xterm_palette(ansi.map(Rgba::from_hex)),
             bold_is_bright: false,
+            link: Rgba::from_hex(0x6f9ef2),
         }
     }
 
@@ -99,6 +102,7 @@ impl Theme {
             selection_foreground: None,
             palette: xterm_palette(ansi.map(Rgba::from_hex)),
             bold_is_bright: false,
+            link: Rgba::from_hex(0x2563d9),
         }
     }
 

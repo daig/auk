@@ -7,14 +7,14 @@
 //! (delay, iterations, direction, fill mode, play state), their keyframes resolved first in the
 //! element's scope (private to program sheets). Interpolated properties are the ones Auk paints
 //! without a new layout: `opacity`, the colors (`color`, `background-color`, the border colors,
-//! `outline-color`, `text-decoration-color`) and `transform`. Other properties in a keyframe
+//! `outline-color`, `text-decoration-color`), `transform` and `box-shadow`. Other properties in a keyframe
 //! switch discretely in CSS; here they keep their cascaded value. Reduce Motion (the
 //! `prefers-reduced-motion` media feature) gives still equivalents: transitions jump and
 //! animations don't run.
 
 use crate::css::properties::Prop;
 use crate::css::values::{Color, Easing, LengthPct};
-use crate::style::{Animation, ComputedStyle, TransformFn};
+use crate::style::{Animation, ComputedStyle, Shadow, TransformFn};
 use std::sync::Arc;
 
 /// A property the engine interpolates.
@@ -27,9 +27,10 @@ pub(crate) enum AnimProp {
     OutlineColor,
     TextDecorationColor,
     Transform,
+    BoxShadow,
 }
 
-const ALL: [AnimProp; 10] = [
+const ALL: [AnimProp; 11] = [
     AnimProp::Opacity,
     AnimProp::Color,
     AnimProp::BackgroundColor,
@@ -40,6 +41,7 @@ const ALL: [AnimProp; 10] = [
     AnimProp::OutlineColor,
     AnimProp::TextDecorationColor,
     AnimProp::Transform,
+    AnimProp::BoxShadow,
 ];
 
 impl AnimProp {
@@ -58,6 +60,7 @@ impl AnimProp {
             "outline-color" | "outline" => &ALL[7..8],
             "text-decoration-color" => &ALL[8..9],
             "transform" => &ALL[9..10],
+            "box-shadow" => &ALL[10..11],
             _ => &[],
         }
     }
@@ -75,6 +78,7 @@ impl AnimProp {
             Prop::OutlineColor => AnimProp::OutlineColor,
             Prop::TextDecorationColor => AnimProp::TextDecorationColor,
             Prop::Transform => AnimProp::Transform,
+            Prop::BoxShadow => AnimProp::BoxShadow,
             _ => return None,
         })
     }
@@ -88,6 +92,7 @@ impl AnimProp {
             AnimProp::OutlineColor => Val::Color(s.outline_color),
             AnimProp::TextDecorationColor => Val::Color(s.text_decoration_color.unwrap_or(s.color)),
             AnimProp::Transform => Val::Transform(s.transform.clone()),
+            AnimProp::BoxShadow => Val::Shadows(s.box_shadow.clone()),
         }
     }
 
@@ -100,6 +105,7 @@ impl AnimProp {
             (AnimProp::OutlineColor, Val::Color(c)) => s.outline_color = *c,
             (AnimProp::TextDecorationColor, Val::Color(c)) => s.text_decoration_color = Some(*c),
             (AnimProp::Transform, Val::Transform(t)) => s.transform = t.clone(),
+            (AnimProp::BoxShadow, Val::Shadows(v)) => s.box_shadow = v.clone(),
             _ => {}
         }
     }
@@ -111,10 +117,47 @@ pub(crate) enum Val {
     Num(f32),
     Color(Color),
     Transform(Option<Arc<Vec<TransformFn>>>),
+    Shadows(Option<Arc<Vec<Shadow>>>),
 }
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
+}
+
+fn lerp_color(a: Color, b: Color, t: f32) -> Color {
+    Color {
+        r: lerp(a.r, b.r, t),
+        g: lerp(a.g, b.g, t),
+        b: lerp(a.b, b.b, t),
+        a: lerp(a.a, b.a, t),
+    }
+}
+
+/// Shadow lists interpolate pairwise, the shorter padded with transparent zero shadows; a pair
+/// where one is inset and the other isn't can't (CSS Backgrounds 3 §7.1).
+fn lerp_shadows(a: &[Shadow], b: &[Shadow], t: f32) -> Option<Vec<Shadow>> {
+    let none = |like: &Shadow| Shadow {
+        inset: like.inset,
+        x: 0.0,
+        y: 0.0,
+        blur: 0.0,
+        spread: 0.0,
+        color: Color::TRANSPARENT,
+    };
+    (0..a.len().max(b.len()))
+        .map(|i| {
+            let x = a.get(i).copied().unwrap_or_else(|| none(&b[i]));
+            let y = b.get(i).copied().unwrap_or_else(|| none(&a[i]));
+            (x.inset == y.inset).then(|| Shadow {
+                inset: x.inset,
+                x: lerp(x.x, y.x, t),
+                y: lerp(x.y, y.y, t),
+                blur: lerp(x.blur, y.blur, t).max(0.0),
+                spread: lerp(x.spread, y.spread, t),
+                color: lerp_color(x.color, y.color, t),
+            })
+        })
+        .collect()
 }
 
 fn lerp_len(a: &LengthPct, b: &LengthPct, t: f32) -> Option<LengthPct> {
@@ -165,12 +208,17 @@ impl Val {
         let discrete = || if t < 0.5 { self.clone() } else { to.clone() };
         match (self, to) {
             (Val::Num(a), Val::Num(b)) => Val::Num(lerp(*a, *b, t)),
-            (Val::Color(a), Val::Color(b)) => Val::Color(Color {
-                r: lerp(a.r, b.r, t),
-                g: lerp(a.g, b.g, t),
-                b: lerp(a.b, b.b, t),
-                a: lerp(a.a, b.a, t),
-            }),
+            (Val::Color(a), Val::Color(b)) => Val::Color(lerp_color(*a, *b, t)),
+            (Val::Shadows(a), Val::Shadows(b)) => {
+                let (sa, sb) = (
+                    a.as_deref().map_or(&[][..], Vec::as_slice),
+                    b.as_deref().map_or(&[][..], Vec::as_slice),
+                );
+                match lerp_shadows(sa, sb, t) {
+                    Some(v) => Val::Shadows((!v.is_empty()).then(|| Arc::new(v))),
+                    None => discrete(),
+                }
+            }
             (Val::Transform(a), Val::Transform(b)) => {
                 let empty = Vec::new();
                 let (fa, fb) = (

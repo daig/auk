@@ -571,12 +571,16 @@ pub struct Safari {
     driver: Child,
     port: u16,
     session: String,
+    /// Safari has the screen ([`crate::screen::lock`]) while the session runs; dropped after
+    /// the session closes.
+    _screen: crate::screen::ScreenGuard,
 }
 
 impl Safari {
     /// Starts safaridriver and a session; panics naming [`SAFARI_PREREQUISITE`] when Safari
     /// won't be automated.
     pub fn start() -> Safari {
+        let screen = crate::screen::lock("Safari");
         let port = TcpListener::bind("127.0.0.1:0")
             .and_then(|l| l.local_addr())
             .expect("a free port")
@@ -591,6 +595,7 @@ impl Safari {
             driver,
             port,
             session: String::new(),
+            _screen: screen,
         };
         // Safari 27 rejects automation sessions in an instance that wasn't launched for automation
         // ("Safari was not launched for automation" in its log); safaridriver then only reports a

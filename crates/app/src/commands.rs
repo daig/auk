@@ -10,6 +10,8 @@ use crate::geometry::Direction;
 pub enum Cmd {
     NewWindow,
     NewSession,
+    SwitchSession,
+    RenameSession,
     NextSession,
     PreviousSession,
     NewTab,
@@ -63,6 +65,7 @@ const fn mods(cmd: bool, shift: bool, opt: bool, ctrl: bool) -> KeyMods {
 const CMD: KeyMods = mods(true, false, false, false);
 const CMD_SHIFT: KeyMods = mods(true, true, false, false);
 const CMD_OPT: KeyMods = mods(true, false, true, false);
+const CTRL_CMD: KeyMods = mods(true, false, false, true);
 const NONE: KeyMods = mods(false, false, false, false);
 
 const fn entry(
@@ -94,6 +97,7 @@ pub const REGISTRY: &[Entry] = &[
     grouped(entry(Cmd::SplitRight, "Shell", "Split Right", "d", CMD)),
     entry(Cmd::SplitDown, "Shell", "Split Down", "d", CMD_SHIFT),
     grouped(entry(Cmd::ClosePane, "Shell", "Close Pane", "w", CMD)),
+    entry(Cmd::RenameSession, "Shell", "Rename Session…", "", NONE),
     entry(Cmd::LockSession, "Shell", "Lock Session", "", NONE),
     entry(Cmd::Copy, "Edit", "Copy", "c", CMD),
     entry(Cmd::Paste, "Edit", "Paste", "v", CMD),
@@ -161,6 +165,13 @@ pub const REGISTRY: &[Entry] = &[
         "[",
         CMD_SHIFT,
     ),
+    grouped(entry(
+        Cmd::SwitchSession,
+        "Window",
+        "Switch Session…",
+        "s",
+        CTRL_CMD,
+    )),
     entry(
         Cmd::NextSession,
         "Window",
@@ -233,6 +244,8 @@ pub fn builtin_id(cmd: Cmd) -> String {
     match cmd {
         Cmd::NewWindow => "new_window".into(),
         Cmd::NewSession => "new_session".into(),
+        Cmd::SwitchSession => "switch_session".into(),
+        Cmd::RenameSession => "rename_session".into(),
         Cmd::NextSession => "next_session".into(),
         Cmd::PreviousSession => "previous_session".into(),
         Cmd::NewTab => "new_tab".into(),

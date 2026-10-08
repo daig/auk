@@ -10,6 +10,9 @@
 //!   ([`sanitize_svg`]) and drawn by resvg at the display's density.
 //! - Decoded pictures are shared by every view in the process, keyed by blob id (and density for
 //!   vector pictures), least recently used first out past 256 MiB.
+//! - Big rasters decode off the frame path ([`request_blob`], amendment A9): natively on a
+//!   decoding thread, in the browser a picture per clock tick ([`pump`]); the views show a
+//!   "decoding" card until the picture is cached, then redraw the node.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -616,13 +619,19 @@ fn draw_builtin(name: &str, density: f32) -> Result<Picture, String> {
 // ---------------------------------------------------------------------------------------------
 // The shared cache
 
-type Loaded = Result<Arc<Picture>, String>;
+pub type Loaded = Result<Arc<Picture>, String>;
+
+/// A cache entry: decoded, or decoding in the background.
+enum Slot {
+    Done(Loaded),
+    Pending,
+}
 
 #[derive(Default)]
 struct Cache {
     clock: u64,
     bytes: usize,
-    entries: HashMap<String, (u64, Loaded)>,
+    entries: HashMap<String, (u64, Slot)>,
 }
 
 fn cache() -> &'static Mutex<Cache> {
@@ -630,41 +639,221 @@ fn cache() -> &'static Mutex<Cache> {
     CACHE.get_or_init(Mutex::default)
 }
 
+fn lock() -> std::sync::MutexGuard<'static, Cache> {
+    cache().lock().unwrap_or_else(|e| e.into_inner())
+}
+
+impl Cache {
+    /// The decoded picture for `key`, if there is one (marking it used).
+    fn hit(&mut self, key: &str) -> Option<&Slot> {
+        self.clock += 1;
+        let now = self.clock;
+        let (used, slot) = self.entries.get_mut(key)?;
+        *used = now;
+        Some(slot)
+    }
+
+    /// Stores a decoded picture, unless one is there already, and makes room past
+    /// [`CACHE_BYTES`] (least recently used first; pictures still decoding stay).
+    fn store(&mut self, key: &str, loaded: &Loaded) {
+        self.clock += 1;
+        let now = self.clock;
+        if matches!(self.entries.get(key), Some((_, Slot::Done(_)))) {
+            return;
+        }
+        self.bytes += loaded.as_ref().map_or(0, |p| p.bytes());
+        self.entries
+            .insert(key.to_owned(), (now, Slot::Done(loaded.clone())));
+        while self.bytes > CACHE_BYTES {
+            let victim = self
+                .entries
+                .iter()
+                .filter(|(k, (_, s))| k.as_str() != key && matches!(s, Slot::Done(_)))
+                .min_by_key(|(_, (used, _))| *used)
+                .map(|(k, _)| k.clone());
+            let Some(victim) = victim else { break };
+            if let Some((_, Slot::Done(Ok(p)))) = self.entries.remove(&victim) {
+                self.bytes -= p.bytes();
+            }
+        }
+    }
+}
+
 /// A picture from the cache, or decoded (outside the lock) and cached.
 fn cached(key: String, decode: impl FnOnce() -> Result<Picture, String>) -> Loaded {
-    {
-        let mut c = cache().lock().unwrap_or_else(|e| e.into_inner());
-        c.clock += 1;
-        let now = c.clock;
-        if let Some((used, loaded)) = c.entries.get_mut(&key) {
-            *used = now;
-            return loaded.clone();
-        }
+    if let Some(Slot::Done(loaded)) = lock().hit(&key) {
+        return loaded.clone();
     }
     let loaded = decode().map(Arc::new);
-    let size = loaded.as_ref().map_or(0, |p| p.bytes());
-    let mut c = cache().lock().unwrap_or_else(|e| e.into_inner());
-    c.clock += 1;
-    let now = c.clock;
-    if c.entries
-        .insert(key.clone(), (now, loaded.clone()))
-        .is_none()
+    lock().store(&key, &loaded);
+    loaded
+}
+
+/// A picture asked for without waiting ([`request_blob`]): decoded, or decoding in the
+/// background.
+#[derive(Debug)]
+pub enum Poll {
+    Ready(Loaded),
+    Pending,
+}
+
+/// Encoded rasters at most this big decode on the caller's thread ([`request_blob`]).
+pub const INLINE_BYTES: usize = 256 << 10;
+/// Rasters of at most this many pixels (512×512) decode on the caller's thread.
+pub const INLINE_PIXELS: u64 = 512 * 512;
+
+/// A blob's picture, without making the caller wait for a big one (amendment A9, §8.5): SVGs,
+/// small rasters (at most [`INLINE_BYTES`] encoded and [`INLINE_PIXELS`] pixels) and ones that
+/// can't show (their header says why: unreadable, or over [`MAX_SIDE`]) are decoded now, as [`load_blob`] does, so they never
+/// flash a placeholder; a bigger raster decodes in the background and is [`Poll::Pending`]
+/// until it is cached. Ask again (the view's clock does) to get it. Duplicate requests share
+/// one decode. In the browser, without threads, the decode waits for [`pump`].
+pub fn request_blob(blob: &auk_tsp::Blob, density: f32) -> Poll {
+    let Some(Kind::Raster(format)) = sniff(&blob.bytes, blob.mime.as_deref()) else {
+        return Poll::Ready(load_blob(blob, density));
+    };
+    let key = blob.id.clone();
     {
-        c.bytes += size;
-    }
-    while c.bytes > CACHE_BYTES {
-        let victim = c
-            .entries
-            .iter()
-            .filter(|(k, _)| **k != key)
-            .min_by_key(|(_, (used, _))| *used)
-            .map(|(k, _)| k.clone());
-        let Some(victim) = victim else { break };
-        if let Some((_, Ok(p))) = c.entries.remove(&victim) {
-            c.bytes -= p.bytes();
+        let mut c = lock();
+        match c.hit(&key) {
+            Some(Slot::Done(loaded)) => return Poll::Ready(loaded.clone()),
+            Some(Slot::Pending) => return Poll::Pending,
+            None => {}
         }
     }
-    loaded
+    let small = blob.bytes.len() <= INLINE_BYTES;
+    let inline = ImageReader::with_format(Cursor::new(&blob.bytes), format)
+        .into_dimensions()
+        .map_or(true, |(w, h)| {
+            small && u64::from(w) * u64::from(h) <= INLINE_PIXELS || w > MAX_SIDE || h > MAX_SIDE
+        });
+    if inline {
+        return Poll::Ready(cached(key, || decode_raster(&blob.bytes, format)));
+    }
+    {
+        let mut c = lock();
+        if c.entries.contains_key(&key) {
+            // Asked for meanwhile.
+            return match c.hit(&key) {
+                Some(Slot::Done(loaded)) => Poll::Ready(loaded.clone()),
+                _ => Poll::Pending,
+            };
+        }
+        c.clock += 1;
+        let now = c.clock;
+        c.entries.insert(key.clone(), (now, Slot::Pending));
+    }
+    background::submit(Job {
+        key,
+        bytes: blob.bytes.clone(),
+        format,
+    });
+    Poll::Pending
+}
+
+/// The picture for `blob` if it is decoded, without decoding anything.
+pub fn peek_blob(blob_id: &str) -> Option<Loaded> {
+    match lock().hit(blob_id) {
+        Some(Slot::Done(loaded)) => Some(loaded.clone()),
+        _ => None,
+    }
+}
+
+/// Whether the raster with this blob id is decoding in the background.
+pub fn decoding_blob(blob_id: &str) -> bool {
+    matches!(lock().entries.get(blob_id), Some((_, Slot::Pending)))
+}
+
+/// Whether pictures are still decoding in the background.
+pub fn decoding() -> bool {
+    lock()
+        .entries
+        .values()
+        .any(|(_, s)| matches!(s, Slot::Pending))
+}
+
+/// Waits until nothing is decoding in the background (doing the browser's queue on this
+/// thread): for hosts that draw deterministically (headless goldens) and tests.
+pub fn settle() {
+    loop {
+        pump();
+        if !decoding() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
+/// A raster decoding in the background.
+struct Job {
+    key: String,
+    bytes: Vec<u8>,
+    format: ImageFormat,
+}
+
+impl Job {
+    fn run(self) {
+        let loaded = std::panic::catch_unwind(|| decode_raster(&self.bytes, self.format))
+            .unwrap_or_else(|_| Err("the decoder failed".into()))
+            .map(Arc::new);
+        lock().store(&self.key, &loaded);
+    }
+}
+
+/// Decodes what the browser queued, one picture per call (the view's clock calls it while a
+/// picture is pending); natively a worker thread does it and this does nothing.
+pub fn pump() {
+    background::pump();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+mod background {
+    use super::Job;
+    use std::sync::OnceLock;
+    use std::sync::mpsc::Sender;
+
+    /// Hands a job to the decoding thread (one, so big decodes don't compete with each other
+    /// or with the views for cores).
+    pub(super) fn submit(job: Job) {
+        static WORKER: OnceLock<std::sync::Mutex<Sender<Job>>> = OnceLock::new();
+        let tx = WORKER.get_or_init(|| {
+            let (tx, rx) = std::sync::mpsc::channel::<Job>();
+            std::thread::Builder::new()
+                .name("auk-image".into())
+                .spawn(move || {
+                    for job in rx {
+                        job.run();
+                    }
+                })
+                .expect("the image decoding thread");
+            std::sync::Mutex::new(tx)
+        });
+        let _ = tx.lock().unwrap_or_else(|e| e.into_inner()).send(job);
+    }
+
+    pub(super) fn pump() {}
+}
+
+#[cfg(target_arch = "wasm32")]
+mod background {
+    use super::Job;
+    use std::cell::RefCell;
+    use std::collections::VecDeque;
+
+    thread_local! {
+        static QUEUE: RefCell<VecDeque<Job>> = RefCell::new(VecDeque::new());
+    }
+
+    /// No threads in the browser: the job waits for [`pump`].
+    pub(super) fn submit(job: Job) {
+        QUEUE.with(|q| q.borrow_mut().push_back(job));
+    }
+
+    pub(super) fn pump() {
+        if let Some(job) = QUEUE.with(|q| q.borrow_mut().pop_front()) {
+            job.run();
+        }
+    }
 }
 
 /// Density buckets of a quarter, so small changes reuse a vector picture.

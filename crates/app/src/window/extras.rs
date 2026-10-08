@@ -202,6 +202,7 @@ impl WinState {
             "program_colors": s.program_colors,
             "native_editing": s.native_editing,
             "links_plain_click": s.links_plain_click,
+            "hyperlinks": format!("{:?}", s.hyperlinks).to_lowercase(),
             "reduce_motion": self.reduce_motion(),
             "system_reduce_motion": auk_platform_macos::system_reduce_motion(),
             "keymap": s.keymap,

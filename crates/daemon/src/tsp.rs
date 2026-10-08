@@ -186,11 +186,15 @@ impl Ages {
             let Some(surface) = pane.surface(sc.key) else {
                 continue;
             };
+            // A top-level `age` that arrived restarts even unchanged; nested agent ages only on a
+            // new value (§7.13).
             let mut visit = |node: NodeRef<'_>| {
+                let arrived = sc.doc.ages.contains(node.id());
                 for (path, age) in ages_of(node) {
+                    let restart = arrived && path == "age";
                     let entry = (sc.key, node.id().to_owned(), path);
                     match self.seen.get(&entry) {
-                        Some((old, _)) if *old == age => {}
+                        Some((old, _)) if *old == age && !restart => {}
                         _ => {
                             self.seen.insert(entry, (age, now));
                         }

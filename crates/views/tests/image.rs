@@ -719,3 +719,118 @@ fn plugin_sheet_data_urls_decode_and_style_through_the_built_in_loader() {
     assert_eq!(url.as_deref(), Some(png_url.as_str()));
     assert!(h.doc.url_image(&png_url).is_some());
 }
+
+/// A GIF of two `w`×`h` frames (100 ms each), looping forever.
+fn big_animated_gif(w: u32, h: u32) -> Vec<u8> {
+    use ::image::codecs::gif::{GifEncoder, Repeat};
+    let mut out = Vec::new();
+    {
+        let mut enc = GifEncoder::new(&mut out);
+        enc.set_repeat(Repeat::Infinite).unwrap();
+        let frames = [40u8, 220].map(|v| {
+            ::image::Frame::from_parts(
+                RgbaImage::from_pixel(w, h, Rgba([v, v, v, 255])),
+                0,
+                0,
+                ::image::Delay::from_numer_denom_ms(100, 1),
+            )
+        });
+        enc.encode_frames(frames).unwrap();
+    }
+    out
+}
+
+/// Amendment A9: a picture over 512×512 pixels decodes off the frame path. The node shows the
+/// busy placeholder ("Decoding the image") while it decodes, then draws at its natural size
+/// with no further TSP traffic; two nodes naming it share one decode.
+#[test]
+fn a_big_picture_decodes_in_the_background_and_draws_in() {
+    let mut h = harness();
+    // 900×600: a few KB encoded, but 540,000 pixels.
+    let id = send_blob(&mut h, &encode(&picture(900, 600), ImageFormat::Png), None);
+    show(
+        &mut h,
+        json!([
+            {"id": "a", "k": "image", "p": {"blob": id, "alt": "Plot"}},
+            {"id": "b", "k": "image", "p": {"blob": id}},
+        ]),
+    );
+    for node in ["a", "b"] {
+        let el = h.el("s1", node);
+        // The decode may already be done; if not, the node is waiting for it.
+        if h.class(el).contains("missing") {
+            let card = h.find_class(el, "sf-img-card")[0];
+            assert_eq!(h.attr(card, "title").as_deref(), Some("Decoding the image"));
+            assert_eq!(h.attr(card, "aria-busy").as_deref(), Some("true"));
+            // The clock watches for the picture: the tick asks for another frame, unless the
+            // decode finished meanwhile and it drew the picture in.
+            let next = h.view.tick(&mut h.doc, &h.pane, h.now);
+            assert!(
+                next.is_some() || !h.class(el).contains("missing"),
+                "{node}: neither waiting nor drawn"
+            );
+        }
+    }
+    let sent = h.sent.len();
+    pictures::settle();
+    assert!(!pictures::decoding());
+    h.now += 16.0;
+    h.frame();
+    for node in ["a", "b"] {
+        let f = drawn(&h, node);
+        let b = h.doc.border_box(f).unwrap();
+        // Its natural size, plus the 1px ring.
+        assert_eq!((b.w, b.h), (902.0, 602.0), "{node}");
+    }
+    assert_eq!(h.sent.len(), sent, "no TSP traffic");
+    // Cached: a later node draws at once.
+    show(
+        &mut h,
+        json!([{"id": "c", "k": "image", "p": {"blob": id}}]),
+    );
+    drawn(&h, "c");
+}
+
+/// Small pictures (512×512 pixels or fewer, 256 KiB or less encoded), SVGs and the built-in
+/// picture decode at once: they never show the placeholder.
+#[test]
+fn small_pictures_svgs_and_builtins_never_wait() {
+    let mut h = harness();
+    let small = send_blob(&mut h, &encode(&picture(512, 512), ImageFormat::Png), None);
+    let svg = send_blob(
+        &mut h,
+        b"<svg xmlns='http://www.w3.org/2000/svg' width='900' height='900'><rect width='900' height='900' fill='red'/></svg>",
+        Some("image/svg+xml"),
+    );
+    show(
+        &mut h,
+        json!([
+            {"id": "s", "k": "image", "p": {"blob": small}},
+            {"id": "v", "k": "image", "p": {"blob": svg}},
+            {"id": "o", "k": "image", "p": {"builtin": "omp"}},
+        ]),
+    );
+    for node in ["s", "v", "o"] {
+        drawn(&h, node);
+    }
+}
+
+/// An animation over the threshold plays once it's decoded.
+#[test]
+fn a_big_animation_plays_after_its_background_decode() {
+    let mut h = harness();
+    let id = send_blob(&mut h, &big_animated_gif(600, 600), Some("image/gif"));
+    show(&mut h, json!([{"id": "g", "k": "image", "p": {"blob": id}}]));
+    pictures::settle();
+    h.now += 16.0;
+    h.frame();
+    let f = drawn(&h, "g");
+    let first = h.doc.image(f).unwrap().data.data.data().to_vec();
+    assert!(
+        h.view.tick(&mut h.doc, &h.pane, h.now + 150.0).is_some(),
+        "it animates"
+    );
+    h.view.layout(&mut h.doc);
+    let later = h.doc.image(f).unwrap().data.data.data().to_vec();
+    assert_ne!(first, later, "the second frame shows");
+}

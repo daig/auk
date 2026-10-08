@@ -53,8 +53,8 @@ use std::time::{Duration, Instant};
 use auk_conformance::app::App;
 use auk_conformance::harness::{TestEnv, wait_for};
 use auk_conformance::perf::{
-    Ghostty, Permissions, median, percentile, permissions, run_probe, screen_probe,
-    transcript_recording, write_text_file,
+    Ghostty, Permissions, big_jpeg, image_recording, median, percentile, permissions, run_probe,
+    screen_probe, transcript_recording, write_text_file,
 };
 use serde_json::Value;
 
@@ -155,7 +155,7 @@ fn frame_budget_omp_session_replay() {
 fn frame_budget_scrolling_a_10000_entry_transcript() {
     let env = env("perf-scroll");
     let recording = env.root.join("transcript.jsonl");
-    let jsonl = transcript_recording(10_000, 50, 16 << 10);
+    let jsonl = transcript_recording(10_000, 50, 16 << 10, 0);
     eprintln!("transcript recording: {:.1} MB", jsonl.len() as f64 / 1e6);
     std::fs::write(&recording, jsonl).expect("write");
     let (app, pane) = app_with_pane(&env, &[]);
@@ -197,6 +197,142 @@ fn frame_budget_scrolling_a_10000_entry_transcript() {
     assert!(moved > 10_000.0, "the scroll didn't move far: {after}");
     let stats = frame_stats(&app, "10,000-entry transcript scroll");
     assert_budget(&stats, "10,000-entry transcript scroll");
+}
+
+/// The load check (amendment A10, §7.10 cost, §18.1): the 10,000-entry omp-style transcript
+/// arriving as a program would stream it, 50 entries per 16 ms frame (`surface-play … paced`,
+/// about 3.2 s of input), into a pane the app shows. Every frame drawn during the load stays in
+/// the frame budget at p95, and the window has drawn the last entry within 1.5× the input's
+/// duration (the time `surface-play` took to send it all) of the first frame being sent.
+#[test]
+fn frame_budget_loading_a_10000_entry_transcript() {
+    const STEP_MS: u64 = 16;
+    const SETTLE_FACTOR: f64 = 1.5;
+    let env = env("perf-load");
+    let recording = env.root.join("transcript.jsonl");
+    let jsonl = transcript_recording(10_000, 50, 16 << 10, STEP_MS);
+    // The last entry's id: the window has caught up once it draws it.
+    let last_frame: Value = serde_json::from_str(jsonl.lines().last().expect("frames"))
+        .expect("a JSON line");
+    let last_id = last_frame["body"]["ops"]
+        .as_array()
+        .and_then(|ops| ops.last())
+        .and_then(|op| op[1].as_str())
+        .expect("the last op adds an entry")
+        .to_owned();
+    let frames = jsonl.lines().filter(|l| l.contains("\"verb\":\"f\"")).count();
+    let nominal = (frames as u64 - 1) * STEP_MS;
+    eprintln!(
+        "transcript recording: {:.1} MB, {frames} frames {STEP_MS} ms apart ({nominal} ms)",
+        jsonl.len() as f64 / 1e6
+    );
+    std::fs::write(&recording, jsonl).expect("write");
+    let (app, pane) = app_with_pane(&env, &[]);
+    stand_in(&env, pane);
+    app.request("frame-stats --reset");
+    let started = Instant::now();
+    play(&env, pane, &recording, &["paced"]);
+    let input = started.elapsed().as_secs_f64();
+    let drawn = |app: &App| {
+        app.try_request(&format!("node-box {pane} {last_id}"))
+            .and_then(|b| b[2].as_f64())
+            .is_some_and(|w| w > 0.0)
+    };
+    let settled = loop {
+        if drawn(&app) {
+            break started.elapsed().as_secs_f64();
+        }
+        assert!(
+            started.elapsed().as_secs_f64() < input * 10.0 + 10.0,
+            "the window never drew the transcript's last entry ({last_id})"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    let stats = app.request("frame-stats --series");
+    let series = stats["series"].clone();
+    let mut stats = stats;
+    stats.as_object_mut().expect("an object").remove("series");
+    eprintln!("10,000-entry transcript load: {stats}");
+    let cpu: Vec<f64> = series["cpu"]
+        .as_array()
+        .map(|a| a.iter().filter_map(Value::as_f64).collect())
+        .unwrap_or_default();
+    // How per-frame work changes as the transcript grows (§7.10: in proportion to the ops, not
+    // to the document): each phase's median over each fifth of the load's frames.
+    let fifths = |v: &[f64]| -> String {
+        let n = v.len() / 5;
+        if n == 0 {
+            return String::new();
+        }
+        (0..5)
+            .map(|i| format!("{:.2}", median(&v[i * n..(i + 1) * n])))
+            .collect::<Vec<_>>()
+            .join(" / ")
+    };
+    eprintln!("CPU per frame by fifth of the load (median ms): {}", fifths(&cpu));
+    if let Some(phases) = series["phases"].as_object() {
+        for (name, v) in phases {
+            let v: Vec<f64> = v
+                .as_array()
+                .map(|a| a.iter().filter_map(Value::as_f64).collect())
+                .unwrap_or_default();
+            eprintln!("  {name}: {}", fifths(&v));
+        }
+    }
+    eprintln!(
+        "input sent in {input:.2} s ({:.2} s nominal); last entry drawn at {settled:.2} s ({:.2}× the input)",
+        nominal as f64 / 1000.0,
+        settled / input
+    );
+    let layout = app.request(&format!("pane-layout {pane}"));
+    assert!(
+        layout["max_scroll"].as_f64().is_some_and(|h| h > 100_000.0),
+        "the transcript isn't in the pane: {layout}"
+    );
+    assert_budget(&stats, "10,000-entry transcript load");
+    assert!(
+        settled <= SETTLE_FACTOR * input,
+        "the load settled in {settled:.2} s, over {SETTLE_FACTOR}× the input's {input:.2} s"
+    );
+}
+
+/// Amendment A9: a big picture decodes off the frame path. A 4096×4096 JPEG arrives in a pane
+/// the app shows and is drawn, and no frame from its arrival to its drawing takes as long as
+/// the decode itself (timed here, in this process, with the views' decoder): none waited for
+/// it.
+#[test]
+fn image_decoding_never_stalls_a_frame() {
+    let jpeg = big_jpeg(4096, 4096);
+    let started = Instant::now();
+    let picture = auk_views::image::decode(&jpeg, Some("image/jpeg"), 2.0, "p").expect("decode");
+    let decode_ms = started.elapsed().as_secs_f64() * 1000.0;
+    assert_eq!(picture.size, (4096.0, 4096.0));
+    drop(picture);
+    eprintln!(
+        "4096×4096 JPEG: {:.1} MB, decodes in {decode_ms:.0} ms here",
+        jpeg.len() as f64 / 1e6
+    );
+    let env = env("perf-image");
+    let recording = env.root.join("image.jsonl");
+    let (jsonl, _) = image_recording(&jpeg, "image/jpeg", "photo");
+    std::fs::write(&recording, jsonl).expect("write");
+    let (app, pane) = app_with_pane(&env, &[]);
+    stand_in(&env, pane);
+    app.request("frame-stats --reset");
+    play(&env, pane, &recording, &[]);
+    // Drawn: the picture's box (square, the pane's width), not the placeholder card.
+    wait_for("the photo drawn", || {
+        let b = app.try_request(&format!("node-box {pane} photo"))?;
+        let (w, h) = (b[2].as_f64()?, b[3].as_f64()?);
+        (h > 500.0 && (w - h).abs() < 4.0).then_some(())
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    let stats = frame_stats(&app, "4096×4096 JPEG arriving");
+    let max = stats["frame"]["max"].as_f64().expect("a max");
+    assert!(
+        max < decode_ms,
+        "a frame took {max:.1} ms, as long as the {decode_ms:.0} ms decode: it waited for it"
+    );
 }
 
 // Against Ghostty (S2).

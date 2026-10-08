@@ -139,6 +139,8 @@ impl Document {
     ) -> LayoutOutput {
         let id = NodeId::from_taffy(tid);
         self.stats.laid_out += 1;
+        let run = self.layout_runs;
+        self.node_mut(id).laid_out_in = run;
         let n = self.node(id);
         if n.image.is_some()
             && n.layout_children.is_empty()
@@ -254,6 +256,7 @@ impl Document {
         if !self.layout_dirty {
             return;
         }
+        self.layout_runs += 1;
         self.build_boxes();
         let anchors = self.record_anchors();
         let root = self.root();
@@ -267,7 +270,7 @@ impl Document {
             },
         );
         self.apply_anchors(anchors);
-        self.layout_dirty = false;
+        self.layout_dirty = std::mem::take(&mut self.needs_relayout);
     }
 
     /// Scroll anchoring (§3.4): remember, for each scrolled container, the first child under the
@@ -411,23 +414,55 @@ impl Document {
         let overscan = view_h * 0.5;
         let scroll_y = self.node(id).scroll.1;
         let window = match self.node(id).virtual_window {
+            // The views move this window once the view is a quarter viewport away from where
+            // it was set: that much overscan keeps what's shown laid out.
             Some((top, bottom)) => {
-                let over = self.viewport.1 * 0.5;
+                let over = self.viewport.1 * 0.25;
                 (top - over, bottom + over)
             }
             None => (scroll_y - overscan, scroll_y + view_h + overscan),
         };
 
+        // Flex and grid parents size a box several times per layout with available heights a
+        // list's height doesn't depend on: within one layout run, the same width, height and
+        // window give the same size, so only the first walks the children.
+        let key = (
+            self.layout_runs,
+            width.to_bits(),
+            height.map(f32::to_bits),
+            window.0.to_bits(),
+            window.1.to_bits(),
+        );
+        if run_mode == RunMode::ComputeSize
+            && let Some((k, out)) = self.node(id).virt_memo
+            && k == key
+        {
+            return out;
+        }
         let kids: Vec<NodeId> = self.node(id).layout_children.clone();
         let mut measured = std::mem::take(&mut self.node_mut(id).measured);
         measured.resize(kids.len(), None);
+        // Children past the last one ever laid out (a list that grows at the end: a
+        // transcript) are estimated at the mean height of those laid out, so a view following
+        // the end finds them about where they land. Earlier ones keep the given estimate: their
+        // places don't move as the mean does.
+        let last = measured.iter().rposition(Option::is_some);
+        let (sum, n) = measured
+            .iter()
+            .flatten()
+            .fold((0.0f64, 0usize), |(s, n), h| (s + f64::from(*h), n + 1));
+        let tail_estimate = if n > 0 {
+            (sum / n as f64) as f32
+        } else {
+            estimate
+        };
         let mut y = 0.0f32;
         let mut content_h = 0.0f32;
         for (i, &c) in kids.iter().enumerate() {
             if self.node(c).taffy_style.position == taffy::Position::Absolute {
                 continue;
             }
-            let cm = self
+            let mut cm = self
                 .node(c)
                 .taffy_style
                 .margin
@@ -436,8 +471,29 @@ impl Document {
                 y += gap;
             }
             y += cm.top;
-            let h = measured[i].unwrap_or(estimate);
+            let h = measured[i].unwrap_or(if last.is_some_and(|l| i > l) {
+                tail_estimate
+            } else {
+                estimate
+            });
             let visible = y + h >= window.0 && y <= window.1;
+            // A child styled only now that it comes into view (restyle leaves the ones out of
+            // view to layout).
+            if visible && self.style_pending(c) {
+                if !self.style_in_view(id, c) {
+                    // It left the flow: the container's boxes are rebuilt next layout.
+                    self.needs_relayout = true;
+                    y -= cm.top;
+                    continue;
+                }
+                y -= cm.top;
+                cm = self
+                    .node(c)
+                    .taffy_style
+                    .margin
+                    .resolve_or_zero(Some(inner_w), resolve_calc);
+                y += cm.top;
+            }
             let cw = (inner_w - cm.left - cm.right).max(0.0);
             if visible {
                 let out = self.compute_child_layout(
@@ -471,11 +527,20 @@ impl Document {
                 }
                 y += out.size.height;
             } else {
-                if run_mode == RunMode::PerformLayout {
+                // An estimated box, stored unless it already is (a long list skips most of
+                // its children on every layout).
+                let (x0, y0) = (pb.left + cm.left, pb.top + y);
+                let n = self.node(c);
+                let same = n.skipped
+                    && n.layout.location.x == x0
+                    && n.layout.location.y == y0
+                    && n.layout.size.width == cw
+                    && n.layout.size.height == h;
+                if run_mode == RunMode::PerformLayout && !same {
                     self.store_layout(
                         c,
-                        pb.left + cm.left,
-                        pb.top + y,
+                        x0,
+                        y0,
                         Size {
                             width: cw,
                             height: h,
@@ -508,7 +573,7 @@ impl Document {
                 bottom: content_h + pb.vertical_axis_sum(),
             };
         }
-        LayoutOutput {
+        let out = LayoutOutput {
             size,
             scrollable_overflow_rect: taffy::Rect {
                 left: 0.0,
@@ -520,7 +585,9 @@ impl Document {
             top_margin: taffy::CollapsibleMarginSet::ZERO,
             bottom_margin: taffy::CollapsibleMarginSet::ZERO,
             margins_can_collapse_through: false,
-        }
+        };
+        self.node_mut(id).virt_memo = Some((key, out));
+        out
     }
 }
 

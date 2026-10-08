@@ -7,7 +7,7 @@ use crate::ansi::AnsiState;
 use crate::common::{bool_prop, num_prop, str_prop};
 use crate::diff::{self, DLine, Hunk, Op};
 use crate::dom::Dom;
-use crate::highlight::{self, Highlighter, Runs};
+use crate::highlight::{self, Runs};
 use crate::image::Picture;
 use crate::spans;
 use crate::state::{SurfaceState, state_key};
@@ -80,7 +80,7 @@ pub(crate) struct CodeState {
 }
 
 /// A line's runs with emphasized byte ranges split out.
-fn line_into(
+pub(crate) fn line_into(
     dom: &mut Dom,
     parent: NodeId,
     line: &str,
@@ -337,22 +337,17 @@ pub(crate) fn diff(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
     let body = part(cx, m, "div", "sf-diff-body");
     // Highlight each side as a whole so multi-line constructs color right.
     let syn = highlight::find(lang, path);
-    let side = |op_keep: Op| -> (Vec<String>, Option<Highlighter>) {
+    let side = |op_keep: Op| -> Option<highlight::Later> {
         let lines: Vec<String> = hunks
             .iter()
             .flat_map(|h| h.lines.iter())
             .filter(|l| l.op == Op::Ctx || l.op == op_keep)
             .map(|l| l.text.clone())
             .collect();
-        let hl = syn.map(|s| {
-            let mut h = Highlighter::new(s);
-            h.update(&lines.join("\n"));
-            h
-        });
-        (lines, hl)
+        syn.map(|s| highlight::later(s, &lines.join("\n")))
     };
-    let (_, old_hl) = side(Op::Del);
-    let (_, new_hl) = side(Op::Add);
+    let mut old_hl = side(Op::Del);
+    let mut new_hl = side(Op::Add);
     let (mut oi, mut ni) = (0usize, 0usize);
     let mut prev_end: Option<u64> = None;
     for h in &hunks {
@@ -422,19 +417,23 @@ pub(crate) fn diff(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
         for (old, new) in rows {
             if split {
                 let r = cx.dom.child(body, "div", "sf-dr");
-                diff_line(cx, r, old, &old_hl, true, true);
-                diff_line(cx, r, new, &new_hl, true, false);
+                diff_line(cx, r, old, &mut old_hl, true, true);
+                diff_line(cx, r, new, &mut new_hl, true, false);
             } else {
                 match (old, new) {
-                    (Some(o), Some(_)) => diff_line(cx, body, Some(o), &old_hl, false, true),
-                    (Some(o), None) => diff_line(cx, body, Some(o), &old_hl, false, true),
-                    (None, Some(n)) => diff_line(cx, body, Some(n), &new_hl, false, false),
+                    (Some(o), Some(_)) => diff_line(cx, body, Some(o), &mut old_hl, false, true),
+                    (Some(o), None) => diff_line(cx, body, Some(o), &mut old_hl, false, true),
+                    (None, Some(n)) => diff_line(cx, body, Some(n), &mut new_hl, false, false),
                     (None, None) => {}
                 }
             }
         }
         let old_len = h.lines.iter().filter(|l| l.op != Op::Add).count() as u64;
         prev_end = Some(h.old_start + old_len);
+    }
+    // Each side is highlighted in the background and drawn in when in view.
+    for hl in [old_hl, new_hl].into_iter().flatten() {
+        hl.finish();
     }
 }
 
@@ -445,7 +444,7 @@ fn diff_line(
     cx: &mut Cx,
     parent: NodeId,
     l: Option<(&DLine, usize)>,
-    hl: &Option<Highlighter>,
+    hl: &mut Option<highlight::Later>,
     half: bool,
     old_side: bool,
 ) {
@@ -479,11 +478,16 @@ fn diff_line(
     };
     cx.dom.child_text(row, "span", "sf-dm", mark);
     let t = cx.dom.child(row, "span", "sf-dt");
-    let runs = hl
-        .as_ref()
-        .filter(|h| idx < h.line_count())
-        .map(|h| h.line(idx).1.clone());
-    line_into(&mut cx.dom, t, &l.text, runs.as_ref(), &l.em);
+    line_into(&mut cx.dom, t, &l.text, None, &l.em);
+    if let Some(h) = hl.as_mut() {
+        h.add(highlight::DeferredLine {
+            el: t,
+            idx,
+            text: l.text.clone(),
+            em: l.em.clone(),
+            newline: false,
+        });
+    }
 }
 
 pub(crate) fn ansi(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
@@ -652,6 +656,8 @@ pub(crate) struct ImageState {
     /// When the picture first drew (view clock, ms).
     start: f64,
     shown: usize,
+    /// The picture is decoding in the background: the clock watches for it.
+    decoding: bool,
 }
 
 /// What an `image` node can show.
@@ -659,6 +665,8 @@ enum ImageSource {
     Ready(Arc<Picture>),
     /// The blob hasn't arrived.
     Loading,
+    /// The blob is decoding in the background.
+    Decoding,
     /// Why it can't show.
     Unavailable(String),
 }
@@ -692,9 +700,11 @@ pub(crate) fn image(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
             .or_else(|| cx.blobs.load(id).map(std::borrow::Cow::Owned));
         match held {
             None => ImageSource::Loading,
-            Some(b) => match crate::image::load_blob(&b, density) {
-                Ok(pic) => ImageSource::Ready(pic),
-                Err(e) => ImageSource::Unavailable(e),
+            // A big picture decodes off the frame path (amendment A9); small ones now.
+            Some(b) => match crate::image::request_blob(&b, density) {
+                crate::image::Poll::Ready(Ok(pic)) => ImageSource::Ready(pic),
+                crate::image::Poll::Ready(Err(e)) => ImageSource::Unavailable(e),
+                crate::image::Poll::Pending => ImageSource::Decoding,
             },
         }
     } else {
@@ -755,15 +765,17 @@ pub(crate) fn image(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
                 frame: Some(el),
                 start,
                 shown,
+                decoding: false,
             }));
         }
-        ImageSource::Loading | ImageSource::Unavailable(_) => {
+        ImageSource::Loading | ImageSource::Decoding | ImageSource::Unavailable(_) => {
             look.class("missing");
-            let loading = matches!(source, ImageSource::Loading);
+            let loading = matches!(source, ImageSource::Loading | ImageSource::Decoding);
             let (fallback, why) = match &source {
                 ImageSource::Loading => {
                     ("Image loading", "The image data has not arrived".to_owned())
                 }
+                ImageSource::Decoding => ("Image loading", "Decoding the image".to_owned()),
                 ImageSource::Unavailable(e) => (
                     "Image unavailable",
                     format!("Not an image format Auk can show ({e})"),
@@ -793,6 +805,14 @@ pub(crate) fn image(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
             let ic = cx.dom.child(card, "span", "sf-img-ic");
             icon(cx, ic, "image");
             cx.dom.child_text(card, "span", "sf-img-alt", text);
+            // The picture draws in when it's decoded: the clock watches for it.
+            if matches!(source, ImageSource::Decoding) {
+                m.clock = true;
+                m.extra = Extra::Image(Box::new(ImageState {
+                    decoding: true,
+                    ..Default::default()
+                }));
+            }
         }
     }
     let over = super::slot(cx, m, 0, "div", "sf-img-over");
@@ -800,11 +820,28 @@ pub(crate) fn image(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
     m.generated.push(over);
 }
 
-/// An animated image's next frame (§7.13). Returns whether it still runs.
-pub(crate) fn tick_image(cx: &mut Cx, _node: NodeRef, m: &mut Mount) -> bool {
+/// The blob an `image` node names, as cache keys spell it.
+fn node_blob(node: NodeRef) -> String {
+    str_prop(node.props(), "blob")
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default()
+}
+
+/// An animated image's next frame (§7.13), or a picture decoded in the background drawn in.
+/// Returns whether it still needs the clock.
+pub(crate) fn tick_image(cx: &mut Cx, node: NodeRef, m: &mut Mount) -> bool {
     let Extra::Image(st) = &mut m.extra else {
         return false;
     };
+    // Decoding in the background: redraw the node once the picture is ready (§8.5).
+    if st.decoding {
+        crate::image::pump();
+        if crate::image::decoding_blob(&node_blob(node)) {
+            return true;
+        }
+        crate::view::render_node(cx, m, node);
+        return m.clock;
+    }
     let (Some(pic), Some(el)) = (st.picture.clone(), st.frame) else {
         return false;
     };

@@ -384,28 +384,21 @@ impl TspPane {
             mime: mime.map(str::to_owned),
             bytes,
         };
-        let referenced = self.referenced_blobs();
         let id = blob.id.clone();
-        self.blobs.put(blob, &|id| referenced.contains(id));
+        let surfaces = &self.surfaces;
+        self.blobs.put(blob, &|id| names_blob(surfaces, id));
         self.arrived.push(id);
         true
     }
 
-    /// Blob ids that `image` nodes name, lowercase.
+    /// Blob ids that `image` nodes name, lowercase: the union of the documents' tracked sets,
+    /// so it costs the number of images, not the documents' size (§7.12).
     pub fn referenced_blobs(&self) -> BTreeSet<String> {
-        let mut out = BTreeSet::new();
-        for s in &self.surfaces {
-            let mut stack = vec![s.doc.root()];
-            while let Some(n) = stack.pop() {
-                if n.kind() == "image"
-                    && let Some(id) = n.prop("blob").and_then(Value::as_str)
-                {
-                    out.insert(id.to_ascii_lowercase());
-                }
-                stack.extend(n.children());
-            }
-        }
-        out
+        self.surfaces
+            .iter()
+            .flat_map(|s| s.doc.blob_refs())
+            .map(str::to_owned)
+            .collect()
     }
 
     /// Blob ids that `image` nodes name and this replica doesn't hold: a window asks the daemon
@@ -1086,9 +1079,9 @@ impl TspPane {
     fn blob(&mut self, msg: &Message) {
         match blob::decode(msg.param("id"), msg.param("mime"), &msg.body) {
             Ok(blob) => {
-                let referenced = self.referenced_blobs();
                 let id = blob.id.clone();
-                self.blobs.put(blob, &|id| referenced.contains(id));
+                let surfaces = &self.surfaces;
+                self.blobs.put(blob, &|id| names_blob(surfaces, id));
                 self.arrived.push(id);
             }
             Err(e) => self.answer(json!({"ev": "error", "msg": e}), None),
@@ -1529,4 +1522,9 @@ fn sendable(surface: &Surface, id: &str) -> bool {
         && !truthy(node.prop("readonly"))
         && !truthy(node.prop("disabled"))
         && !truthy(node.prop("hidden"))
+}
+
+/// Whether an `image` node in any of `surfaces` names `blob` (lowercase).
+fn names_blob(surfaces: &[Surface], blob: &str) -> bool {
+    surfaces.iter().any(|s| s.doc.names_blob(blob))
 }

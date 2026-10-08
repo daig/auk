@@ -22,6 +22,8 @@ auk-views = { path = "../views" }
 base64 = "0.23.1"
 # Decodes WebDriver screenshots in the web suite.
 png = "0.18.1"
+# Encodes the perf suite's big pictures (the views decode them).
+image = { version = "0.25.10", default-features = false, features = ["jpeg"] }
 serde.workspace = true
 serde_json.workspace = true
 

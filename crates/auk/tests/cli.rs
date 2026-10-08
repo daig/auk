@@ -753,7 +753,9 @@ fn a_locked_session_refuses_closing_its_panes_with_a_toast() {
             .find(|e| e["effect"] == "toast")
             .cloned()
     });
-    assert_eq!(toast["text"], "Session 1 is locked", "{toast}");
+    // New sessions get a generated two-word name (amendment A11).
+    let name = ls(&env)["layout"]["main"]["sessions"][0]["name"].as_str().unwrap().to_owned();
+    assert_eq!(toast["text"], format!("Session {name} is locked"), "{toast}");
     // A window's close is refused too.
     use auk_mirror::{Client, ClientFacts, ClientKind, ClientMsg, Hello, LayoutEdit};
     let stream = UnixStream::connect(&env.socket).unwrap();
@@ -1226,6 +1228,15 @@ fn remote_loopback_attaches_a_second_daemon_through_the_bridge() {
     let serve = Serve::start(&env, &out);
     let first = serve.ctl(&env, &["ready"])["pane"].as_u64().unwrap();
     serve.ctl(&env, &["run", "echo", "on the first host"]);
+    // It takes no address (§11.3): the host is always `loopback`.
+    let control = serve.control.to_string_lossy().into_owned();
+    let refused = env.cli(&["ctl", "--control", &control, "remote", "loopback", "example.com"]);
+    let said = format!(
+        "{}{}",
+        String::from_utf8_lossy(&refused.stdout),
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    assert!(said.contains("takes no address"), "{said}");
     let status = serve.ctl(&env, &["remote", "loopback"]);
     assert_eq!(status["state"]["state"], "connected", "{status:#}");
     // The window now shows the loopback host: nothing yet, then its own session.

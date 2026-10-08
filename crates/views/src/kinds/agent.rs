@@ -230,7 +230,7 @@ pub(crate) fn tool(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
     } else if running && p.get("age").is_some() {
         let te = cx.dom.child(head, "span", "sf-tool-time");
         cx.dom.attr(te, "role", "timer");
-        live(cx, m, te, format!("{}/age", node.id()), p.get("age"), "");
+        live(cx, m, te, crate::motion::anchor_key(node.id(), "age"), p.get("age"), "");
     }
     let stc = cx.dom.child(head, "span", "sf-tool-st");
     match status {
@@ -447,7 +447,7 @@ pub(crate) fn agent(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
             cx,
             m,
             e,
-            format!("{}/stats.age", node.id()),
+            crate::motion::anchor_key(node.id(), "stats.age"),
             s.get("age"),
             "",
         );
@@ -472,7 +472,7 @@ pub(crate) fn agent(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
                 cx,
                 m,
                 te,
-                format!("{}/tool.age", node.id()),
+                crate::motion::anchor_key(node.id(), "tool.age"),
                 t.get("age"),
                 "",
             );
@@ -500,7 +500,7 @@ pub(crate) fn agent(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
                 cx,
                 m,
                 te,
-                format!("{}/retry.age", node.id()),
+                crate::motion::anchor_key(node.id(), "retry.age"),
                 Some(&Value::from(remaining)),
                 "in ",
             );

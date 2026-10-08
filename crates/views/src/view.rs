@@ -52,6 +52,9 @@ pub(crate) struct Mount {
     pub region: bool,
     /// The sync pass that created it.
     pub stamp: u64,
+    /// Text its renders drew plain past a pass's highlighting budget, to draw in when the
+    /// background has highlighted it.
+    pub hl: Vec<crate::highlight::Deferred>,
 }
 
 impl Mount {
@@ -68,6 +71,7 @@ impl Mount {
             clock: false,
             region: false,
             stamp: 0,
+            hl: Vec::new(),
         }
     }
 }
@@ -192,6 +196,12 @@ pub struct PaneView {
     pub(crate) hidden_at: Option<f64>,
     /// `el` controls never flip (a lens layer's view, §9.6).
     pub(crate) inert_controls: bool,
+    /// What the last layout did (frame statistics), and the measure targets visited since.
+    pub(crate) work: crate::measure::LayoutWork,
+    pub(crate) measure_visits: usize,
+    /// The document's layout count when the last measure pass ran: the next one revisits only
+    /// what layout computed since (`Document::laid_out_since`).
+    pub(crate) measure_mark: u64,
 }
 
 impl PaneView {
@@ -239,6 +249,9 @@ impl PaneView {
             paused_ms: 0.0,
             hidden_at: None,
             inert_controls: false,
+            work: Default::default(),
+            measure_visits: 0,
+            measure_mark: 0,
         }
     }
 
@@ -601,6 +614,18 @@ impl PaneView {
             }
         }
         let doc_t = surface.document();
+        // A top-level `age` that arrived restarts its timer, even unchanged (§7.13). Re-anchored
+        // here, before anything renders, so a node added in this drain anchors once, at `now`.
+        for id in &dc.ages {
+            if let Some(age) = doc_t.get(id).and_then(|n| n.prop("age"))
+                && let Some(ms) = age.as_f64()
+            {
+                cx.st.anchors.insert(
+                    crate::motion::anchor_key(id, "age"),
+                    (age.clone(), cx.now - ms),
+                );
+            }
+        }
         // 2. The root's children: regions.
         if fresh || dc.children.contains(surface.id()) {
             for name in ["main", "dock", "layer"] {
@@ -901,7 +926,35 @@ fn mount_node(
 /// Render a node's own element: classes, attributes, inline style and generated parts.
 pub(crate) fn render_node(cx: &mut Cx, m: &mut Mount, node: NodeRef) {
     let mut look = Look::default();
+    crate::highlight::enter_pass((cx.pass, &*cx.st as *const _ as usize));
     kinds::render(cx, node, m, &mut look);
+    // Highlighting past the pass's budget draws in on the clock, once in view.
+    m.hl.extend(crate::highlight::take_deferred());
+    if m.hl.is_empty() {
+        cx.st.hl_waiting.remove(node.id());
+    } else {
+        cx.st.hl_waiting.insert(node.id().to_owned(), m.el);
+        m.clock = true;
+    }
+    // Cards and tools showing a preview get their "N more lines" from the measure loop.
+    if matches!(node.kind(), "card" | "tool")
+        && look.class.split_ascii_whitespace().any(|c| c == "preview")
+    {
+        cx.st.previews.insert(node.id().to_owned(), m.el);
+    } else {
+        cx.st.previews.remove(node.id());
+    }
+    // The measure loop revisits only boxes laid out since its last pass, and a render rewrites
+    // what it set (classes, cut text): lay this node's measured box out again.
+    let id = node.id();
+    let target = if cx.st.previews.contains_key(id) || cx.st.truncs.contains_key(id) {
+        Some(m.el)
+    } else {
+        cx.st.tables.get(id).map(|t| t.grid)
+    };
+    if let Some(el) = target {
+        cx.dom.doc.relayout(el);
+    }
     apply_look(cx, m, node, look);
 }
 

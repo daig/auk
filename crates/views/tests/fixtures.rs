@@ -280,8 +280,11 @@ fn omp_session_replays_without_errors() {
     h.view.layout(&mut h.doc);
     layout_sane(&h);
     let s = &h.pane.surfaces()[0];
+    // The kinds omp 18.8.5 used in this session. (The 18.8.4 recording also had `code`, from a
+    // grep result the model happened to run; `docs-frames` covers `code`.)
     for k in [
-        "tool", "md", "diff", "code", "ansi", "editor", "status", "section", "row", "icon",
+        "tool", "md", "diff", "ansi", "editor", "status", "section", "row", "icon", "card",
+        "image", "spinner", "elapsed", "shimmer", "kbd", "meter",
     ] {
         assert!(kinds.contains(k), "omp used {k}");
     }

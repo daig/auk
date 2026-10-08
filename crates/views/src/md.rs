@@ -4,7 +4,7 @@
 //! streaming append re-parses from the last block.
 
 use crate::dom::Dom;
-use crate::highlight::{self, Highlighter};
+use crate::highlight;
 use crate::spans::{self, Span};
 use auk_ui::NodeId;
 use pulldown_cmark::{
@@ -789,26 +789,26 @@ pub(crate) fn highlight_into(
     text: &str,
 ) {
     match highlight::find(lang, path) {
+        // Plain now, highlighted in the background and drawn in when in view.
         Some(syn) => {
-            let mut h = Highlighter::new(syn);
-            h.update(text);
-            for i in 0..h.line_count() {
-                let (line, runs) = h.line(i);
+            let mut hl = highlight::later(syn, text);
+            let lines: Vec<&str> = text.split('\n').collect();
+            for (i, line) in lines.iter().enumerate() {
                 let l = dom.child(parent, "span", "ln");
-                for (tk, r) in runs {
-                    match tk {
-                        Some(tk) => {
-                            dom.child_text(l, "span", tk.class(), &line[r.clone()]);
-                        }
-                        None => {
-                            dom.text(l, &line[r.clone()]);
-                        }
-                    }
-                }
-                if i + 1 < h.line_count() {
+                let newline = i + 1 < lines.len();
+                dom.text(l, line);
+                if newline {
                     dom.text(l, "\n");
                 }
+                hl.add(highlight::DeferredLine {
+                    el: l,
+                    idx: i,
+                    text: (*line).to_owned(),
+                    em: Vec::new(),
+                    newline,
+                });
             }
+            hl.finish();
         }
         None => {
             dom.text(parent, text);

@@ -12,6 +12,7 @@ pub mod native;
 pub mod perf;
 pub mod probe;
 pub mod remote;
+pub mod screen;
 pub mod surfaces;
 pub mod viewer;
 pub mod vt;

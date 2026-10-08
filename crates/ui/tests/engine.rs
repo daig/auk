@@ -710,3 +710,158 @@ fn vw_and_vh_units_resolve_against_the_viewport_in_program_sheets() {
     let r = doc.border_box(v).unwrap();
     assert_eq!((r.x, r.w, r.h), (102.0, 500.0, 100.0), "at 1000x400");
 }
+
+/// A7: `box-shadow` parses (inset, spread, several shadows, any component order, `var()`,
+/// `color-mix()`, the `currentColor` default) and computes to px and resolved colors; `none`
+/// clears it, and malformed lists are invalid.
+#[test]
+fn box_shadow_parses_and_computes_with_vars_color_mix_and_current_color() {
+    use auk_ui::style::Shadow;
+    let mut doc = doc_with(
+        ".s { color: rgb(0, 0, 255); --c: rgb(0, 128, 0);
+              box-shadow: inset 2px 0 0 rgb(255, 0, 0), 1px 2px 3px 4px; }
+         .v { box-shadow: inset 0 0 0 1px var(--c); }
+         .m { box-shadow: color-mix(in srgb, rgb(255, 0, 0) 50%, transparent) 0.5em -1px; }
+         .n { box-shadow: none; }",
+    );
+    let root = doc.root();
+    let body = el(&mut doc, root, "body", "", None);
+    let s = el(&mut doc, body, "div", "s", None);
+    let v = el(&mut doc, s, "div", "v", None);
+    let m = el(&mut doc, s, "div", "m", None);
+    let n = el(&mut doc, s, "div", "s n", None);
+    doc.update();
+    let shadows = |id: NodeId| -> Vec<Shadow> {
+        doc.computed_style(id)
+            .unwrap()
+            .box_shadow
+            .as_deref()
+            .cloned()
+            .unwrap_or_default()
+    };
+    let rgba = |sh: &Shadow| sh.color.to_rgba8();
+    let got = shadows(s);
+    assert_eq!(got.len(), 2, "{got:?}");
+    assert!(got[0].inset);
+    assert_eq!(
+        (got[0].x, got[0].y, got[0].blur, got[0].spread),
+        (2.0, 0.0, 0.0, 0.0)
+    );
+    assert_eq!(rgba(&got[0]), RED);
+    assert!(!got[1].inset);
+    assert_eq!(
+        (got[1].x, got[1].y, got[1].blur, got[1].spread),
+        (1.0, 2.0, 3.0, 4.0)
+    );
+    assert_eq!(rgba(&got[1]), BLUE, "no color is currentColor");
+    let got = shadows(v);
+    assert_eq!(got.len(), 1);
+    assert_eq!((got[0].inset, got[0].spread), (true, 1.0));
+    assert_eq!(rgba(&got[0]), GREEN, "var() resolves (and --c inherits)");
+    let got = shadows(m);
+    assert_eq!(
+        (got[0].x, got[0].y),
+        (5.0, -1.0),
+        "em against the 10px font"
+    );
+    let [r, g, b, a] = rgba(&got[0]);
+    assert_eq!(
+        (r, g, b),
+        (255, 0, 0),
+        "color first, color-mix with transparent"
+    );
+    assert!((126..=129).contains(&a), "half alpha: {a}");
+    assert!(shadows(n).is_empty(), "none clears it");
+    assert!(doc.computed_style(n).unwrap().box_shadow.is_none());
+
+    let errors = doc.set_stylesheet(
+        "app",
+        SheetKind::Program,
+        Some("sf1"),
+        ".a { box-shadow: 1px; }\n.b { box-shadow: 1px 1px -2px red; }\n.c { box-shadow: 10% 1px; }\n.d { box-shadow: inset inset 1px 1px; }\n.e { box-shadow: 1px 1px, none; }\n.f { box-shadow: red 1px 1px blue; }\n.ok { box-shadow: 1px 1px 2px -1px red, inset 0 0 0 1px; }\n",
+    );
+    let want = [
+        "1:6: invalid value for `box-shadow` in `box-shadow: 1px`",
+        "2:6: invalid value for `box-shadow` in `box-shadow: 1px 1px -2px red`",
+        "3:6: invalid value for `box-shadow` in `box-shadow: 10% 1px`",
+        "4:6: invalid value for `box-shadow` in `box-shadow: inset inset 1px 1px`",
+        "5:6: invalid value for `box-shadow` in `box-shadow: 1px 1px, none`",
+        "6:6: invalid value for `box-shadow` in `box-shadow: red 1px 1px blue`",
+    ];
+    assert_eq!(errors, want, "{errors:#?}");
+}
+
+/// A7: `box-shadow` is paint-only (no relayout) and transitions shadow by shadow.
+#[test]
+fn box_shadow_changes_repaint_without_relayout_and_transition() {
+    let mut doc = doc_with(
+        ".t { width: 10px; height: 10px; box-shadow: 0 0 0 0 rgb(0, 0, 0);
+              transition: box-shadow 100ms linear }
+         .t.on { box-shadow: 0 0 0 10px rgb(200, 0, 0) }",
+    );
+    let root = doc.root();
+    let body = el(&mut doc, root, "body", "", None);
+    let t = el(&mut doc, body, "div", "t", None);
+    doc.set_time(0.0);
+    doc.update();
+    doc.set_attribute(t, "class", "t on");
+    doc.update();
+    assert_eq!(
+        doc.last_update_stats().laid_out,
+        0,
+        "a shadow change doesn't lay out: {:?}",
+        doc.last_update_stats()
+    );
+    doc.set_time(50.0);
+    doc.update();
+    let sh = doc
+        .computed_style(t)
+        .unwrap()
+        .box_shadow
+        .as_deref()
+        .unwrap()[0];
+    assert!((sh.spread - 5.0).abs() < 0.01, "{sh:?}");
+    assert_eq!(sh.color.to_rgba8(), [100, 0, 0, 255]);
+    doc.set_time(200.0);
+    doc.update();
+    let sh = doc
+        .computed_style(t)
+        .unwrap()
+        .box_shadow
+        .as_deref()
+        .unwrap()[0];
+    assert_eq!(sh.spread, 10.0);
+}
+
+/// A7: Tern's engine has automatic table layout only and no captions (book:10679), and no
+/// floats (book:10796): `table-layout` and `float` are unknown properties and `display:
+/// table-caption` is an invalid value, in every sheet kind.
+#[test]
+fn table_layout_table_caption_and_float_are_rejected_as_in_tern() {
+    let css = ".a { table-layout: fixed; }\n.b { display: table-caption; }\n.c { float: left; clear: both; }\n";
+    for kind in [SheetKind::Program, SheetKind::Plugin, SheetKind::BuiltIn] {
+        let mut doc = Document::new();
+        let errors = doc.set_stylesheet("x", kind, Some("sf1"), css);
+        assert_eq!(
+            errors,
+            [
+                "1:6: unknown property `table-layout` in `table-layout: fixed`",
+                "2:6: invalid value for `display` in `display: table-caption`",
+                "3:6: unknown property `float` in `float: left`",
+                "3:19: unknown property `clear` in `clear: both`",
+            ],
+            "{kind:?}"
+        );
+    }
+    // The UA sheet has no `caption` rule: a `caption` element is an inline box.
+    let mut doc = doc_with("");
+    let root = doc.root();
+    let body = el(&mut doc, root, "body", "", None);
+    let table = el(&mut doc, body, "table", "", None);
+    let caption = el(&mut doc, table, "caption", "", Some("c"));
+    doc.update();
+    assert_eq!(
+        doc.computed_style(caption).unwrap().display,
+        auk_ui::style::Display::Inline
+    );
+}

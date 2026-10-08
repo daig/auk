@@ -283,6 +283,9 @@ impl Drawer {
             pd.sync(tsp, c, now);
         }
         pd.configure(tsp, settings, scale);
+        // Headless frames are drawn to be compared: highlighting and pictures left to the
+        // background are finished here rather than drawn in on later frames.
+        pd.finish_background();
         pd
     }
 
@@ -378,7 +381,7 @@ impl Drawer {
             );
             let main_screen = !term.modes().alt_screen;
             // The flow (§6.2), following the tail: rows one cell high, blocks at their height.
-            let arranged = pd.arrange(
+            let arranged = pd.arrange_shown(
                 term,
                 tsp,
                 ch,
@@ -415,6 +418,7 @@ impl Drawer {
                     selection: None,
                     focused: Some(*pane) == focused,
                     cursor_on: true,
+                    ..GridView::default()
                 };
                 let snap = GridSnapshot::from_lines(term, &theme, &gv, first, rows);
                 let r =

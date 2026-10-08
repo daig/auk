@@ -92,21 +92,30 @@ fn reid(node: &mut Value, copy: usize) {
 /// A TSP recording (Tern's JSONL) of an omp-style transcript with `entries` entries: omp's own
 /// final entries ([`omp_entries`]) repeated in order, each copy with fresh ids, added to an inline
 /// surface's `main` region `per_frame` at a time. Entries larger than `max_entry` bytes of JSON
-/// are left out so the transcript stays within a pane's retention budget (§7.10).
-pub fn transcript_recording(entries: usize, per_frame: usize, max_entry: usize) -> String {
+/// are left out so the transcript stays within a pane's retention budget (§7.10). The frames
+/// are stamped `step_ms` apart (`t`), so `surface-play … paced` sends them at that pace; 0 stamps
+/// them all at once.
+pub fn transcript_recording(
+    entries: usize,
+    per_frame: usize,
+    max_entry: usize,
+    step_ms: u64,
+) -> String {
     let source: Vec<Value> = omp_entries()
         .into_iter()
         .filter(|e| e.to_string().len() <= max_entry)
         .collect();
-    let line = |verb: &str, body: Value| {
-        json!({"t": 0, "dir": "out", "verb": verb, "params": Map::new(), "body": body}).to_string()
+    let line = |t: u64, verb: &str, body: Value| {
+        json!({"t": t, "dir": "out", "verb": verb, "params": Map::new(), "body": body}).to_string()
     };
     let mut out = vec![
         line(
+            0,
             "q",
             json!({"q": "hello", "v": [1], "app": "omp", "features": ["edit", "undo", "send"]}),
         ),
         line(
+            0,
             "o",
             json!({"id": "tx", "mode": "inline", "title": "transcript"}),
         ),
@@ -123,6 +132,7 @@ pub fn transcript_recording(entries: usize, per_frame: usize, max_entry: usize) 
         ops.push(json!(["add", node["id"].clone(), "main", null, node]));
         if (i + 1) % per_frame == 0 || i + 1 == entries {
             out.push(line(
+                (s - 1) * step_ms,
                 "f",
                 json!({"sf": "tx", "s": s, "ops": std::mem::take(&mut ops)}),
             ));
@@ -130,6 +140,58 @@ pub fn transcript_recording(entries: usize, per_frame: usize, max_entry: usize) 
         }
     }
     out.join("\n") + "\n"
+}
+
+/// A `w`×`h` JPEG of a noisy gradient: a photo's worth of decoding work, deterministic.
+pub fn big_jpeg(w: u32, h: u32) -> Vec<u8> {
+    let mut seed = 0x2545_f491_u32;
+    let img = image::RgbImage::from_fn(w, h, |x, y| {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        let n = (seed & 0x3f) as u8;
+        image::Rgb([
+            ((x * 255 / w) as u8).wrapping_add(n),
+            ((y * 255 / h) as u8).wrapping_add(n),
+            128u8.wrapping_add(n),
+        ])
+    });
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgb8(img)
+        .write_to(&mut out, image::ImageFormat::Jpeg)
+        .expect("encode a JPEG");
+    out.into_inner()
+}
+
+/// A TSP recording (Tern's JSONL) that sends `bytes` as a blob of type `mime`, then shows it in
+/// an inline surface's `image` node `node`.
+/// Returns the recording and the blob's id.
+pub fn image_recording(bytes: &[u8], mime: &str, node: &str) -> (String, String) {
+    use base64::Engine as _;
+    let id = auk_tsp::blob::blob_id(bytes);
+    let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+    let line = |verb: &str, params: Value, body: Value| {
+        json!({"t": 0, "dir": "out", "verb": verb, "params": params, "body": body}).to_string()
+    };
+    let mut out = vec![
+        line(
+            "q",
+            json!({}),
+            json!({"q": "hello", "v": [1], "app": "perf"}),
+        ),
+        line("o", json!({}), json!({"id": "pic", "mode": "inline"})),
+    ];
+    // One record: `surface-play` chunks it under the APC limit, as the SDKs do.
+    out.push(line("b", json!({"mime": mime}), json!(b64)));
+    out.push(line(
+        "f",
+        json!({}),
+        json!({"sf": "pic", "s": 1, "ops": [
+            ["add", "main", "pic", null, {"id": "main", "k": "col"}],
+            ["add", node, "main", null, {"id": node, "k": "image", "p": {"blob": id, "alt": "A photo"}}],
+        ]}),
+    ));
+    (out.join("\n") + "\n", id)
 }
 
 /// Writes a `size`-byte text file of `cat`-style output: plain ASCII log lines, no escapes, so
@@ -259,6 +321,8 @@ pub fn permissions(probe: &Path) -> Permissions {
 #[derive(Debug)]
 pub struct Ghostty {
     pub pid: i32,
+    /// Ghostty has the screen ([`crate::screen::lock`]) while it runs; dropped after the kill.
+    _screen: crate::screen::ScreenGuard,
 }
 
 impl Ghostty {
@@ -271,6 +335,7 @@ impl Ghostty {
                 "prerequisite missing: {GHOSTTY_APP} (brew install --cask ghostty)"
             ));
         }
+        let screen = crate::screen::lock("Ghostty");
         let before = ghostty_pids();
         let status = Command::new("open")
             .args(["-na", GHOSTTY_APP, "--args"])
@@ -309,7 +374,10 @@ impl Ghostty {
             .into_iter()
             .find(|p| !before.contains(p))
             .ok_or("no new Ghostty process")?;
-        Ok(Ghostty { pid })
+        Ok(Ghostty {
+            pid,
+            _screen: screen,
+        })
     }
 }
 
