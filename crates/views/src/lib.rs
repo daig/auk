@@ -18,11 +18,17 @@
 //! through [`PaneView::click`] and friends. Build the pane's engine with [`sheet_checker`] so
 //! programs get the engine's CSS errors. [`PaneView::to_html`] serializes the projection with
 //! every sheet that applies, for laying the same page out in WebKit.
+//!
+//! Windows composite a pane through [`compose`] (the §6.2 flow: grid rows and surface blocks,
+//! following the tail, scroll anchoring) and [`surfaces`] ([`PaneSurfaces`]: the document, the
+//! blocks, docks, screen surfaces and layers, painted into a Vello scene). The app, the headless
+//! window and the web client share both.
 
 mod a11y;
 mod ansi;
 mod checker;
 mod common;
+pub mod compose;
 mod control;
 pub mod diff;
 mod dom;
@@ -40,6 +46,7 @@ pub mod palette;
 pub mod sheets;
 pub mod spans;
 mod state;
+pub mod surfaces;
 mod view;
 
 pub use a11y::AxNode;
@@ -49,6 +56,7 @@ pub use events::{Button, MenuEntry, Outcome, PointerEvent, Zoom, ZoomImage};
 pub use kinds::KINDS;
 pub use sheets::install_sheets;
 pub use state::{Preedit, Selection};
+pub use surfaces::{Arranged, PaneSurfaces, Place, SurfaceBlock};
 pub use view::PaneView;
 
 /// The regions of a surface (§7.5).

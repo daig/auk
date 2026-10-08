@@ -12,20 +12,17 @@ use std::time::Instant;
 
 use auk_mirror::PaneId;
 use auk_mirror::layout::{Node, SplitDir, Tab, Window};
-use auk_render::vello::kurbo::{Affine, Rect as KRect};
-use auk_render::vello::{Scene, peniko::Fill};
+use auk_render::vello::Scene;
 use auk_render::{
     GridRenderer, GridSnapshot, Image, OFFSCREEN_FORMAT, OffscreenTarget, RowSlot, Theme, UiLayer,
     View as GridView,
 };
 use auk_text::{FontConfig, GridFonts};
-use auk_tsp::{Changes, Mode};
-use auk_ui::{Document, NodeId, SheetKind};
-use auk_views::{PaneView, Region, ViewSettings};
+use auk_tsp::Changes;
+use auk_ui::{Document, NodeId};
+use auk_views::compose::Scroll;
+use auk_views::{PaneSurfaces, Place, Region, ViewSettings};
 use serde_json::{Value, json};
-
-/// The host's own CSS around a pane's surfaces.
-const HOST_CSS: &str = "body { margin: 0; }";
 
 /// Points between a pane's edge and its grid.
 pub const PADDING: f64 = 6.0;
@@ -176,67 +173,8 @@ fn layout_node(node: &Node, area: Rect, out: &mut Vec<(PaneId, Rect)>) {
     }
 }
 
-/// A region painted at a place: its element's top in the document (points), where that top goes
-/// (pixels), and the clip.
-type PaintOp = (f32, f64, KRect);
-
 /// One pane's surfaces document.
-struct PaneDoc {
-    doc: Document,
-    view: PaneView,
-}
-
-impl PaneDoc {
-    fn new(settings: ViewSettings, scale: f32) -> PaneDoc {
-        let mut doc = Document::new();
-        doc.set_device_scale(scale);
-        let errors = auk_views::install_sheets(&mut doc, settings.dark);
-        debug_assert!(errors.is_empty(), "built-in sheets: {errors:?}");
-        doc.set_stylesheet("host", SheetKind::BuiltIn, None, HOST_CSS);
-        let root = doc.root();
-        let body = doc.create_element("body");
-        doc.append_child(root, body);
-        let view = PaneView::new(&mut doc, settings);
-        let el = view.element();
-        doc.append_child(body, el);
-        PaneDoc { doc, view }
-    }
-
-    /// The pane container's child with this class (`auk-flow`, `auk-docks`, …).
-    fn container(&self, class: &str) -> Option<NodeId> {
-        self.doc
-            .element_children(self.view.element())
-            .into_iter()
-            .find(|&el| {
-                self.view
-                    .written()
-                    .class(el)
-                    .is_some_and(|c| c.split_whitespace().next() == Some(class))
-            })
-    }
-
-    /// Hides every container but `keep` (`""` shows them all again), for a paint pass.
-    fn only(&mut self, keep: &str) {
-        for class in ["auk-flow", "auk-docks", "auk-screen", "auk-layers"] {
-            if let Some(el) = self.container(class) {
-                let css = if keep.is_empty() || keep == class {
-                    ""
-                } else {
-                    "visibility: hidden"
-                };
-                self.doc.set_inline_style(el, css);
-            }
-        }
-        self.doc.update();
-    }
-
-    fn hidden(&self, el: NodeId) -> bool {
-        self.view
-            .written()
-            .class(el)
-            .is_some_and(|c| c.split_whitespace().any(|w| w == "sf-hidden"))
-    }
-}
+type PaneDoc = PaneSurfaces;
 
 /// What a pane needs to draw, gathered by the window under its lock.
 #[derive(Debug)]
@@ -339,16 +277,12 @@ impl Drawer {
         let pd = self
             .docs
             .entry(input.pane)
-            .or_insert_with(|| PaneDoc::new(settings.clone(), scale));
+            .or_insert_with(|| PaneSurfaces::new(settings.clone(), scale));
         let tsp = input.replica.tsp();
         for c in &input.changes {
-            pd.view.sync(&mut pd.doc, tsp, c, now);
+            pd.sync(tsp, c, now);
         }
-        if pd.view.settings() != &settings {
-            auk_views::sheets::set_theme(&mut pd.doc, settings.dark);
-            pd.view.set_settings(&mut pd.doc, tsp, settings);
-        }
-        pd.doc.set_device_scale(scale);
+        pd.configure(tsp, settings, scale);
         pd
     }
 
@@ -435,105 +369,34 @@ impl Drawer {
                 h: (rect.h - 2.0 * PADDING).max(0.0),
             };
             let pd = self.docs.get_mut(pane).expect("synced above");
-            pd.view.set_cols(&mut pd.doc, tsp, term.cols());
-            pd.view
-                .set_focused(&mut pd.doc, tsp, Some(*pane) == focused);
-            pd.doc.set_viewport(content.w as f32, content.h as f32);
-            pd.view.tick(&mut pd.doc, tsp, now);
-            pd.view.layout(&mut pd.doc);
-
+            pd.layout(
+                term,
+                tsp,
+                (content.w as f32, content.h as f32),
+                Some(*pane) == focused,
+                now,
+            );
             let main_screen = !term.modes().alt_screen;
-            // Blocks: inline and flow surfaces' main regions, at their anchor rows.
-            let mut blocks: Vec<(String, usize, NodeId, f32)> = Vec::new();
-            for sf in tsp.surfaces() {
-                if sf.mode() == Mode::Screen || !main_screen {
-                    continue;
-                }
-                let (Some(anchor), Some(el)) =
-                    (sf.anchor(), pd.view.region(sf.key(), Region::Main))
-                else {
-                    continue;
-                };
-                let (Some(line), Some(b)) = (term.anchor_line(anchor), pd.doc.border_box(el))
-                else {
-                    continue;
-                };
-                if pd.hidden(el) || b.h <= 0.0 {
-                    continue;
-                }
-                blocks.push((sf.id().to_owned(), line, el, b.h * spec.scale));
-            }
-            blocks.sort_by_key(|b| b.1);
-            let docks = pd
-                .container("auk-docks")
-                .and_then(|el| Some((el, pd.doc.border_box(el)?)))
-                .filter(|(_, b)| b.h > 0.0);
-            let screen = pd
-                .container("auk-screen")
-                .filter(|&el| !pd.hidden(el))
-                .and_then(|el| Some((el, pd.doc.border_box(el)?)));
-            let layers = pd
-                .container("auk-layers")
-                .and_then(|el| Some((el, pd.doc.border_box(el)?)));
-
-            // The flow: rows one cell high, blocks at their height, following the tail.
-            let dock_h = docks.map_or(0.0, |(_, b)| b.h * spec.scale);
-            let view_h = (content.h as f32 * spec.scale - dock_h).max(ch);
-            let lines = term.history_len() + usize::from(term.rows());
-            let height = |line: usize| blocks.iter().find(|b| b.1 == line).map_or(ch, |b| b.3);
-            // The view shows the screen from its top row, unless blocks make the content taller
-            // than the view: then it scrolls just enough to show the tail, the last line with
-            // anything on it (the cursor's, a block's or a written row). Blank rows below the
-            // tail give way first.
-            let cursor_line = term.history_len() + usize::from(term.cursor().row);
-            let written = (cursor_line + 1..lines)
-                .rev()
-                .find(|&l| {
-                    term.line(l)
-                        .is_some_and(|r| r.cells.iter().any(|c| !c.text.is_empty()))
-                })
-                .unwrap_or(cursor_line);
-            let tail = blocks
+            // The flow (§6.2), following the tail: rows one cell high, blocks at their height.
+            let arranged = pd.arrange(
+                term,
+                tsp,
+                ch,
+                content.h as f32 * spec.scale,
+                spec.scale,
+                Scroll::default(),
+            );
+            let first = arranged.composed.first;
+            let slots: Vec<RowSlot> = arranged
+                .composed
+                .slots
                 .iter()
-                .map(|b| b.1)
-                .chain([written, cursor_line])
-                .max()
-                .unwrap_or(0)
-                .min(lines.saturating_sub(1));
-            let mut tail_first = tail + 1;
-            let mut used = 0.0f32;
-            while tail_first > 0 && used + height(tail_first - 1) <= view_h + 0.01 {
-                tail_first -= 1;
-                used += height(tail_first);
-            }
-            let (mut first, mut top) = if tail_first <= term.history_len() {
-                (term.history_len(), 0.0)
-            } else {
-                (tail_first, view_h - used)
-            };
-            if first > 0 && top > 0.0 {
-                // A partial line above fills the gap.
-                first -= 1;
-                top -= height(first);
-            }
-            let mut slots = Vec::new();
-            let mut placed = Vec::new();
-            let mut y = top;
-            let mut line = first;
-            while line < lines && y < view_h {
-                let h = height(line);
-                slots.push(RowSlot { top: y, height: h });
-                if let Some(b) = blocks.iter().find(|b| b.1 == line) {
-                    placed.push((b, y));
-                }
-                y += h;
-                line += 1;
-            }
-            let uniform = placed.is_empty()
-                && slots
-                    .iter()
-                    .enumerate()
-                    .all(|(i, sl)| sl.height == ch && sl.top == i as f32 * ch);
+                .map(|sl| RowSlot {
+                    top: sl.top,
+                    height: sl.height,
+                })
+                .collect();
+            let uniform = arranged.composed.is_uniform(ch);
             let rows = slots.len().clamp(1, usize::from(u16::MAX)) as u16;
             let origin = (
                 (content.x * s).round() as f32,
@@ -546,7 +409,7 @@ impl Drawer {
                 (rect.h * s).round() as u32,
             );
 
-            if screen.is_none() {
+            if arranged.grid_shown() {
                 let gv = GridView {
                     scroll: 0,
                     selection: None,
@@ -568,72 +431,39 @@ impl Drawer {
                 grids_drawn.push((*pane, clip));
             }
 
-            // Surfaces, each painted where the flow put it. One pass per container (flow, docks,
-            // screen, layers), the others hidden, each region clipped to where it goes.
-            let content_px = KRect::new(
-                content.x * s,
-                content.y * s,
-                (content.x + content.w) * s,
-                (content.y + content.h) * s,
-            );
+            // Surfaces, each painted where the flow put it.
             let pd = self.docs.get_mut(pane).expect("synced above");
-            let mut blocks_json = Vec::new();
-            let mut flow_ops = Vec::new();
-            for (b, y) in &placed {
-                let el_top = pd.doc.border_box(b.2).map_or(0.0, |r| r.y);
-                let at = content.y * s + f64::from(*y);
-                let clip = KRect::new(
-                    content_px.x0,
-                    at.max(content_px.y0),
-                    content_px.x1,
-                    (at + f64::from(b.3)).min(content_px.y1 - f64::from(dock_h)),
-                );
-                if clip.y1 > clip.y0 {
-                    flow_ops.push((el_top, at, clip));
-                }
-                blocks_json.push(json!({
-                    "sf": b.0, "line": b.1,
-                    "top": r2(f64::from(*y) / s), "height": r2(f64::from(b.3) / s),
-                }));
-            }
-            let pane_top = pd.doc.border_box(pd.view.element()).map_or(0.0, |r| r.y);
-            let mut passes: Vec<(&str, Vec<PaintOp>)> = vec![("auk-flow", flow_ops)];
-            let mut dock_json = Value::Null;
-            if let Some((_, b)) = docks {
-                let at = content_px.y1 - f64::from(dock_h);
-                passes.push((
-                    "auk-docks",
-                    vec![(
-                        b.y,
-                        at,
-                        KRect::new(content_px.x0, at, content_px.x1, content_px.y1),
-                    )],
-                ));
-                dock_json = json!({"top": r2(at / s - content.y), "height": r2(f64::from(b.h))});
-            }
-            if let Some((_, b)) = screen {
-                passes.push(("auk-screen", vec![(b.y, content_px.y0, content_px)]));
-            }
-            if let Some((el, _)) = layers
-                && !pd.doc.children(el).is_empty()
-            {
-                // Layers keep their place in the pane container, over the pane.
-                passes.push(("auk-layers", vec![(pane_top, content_px.y0, content_px)]));
-            }
-            for (keep, ops) in passes {
-                if ops.is_empty() {
-                    continue;
-                }
-                pd.only(keep);
-                for (el_top, at, clip) in ops {
-                    scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &clip);
-                    let xf = Affine::translate((content.x * s, at - f64::from(el_top) * s))
-                        * Affine::scale(s);
-                    auk_ui::paint::paint_with_transform(&pd.doc, &mut scene, xf);
-                    scene.pop_layer();
-                }
-            }
-            pd.only("");
+            let blocks_json: Vec<Value> = arranged
+                .composed
+                .blocks
+                .iter()
+                .map(|&(i, y)| {
+                    let b = &arranged.blocks[i];
+                    json!({
+                        "sf": b.sf, "line": b.line,
+                        "top": r2(f64::from(y) / s), "height": r2(f64::from(b.height) / s),
+                    })
+                })
+                .collect();
+            let dock_json = match arranged.dock {
+                Some((_, b)) => json!({
+                    "top": r2(content.h - f64::from(arranged.dock_px) / s),
+                    "height": r2(f64::from(b.h)),
+                }),
+                None => Value::Null,
+            };
+            pd.paint(
+                &arranged,
+                &mut scene,
+                Place {
+                    x: content.x * s,
+                    y: content.y * s,
+                    w: content.w * s,
+                    h: content.h * s,
+                    scale: s,
+                },
+            );
+            let screen = arranged.screen;
             let grid_first = first;
             panes_json.push(json!({
                 "pane": pane,
@@ -727,7 +557,7 @@ impl Drawer {
             .ok_or_else(|| format!("pane {pane} hasn't been drawn"))?;
         let sel = selector.map(Simple::parse).transpose()?;
         let mut out = Vec::new();
-        walk(pd, pd.view.element(), sel.as_ref(), false, &mut out);
+        walk(pd, pd.view().element(), sel.as_ref(), false, &mut out);
         Ok(json!(out))
     }
 
@@ -738,10 +568,10 @@ impl Drawer {
             .get(&pane)
             .ok_or_else(|| format!("pane {pane} hasn't been drawn"))?;
         let sel = Simple::parse(selector)?;
-        let el = find(pd, pd.view.element(), &sel)
+        let el = find(pd, pd.view().element(), &sel)
             .ok_or_else(|| format!("nothing matches `{selector}`"))?;
         let style = pd
-            .doc
+            .doc()
             .computed_style(el)
             .ok_or("the element has no computed style")?;
         let debug = format!("{style:?}");
@@ -749,9 +579,9 @@ impl Drawer {
         for p in props {
             values.insert(p.clone(), json!(style_field(&debug, p)));
         }
-        let b = pd.doc.border_box(el).unwrap_or_default();
+        let b = pd.doc().border_box(el).unwrap_or_default();
         Ok(json!({
-            "class": pd.view.written().class(el),
+            "class": pd.view().written().class(el),
             "box": [b.x, b.y, b.w, b.h],
             "style": values,
         }))
@@ -807,7 +637,7 @@ impl Simple {
 
     fn matches(&self, pd: &PaneDoc, el: NodeId) -> bool {
         if let Some(tag) = &self.tag
-            && tag_of(&pd.doc, el) != *tag
+            && tag_of(pd.doc(), el) != *tag
         {
             return false;
         }
@@ -826,27 +656,27 @@ fn tag_of(doc: &Document, el: NodeId) -> String {
 }
 
 fn class_of(pd: &PaneDoc, el: NodeId) -> String {
-    pd.view
+    pd.view()
         .written()
         .class(el)
         .map(str::to_owned)
-        .or_else(|| pd.doc.attribute(el, "class").map(str::to_owned))
+        .or_else(|| pd.doc().attribute(el, "class").map(str::to_owned))
         .unwrap_or_default()
 }
 
 fn walk(pd: &PaneDoc, el: NodeId, sel: Option<&Simple>, inside: bool, out: &mut Vec<Value>) {
     let hit = inside || sel.is_none_or(|s| s.matches(pd, el));
     if hit {
-        let b = pd.doc.border_box(el).unwrap_or_default();
+        let b = pd.doc().border_box(el).unwrap_or_default();
         let r = |v: f32| (v * 100.0).round() / 100.0;
         out.push(json!({
-            "tag": tag_of(&pd.doc, el),
+            "tag": tag_of(pd.doc(), el),
             "class": class_of(pd, el),
-            "id": pd.doc.attribute(el, "data-id"),
+            "id": pd.doc().attribute(el, "data-id"),
             "box": [r(b.x), r(b.y), r(b.w), r(b.h)],
         }));
     }
-    for c in pd.doc.element_children(el) {
+    for c in pd.doc().element_children(el) {
         walk(pd, c, sel, hit, out);
     }
 }
@@ -855,7 +685,7 @@ fn find(pd: &PaneDoc, el: NodeId, sel: &Simple) -> Option<NodeId> {
     if sel.matches(pd, el) {
         return Some(el);
     }
-    pd.doc
+    pd.doc()
         .element_children(el)
         .into_iter()
         .find_map(|c| find(pd, c, sel))
@@ -871,10 +701,10 @@ fn boxes(pd: &PaneDoc, tsp: &auk_tsp::TspPane) -> Value {
             ("dock", Region::Dock),
             ("layer", Region::Layer),
         ] {
-            let Some(el) = pd.view.region(sf.key(), region) else {
+            let Some(el) = pd.view().region(sf.key(), region) else {
                 continue;
             };
-            let Some(origin) = pd.doc.border_box(el) else {
+            let Some(origin) = pd.doc().border_box(el) else {
                 continue;
             };
             if pd.hidden(el) {
@@ -882,12 +712,12 @@ fn boxes(pd: &PaneDoc, tsp: &auk_tsp::TspPane) -> Value {
             }
             let mut stack = vec![el];
             while let Some(e) = stack.pop() {
-                if let Some(b) = pd.doc.border_box(e) {
+                if let Some(b) = pd.doc().border_box(e) {
                     let r = |v: f32| (f64::from(v) * 100.0).round() / 100.0;
                     out.push(json!([
                         sf.id(),
                         name,
-                        tag_of(&pd.doc, e),
+                        tag_of(pd.doc(), e),
                         class_of(pd, e),
                         r(b.x - origin.x),
                         r(b.y - origin.y),
@@ -895,7 +725,7 @@ fn boxes(pd: &PaneDoc, tsp: &auk_tsp::TspPane) -> Value {
                         r(b.h),
                     ]));
                 }
-                let mut kids = pd.doc.element_children(e);
+                let mut kids = pd.doc().element_children(e);
                 kids.reverse();
                 stack.extend(kids);
             }
