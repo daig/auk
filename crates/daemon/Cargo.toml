@@ -7,7 +7,18 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+auk-mirror = { version = "0.0.0", path = "../mirror", features = ["tokio"] }
+auk-replica = { version = "0.0.0", path = "../replica" }
+auk-term = { version = "0.0.0", path = "../term" }
+bytes = "1.12.1"
+futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
+libc = "0.2.190"
+rustix = { version = "1.1.5", features = ["pty", "termios", "process", "fs", "system", "stdio"] }
+serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+shlex = "2.0.1"
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "process", "macros", "signal"] }
+tokio-util = { version = "0.7.19", features = ["codec"] }
 
 [lints]
 workspace = true

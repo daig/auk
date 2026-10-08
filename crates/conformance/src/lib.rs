@@ -3,6 +3,8 @@
 //! M0 provides the recording format and fixture validation. The TSP checklist
 //! (`research/sdk-wire.md` §10) and the SDK and omp runs build on these in M3 and M5.
 
+pub mod harness;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html><head><style>
+@font-face { font-family: Ahem; src: url(Ahem.ttf); }
+html { font: 10px/1 Ahem; }
+body { margin: 8px; }
+.a { margin: 10px 0; background: #ccc; }
+.b { margin: 20px 5px; padding: 3px; }
+.c { margin-top: 15px; margin-bottom: -5px; }
+.bord { border: 2px solid black; margin: 7px; }
+.empty { margin: 12px 0; }
+.bfc { overflow: hidden; margin: 6px 0; }
+.center { width: 200px; margin: 4px auto; height: 20px; }
+.right { width: 100px; margin-left: auto; height: 10px; }
+.pct { width: 50%; height: 12px; }
+.minmax { width: 900px; max-width: 300px; min-height: 25px; }
+.bb { box-sizing: border-box; width: 120px; padding: 10px; border: 5px solid; height: 40px; }
+.cb { width: 120px; padding: 10px; border: 5px solid; height: 40px; }
+p { margin: 1em 0; }
+h1 { font-size: 20px; }
+.lh { line-height: 18px; }
+.calc { width: calc(100% - 40px); margin: 0 calc(1em + 5px); height: 5px; }
+.em { font-size: 12px; padding: 1em 2em; margin: 0.5em; }
+.rem { margin: 1rem 0; height: 2px; }
+.vw { width: 10vw; height: 1vh; }
+</style></head>
+<body>
+<div class="a"><div class="b">first child text</div><div class="c">second</div></div>
+<div class="a"><div class="empty"></div></div>
+<div class="bord"><div class="b">bordered parent</div></div>
+<div class="bfc"><div class="b">bfc child</div></div>
+<div class="center"></div>
+<div class="right"></div>
+<div class="pct"></div>
+<div class="minmax"></div>
+<div class="bb"></div>
+<div class="cb"></div>
+<p>A paragraph with several words that should wrap across lines when the container is narrow enough to force it to break somewhere around here and keep going for a while longer.</p>
+<p class="lh">line height eighteen pixels in this paragraph with wrapping text that goes on and on and on until it wraps around twice or more times.</p>
+<h1>Heading</h1>
+<div class="calc"></div>
+<div class="em">em sized</div>
+<div class="rem"></div>
+<div class="vw"></div>
+<div><div><div class="c">deep</div></div></div>
+<div style="margin-bottom: 30px"><div style="margin-bottom: 10px">collapse bottoms</div></div>
+<div style="margin-top: 5px">after</div>
+<section><header>header</header><article><div>article body</div></article><footer>footer</footer></section>
+<ul><li>one</li><li>two</li><li>three</li></ul>
+<blockquote>quoted text</blockquote>
+<pre>pre   formatted
+  text</pre>
+<hr>
+<div style="height: 50px; display: flow-root"><div style="margin-top: 20px; height: 10px"></div></div>
+</body></html>

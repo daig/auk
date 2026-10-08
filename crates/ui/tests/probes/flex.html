@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html><head><style>
+@font-face { font-family: Ahem; src: url(Ahem.ttf); }
+html { font: 10px/1 Ahem; }
+body { margin: 8px; }
+.row { display: flex; width: 400px; margin-bottom: 6px; background: #eee; }
+.col { display: flex; flex-direction: column; width: 200px; height: 150px; margin-bottom: 6px; }
+.i { width: 50px; height: 20px; }
+.g1 { flex-grow: 1; }
+.g2 { flex-grow: 2; }
+.s0 { flex-shrink: 0; }
+.s2 { flex-shrink: 2; }
+.b100 { flex-basis: 100px; }
+.wrap { flex-wrap: wrap; }
+.gap { gap: 10px 5px; }
+.center { justify-content: center; align-items: center; height: 60px; }
+.between { justify-content: space-between; }
+.around { justify-content: space-around; }
+.evenly { justify-content: space-evenly; }
+.end { justify-content: flex-end; align-items: flex-end; height: 50px; }
+.stretch { height: 70px; }
+.base { align-items: baseline; }
+.rev { flex-direction: row-reverse; }
+.colrev { flex-direction: column-reverse; }
+.auto { margin-left: auto; }
+.self { align-self: center; }
+.order { order: -1; }
+.content { align-content: space-between; height: 100px; }
+.text { padding: 3px; border: 1px solid; }
+.big { font-size: 20px; }
+.min0 { min-width: 0; }
+.flex1 { flex: 1; }
+.flexnone { flex: none; }
+.pct { width: 25%; }
+</style></head>
+<body>
+<div class="row"><div class="i"></div><div class="i g1"></div><div class="i g2"></div></div>
+<div class="row"><div class="i b100 s0" style="width:200px"></div><div class="i" style="width:200px"></div><div class="i s2" style="width:200px"></div></div>
+<div class="row wrap"><div class="i" style="width:150px"></div><div class="i" style="width:150px"></div><div class="i" style="width:150px"></div></div>
+<div class="row wrap gap"><div class="i" style="width:150px"></div><div class="i" style="width:150px"></div><div class="i" style="width:150px"></div></div>
+<div class="row center"><div class="i"></div><div class="i" style="height:40px"></div></div>
+<div class="row between"><div class="i"></div><div class="i"></div><div class="i"></div></div>
+<div class="row around"><div class="i"></div><div class="i"></div></div>
+<div class="row evenly"><div class="i"></div><div class="i"></div></div>
+<div class="row end"><div class="i"></div><div class="i" style="height:30px"></div></div>
+<div class="row stretch"><div style="width:30px"></div><div class="i"></div></div>
+<div class="row base"><div class="text">small</div><div class="text big">big</div><div class="text" style="padding-top:15px">pad</div></div>
+<div class="row rev"><div class="i"></div><div class="i"></div></div>
+<div class="row"><div class="i"></div><div class="i auto"></div></div>
+<div class="row" style="height:40px"><div class="i"></div><div class="i self"></div></div>
+<div class="row"><div class="i"></div><div class="i order" style="width:20px"></div></div>
+<div class="row wrap content"><div class="i" style="width:300px"></div><div class="i" style="width:300px"></div></div>
+<div class="col"><div class="i"></div><div class="i g1"></div><div class="i"></div></div>
+<div class="col colrev"><div class="i"></div><div class="i"></div></div>
+<div class="col" style="align-items:center; justify-content:center"><div class="i"></div><div class="text">text item</div></div>
+<div class="row"><div class="text">text items shrink and wrap when there is not enough room</div><div class="text">second text item also long enough to wrap</div></div>
+<div class="row"><div class="flex1 text">a</div><div class="flex1 text">bbbbbbbbbb</div><div class="flexnone text">c</div></div>
+<div class="row"><div class="pct" style="height:5px"></div><div class="pct" style="height:5px"></div></div>
+<div class="row">loose text <span>span item</span><div class="i"></div></div>
+<div style="display:inline-flex; gap: 4px"><div class="i"></div><div class="i"></div></div>
+<div class="row" style="flex-direction:column; height:auto"><div class="text">col auto</div><div class="text">two</div></div>
+<div class="row"><div style="flex: 1 1 0; min-width: 0" class="text">long long long long long long long long long long long</div><div class="i"></div></div>
+</body></html>

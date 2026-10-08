@@ -1,14 +1,17 @@
 //! The control endpoint (spec §11.3): one command per line in, one JSON line out.
 //!
 //! Replies take Tern's shape: `{"ok":true}`, `{"ok":true,"value":…}` or
-//! `{"ok":false,"error":"…"}`. M0 knows two commands, `ping` and `version`. The headless
-//! harness and the scenario commands arrive with the daemon in M1.
+//! `{"ok":false,"error":"…"}`. [`handle`] answers the commands every endpoint shares, `ping`
+//! and `version`. The daemon's commands are in `commands.rs`; a headless window serves its own
+//! set through [`serve_listener_with`]. The daemon serves on tokio ([`serve_async`]); blocking
+//! callers use the thread-per-client server.
 
 use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::fs::FileTypeExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
+use std::sync::Arc;
 use std::thread;
 
 use serde_json::{Value, json};
@@ -24,11 +27,29 @@ pub fn handle(line: &str) -> Value {
     }
 }
 
+/// A successful reply carrying `value`.
+pub fn ok(value: Value) -> Value {
+    json!({"ok": true, "value": value})
+}
+
+/// A failed reply.
+pub fn error(message: impl std::fmt::Display) -> Value {
+    json!({"ok": false, "error": message.to_string()})
+}
+
+/// A command handler for the blocking server.
+pub type Handler = Arc<dyn Fn(&str) -> Value + Send + Sync>;
+
 /// Serves one client until it disconnects.
 pub fn serve_client(stream: UnixStream) -> io::Result<()> {
+    serve_client_with(stream, &(Arc::new(handle) as Handler))
+}
+
+/// Serves one client with `handler` until it disconnects.
+pub fn serve_client_with(stream: UnixStream, handler: &Handler) -> io::Result<()> {
     let mut writer = stream.try_clone()?;
     for line in BufReader::new(stream).lines() {
-        let reply = handle(line?.trim());
+        let reply = handler(line?.trim());
         writeln!(writer, "{reply}")?;
     }
     Ok(())
@@ -52,15 +73,45 @@ pub fn bind(path: &Path) -> io::Result<UnixListener> {
 
 /// Serves clients on `listener`, each on its own thread, until accepting fails.
 pub fn serve_listener(listener: UnixListener) -> io::Result<()> {
+    serve_listener_with(listener, Arc::new(handle))
+}
+
+/// Serves clients on `listener` with `handler`, each on its own thread, until accepting fails.
+pub fn serve_listener_with(listener: UnixListener, handler: Handler) -> io::Result<()> {
     for stream in listener.incoming() {
         let stream = stream?;
+        let handler = handler.clone();
         thread::spawn(move || {
-            if let Err(err) = serve_client(stream) {
+            if let Err(err) = serve_client_with(stream, &handler) {
                 eprintln!("control client: {err}");
             }
         });
     }
     Ok(())
+}
+
+/// Serves clients on a tokio listener: each line goes to `handler`, and its reply goes back as
+/// one JSON line. Commands from one client run in order.
+pub async fn serve_async<F, Fut>(listener: tokio::net::UnixListener, handler: F)
+where
+    F: Fn(String) -> Fut + Clone + Send + Sync + 'static,
+    Fut: Future<Output = Value> + Send,
+{
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+    while let Ok((stream, _)) = listener.accept().await {
+        let handler = handler.clone();
+        tokio::spawn(async move {
+            let (read, mut write) = stream.into_split();
+            let mut lines = tokio::io::BufReader::new(read).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let mut reply = handler(line.trim().to_owned()).await.to_string();
+                reply.push('\n');
+                if write.write_all(reply.as_bytes()).await.is_err() {
+                    break;
+                }
+            }
+        });
+    }
 }
 
 /// Listens on `path` and serves clients until accepting fails.
@@ -77,7 +128,10 @@ mod tests {
     fn answers_known_and_unknown_commands() {
         assert_eq!(handle("ping"), json!({"ok": true, "value": "pong"}));
         assert_eq!(handle(""), json!({"ok": false, "error": "empty command"}));
-        assert_eq!(handle("nope 1"), json!({"ok": false, "error": "unknown command `nope`"}));
+        assert_eq!(
+            handle("nope 1"),
+            json!({"ok": false, "error": "unknown command `nope`"})
+        );
     }
 
     #[test]

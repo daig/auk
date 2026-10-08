@@ -6,6 +6,13 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+auk-term = { path = "../term" }
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+auk-platform-macos = { path = "../platform-macos" }
+auk-render = { path = "../render" }
+auk-text = { path = "../text" }
+libc = "0.2"
 
 [lints]
 workspace = true

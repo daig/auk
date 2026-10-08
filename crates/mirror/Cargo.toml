@@ -1,11 +1,26 @@
 [package]
 name = "auk-mirror"
+description = "The daemon-to-client replication protocol: frames, messages, handshake and codecs (spec §15.6)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[features]
+# The async codec for tokio users (the daemon). The browser client builds without it.
+tokio = ["dep:tokio", "dep:tokio-util", "dep:bytes"]
+
 [dependencies]
+auk-replica = { path = "../replica" }
+bytes = { version = "1.12.1", optional = true }
+serde = { workspace = true }
+serde_json.workspace = true
+tokio = { version = "1.53.2", default-features = false, optional = true }
+tokio-util = { version = "0.7.19", features = ["codec"], optional = true }
+
+[dev-dependencies]
+tokio = { version = "1.53.2", features = ["rt", "macros", "io-util", "net"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 
 [lints]
 workspace = true

@@ -13,7 +13,7 @@ source scripts/env.sh
 SUITES="persistence terminal replication tsp sdk_examples omp layout perf plugins app cli web remote"
 # Checklist items (research/sdk-wire.md §10) that can't apply to Auk. F2 is Windows ConPTY only (D1).
 NOT_APPLICABLE="F2"
-TOOLS="cargo-nextest node go wasmtime limactl omp htop tmux python3 swiftc"
+TOOLS="cargo-nextest node bun go wasmtime limactl omp htop tmux python3 swiftc"
 
 out=target/verify
 mkdir -p "$out"

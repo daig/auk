@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html><head><style>
+@font-face { font-family: Ahem; src: url(Ahem.ttf); }
+html { font: 10px/1 Ahem; }
+body { margin: 8px; }
+::-webkit-scrollbar { display: none; }
+.box { width: 200px; height: 60px; margin-bottom: 10px; border: 2px solid; padding: 4px; }
+.scroll { overflow: scroll; }
+.auto { overflow: auto; }
+.hidden { overflow: hidden; }
+.clipx { overflow-x: hidden; overflow-y: visible; }
+.item { height: 30px; margin: 5px 0; }
+.wide { width: 400px; height: 10px; }
+.flexcol { display: flex; flex-direction: column; height: 80px; overflow: auto; width: 150px; }
+.flexcol > div { flex-shrink: 0; height: 30px; }
+</style></head>
+<body>
+<div class="box scroll"><div class="item"></div><div class="item"></div><div class="item"></div></div>
+<div class="box auto"><div class="wide"></div><div class="item">text inside a scroll box that wraps over lines</div></div>
+<div class="box hidden"><div class="item"></div><div class="item"></div><div class="item"></div></div>
+<div class="box clipx"><div class="wide"></div></div>
+<div class="flexcol"><div></div><div></div><div></div><div></div></div>
+<div class="box hidden" style="height:auto"><div class="item" style="margin-top:20px"></div></div>
+<div class="box scroll" style="height:auto; max-height: 50px"><div class="item"></div><div class="item"></div></div>
+</body></html>

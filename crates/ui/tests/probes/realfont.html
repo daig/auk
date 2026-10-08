@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html><head><style>
+body { margin: 8px; }
+.mono { font: 13px Menlo, monospace; }
+.sys { font: 13px system-ui; }
+.helv { font: 14px Helvetica; }
+.geo { font: 15px Georgia; }
+div { margin-bottom: 4px; }
+.w300 { width: 300px; }
+.card { border: 1px solid #ccc; border-radius: 8px; padding: 8px 12px; width: 360px; }
+.row { display: flex; gap: 8px; align-items: baseline; }
+.badge { display: inline-block; padding: 1px 6px; border-radius: 6px; font-size: 11px; }
+table { border-collapse: separate; }
+td { padding: 2px 8px; }
+</style></head>
+<body>
+<div class="mono w300">Monospace text that wraps across a few lines in a 300px box so we can compare.</div>
+<div class="sys w300">System UI text that wraps across a few lines in a 300px box so we can compare.</div>
+<div class="helv">Helvetica line with <span style="font-size: 20px">bigger</span> text.</div>
+<div class="geo w300">Georgia serif text, also wrapping over a couple of lines here.</div>
+<div class="card sys"><div class="row"><b>Title</b><span class="badge">ok</span><span style="margin-left:auto">12:30</span></div><p style="margin:4px 0">Body text inside a card with a paragraph that wraps over lines.</p></div>
+<div class="mono"><table><tr><td>name</td><td>size</td></tr><tr><td>Cargo.toml</td><td>1.2 KB</td></tr></table></div>
+<div class="sys" style="line-height:1.5">Line height one point five in the system font.</div>
+</body></html>

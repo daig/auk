@@ -1,11 +1,19 @@
 [package]
 name = "auk-cli"
+description = "The auk CLI verbs, the control-endpoint client and the headless window (spec §11)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+auk-daemon = { version = "0.0.0", path = "../daemon" }
+auk-mirror = { version = "0.0.0", path = "../mirror" }
+auk-replica = { version = "0.0.0", path = "../replica" }
+auk-term = { version = "0.0.0", path = "../term" }
+clap = { version = "4.6.7", features = ["derive"] }
+serde_json.workspace = true
+shlex = "2.0.1"
 
 [lints]
 workspace = true

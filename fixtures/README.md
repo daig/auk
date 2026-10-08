@@ -19,3 +19,7 @@ Re-record with the commands in each `.meta.json` (`argv`, `cwd`, `env`). Recordi
 ## `scenarios/`
 
 Step lists for `tools/tsp_record.py --scenario` (see the tool's docstring).
+
+## Fonts
+
+`fonts/Ahem.ttf` is the public-domain Ahem test font from web-platform-tests (`fonts/Ahem.ttf`), fetched 2026-10-08. The layout suite sets its probe pages in it so text metrics are exact in both WebKit and Auk.

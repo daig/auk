@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html><head><style>
+@font-face { font-family: Ahem; src: url(Ahem.ttf); }
+html { font: 10px Ahem; }
+body { margin: 8px; }
+div { margin-bottom: 4px; }
+.w200 { width: 200px; }
+.pad { padding: 2px 5px; border: 1px solid; margin: 0 3px; }
+.big { font-size: 20px; }
+.small { font-size: 6px; }
+.lh2 { line-height: 2; }
+.lh30 { line-height: 30px; }
+.ib { display: inline-block; width: 30px; height: 20px; background: #ccc; }
+.ibt { display: inline-block; padding: 3px; border: 2px solid; }
+.ibm { display: inline-block; width: 20px; height: 20px; margin: 4px 6px; }
+.mid { vertical-align: middle; }
+.top { vertical-align: top; }
+.bot { vertical-align: bottom; }
+.sub { vertical-align: sub; }
+.sup { vertical-align: super; }
+.tt { vertical-align: text-top; }
+.tb { vertical-align: text-bottom; }
+.v5 { vertical-align: 5px; }
+.pre { white-space: pre; }
+.nowrap { white-space: nowrap; }
+.prewrap { white-space: pre-wrap; }
+.preline { white-space: pre-line; }
+.center { text-align: center; }
+.right { text-align: right; }
+.ls { letter-spacing: 2px; }
+.ba { word-break: break-all; }
+.any { overflow-wrap: anywhere; }
+.ibflex { display: inline-flex; width: 40px; height: 15px; }
+.ibov { display: inline-block; overflow: hidden; height: 25px; width: 30px; }
+</style></head>
+<body>
+<div class="w200">The quick brown fox jumps over the lazy dog and keeps running far away.</div>
+<div class="w200">Text with <span class="pad">padded span</span> in the middle of a long line that wraps.</div>
+<div>Mixed <span class="big">big</span> and <span class="small">small</span> sizes.</div>
+<div class="lh2">Line height two <span class="big">big</span> text.</div>
+<div class="lh30">Line height thirty <span class="small">small</span>.</div>
+<div>Box <span class="ib"></span> after.</div>
+<div>Box <span class="ibt">inline block text</span> after.</div>
+<div>Margins <span class="ibm"></span><span class="ibm"></span> end.</div>
+<div>Align <span class="ib mid"></span> <span class="ib top"></span> <span class="ib bot"></span> x</div>
+<div class="big">Sub <span class="sub small">sub</span> sup <span class="sup small">sup</span> v <span class="v5 small">v</span></div>
+<div class="big">Text <span class="tt small">tt</span> and <span class="tb small">tb</span></div>
+<div class="pre">pre  formatted
+   lines   here</div>
+<div class="nowrap w200">no wrap text that is longer than the container width surely</div>
+<div class="prewrap w200">pre wrap   keeps    spaces and wraps when the line is too long</div>
+<div class="preline w200">pre line   collapses
+spaces but keeps
+newlines</div>
+<div class="center w200">centered text that wraps onto a second line</div>
+<div class="right w200">right aligned <span>text</span></div>
+<div class="ls">spaced letters</div>
+<div class="ba w200">breakallwordsthatareverylongwithoutanyspacesinsideatall</div>
+<div class="any w200">anywherewordsthatareverylongwithoutanyspacesinsideatall</div>
+<div>Flex <span class="ibflex"></span> inline.</div>
+<div>Over <span class="ibov">a b c d e f</span> flow.</div>
+<div><span>a</span><span> b </span> <span>c</span></div>
+<div class="w200"><span><span class="pad">nested <i>italic</i> spans</span> wrap across the line boundary somewhere</span></div>
+<div><span class="ibt"><span class="ibt">nested ib</span></span> x</div>
+<div class="lh2"><span class="ib"></span></div>
+<div style="font-size: 0"><span class="ib"></span></div>
+</body></html>

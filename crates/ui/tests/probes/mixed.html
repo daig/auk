@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html><head><style>
+@font-face { font-family: Ahem; src: url(Ahem.ttf); }
+html { font: 10px/1 Ahem; }
+body { margin: 8px; }
+.contents { display: contents; }
+.none { display: none; }
+.fit { width: fit-content; border: 1px solid; }
+.minc { width: min-content; border: 1px solid; }
+.maxc { width: max-content; border: 1px solid; }
+.ar { width: 100px; aspect-ratio: 2 / 1; }
+.mx { max-width: 150px; margin: 0 auto; }
+.mh { min-height: 30px; }
+.xh { max-height: 15px; overflow: hidden; }
+.neg { margin-top: -5px; }
+.m20 { margin: 20px 0; }
+.ib { display: inline-block; vertical-align: top; width: 60px; }
+.ibb { display: inline-block; width: 70px; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; width: 300px; }
+.tbl { display: grid; grid-template-columns: repeat(3, auto); width: 400px; }
+.tbl > .r { display: contents; }
+.tbl .c { padding: 2px 4px; border-bottom: 1px solid; }
+.col { display: flex; flex-direction: column; gap: 8px; width: 300px; }
+.card { border: 1px solid; border-radius: 6px; padding: 4px 8px; }
+.row { display: flex; gap: 6px; align-items: center; }
+.grow { flex: 1; min-width: 0; }
+.badge { display: inline-block; padding: 0 4px; border: 1px solid; font-size: 8px; line-height: 12px; }
+.clamp { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; width: 100px; }
+.colwrap { display: flex; flex-flow: column wrap; height: 50px; width: 200px; }
+.colwrap > div { width: 40px; height: 20px; }
+.basis { flex-basis: content; }
+.abs { position: absolute; top: 5px; right: 5px; width: 10px; height: 10px; }
+.rel { position: relative; }
+.upper { text-transform: uppercase; }
+.lhsmall { line-height: 0.5; }
+.marker li { list-style: none; }
+ol li { margin-left: 5px; }
+</style></head>
+<body>
+<div><span class="contents"><div>inside contents</div></span><div class="none">hidden</div><div>after</div></div>
+<div class="fit">fit content</div>
+<div class="minc">min content words</div>
+<div class="maxc">max content words here</div>
+<div class="ar"></div>
+<div class="mx">max width centered text that wraps</div>
+<div class="mh">min</div>
+<div class="xh">clipped tall text that wraps on many lines within the narrow box of fifteen px height</div>
+<div class="m20"><div class="m20"><div class="neg m20">nested</div></div></div>
+<div><div class="ib">top aligned block with text</div><div class="ib" style="height:30px">b</div><div class="ibb">baseline block<div>last line</div></div>x</div>
+<div><span class="ibb" style="height:20px"></span><span class="ibb"></span>after empty</div>
+<div class="kv"><div>key</div><div>value text</div><div>longer key</div><div>v</div></div>
+<div class="tbl"><div class="r"><div class="c">a</div><div class="c">bb</div><div class="c">ccc</div></div><div class="r"><div class="c">dddd</div><div class="c">e</div><div class="c">f</div></div></div>
+<div class="col"><div class="card"><div class="row"><span class="badge">tag</span><span class="grow">title text that is long and wraps maybe</span><span>12</span></div><div>body</div></div><div class="card">second</div></div>
+<div class="clamp">one two three four five six seven eight nine ten</div>
+<div class="colwrap"><div></div><div></div><div></div><div></div></div>
+<div class="row" style="width:300px"><div class="basis">content basis</div><div class="grow">grow</div></div>
+<div class="row rel" style="width:200px; height: 30px"><div>a</div><div class="abs"></div><div>b</div></div>
+<div class="upper">upper case</div>
+<div class="lhsmall">small line height text <span style="font-size:20px">big</span></div>
+<ul class="marker"><li>no marker</li><li>two</li></ul>
+<ol><li>first</li><li>second</li></ol>
+<div>text <span style="display:inline-block; width: 40px; height: 40px; vertical-align: middle"></span> middle</div>
+<div style="width: 150px"><span class="ibb">a</span> <span class="ibb">b</span> <span class="ibb">c</span></div>
+<div style="text-align: justify; width: 120px">justified text across lines here</div>
+<div style="padding-left: 10px; text-indent: 0">indent</div>
+</body></html>

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html><head><style>
+@font-face { font-family: Ahem; src: url(Ahem.ttf); }
+html { font: 10px/1 Ahem; }
+body { margin: 8px; }
+.cb { position: relative; width: 300px; height: 100px; margin: 10px; padding: 5px; border: 3px solid; }
+.a { position: absolute; width: 40px; height: 20px; }
+.tl { top: 0; left: 0; }
+.br { bottom: 4px; right: 6px; }
+.stretch { top: 10px; bottom: 10px; left: 20px; right: 20px; width: auto; height: auto; }
+.pct { top: 50%; left: 25%; width: 10%; height: 10%; }
+.rel { position: relative; top: 5px; left: 10px; width: 50px; height: 10px; }
+.relneg { position: relative; bottom: 5px; right: 10px; width: 50px; height: 10px; }
+.text { position: absolute; top: 30px; left: 30px; }
+.mar { position: absolute; top: 0; left: 0; margin: 7px; width: 20px; height: 20px; }
+.deep { position: absolute; top: 2px; right: 2px; width: 10px; height: 10px; }
+.inner { margin: 20px; padding: 4px; }
+.z { z-index: 5; }
+.sticky { position: sticky; top: 0; height: 10px; }
+.shrink { position: absolute; top: 60px; left: 100px; padding: 2px; }
+</style></head>
+<body>
+<div class="cb"><div class="a tl"></div><div class="a br"></div></div>
+<div class="cb"><div class="a stretch"></div></div>
+<div class="cb"><div class="a pct"></div></div>
+<div class="cb"><div class="rel"></div><div class="relneg"></div><div class="rel">text</div></div>
+<div class="cb"><div class="text">abs text</div><div class="mar"></div></div>
+<div class="cb"><div class="inner"><div class="inner"><div class="deep"></div></div></div></div>
+<div class="cb">inline text <span class="a tl z"></span> more text <span class="shrink">shrink to fit</span></div>
+<div class="cb"><div class="sticky"></div><div class="a" style="top:auto; left: 50px; bottom: 0"></div></div>
+<div class="cb" style="height:auto"><div style="height:30px"></div><div class="inner" style="position:relative; left: 3px"><div class="a" style="right:0; top: 0"></div></div></div>
+</body></html>

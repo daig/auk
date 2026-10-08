@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html><head><style>
+@font-face { font-family: Ahem; src: url(Ahem.ttf); }
+html { font: 10px/1 Ahem; }
+body { margin: 8px; }
+.z2 { zoom: 2; }
+.z15 { zoom: 150%; }
+.box { width: 50px; height: 10px; margin: 5px; border: 1px solid; padding: 2px; }
+.flex { display: flex; gap: 4px; }
+.flex > div { width: 20px; height: 8px; }
+</style></head>
+<body>
+<div class="z2"><div class="box"></div><span>zoomed text</span><div class="flex"><div></div><div></div></div></div>
+<div class="z15"><div class="box"></div><div style="font-size: 12px">twelve px <span style="font-size: 1em">em</span></div><div style="width: 50%; height: 4px"></div></div>
+<div class="z2"><div class="z15"><div class="box"></div></div></div>
+<div class="box">unzoomed</div>
+</body></html>

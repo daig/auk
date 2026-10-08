@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html><head><style>
+@font-face { font-family: Ahem; src: url(Ahem.ttf); }
+html { font: 10px/1 Ahem; }
+body { margin: 8px; }
+.g { display: grid; width: 400px; margin-bottom: 6px; }
+.g > div { min-height: 10px; }
+.fr { grid-template-columns: 1fr 2fr 1fr; }
+.fixed { grid-template-columns: 100px auto 50px; }
+.minmax { grid-template-columns: minmax(100px, 1fr) minmax(50px, 200px); }
+.repeat { grid-template-columns: repeat(4, 1fr); gap: 5px 10px; }
+.rows { grid-template-rows: 30px auto 1fr; height: 120px; grid-template-columns: 1fr 1fr; }
+.areas { grid-template-areas: "head head" "side main" "foot foot"; grid-template-columns: 80px 1fr; grid-template-rows: 20px 40px 20px; }
+.areas .h { grid-area: head; } .areas .s { grid-area: side; } .areas .m { grid-area: main; } .areas .f { grid-area: foot; }
+.span { grid-template-columns: repeat(3, 100px); }
+.s2 { grid-column: span 2; }
+.r2 { grid-row: span 2; }
+.place { grid-column: 2 / 4; grid-row: 1; }
+.neg { grid-column: 1 / -1; }
+.auto { grid-template-columns: auto auto; justify-content: start; }
+.text { padding: 2px; border: 1px solid; }
+.align { grid-template-columns: 100px 100px; grid-template-rows: 60px; align-items: center; justify-items: center; }
+.align > div { width: 30px; height: 20px; }
+.self { align-self: end; justify-self: end; }
+.flow { grid-template-columns: repeat(3, 50px); grid-auto-flow: column; grid-template-rows: 20px 20px; }
+.autorows { grid-template-columns: 1fr 1fr; grid-auto-rows: 25px; }
+.dense { grid-template-columns: repeat(3, 60px); grid-auto-flow: row dense; }
+.mc { grid-template-columns: min-content max-content 1fr; }
+.fit { grid-template-columns: fit-content(80px) 1fr; }
+.pct { grid-template-columns: 25% 75%; }
+.named { grid-template-columns: [a] 50px [b] 100px [c] 1fr [d]; }
+.named .x { grid-column: b / d; }
+</style></head>
+<body>
+<div class="g fr"><div></div><div></div><div></div><div></div></div>
+<div class="g fixed"><div></div><div class="text">auto text</div><div></div></div>
+<div class="g minmax"><div></div><div></div></div>
+<div class="g repeat"><div></div><div></div><div></div><div></div><div></div><div></div></div>
+<div class="g rows"><div></div><div class="text">auto row</div><div></div><div></div><div></div><div></div></div>
+<div class="g areas"><div class="h"></div><div class="s"></div><div class="m"></div><div class="f"></div></div>
+<div class="g span"><div class="s2"></div><div class="r2"></div><div></div><div></div><div class="place"></div></div>
+<div class="g span"><div class="neg"></div><div></div></div>
+<div class="g auto"><div class="text">one</div><div class="text">two two</div></div>
+<div class="g align"><div></div><div class="self"></div></div>
+<div class="g flow"><div></div><div></div><div></div><div></div><div></div></div>
+<div class="g autorows"><div></div><div></div><div class="text">auto rows with text that wraps</div></div>
+<div class="g dense"><div class="s2"></div><div class="s2"></div><div></div></div>
+<div class="g mc"><div class="text">min content words</div><div class="text">max content</div><div></div></div>
+<div class="g fit"><div class="text">fit content text that is long</div><div></div></div>
+<div class="g pct"><div></div><div></div></div>
+<div class="g named"><div class="x"></div><div></div></div>
+<div class="g fr" style="gap: 1em">text run<div></div><div></div></div>
+</body></html>
