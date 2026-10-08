@@ -9,15 +9,14 @@
 //! Order: the alternate screen's cells, saved cursor and kitty stack (entered with mode 47,
 //! which neither clears nor saves); the main screen's scrollback and rows, streamed so that rows
 //! scroll into the scrollback; its saved cursor and kitty stack; tab stops, titles, colors and
-//! modes; the cursors; the REP character; and last, the bytes of any sequence the parser is in
-//! the middle of.
+//! modes; the cursors; and the REP character. The bytes of any sequence the parser is in the
+//! middle of come last, after anything the caller appends (see `Terminal::snapshot_parser`).
 
 use std::fmt::Write as _;
 
 use unicode_width::UnicodeWidthChar;
 
 use crate::core::{Core, MouseEncoding, default_tabs, mode};
-use crate::parser::Parser;
 use crate::screen::{Charset, CursorState, Pen, Screen};
 use crate::{Cell, Color, CursorShape, Flags, MouseMode, Row};
 
@@ -240,7 +239,7 @@ fn screen_is_blank(s: &Screen) -> bool {
         .all(|r| !r.wrapped && r.anchor.is_none() && r.cells.iter().all(|c| *c == Cell::default()))
 }
 
-pub(crate) fn snapshot(core: &Core, parser: &Parser) -> Vec<u8> {
+pub(crate) fn snapshot(core: &Core) -> Vec<u8> {
     let mut w = Writer {
         core,
         out: Vec::new(),
@@ -395,6 +394,5 @@ pub(crate) fn snapshot(core: &Core, parser: &Parser) -> Vec<u8> {
         None => w.osc("6464;rep"),
     }
 
-    parser.replay_bytes(&mut w.out);
     w.out
 }

@@ -63,9 +63,11 @@ pub enum Color {
 pub enum Mark {
     PromptStart,
     PromptEnd,
-    /// `C`, with kitty's `cmdline_url` decoded when present.
+    /// `C`, with kitty's `cmdline_url` decoded when present, and the line as typed
+    /// (`typed_url`, Auk's zsh integration) when the shell reports it too.
     CommandStart {
         cmdline: Option<String>,
+        typed: Option<String>,
     },
     CommandEnd {
         status: Option<i32>,
@@ -503,7 +505,23 @@ impl Terminal {
     /// written with Auk's private `OSC 6464 ; anchor ; <key> ST`; a few other facts plain VT
     /// can't set use other `OSC 6464` sequences.
     pub fn snapshot(&self) -> Vec<u8> {
-        snapshot::snapshot(&self.core, &self.parser)
+        let mut out = self.snapshot_state();
+        self.snapshot_parser(&mut out);
+        out
+    }
+
+    /// The snapshot's first part: everything but the sequence the parser is in the middle of.
+    /// It leaves a fresh terminal's parser in the ground state, so a caller can append its own
+    /// sequences (a replica's OSC and TSP state) before [`snapshot_parser`](Self::snapshot_parser).
+    pub fn snapshot_state(&self) -> Vec<u8> {
+        snapshot::snapshot(&self.core)
+    }
+
+    /// The snapshot's last part: bytes that bring a parser in the ground state into this one's
+    /// state (a half-parsed escape sequence or OSC, DCS or APC string, a partial UTF-8
+    /// character). Nothing may follow them in a snapshot; the live stream continues after them.
+    pub fn snapshot_parser(&self, out: &mut Vec<u8>) {
+        self.parser.replay_bytes(out);
     }
 }
 

@@ -2,7 +2,8 @@
 //! that rebuilds the engine's replicated state.
 //!
 //! Order: the hello; each surface, closed ones first, as a synthetic `o` (with the reserved
-//! parameters `key`, `buf` and `seeded`); its `t` and `s` sheets; one frame with the last `s` that
+//! parameters `key`, `buf`, `seeded` and `at`, its place in pane order, restored at the end of
+//! the replay); its `t` and `s` sheets; one frame with the last `s` that
 //! adds the whole document, then `settle`s, `focus` and `suspend`; and `x keep:true` for closed
 //! surfaces. A chunk sequence being joined is replayed last, so the replica keeps joining it.
 //!
@@ -59,10 +60,12 @@ impl TspPane {
         };
         w.json("q", &[("seeded", "1")], &self.seed_hello());
 
-        let closed = self.surfaces.iter().filter(|s| s.state == State::Closed);
-        let live = self.surfaces.iter().filter(|s| s.state == State::Live);
-        for s in closed.chain(live) {
-            self.write_surface(&mut w, s, rewrite);
+        // Closed surfaces first (§15.3); `at` restores pane order at the end of the replay.
+        let indexed = self.surfaces.iter().enumerate();
+        let closed = indexed.clone().filter(|(_, s)| s.state == State::Closed);
+        let live = indexed.filter(|(_, s)| s.state == State::Live);
+        for (at, s) in closed.chain(live) {
+            self.write_surface(&mut w, s, at, rewrite);
         }
 
         if let Some(seq) = self.joiner.pending() {
@@ -117,14 +120,16 @@ impl TspPane {
         body
     }
 
-    fn write_surface(&self, w: &mut Writer, s: &Surface, rewrite: &mut Rewrite<'_>) {
+    fn write_surface(&self, w: &mut Writer, s: &Surface, at: usize, rewrite: &mut Rewrite<'_>) {
         let key = s.anchor.map(|k| k.0.to_string());
+        let at = at.to_string();
         let mut params: Vec<(&str, &str)> = Vec::new();
         if let Some(key) = &key {
             params.push(("key", key));
         }
         params.push(("buf", s.buffer.as_str()));
         params.push(("seeded", "1"));
+        params.push(("at", &at));
         let mut open = json!({"id": s.id, "mode": s.mode.as_str()});
         if let Some(title) = &s.title {
             open["title"] = title.as_str().into();

@@ -28,11 +28,14 @@ use sha2::{Digest, Sha256};
 
 pub use auk_term::Event;
 
+mod lens;
+pub use lens::{ANCHOR_BASE, LensBlock, LensNote, LensSnapshot, SF_PREFIX, claim_catalog};
+
 /// The parsing behavior every replica of a host must share (§15.2). Clients whose parser version
 /// differs from the daemon's are refused at attach (X9). It names this crate's version, which the
 /// whole workspace shares (so it covers `auk-term`, its Unicode width tables and `auk-tsp`), plus
 /// a revision bumped whenever parsing changes between releases.
-pub const PARSER_VERSION: &str = concat!("auk-replica/", env!("CARGO_PKG_VERSION"), "+r2");
+pub const PARSER_VERSION: &str = concat!("auk-replica/", env!("CARGO_PKG_VERSION"), "+r3");
 
 /// Host settings that change parsing (§15.2, §5.5). They change only through
 /// [`Record::Settings`], so every replica switches at the same stream position.
@@ -88,6 +91,20 @@ pub enum Record {
     /// The daemon's 1 s chunk timeout passed (§7.1): the chunk sequence being joined is dropped
     /// here on every replica.
     ChunkTimeout,
+    /// The plugin catalog changed (§15.2): lens claims at later command starts use this one.
+    /// It carries only what claims read ([`claim_catalog`]).
+    Catalog {
+        catalog: auk_plugins::Catalog,
+    },
+    /// The daemon measured a command block's duration, from `C` to `D` (§5.3).
+    LensTook {
+        block: u64,
+        took_ms: u64,
+    },
+    /// The pane came back from the state file after a daemon restart, with a new process (§5.4):
+    /// inline and flow surfaces become closed, read-only and restored, screen surfaces go, and
+    /// an earlier exit is forgotten.
+    Restore,
 }
 
 /// One item of a pane's stream.
@@ -119,9 +136,14 @@ pub struct Snapshot {
     /// The process's exit status, once it has ended.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit: Option<i32>,
-    /// VT bytes, then the replica's own state as OSC sequences, then TSP (§15.3).
+    /// VT bytes, then the replica's own state as OSC sequences, then TSP, then the bytes of any
+    /// sequence the parser is in the middle of (§15.3).
     #[serde(skip)]
     pub bytes: Vec<u8>,
+    /// The lens claim catalog, command blocks with their current views, and a running capture
+    /// (§15.3).
+    #[serde(default, skip_serializing_if = "LensSnapshot::is_empty")]
+    pub lens: LensSnapshot,
 }
 
 /// An item arrived out of order.
@@ -182,6 +204,7 @@ pub struct Replica {
     user_vars: BTreeMap<String, Vec<u8>>,
     replies: Vec<Answer>,
     tsp: TspPane,
+    lens: lens::Lenses,
 }
 
 impl Replica {
@@ -207,6 +230,7 @@ impl Replica {
             user_vars: BTreeMap::new(),
             replies: Vec::new(),
             tsp,
+            lens: lens::Lenses::default(),
         }
     }
 
@@ -229,6 +253,7 @@ impl Replica {
         replica.term.take_replies();
         replica.tsp.take_output();
         replica.replies.clear();
+        replica.lens = lens::Lenses::restore(&snapshot.lens);
         replica.seq = snapshot.seq;
         replica
     }
@@ -370,6 +395,7 @@ impl Replica {
             hash_bytes(&mut h, Some(value));
         }
         h.update(self.tsp.state_hash());
+        self.lens.hash(&mut h);
         h.finalize().into()
     }
 
@@ -381,7 +407,10 @@ impl Replica {
     /// The snapshot, with each TSP node's props passed through `rewrite` (the daemon rewrites
     /// ages to snapshot time, §7.13).
     pub fn snapshot_with(&self, rewrite: &mut Rewrite<'_>) -> Snapshot {
-        let mut bytes = self.term.snapshot();
+        // The terminal's state leaves the parser in the ground state, so the replica's own
+        // sequences and TSP's parse as such; the sequence the parser is in the middle of comes
+        // last, and the live stream continues it.
+        let mut bytes = self.term.snapshot_state();
         if let Some(cwd) = &self.cwd {
             write_osc(&mut bytes, &format!("7;{cwd}"));
         }
@@ -393,6 +422,7 @@ impl Replica {
             );
         }
         bytes.extend(self.tsp.snapshot_with(rewrite));
+        self.term.snapshot_parser(&mut bytes);
         Snapshot {
             seq: self.seq,
             cols: self.term.cols(),
@@ -400,6 +430,7 @@ impl Replica {
             settings: self.settings.clone(),
             exit: self.exit,
             bytes,
+            lens: self.lens.snapshot(),
         }
     }
 
@@ -413,7 +444,18 @@ impl Replica {
                 self.settings = settings.clone();
             }
             Record::Exit { status } => self.exit = Some(*status),
+            Record::Restore => self.exit = None,
             Record::ChunkTimeout => {}
+            Record::Catalog { catalog } => self.lens.catalog = Some(catalog.clone()),
+            Record::LensTook { block, took_ms } => {
+                if let Some(i) = self.lens.index(*block) {
+                    self.lens.blocks[i].took_ms = Some(*took_ms);
+                }
+            }
+        }
+        // The process is gone: a running capture ends where it is, unfinished.
+        if matches!(record, Record::Exit { .. } | Record::Restore) {
+            self.end_capture();
         }
         self.collect_replies(false);
         // A reset clears every surface silently, before the anchors it ended are reported.
@@ -430,7 +472,8 @@ impl Replica {
             }
             Record::Exit { .. } => self.tsp.on_exit(&mut self.term),
             Record::ChunkTimeout => self.tsp.expire_chunks(),
-            Record::ClearScrollback => {}
+            Record::Restore => self.tsp.on_restore(&mut self.term),
+            Record::ClearScrollback | Record::Catalog { .. } | Record::LensTook { .. } => {}
         }
         self.collect_tsp(false);
         self.drain_events(false, events);
@@ -438,6 +481,11 @@ impl Replica {
 
     fn feed(&mut self, mut bytes: &[u8], replaying: bool, events: &mut Vec<Event>) {
         while !bytes.is_empty() {
+            if self.lens.running.is_some() && !replaying {
+                let n = self.feed_capture(bytes, events);
+                bytes = &bytes[n.min(bytes.len())..];
+                continue;
+            }
             let (n, event) = self.term.advance(bytes);
             bytes = &bytes[n.min(bytes.len())..];
             match event {
@@ -490,6 +538,10 @@ impl Replica {
                         self.user_vars.insert(name.clone(), value.clone());
                     }
                     Event::Mark(Mark::PromptStart) => self.tsp.on_prompt(&mut self.term),
+                    Event::Mark(Mark::CommandStart { cmdline, typed }) if !replaying => {
+                        self.claim(cmdline.as_deref(), typed.as_deref());
+                    }
+                    Event::AnchorGone(key) if key.0 >= ANCHOR_BASE => self.lens_anchor_gone(*key),
                     Event::Reset => self.tsp.on_reset(&mut self.term),
                     Event::AltScreen(entered) => self.tsp.on_alt_screen(&mut self.term, *entered),
                     Event::ScreenCleared => self.tsp.on_screen_cleared(&mut self.term),

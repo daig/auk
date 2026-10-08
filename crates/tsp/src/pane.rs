@@ -219,6 +219,9 @@ struct HeldSend {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Seed {
     pub swallow: Option<(String, String)>,
+    /// Each rebuilt surface's place in pane order (the reserved `at` parameter). Closed surfaces
+    /// are replayed first, so the replay's own order can differ from the pane's.
+    pub order: Vec<(SurfaceKey, u64)>,
 }
 
 /// The TSP side of one pane.
@@ -509,10 +512,14 @@ impl TspPane {
 
     /// OSC 133 `A` (§7.3): discards inline and screen surfaces, kept ones included, undoing an
     /// inline anchor row with nothing below it; closes live flow surfaces. The program is gone.
+    ///
+    /// Inline surfaces restored after a daemon restart stay (§5.4, ours): the rule discards only
+    /// inline surfaces opened since the previous prompt.
     pub fn on_prompt(&mut self, grid: &mut dyn Grid) {
         for key in self.keys() {
             let Some(i) = self.index(key) else { continue };
             match self.surfaces[i].mode {
+                Mode::Inline if self.surfaces[i].restored => {}
                 Mode::Inline => {
                     if let Some(anchor) = self.surfaces[i].anchor
                         && grid.undo_anchor(anchor)
@@ -544,6 +551,32 @@ impl TspPane {
             }
         }
         self.program_gone();
+    }
+
+    /// The pane came back from the state file after a daemon restart (§5.4): inline and flow
+    /// surfaces close as if kept and become restored (read-only, and past the prompt rule); screen
+    /// surfaces go; a chunk sequence being joined is dropped; the program is gone.
+    pub fn on_restore(&mut self, grid: &mut dyn Grid) {
+        for key in self.keys() {
+            let Some(i) = self.index(key) else { continue };
+            match self.surfaces[i].mode {
+                Mode::Screen => {
+                    self.discard(grid, i);
+                    continue;
+                }
+                Mode::Inline | Mode::Flow if self.surfaces[i].is_live() => {
+                    self.close_kept(grid, i)
+                }
+                Mode::Inline | Mode::Flow => {}
+            }
+            let s = &mut self.surfaces[i];
+            s.restored = true;
+            s.flags.meta = true;
+        }
+        self.joiner.reset();
+        self.program_gone();
+        self.title = TitleSource::Grid;
+        self.command_seen = false;
     }
 
     /// RIS: clears every surface and drops a chunk sequence silently.
@@ -790,11 +823,14 @@ impl TspPane {
         }
         let key = SurfaceKey(self.next_surface);
         self.next_surface += 1;
-        self.surfaces.push(Surface::new(
-            key, id, mode, buffer, listen, title, role, anchor,
-        ));
+        let mut surface = Surface::new(key, id, mode, buffer, listen, title, role, anchor);
+        surface.restored = seeded && msg.param("restored") == Some("1");
+        self.surfaces.push(surface);
         if seeded {
             self.replay_target = Some(key);
+            if let Some(at) = msg.param("at").and_then(|a| a.parse().ok()) {
+                self.seed.order.push((key, at));
+            }
         }
     }
 
@@ -1330,6 +1366,18 @@ impl TspPane {
         self.replay_target = None;
         if let Some(swallow) = self.seed.swallow.take() {
             self.joiner.set_swallowing(swallow);
+        }
+        // Back to pane order: a live surface may precede a closed one (it closed later than
+        // one opened after it), and which comes first matters (adoption, retention, the hash).
+        let order = std::mem::take(&mut self.seed.order);
+        if !order.is_empty() {
+            let place = |key: SurfaceKey| {
+                order
+                    .iter()
+                    .find(|(k, _)| *k == key)
+                    .map_or(u64::MAX, |&(_, at)| at)
+            };
+            self.surfaces.sort_by_key(|s| place(s.key));
         }
         for s in &mut self.surfaces {
             s.delivery = Default::default();

@@ -261,11 +261,16 @@ fn parse_mark(params: &[&[u8]]) -> Option<Mark> {
         b'A' => Some(Mark::PromptStart),
         b'B' => Some(Mark::PromptEnd),
         b'C' => {
-            let cmdline = params[1..]
-                .iter()
-                .find_map(|p| p.strip_prefix(b"cmdline_url="))
-                .map(|url| String::from_utf8_lossy(&percent_decode(url)).into_owned());
-            Some(Mark::CommandStart { cmdline })
+            let param = |name: &[u8]| {
+                params[1..]
+                    .iter()
+                    .find_map(|p| p.strip_prefix(name))
+                    .map(|url| String::from_utf8_lossy(&percent_decode(url)).into_owned())
+            };
+            Some(Mark::CommandStart {
+                cmdline: param(b"cmdline_url="),
+                typed: param(b"typed_url="),
+            })
         }
         b'D' => {
             let status = params
@@ -413,16 +418,27 @@ mod tests {
         assert_eq!(
             parse_mark(&[b"C", b"cmdline_url=echo%20%22hi%22%3B%20ls"]),
             Some(Mark::CommandStart {
-                cmdline: Some("echo \"hi\"; ls".into())
+                cmdline: Some("echo \"hi\"; ls".into()),
+                typed: None
             })
         );
         assert_eq!(
             parse_mark(&[b"C"]),
-            Some(Mark::CommandStart { cmdline: None })
+            Some(Mark::CommandStart {
+                cmdline: None,
+                typed: None
+            })
         );
         assert_eq!(
             parse_mark(&[b"D", b"130"]),
             Some(Mark::CommandEnd { status: Some(130) })
+        );
+        assert_eq!(
+            parse_mark(&[b"C", b"cmdline_url=ls%20-la", b"typed_url=ll"]),
+            Some(Mark::CommandStart {
+                cmdline: Some("ls -la".into()),
+                typed: Some("ll".into())
+            })
         );
         assert_eq!(parse_mark(&[b"Z"]), None);
         assert_eq!(percent_decode(b"100%"), b"100%");

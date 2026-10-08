@@ -135,7 +135,8 @@ fn shell_integration_events() {
             Event::Mark(Mark::PromptStart),
             Event::Mark(Mark::PromptEnd),
             Event::Mark(Mark::CommandStart {
-                cmdline: Some("ls -la".into())
+                cmdline: Some("ls -la".into()),
+                typed: None
             }),
             Event::Mark(Mark::CommandEnd { status: Some(2) }),
             Event::Mark(Mark::CommandEnd { status: None }),

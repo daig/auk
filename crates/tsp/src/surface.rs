@@ -105,6 +105,9 @@ pub struct Surface {
     pub(crate) sheets: Sheets,
     pub(crate) doc: Document,
     pub(crate) last_s: Option<u64>,
+    /// Came back from the state file after a daemon restart (§5.4): closed and read-only, and
+    /// the prompt rule leaves it alone, like a flow surface, until its anchor row ends.
+    pub(crate) restored: bool,
     pub(crate) delivery: Tracking,
     pub(crate) flags: Flags,
 }
@@ -137,6 +140,7 @@ impl Surface {
             sheets: Sheets::default(),
             doc,
             last_s: None,
+            restored: false,
             delivery: Tracking::default(),
             flags: Flags {
                 opened: true,
@@ -192,6 +196,11 @@ impl Surface {
     /// The anchor row of an inline or flow surface.
     pub fn anchor(&self) -> Option<AnchorKey> {
         self.anchor
+    }
+
+    /// Whether it came back from the state file after a daemon restart (§5.4).
+    pub fn restored(&self) -> bool {
+        self.restored
     }
 
     /// Whether the program handed the pane back to the grid (`suspend`).

@@ -2,8 +2,8 @@
 //! replica of a pane must agree on.
 //!
 //! Covered: the replicated config, the answer gate, the program hello, the title state, the next
-//! anchor key, the chunk joiner, and every surface (closed ones first, then live ones, each group
-//! in pane order) with its mode, buffer, state, listen, title, role, anchor, suspension, last `s`,
+//! anchor key, the chunk joiner, and every surface in pane order (which decides adoption and
+//! retention) with its mode, buffer, state, listen, title, role, anchor, suspension, last `s`,
 //! palette, sheets, focus and document (ids, kinds, settle hints, props with object keys sorted).
 //!
 //! Not covered: client facts, acks and `resize` bookkeeping, the output queue, held `send`s,
@@ -140,6 +140,7 @@ impl Canon {
         self.opt_str(s.role.as_deref());
         self.opt_u64(s.anchor.map(|a| a.0));
         self.bool(s.suspended);
+        self.bool(s.restored);
         self.opt_u64(s.last_s);
         match &s.palette {
             None => self.bool(false),
@@ -231,10 +232,8 @@ impl TspPane {
             }
         }
 
-        let closed = self.surfaces.iter().filter(|s| s.state == State::Closed);
-        let live = self.surfaces.iter().filter(|s| s.state == State::Live);
         h.u64(self.surfaces.len() as u64);
-        for s in closed.chain(live) {
+        for s in &self.surfaces {
             h.surface(s);
         }
         *h.0.finalize().as_bytes()

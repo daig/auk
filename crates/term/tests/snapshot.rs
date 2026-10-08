@@ -161,6 +161,108 @@ proptest! {
     }
 }
 
+/// Streams of whole and cut sequences: CSI with parameters and subparameters, OSC (BEL and ST
+/// ended), DCS, SOS/PM, TSP and other APC strings, UTF-8 split anywhere.
+fn stream() -> impl Strategy<Value = Vec<u8>> {
+    let pieces: Vec<Vec<u8>> = [
+        &b"\x1b[38;2;1;2;3m"[..],
+        b"\x1b[4:3;58:2::9:8:7m",
+        b"\x1b[?1049h",
+        b"\x1b[?1049l",
+        b"\x1b[2;4r",
+        b"\x1b[3;5H",
+        b"\x1b[1 q",
+        b"\x1b[>1u",
+        b"\x1b[;;;:1:2;99999999;?h",
+        b"\x1b(0q\x1b(B",
+        b"\x1b \x21\x22F",
+        b"\x1b]2;a title\x07",
+        b"\x1b]8;id=1;http://x\x1b\\link\x1b]8;;\x1b\\",
+        b"\x1b]4;1;rgb:12/34/56\x1b\\",
+        b"\x1b]133;A\x07",
+        b"\x1bP1;2$qm\x1b\\",
+        b"\x1bXsos\x1b\\",
+        b"\x1b^pm\x1b\\",
+        b"\x1b_tsp;o;{\"id\":\"s\"}\x1b\\",
+        b"\x1b_tsp;o;c=1;m=1;{\"id\"\x07",
+        b"\x1b_other\x07",
+        b"\x1b_ts\x1bx",
+        "\u{4e2d}e\u{301}\u{1f600}x\u{fe0f}".as_bytes(),
+        b"\xe4\xb8\xad\xf0\x9f\x98\x80\xc2\x9c\xff",
+        b"plain text\r\n",
+        b"\x08\t\x0e\x0f",
+        b"\x1b7\x1b8\x1bD\x1bM",
+    ]
+    .iter()
+    .map(|b| b.to_vec())
+    .collect();
+    let piece = prop_oneof![
+        4 => prop::sample::select(pieces.clone()),
+        2 => (prop::sample::select(pieces), any::<prop::sample::Index>())
+            .prop_map(|(p, i)| p[..i.index(p.len() + 1)].to_vec()),
+        2 => soup(),
+    ];
+    prop::collection::vec(piece, 1..16).prop_map(|v| v.concat())
+}
+
+/// Cuts `stream` at `cut`: a terminal rebuilt from a snapshot there, with other sequences between
+/// the terminal's state and the parser's (as a replica appends its own, §15.3), continues like
+/// the original.
+fn check_cut(cols: u16, rows: u16, stream: &[u8], cut: usize) -> Result<(), TestCaseError> {
+    let config = Config { scrollback: 6 };
+    let mut t = Terminal::new(cols, rows, config.clone());
+    t.feed(&stream[..cut]);
+    t.take_events();
+    let mut whole = t.snapshot_state();
+    t.snapshot_parser(&mut whole);
+    prop_assert_eq!(&whole, &t.snapshot());
+
+    let mut snapshot = t.snapshot_state();
+    // Sequences that leave the terminal's state alone.
+    snapshot.extend_from_slice(b"\x1b]7;file://host/x\x1b\\\x1b_tsp;q;{}\x1b\\");
+    t.snapshot_parser(&mut snapshot);
+    let mut u = Terminal::new(cols, rows, config);
+    u.feed(&snapshot);
+    u.take_events();
+    prop_assert_eq!(t.state_hash(), u.state_hash(), "rebuilt at {}", cut);
+    let rest = &stream[cut..];
+    let (te, ue) = (t.feed(rest), u.feed(rest));
+    prop_assert_eq!(t.state_hash(), u.state_hash(), "continued from {}", cut);
+    prop_assert_eq!(te, ue, "events after {}", cut);
+    Ok(())
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 400, failure_persistence: None, ..ProptestConfig::default() })]
+
+    /// A snapshot at every byte position of a stream.
+    #[test]
+    fn snapshot_at_every_byte_continues_like_the_original(
+        cols in 2u16..16,
+        rows in 1u16..8,
+        stream in stream(),
+    ) {
+        for cut in 0..=stream.len() {
+            check_cut(cols, rows, &stream, cut)?;
+        }
+    }
+}
+
+/// An APC string abandoned for its length: snapshots on either side of the limit.
+#[test]
+fn snapshot_around_an_abandoned_apc_string() {
+    for prefix in [&b"tsp;o;"[..], b"other;", b"t"] {
+        let mut stream = b"\x1b_".to_vec();
+        stream.extend_from_slice(prefix);
+        stream.resize(2 + 262_144, b'y');
+        stream.extend_from_slice(b"zz\x1b[31mred\x1b\\");
+        let end = 2 + 262_144;
+        for cut in [0, 1, 2, 3, end - 1, end, end + 1, end + 2, end + 3] {
+            check_cut(10, 3, &stream, cut).unwrap();
+        }
+    }
+}
+
 #[test]
 fn snapshot_keeps_anchors_and_scrollback() {
     let mut t = Terminal::new(20, 5, Config { scrollback: 100 });

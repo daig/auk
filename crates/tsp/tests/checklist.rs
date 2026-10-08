@@ -2423,6 +2423,47 @@ fn h1_snapshot_replays_to_an_equal_state() {
 }
 
 #[test]
+fn h1_snapshot_keeps_pane_order() {
+    // A flow surface opened before an inline one that has since closed: the snapshot replays
+    // the closed one first, and `at` puts them back in pane order, which decides what closes
+    // and is adopted later.
+    let mut h = Harness::new();
+    h.hello(&["adopt", "flow"]);
+    h.open("fl", "flow", json!([]));
+    h.open("a", "inline", json!([]));
+    h.open("b", "inline", json!([]));
+    h.out();
+    let ids = |h: &Harness| -> Vec<(String, bool)> {
+        h.pane
+            .surfaces()
+            .iter()
+            .map(|s| (s.id().to_owned(), s.is_live()))
+            .collect()
+    };
+    let snap = h.pane.snapshot();
+    let ats: Vec<Option<String>> = common::apc_payloads(&snap)
+        .iter()
+        .map(|p| auk_tsp::wire::parse(p).unwrap())
+        .filter(|m| m.verb == "o")
+        .map(|m| m.param("at").map(str::to_owned))
+        .collect();
+    assert_eq!(
+        ats,
+        [Some("1".into()), Some("0".into()), Some("2".into())],
+        "closed first, each with its place"
+    );
+    let mut fresh = h.replay();
+    assert_eq!(ids(&fresh), ids(&h));
+    assert_eq!(fresh.pane.state_hash(), h.pane.state_hash());
+    for x in [&mut h, &mut fresh] {
+        x.send_json("x", json!({"id": "fl", "keep": true}));
+        x.send_json("o", json!({"id": "a", "adopt": true}));
+    }
+    assert_eq!(ids(&fresh), ids(&h));
+    assert_eq!(fresh.pane.state_hash(), h.pane.state_hash());
+}
+
+#[test]
 fn h1_snapshot_ages_are_rewritten_without_changing_the_state() {
     let h = rich();
     let snap = h.pane.snapshot_with(&mut |_, node, props| {

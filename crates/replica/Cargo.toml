@@ -7,10 +7,14 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+# The catalog, lens claims and the capture's scratch screen, without the Luau runtime (§9.6):
+# every replica claims commands on its own.
+auk-plugins = { version = "0.0.0", path = "../plugins", default-features = false }
 auk-term = { version = "0.0.0", path = "../term" }
 auk-tsp = { version = "0.0.0", path = "../tsp" }
 base64 = "0.23.1"
 serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 sha2 = "0.11.0"
 
 [lints]
@@ -18,3 +22,7 @@ workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+
+# proptest doesn't build for wasm32.
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+proptest = "1.11.0"

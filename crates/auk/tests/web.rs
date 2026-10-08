@@ -594,12 +594,11 @@ fn ac02_wasm_replicas_reach_the_native_state_hashes_under_fuzzing() {
     for (i, line) in native.iter().enumerate() {
         let words: Vec<&str> = line.split(' ').collect();
         assert_eq!(words.len(), 6, "case {i}: {line}");
-        // The authoritative replica, both followers and the late follower agree. The last
-        // word, a replica rebuilt from the final snapshot, is compared with wasm's only: a
-        // snapshot taken in the middle of an escape sequence or TSP string doesn't carry the
-        // parser's partial state.
+        // The authoritative replica, both followers, the late follower and a replica rebuilt
+        // from the final snapshot (often taken in the middle of an escape sequence, a TSP string
+        // or a chunk sequence) agree.
         assert!(
-            words[1..5].iter().all(|h| *h == words[1]),
+            words[1..].iter().all(|h| *h == words[1]),
             "case {i}: native replicas disagree: {line}"
         );
     }
