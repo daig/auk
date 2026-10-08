@@ -342,8 +342,13 @@ impl Pane {
     ///
     /// Only the program's silence counts: while output is still queued in the PTY or held by the
     /// reader, the sequence hasn't timed out.
+    ///
+    /// A chunk still arriving counts as a chunk: a 64 KiB chunk can take longer than the timeout
+    /// to reach the replica when the machine is loaded, so the clock also waits for 1 s with no
+    /// output at all.
     pub fn chunk_expired(&self) -> bool {
         self.chunk.is_some_and(|(_, at)| at.elapsed() >= CHUNK_TIMEOUT)
+            && self.last_output.elapsed() >= CHUNK_TIMEOUT
             && !self.io.as_ref().is_some_and(|io| io.master.output_pending())
     }
 
