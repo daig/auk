@@ -39,6 +39,7 @@ impl PaneView {
             st: &mut sv.st,
             cols,
             pass,
+            blobs: pane.blobs(),
         };
         for id in ids {
             let Some(node) = surface.document().get(id) else {
@@ -104,6 +105,7 @@ impl PaneView {
                 st: &mut sv.st,
                 cols,
                 pass,
+                blobs: pane.blobs(),
             };
             for id in ids {
                 let Some(node) = surface.document().get(&id) else {
@@ -245,6 +247,7 @@ impl PaneView {
                 st: &mut sv.st,
                 cols,
                 pass,
+                blobs: pane.blobs(),
             };
             let ids: Vec<String> = sv
                 .mounts

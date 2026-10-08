@@ -133,6 +133,8 @@ props! {
     OutlineColor = "outline-color";
     OutlineOffset = "outline-offset";
     TableLayout = "table-layout";
+    ObjectFit = "object-fit";
+    ImageRendering = "image-rendering", inherited;
     Content = "content";
     TransitionProperty = "transition-property";
     TransitionDuration = "transition-duration";
@@ -157,8 +159,6 @@ const ACCEPTED_UNUSED: &[&str] = &[
     "background-repeat",
     "background-origin",
     "background-clip",
-    "object-fit",
-    "image-rendering",
     "box-shadow",
     "translate",
     "rotate",
@@ -1718,6 +1718,11 @@ pub fn parse_longhand<'i>(prop: Prop, p: &mut Parser<'i>) -> PResult<SV> {
         }
         OutlineOffset => parse_length_pct(p).map(SV::Len),
         TableLayout => sv_kw(p, &["auto", "fixed"]),
+        ObjectFit => sv_kw(p, &["fill", "contain", "cover", "none", "scale-down"]),
+        ImageRendering => sv_kw(
+            p,
+            &["auto", "smooth", "high-quality", "pixelated", "crisp-edges"],
+        ),
         Content => parse_content(p),
         TransitionProperty => {
             if p.try_parse(|p| p.expect_ident_matching("none")).is_ok() {

@@ -104,6 +104,8 @@ struct View {
     last_message: Option<Instant>,
     /// Panes whose replica was rebuilt from a snapshot: their drawn views start over.
     reset: std::collections::BTreeSet<PaneId>,
+    /// Blobs asked of the daemon, or sent by it after a snapshot (§7.12), per pane.
+    asked: BTreeMap<PaneId, std::collections::BTreeSet<String>>,
 }
 
 /// Work for the draw thread.
@@ -210,10 +212,11 @@ impl Headless {
                     auk_views::sheet_checker(),
                     Box::new(auk_tsp::MemoryBlobs::default()),
                 );
-                view.replicas.insert(
-                    pane,
-                    Replica::from_snapshot(&snapshot, Role::Follower, Some(tsp)),
-                );
+                let replica = Replica::from_snapshot(&snapshot, Role::Follower, Some(tsp));
+                // The daemon sends the blobs the snapshot names right after it.
+                view.asked
+                    .insert(pane, replica.tsp().missing_blobs().into_iter().collect());
+                view.replicas.insert(pane, replica);
                 // A new replica starts its views over.
                 view.pending.insert(pane, Vec::new());
                 view.reset.insert(pane);
@@ -255,6 +258,19 @@ impl Headless {
                 draw = Some((pane, true));
             }
             DaemonMsg::Effect(effect) => view.effects.push(json!(effect)),
+            DaemonMsg::Blob {
+                pane,
+                id,
+                mime,
+                bytes,
+            } => {
+                if let Some(replica) = view.replicas.get_mut(&pane) {
+                    if !replica.deliver_blob(&id, mime.as_deref(), bytes) {
+                        view.errors.push(format!("pane {pane}: bad blob {id}"));
+                    }
+                    draw = Some((pane, false));
+                }
+            }
             DaemonMsg::Catalog { catalog } => view.catalog = catalog,
             DaemonMsg::LensView { pane, block, node } => {
                 if let Ok(block) = block.parse::<u64>() {
@@ -551,18 +567,32 @@ fn apply(view: &mut View, pane: PaneId, seq: u64, item: Item<'_>) {
 
 /// Where a window draws a pane after the replica changed, and then acks what it drew (§7.10):
 /// only the pane's primary acks, each live listening surface's last frame once it has been
-/// drawn. Headless rendering of surfaces arrives with the views; the ack point stays here.
+/// drawn. Headless rendering of surfaces arrives with the views; the ack point stays here. Blobs
+/// the pane's documents name and the window lacks are asked for here too (§7.12).
 fn draw_pane(view: &mut View, pane: PaneId, all: bool) -> Vec<ClientMsg> {
     let primary = view.primary.get(&pane).copied().unwrap_or(false);
     let View {
         replicas,
         surfaces,
         pending,
+        asked,
         ..
     } = view;
     let Some(replica) = replicas.get_mut(&pane) else {
         return Vec::new();
     };
+    // Blobs a document names that this window lacks (they arrived before its snapshot).
+    let asked = asked.entry(pane).or_default();
+    let ask: Vec<String> = replica
+        .tsp()
+        .missing_blobs()
+        .into_iter()
+        .filter(|id| asked.insert(id.clone()))
+        .collect();
+    let mut out = Vec::new();
+    if !ask.is_empty() {
+        out.push(ClientMsg::Blobs { pane, ids: ask });
+    }
     let changes = replica.take_tsp_changes();
     if !changes.is_empty() {
         let pending = pending.entry(pane).or_default();
@@ -572,12 +602,14 @@ fn draw_pane(view: &mut View, pane: PaneId, all: bool) -> Vec<ClientMsg> {
     let pv = surfaces.entry(pane).or_default();
     pv.forget(&changes);
     if !primary {
-        return Vec::new();
+        return out;
     }
-    pv.acks(replica.tsp(), &changes, all)
-        .into_iter()
-        .map(|(sf, s)| ClientMsg::Ack { pane, sf, s })
-        .collect()
+    out.extend(
+        pv.acks(replica.tsp(), &changes, all)
+            .into_iter()
+            .map(|(sf, s)| ClientMsg::Ack { pane, sf, s }),
+    );
+    out
 }
 
 /// Keeps a pane's undrawn changes bounded: past 256 entries they merge into one, in order, and

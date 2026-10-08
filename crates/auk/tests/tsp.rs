@@ -208,13 +208,13 @@ fn advertises_exactly_the_t0_and_t1_kinds() {
     // §8.2, D22: T0 then T1, nothing else.
     let t0 =
         "col row card section rule spacer text badge kv icon spinner elapsed progress ansi rows el";
-    let t1 = "md code diff editor input status seg overlay toast shimmer rate meter list item tabs table tree kbd tool agent checklist";
+    let t1 = "md code diff editor input status seg overlay toast shimmer rate meter list item tabs table tree kbd tool agent checklist image";
     let mut want: Vec<&str> = t0.split(' ').chain(t1.split(' ')).collect();
     let mut got = kinds.clone();
     want.sort_unstable();
     got.sort_unstable();
     assert_eq!(got, want);
-    assert_eq!(kinds.len(), 37, "no duplicates");
+    assert_eq!(kinds.len(), 38, "no duplicates");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -675,12 +675,12 @@ fn b6_kinds_and_features_list_only_what_is_implemented() {
     let (_env, probe) = setup("b6");
     let reply = hello_reply(&exchange(&probe, &hello(&[]))).clone();
     let kinds = reply["kinds"].as_array().unwrap();
-    for t2 in [
-        "math", "image", "chart", "picker", "prefs", "effort", "block",
-    ] {
+    for t2 in ["math", "chart", "picker", "prefs", "effort", "block"] {
         assert!(!kinds.contains(&json!(t2)), "{t2} isn't drawn in v1");
     }
-    assert_eq!(kinds.len(), 37);
+    // omp sends `image` unguarded, so it is T1 (D24).
+    assert!(kinds.contains(&json!("image")));
+    assert_eq!(kinds.len(), 38);
     let allowed = [
         "blobs",
         "settle",
@@ -709,7 +709,7 @@ fn b6_kinds_and_features_list_only_what_is_implemented() {
         &frame(
             "s1",
             1,
-            json!([["add", "main", "s1", null, {"id": "main", "k": "col", "c": [{"id": "i", "k": "image"}]}]]),
+            json!([["add", "main", "s1", null, {"id": "main", "k": "col", "c": [{"id": "i", "k": "math"}]}]]),
         ),
     );
     assert_eq!(errors(&bodies).len(), 1, "{bodies:?}");
@@ -1462,7 +1462,7 @@ fn d5_add_checks_ids_before_kinds_duplicates_and_limits() {
     let bad = [
         add("x", json!({"id": "y", "k": "text"})),
         json!(["add", "x", "main", {"id": "x", "k": "text"}]),
-        add("x", json!({"id": "x", "k": "image"})),
+        add("x", json!({"id": "x", "k": "math"})),
         add("main", json!({"id": "main", "k": "text"})),
         add(
             "p",
@@ -2412,9 +2412,51 @@ fn g2_stylesheets_are_named_limited_ordered_and_checked() {
     );
 }
 
+/// An SVG of `w`×`h` px: the smallest picture a blob can carry as text.
+fn svg_blob(w: u32, h: u32, fill: &str) -> String {
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\">\
+         <rect width=\"{w}\" height=\"{h}\" fill=\"{fill}\"/></svg>"
+    )
+}
+
+/// The `.sf-image` element of node `id` in a window's drawn pane, with everything under it:
+/// `(class, [(class, box)])`, once it is drawn.
+fn window_image(
+    window: &Headless,
+    probe: &Probe,
+    id: &str,
+) -> Option<(String, Vec<(String, Value)>)> {
+    let tree = window.request(&format!("tree {} .sf-image", probe.pane));
+    let els = tree.as_array()?;
+    let at = els.iter().position(|e| e["id"] == id)?;
+    let class = els[at]["class"].as_str()?.to_owned();
+    let inner = els[at + 1..]
+        .iter()
+        .take_while(|e| e["id"].is_null())
+        .map(|e| {
+            (
+                e["class"].as_str().unwrap_or("").to_owned(),
+                e["box"].clone(),
+            )
+        })
+        .collect();
+    Some((class, inner))
+}
+
+/// Waits until a window draws node `id` as a picture (no placeholder) of `w`×`h` CSS px.
+fn await_drawn(window: &Headless, probe: &Probe, id: &str, w: f64, h: f64, who: &str) {
+    wait_for(&format!("{who} to draw {id}"), || {
+        let (class, inner) = window_image(window, probe, id)?;
+        let pic = inner.iter().find(|(c, _)| c.contains("sf-img-svg"))?;
+        (!class.contains("missing") && pic.1[2].as_f64() == Some(w) && pic.1[3].as_f64() == Some(h))
+            .then_some(())
+    });
+}
+
 #[test]
 fn g3_blobs_are_content_addressed_and_shared_by_the_panes_surfaces() {
-    let (env, probe) = setup("g3");
+    let (env, window, probe) = setup_window("g3");
     exchange(&probe, &hello(&[]));
     let b64 = base64::engine::general_purpose::STANDARD;
     exchange(&probe, &open("one", "flow"));
@@ -2432,6 +2474,59 @@ fn g3_blobs_are_content_addressed_and_shared_by_the_panes_surfaces() {
         "lowercase hex SHA-256 ids: {have:?}"
     );
     assert!(env.state.join("blobs").join(&id).is_file());
+
+    // An image whose blob arrives after the frame that uses it (omp never waits): the window
+    // shows a placeholder, then draws the picture when the blob comes, with no change to the node.
+    let late = svg_blob(24, 12, "#22aa55");
+    let late_id = sha256(late.as_bytes());
+    let bodies = exchange(
+        &probe,
+        &frame(
+            "two",
+            1,
+            json!([["add", "main", "two", null, {"id": "main", "k": "col", "c": [
+                {"id": "pic", "k": "image", "p": {"blob": late_id, "alt": "Late"}}
+            ]}]]),
+        ),
+    );
+    assert!(errors(&bodies).is_empty(), "{bodies:?}");
+    let (class, inner) = window_image(&window, &probe, "pic").expect("the image node is drawn");
+    assert!(class.contains("missing"), "a placeholder first: {class}");
+    assert!(
+        inner.iter().any(|(c, _)| c.contains("sf-img-card")),
+        "{inner:?}"
+    );
+    exchange(
+        &probe,
+        &tsp("b", &[("mime", "image/svg+xml")], &b64.encode(&late)),
+    );
+    await_drawn(&window, &probe, "pic", 24.0, 12.0, "the window");
+
+    // A blob sent before any node names it, then a window that attaches later: the snapshot
+    // carries no blobs, so the daemon sends the ones its documents name, and the window asks for
+    // others when a later frame names them.
+    let early = svg_blob(10, 30, "#3355ff");
+    let early_id = sha256(early.as_bytes());
+    exchange(
+        &probe,
+        &tsp("b", &[("mime", "image/svg+xml")], &b64.encode(&early)),
+    );
+    let second = env.start_headless("w2", &[]);
+    await_drawn(&second, &probe, "pic", 24.0, 12.0, "the late window");
+    let bodies = exchange(
+        &probe,
+        &frame(
+            "two",
+            2,
+            json!([["add", "pic2", "main", null,
+                {"id": "pic2", "k": "image", "p": {"blob": early_id}}]]),
+        ),
+    );
+    assert!(errors(&bodies).is_empty(), "{bodies:?}");
+    await_drawn(&second, &probe, "pic2", 10.0, 30.0, "the late window");
+    await_drawn(&window, &probe, "pic2", 10.0, 30.0, "the window");
+    assert!(second.errors().is_empty(), "{:?}", second.errors());
+    assert!(window.errors().is_empty(), "{:?}", window.errors());
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -260,7 +260,7 @@ fn has_el(v: &Value) -> bool {
 /// §8.2's tiers, spelled out from the spec.
 const T0: &str =
     "col row card section rule spacer text badge kv icon spinner elapsed progress ansi rows el";
-const T1: &str = "md code diff editor input status seg overlay toast shimmer rate meter list item tabs table tree kbd tool agent checklist";
+const T1: &str = "md code diff editor input status seg overlay toast shimmer rate meter list item tabs table tree kbd tool agent checklist image";
 
 /// Kinds that render as spans (§8.3: inline kinds).
 const INLINE: [&str; 7] = [

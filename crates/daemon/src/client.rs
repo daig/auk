@@ -159,6 +159,7 @@ fn on_message(daemon: &Arc<Daemon>, id: ClientId, msg: ClientMsg) {
                 eprintln!("auk daemon: client {id}: view event: {err}");
             }
         }
+        ClientMsg::Blobs { pane, ids } => daemon.client_blobs(id, pane, &ids),
         // Client environments matter once windows spawn panes with them (M4).
         ClientMsg::Env { .. } => {}
         ClientMsg::Hello(_) | ClientMsg::Detach => {}

@@ -451,9 +451,9 @@ fn b6_advertises_exactly_t0_and_t1() {
     kinds.sort_unstable();
     want.sort_unstable();
     assert_eq!(kinds, want);
-    for t2 in [
-        "math", "image", "chart", "picker", "prefs", "effort", "block",
-    ] {
+    // `image` joined T1 (D24).
+    assert!(kinds.contains(&"image"));
+    for t2 in ["math", "chart", "picker", "prefs", "effort", "block"] {
         assert!(!kinds.contains(&t2), "{t2} is T2");
     }
     for f in reply["features"].as_array().unwrap() {
@@ -469,8 +469,8 @@ fn b6_advertises_exactly_t0_and_t1() {
     // And `add` takes only advertised kinds.
     let mut h = Harness::new();
     h.send_json("o", json!({"id": "s1"}));
-    h.frame("s1", 1, json!([["add", "main", "s1", null, {"id": "main", "k": "col", "c": [{"id": "i", "k": "image"}]}]]));
-    assert_eq!(h.out()[0]["msg"], "i: unknown kind image");
+    h.frame("s1", 1, json!([["add", "main", "s1", null, {"id": "main", "k": "col", "c": [{"id": "i", "k": "math"}]}]]));
+    assert_eq!(h.out()[0]["msg"], "i: unknown kind math");
 }
 
 #[test]
@@ -2277,10 +2277,12 @@ fn g3_blobs_are_shared_and_late_ones_redraw() {
     h.open(
         "s1",
         "inline",
-        json!([{"id": "img", "k": "text", "p": {"blob": id}}]),
+        json!([{"id": "img", "k": "image", "p": {"blob": id.to_uppercase()}}]),
     );
     h.open("s2", "flow", json!([]));
     h.pane.take_changes();
+    // A window asks the daemon for what its documents name and it lacks.
+    assert_eq!(h.pane.missing_blobs(), std::slice::from_ref(&id));
     h.send("b", "cG5n");
     let changes = h.pane.take_changes();
     assert_eq!(changes.blobs, std::slice::from_ref(&id));
@@ -2288,9 +2290,26 @@ fn g3_blobs_are_shared_and_late_ones_redraw() {
     h.send_params("b", &[("mime", "image/png")], "cG5n");
     assert_eq!(
         h.pane.take_changes().blobs,
-        [id],
+        std::slice::from_ref(&id),
         "content-addressed: the same blob again"
     );
+    assert!(h.pane.missing_blobs().is_empty());
+    // A late window gets blobs outside the stream: checked against their id, then redrawn.
+    let mut late = Harness::new();
+    late.open(
+        "s1",
+        "inline",
+        json!([{"id": "img", "k": "image", "p": {"blob": id}}]),
+    );
+    late.pane.take_changes();
+    assert!(!late.pane.deliver_blob(&id, None, b"not png".to_vec()));
+    assert!(late.pane.take_changes().blobs.is_empty());
+    assert!(
+        late.pane
+            .deliver_blob(&id, Some("image/png"), b"png".to_vec())
+    );
+    assert_eq!(late.pane.take_changes().blobs, [id]);
+    assert!(late.pane.missing_blobs().is_empty());
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -51,6 +51,7 @@ fn implicit_role(doc: &Document, el: NodeId) -> Option<&'static str> {
         "h1" | "h2" | "h3" | "h4" => "heading",
         "hr" => "separator",
         "form" => "form",
+        "img" => "img",
         _ => return None,
     })
 }
@@ -92,7 +93,7 @@ fn build(doc: &Document, el: NodeId, text: &mut String) -> Vec<AxNode> {
     let flag = |k: &str| doc.attribute(el, k).map(|v| v == "true");
     let mut node = AxNode {
         role: role.unwrap_or_else(|| "group".to_owned()),
-        name: attr("aria-label"),
+        name: attr("aria-label").or_else(|| attr("alt")),
         value: attr("aria-valuenow").or_else(|| attr("aria-valuetext")),
         id,
         expanded: flag("aria-expanded"),

@@ -44,6 +44,10 @@ fn client_messages() -> Vec<ClientMsg> {
             pane: 7,
             dir: SplitDir::Right,
         }),
+        ClientMsg::Blobs {
+            pane: 7,
+            ids: vec!["ab".repeat(32)],
+        },
         ClientMsg::Detach,
     ]
 }
@@ -122,6 +126,18 @@ fn daemon_messages() -> Vec<DaemonMsg> {
             status: 130,
         },
         DaemonMsg::Primary { pane: 7, you: true },
+        DaemonMsg::Blob {
+            pane: 7,
+            id: "cd".repeat(32),
+            mime: Some("image/png".into()),
+            bytes: b"\x89PNG\r\n\x1a\n\x00\xff".to_vec(),
+        },
+        DaemonMsg::Blob {
+            pane: 7,
+            id: "ef".repeat(32),
+            mime: None,
+            bytes: Vec::new(),
+        },
     ]
 }
 
@@ -209,6 +225,8 @@ fn malformed_frames_are_errors_not_panics() {
         (frame::kind::OUTPUT, &b"\x01\x02"[..]),
         (frame::kind::SNAPSHOT, b"\xff\x00\x00\x00{}"),
         (frame::kind::SNAPSHOT, b"\x02\x00\x00\x00{}"),
+        (frame::kind::BLOB, b"\x40\x00\x00\x00{}"),
+        (frame::kind::BLOB, b"\x02\x00\x00\x00{}"),
     ] {
         assert!(
             DaemonMsg::decode(Frame { kind, payload }).is_err(),

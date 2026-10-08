@@ -63,8 +63,13 @@ pub trait BlobStore: Debug + Send {
     fn has(&self, id: &str) -> bool;
     /// Counts a use for LRU eviction (a `blobs` query or a draw).
     fn touch(&mut self, id: &str);
-    /// The blob, if held.
+    /// The blob, if held in memory.
     fn get(&self, id: &str) -> Option<&Blob>;
+    /// The blob, from memory or wherever else the store keeps it (the daemon's disk cache), to
+    /// send to a window.
+    fn load(&self, id: &str) -> Option<Blob> {
+        self.get(id).cloned()
+    }
 }
 
 /// An in-memory store with LRU eviction of unreferenced blobs past a byte limit.

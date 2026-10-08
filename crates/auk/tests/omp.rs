@@ -33,10 +33,8 @@ const TURN: Duration = Duration::from_secs(180);
 /// How long omp may take to start, or to react to a key.
 const UI: Duration = Duration::from_secs(30);
 
-/// The T2 kinds of §8.2 (omp's pickers and settings, rich media).
-const T2: [&str; 7] = [
-    "math", "image", "chart", "picker", "prefs", "effort", "block",
-];
+/// The T2 kinds of §8.2 (omp's pickers and settings, rich media). `image` joined T1 (D24).
+const T2: [&str; 6] = ["math", "chart", "picker", "prefs", "effort", "block"];
 
 /// The pane size the window asks for.
 const SIZE: (u16, u16) = (120, 40);
@@ -443,6 +441,30 @@ fn shown(doc: &auk_tsp::Document, id: &str) -> bool {
     true
 }
 
+/// The drawn size of an `image` node: its element is `.sf-image` without the placeholder, and
+/// its picture element (`.sf-img-frame` for rasters, `.sf-img-svg` for SVG) holds a decoded
+/// picture and has a box. `None` until then.
+fn image_drawn(
+    window: &NativeWindow,
+    pane: u64,
+    surface: &auk_tsp::Surface,
+    id: &str,
+) -> Option<(f32, f32)> {
+    let el = window.element_of(pane, surface, id)?;
+    let class = window.class(pane, el);
+    if !class.split(' ').any(|c| c == "sf-image") || class.split(' ').any(|c| c == "missing") {
+        return None;
+    }
+    let pic = window
+        .with_class(pane, el, "sf-img-frame")
+        .into_iter()
+        .chain(window.with_class(pane, el, "sf-img-svg"))
+        .next()?;
+    window.doc(pane).image(pic)?;
+    let b = window.doc(pane).border_box(pic)?;
+    (b.w > 0.0 && b.h > 0.0).then_some((b.w, b.h))
+}
+
 // ---------------------------------------------------------------------------------------------
 // Replay of the recording
 
@@ -566,10 +588,18 @@ fn ac09_replay_draws_transcript_tool_cards_and_diffs_natively() {
         "the edit card names its file: {text:?}"
     );
 
-    // The recording's `image` nodes (the welcome logo, a table's chart) aren't T0+T1 (D22): the
-    // daemon rejected their `add`s, which took the welcome card with them.
-    for id in ["1.lockup/logo", "1", "1g.t1.1"] {
-        assert!(doc.get(id).is_none(), "{id} should have been rejected");
+    // The recording's `image` nodes draw (D24): the welcome card's logo is omp's built-in mark,
+    // and the chart of a numeric table is an SVG blob sent after the frame that names it.
+    assert!(doc.get("1").is_some(), "the welcome card arrived");
+    let logo = doc.get("1.lockup/logo").expect("the welcome logo");
+    assert_eq!(logo.prop("builtin"), Some(&Value::from("omp")));
+    let chart = doc.get("1g.t1.1").expect("the table's chart");
+    let blob = chart.prop("blob").and_then(Value::as_str).expect("a blob");
+    assert!(tsp.blobs().has(blob), "the chart's blob reached the window");
+    for id in ["1.lockup/logo", "1g.t1.1"] {
+        let size = image_drawn(&window, pane, s, id)
+            .unwrap_or_else(|| panic!("{id} isn't drawn as a picture"));
+        eprintln!("image {id}: {size:?}");
     }
     assert!(
         doc.get("1g.t1.2").is_some(),
@@ -898,8 +928,8 @@ fn ac09_live_transcript_send_and_tool_card() {
         "the composer emptied after send"
     );
 
-    // The table's chart: omp sends it as an `image` whatever the hello says. The daemon rejects
-    // that one `add`; the table itself stays, drawn as `md`.
+    // The table's chart: omp sends it as an `image` (D24), its SVG blob after the frame that
+    // names it; the window draws it once the blob arrives.
     let reply_text: String = reply_md
         .iter()
         .filter_map(|(nid, _)| s.document().get(nid).and_then(|n| n.text()))
@@ -915,10 +945,13 @@ fn ac09_live_transcript_send_and_tool_card() {
         assert_eq!(charts.len(), 1, "omp charted the numeric table: {charts:?}");
     }
     for nid in &charts {
-        assert!(
-            s.document().get(nid).is_none(),
-            "the chart {nid} was rejected"
-        );
+        let size = omp
+            .window
+            .wait(&format!("the chart {nid} to draw"), UI, |w| {
+                let s = w.live_surface(pane, "s:1")?;
+                image_drawn(w, pane, s, nid)
+            });
+        eprintln!("chart {nid}: {size:?}");
     }
 
     // A tool call, prompted with keys.
@@ -974,19 +1007,17 @@ fn ac09_live_transcript_send_and_tool_card() {
     eprintln!("errors: {:?}", report.errors);
     eprintln!("T2 kinds sent anyway: {:?}", report.sent_anyway);
     assert!(
-        report.unexplained.is_empty(),
-        "errors not caused by unadvertised kinds: {:?}",
-        report.unexplained
+        report.errors.is_empty(),
+        "omp got errors: {:?}",
+        report.errors
     );
     assert!(omp.window.errors().is_empty(), "{:?}", omp.window.errors());
 }
 
-/// T2 fallback under Auk's T0+T1 hello (§8.2, D22), from omp's own record of a live start: omp
-/// guards `effort` (a `row` of `meter` and `text` instead), but sends its welcome logo as an
-/// `image` without checking `supports()`. The daemon rejects that `add` (`unknown kind image`),
-/// which drops the whole welcome card and fails the later ops that name it; nothing else fails.
-/// The finding is recorded in PROGRESS.md for the coordinator to decide between advertising
-/// `image` and a deviation; this test pins it at omp 18.8.4.
+/// T2 fallback under Auk's T0+T1 hello (§8.2, D22, D24), from omp's own record of a live start:
+/// omp guards `effort` (a `row` of `meter` and `text` instead) and sends nothing unadvertised. Its
+/// welcome logo, an `image` it sends without checking `supports()`, is T1 now: the welcome card
+/// draws with omp's built-in mark, and omp gets no errors.
 #[test]
 fn omp_t2_fallback_under_t0_t1_hello() {
     let mut omp = LiveOmp::start("omp-t2", true);
@@ -1008,33 +1039,40 @@ fn omp_t2_fallback_under_t0_t1_hello() {
         .map(|k| (*k).to_owned())
         .collect();
     assert_eq!(report.advertised, expected, "the hello lists exactly T0+T1");
-    assert!(report.unexplained.is_empty(), "{:?}", report.unexplained);
-    let anyway: Vec<&str> = report.sent_anyway.keys().map(String::as_str).collect();
-    assert_eq!(
-        anyway,
-        ["image"],
-        "omp 18.8.4 sends `image` unguarded, and only that"
-    );
-    assert_eq!(
-        report.sent_anyway["image"],
-        ["1.lockup/logo"],
-        "the welcome logo"
+    assert!(report.advertised.contains("image"), "image is T1 (D24)");
+    assert!(
+        report.sent_anyway.is_empty(),
+        "omp 18.8.4 sends nothing unadvertised: {:?}",
+        report.sent_anyway
     );
     assert!(
-        report
-            .errors
-            .iter()
-            .any(|e| e.contains("unknown kind image")),
-        "the logo's add was rejected"
+        report.errors.is_empty(),
+        "omp got errors: {:?}",
+        report.errors
     );
+    let logos: Vec<String> = added_kinds(&records)
+        .into_iter()
+        .filter(|(_, _, kind)| kind == "image")
+        .map(|(_, id, _)| id)
+        .collect();
+    assert_eq!(
+        logos,
+        ["1.lockup/logo"],
+        "the welcome logo is omp's one image at start"
+    );
+    // The welcome card and its logo draw.
+    let size = omp.window.wait("the welcome logo to draw", UI, |w| {
+        let s = w.live_surface(pane, "s:1")?;
+        s.document().get("1")?;
+        image_drawn(w, pane, s, "1.lockup/logo")
+    });
+    eprintln!("welcome logo: {size:?}");
     let s = omp
         .window
         .live_surface(pane, "s:1")
         .expect("the session surface");
-    assert!(
-        s.document().get("1").is_none(),
-        "the welcome card was dropped with its logo"
-    );
+    let logo = s.document().get("1.lockup/logo").expect("the logo");
+    assert_eq!(logo.prop("builtin"), Some(&Value::from("omp")));
     // `effort` fell back: the widget is a row of T1 kinds.
     let effort = s.document().get("3.bar/effort").expect("the effort widget");
     let kinds: BTreeSet<String> = kinds_under(effort).into_iter().map(|(_, k)| k).collect();
@@ -1043,6 +1081,7 @@ fn omp_t2_fallback_under_t0_t1_hello() {
         "effort fell back to {kinds:?}"
     );
     assert_eq!(effort.kind(), "row");
+    assert!(omp.window.errors().is_empty(), "{:?}", omp.window.errors());
     omp.quit();
 }
 

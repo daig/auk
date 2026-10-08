@@ -16,9 +16,16 @@ syntect = { version = "5", default-features = false, features = ["default-fancy"
 two-face = { version = "0.4", default-features = false, features = ["syntect-fancy"] }
 imara-diff = "0.2"
 vello = "0.11"
+# `image` (§8.5, §18.4): PNG (and APNG), JPEG, GIF and WebP, animated frames included.
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+# Sanitized SVG: parsed and filtered to the allowlist (usvg's roxmltree), drawn by resvg.
+resvg = { version = "0.48.1", default-features = false, features = ["text", "system-fonts"] }
 
 [dev-dependencies]
 auk-conformance = { path = "../conformance" }
+base64 = "0.23.1"
+# Writes the APNG the image tests decode.
+png = "0.18.1"
 
 [lints]
 workspace = true

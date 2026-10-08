@@ -16,7 +16,7 @@ use auk_ui::NodeId;
 use std::collections::HashMap;
 
 /// The T0 and T1 kinds (§8.2): what the hello advertises and what this crate draws.
-pub const KINDS: [&str; 37] = [
+pub const KINDS: [&str; 38] = [
     "col",
     "row",
     "card",
@@ -54,6 +54,7 @@ pub const KINDS: [&str; 37] = [
     "tool",
     "agent",
     "checklist",
+    "image",
 ];
 
 /// Where a child element goes.
@@ -274,6 +275,7 @@ pub(crate) fn tick(cx: &mut Cx, node: NodeRef, m: &mut Mount) -> bool {
             crate::motion::tick_fx(cx, m)
         }
         "tool" | "agent" => agent::tick(cx, node, m),
+        "image" => rich::tick_image(cx, node, m),
         "editor" | "input" => input::tick(cx, node, m),
         _ => false,
     }

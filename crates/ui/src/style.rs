@@ -340,6 +340,23 @@ pub enum OverflowWrap {
     BreakWord,
 }
 
+/// How replaced content (an image) fills its content box.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ObjectFit {
+    Fill,
+    Contain,
+    Cover,
+    None,
+    ScaleDown,
+}
+
+/// How an image is scaled: smoothly, or by the nearest pixel (`pixelated`, `crisp-edges`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImageRendering {
+    Smooth,
+    Pixelated,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextOverflow {
     Clip,
@@ -520,6 +537,8 @@ pub struct ComputedStyle {
     pub outline_color: Color,
     pub outline_offset: f32,
     pub table_layout_fixed: bool,
+    pub object_fit: ObjectFit,
+    pub image_rendering: ImageRendering,
     pub content: Option<Arc<Vec<ContentItem>>>,
     pub transitions: Option<Arc<Vec<Transition>>>,
     pub animations: Option<Arc<Vec<Animation>>>,
@@ -637,6 +656,8 @@ impl Default for ComputedStyle {
             outline_color: Color::BLACK,
             outline_offset: 0.0,
             table_layout_fixed: false,
+            object_fit: ObjectFit::Fill,
+            image_rendering: ImageRendering::Smooth,
             content: None,
             transitions: None,
             animations: None,

@@ -7,7 +7,7 @@
 //!
 //! The `omp` suite drives a real omp through it; nothing here knows about omp.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
@@ -30,6 +30,8 @@ struct Shown {
     view: PaneView,
     /// The last frame acked per surface key.
     acked: BTreeMap<u64, u64>,
+    /// Blobs asked of the daemon, or sent by it after the snapshot (§7.12).
+    asked: BTreeSet<String>,
 }
 
 /// A window attached to the test daemon that is primary for the panes it focuses.
@@ -140,6 +142,8 @@ impl NativeWindow {
                 let changes = replica.take_tsp_changes();
                 view.sync(&mut doc, replica.tsp(), &changes, now);
                 let _ = replica.take_replies();
+                // The daemon sends the blobs the snapshot names right after it.
+                let asked = replica.tsp().missing_blobs().into_iter().collect();
                 self.panes.insert(
                     *pane,
                     Shown {
@@ -147,6 +151,7 @@ impl NativeWindow {
                         doc,
                         view,
                         acked: BTreeMap::new(),
+                        asked,
                     },
                 );
                 let (cols, rows) = self.size;
@@ -169,6 +174,25 @@ impl NativeWindow {
                 self.exited.insert(*pane, *status);
                 return None;
             }
+            DaemonMsg::Blob {
+                pane,
+                id,
+                mime,
+                bytes,
+            } => {
+                let shown = self.panes.get_mut(pane)?;
+                if !shown
+                    .replica
+                    .deliver_blob(id, mime.as_deref(), bytes.clone())
+                {
+                    self.errors.push(format!("pane {pane}: bad blob {id}"));
+                }
+                let changes = shown.replica.take_tsp_changes();
+                shown
+                    .view
+                    .sync(&mut shown.doc, shown.replica.tsp(), &changes, now);
+                return Some(*pane);
+            }
             _ => return None,
         };
         let shown = self.panes.get_mut(&pane)?;
@@ -181,6 +205,17 @@ impl NativeWindow {
             shown
                 .view
                 .sync(&mut shown.doc, shown.replica.tsp(), &changes, now);
+        }
+        // Blobs a document names that this window lacks (they arrived before its snapshot).
+        let ask: Vec<String> = shown
+            .replica
+            .tsp()
+            .missing_blobs()
+            .into_iter()
+            .filter(|id| shown.asked.insert(id.clone()))
+            .collect();
+        if !ask.is_empty() {
+            self.send(&ClientMsg::Blobs { pane, ids: ask });
         }
         Some(pane)
     }

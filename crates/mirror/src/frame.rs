@@ -9,7 +9,7 @@ pub const MAX_PAYLOAD: usize = 256 << 20;
 /// Bytes before the payload: the length and the type byte.
 pub const HEADER_LEN: usize = 5;
 
-/// Frame types. Output, input and snapshots carry raw bytes; everything else is JSON.
+/// Frame types. Output, input, snapshots and blobs carry raw bytes; everything else is JSON.
 pub mod kind {
     /// A control message as JSON.
     pub const CONTROL: u8 = 0x01;
@@ -19,6 +19,9 @@ pub mod kind {
     pub const SNAPSHOT: u8 = 0x03;
     /// Client to daemon: `pane` u64 LE, then the bytes for the pane's PTY.
     pub const INPUT: u8 = 0x04;
+    /// Daemon to client: a u32 LE header length, the JSON header (`pane`, `id`, `mime`), then the
+    /// blob's bytes.
+    pub const BLOB: u8 = 0x05;
 }
 
 /// Why bytes couldn't be read as a message.

@@ -19,7 +19,7 @@ pub const T0_KINDS: [&str; 16] = [
     "elapsed", "progress", "ansi", "rows", "el",
 ];
 /// The T1 kinds (§8.2).
-pub const T1_KINDS: [&str; 21] = [
+pub const T1_KINDS: [&str; 22] = [
     "md",
     "code",
     "diff",
@@ -41,6 +41,7 @@ pub const T1_KINDS: [&str; 21] = [
     "tool",
     "agent",
     "checklist",
+    "image",
 ];
 /// Every terminal feature name of v1 (§7.2).
 pub const ALL_FEATURES: [&str; 10] = [
@@ -351,6 +352,53 @@ impl TspPane {
 
     pub fn blobs(&self) -> &dyn BlobStore {
         self.blobs.as_ref()
+    }
+
+    /// A blob that reached this replica outside the stream (§7.12): the daemon sends a late
+    /// window the blobs its documents name, since snapshots don't carry them. Blob bytes are
+    /// storage, not replicated state (the hash leaves them out), so this changes nothing a replica
+    /// must agree on; nodes naming the blob redraw. Returns false, storing nothing, when `id`
+    /// isn't the SHA-256 of `bytes` or the blob is over [`blob::MAX_BLOB`].
+    pub fn deliver_blob(&mut self, id: &str, mime: Option<&str>, bytes: Vec<u8>) -> bool {
+        if bytes.len() > blob::MAX_BLOB || !blob::blob_id(&bytes).eq_ignore_ascii_case(id) {
+            return false;
+        }
+        let blob = blob::Blob {
+            id: id.to_ascii_lowercase(),
+            mime: mime.map(str::to_owned),
+            bytes,
+        };
+        let referenced = self.referenced_blobs();
+        let id = blob.id.clone();
+        self.blobs.put(blob, &|id| referenced.contains(id));
+        self.arrived.push(id);
+        true
+    }
+
+    /// Blob ids that `image` nodes name, lowercase.
+    pub fn referenced_blobs(&self) -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        for s in &self.surfaces {
+            let mut stack = vec![s.doc.root()];
+            while let Some(n) = stack.pop() {
+                if n.kind() == "image"
+                    && let Some(id) = n.prop("blob").and_then(Value::as_str)
+                {
+                    out.insert(id.to_ascii_lowercase());
+                }
+                stack.extend(n.children());
+            }
+        }
+        out
+    }
+
+    /// Blob ids that `image` nodes name and this replica doesn't hold: a window asks the daemon
+    /// for them.
+    pub fn missing_blobs(&self) -> Vec<String> {
+        self.referenced_blobs()
+            .into_iter()
+            .filter(|id| !self.blobs.has(id))
+            .collect()
     }
 
     /// The pane's retention estimate in bytes.
@@ -1009,23 +1057,6 @@ impl TspPane {
             }
             Err(e) => self.answer(json!({"ev": "error", "msg": e}), None),
         }
-    }
-
-    /// Blob ids that `image` nodes name.
-    fn referenced_blobs(&self) -> BTreeSet<String> {
-        let mut out = BTreeSet::new();
-        for s in &self.surfaces {
-            let mut stack = vec![s.doc.root()];
-            while let Some(n) = stack.pop() {
-                if n.kind() == "image"
-                    && let Some(id) = n.prop("blob").and_then(Value::as_str)
-                {
-                    out.insert(id.to_ascii_lowercase());
-                }
-                stack.extend(n.children());
-            }
-        }
-        out
     }
 
     /// The surface a `t` or `s` names (`sf`), or the live surface.

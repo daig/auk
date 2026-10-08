@@ -111,6 +111,20 @@ impl Shared {
                 }
             }
             DaemonMsg::Effect(effect) => self.effects.push(effect),
+            // A blob the pane's documents name, sent after a snapshot (§7.12); nodes naming it
+            // redraw from the replica's changes.
+            DaemonMsg::Blob {
+                pane,
+                id,
+                mime,
+                bytes,
+            } => {
+                if let Some(p) = self.panes.get_mut(&pane)
+                    && p.replica.deliver_blob(&id, mime.as_deref(), bytes)
+                {
+                    p.generation += 1;
+                }
+            }
             DaemonMsg::Welcome { .. }
             | DaemonMsg::Refused(_)
             | DaemonMsg::LensView { .. }

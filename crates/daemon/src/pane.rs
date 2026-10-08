@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use auk_mirror::msg::{encode_output, encode_snapshot};
+use auk_mirror::msg::{encode_blob, encode_output, encode_snapshot};
 use auk_mirror::{ClientFacts, DaemonMsg, Message, PaneId};
 use auk_replica::{Answer, Delivery, Event, Item, Record, Replica, Snapshot, TspFacts};
 use auk_term::Mark;
@@ -455,6 +455,9 @@ impl Pane {
         let mut frame = Vec::new();
         encode_snapshot(&mut frame, self.id, &self.snapshot());
         tx.send(Bytes::from(frame));
+        // Snapshots don't carry blobs; the window gets the ones its documents name (§7.12).
+        let named = self.replica.tsp().referenced_blobs();
+        self.send_blobs(&tx, named.iter().map(String::as_str));
         self.send_lens_views(&tx);
         self.viewers.insert(
             client,
@@ -468,6 +471,31 @@ impl Pane {
             self.activity.insert(0, client);
         }
         self.update_primary();
+    }
+
+    /// Sends the blobs among `ids` that the pane holds (in memory or on disk), each as a
+    /// [`DaemonMsg::Blob`]. Ids it doesn't hold are skipped: they may still arrive in the stream.
+    fn send_blobs<'a>(&self, tx: &ClientTx, ids: impl Iterator<Item = &'a str>) {
+        for id in ids {
+            if let Some(blob) = self.replica.tsp().blobs().load(&id.to_ascii_lowercase()) {
+                let mut frame = Vec::new();
+                encode_blob(
+                    &mut frame,
+                    self.id,
+                    &blob.id,
+                    blob.mime.as_deref(),
+                    &blob.bytes,
+                );
+                tx.send(Bytes::from(frame));
+            }
+        }
+    }
+
+    /// A window asks for blobs its documents name and it lacks (§7.12).
+    pub fn client_blobs(&self, client: ClientId, ids: &[String]) {
+        if let Some(v) = self.viewers.get(&client) {
+            self.send_blobs(&v.tx, ids.iter().map(String::as_str));
+        }
     }
 
     pub fn remove_viewer(&mut self, client: ClientId) {

@@ -127,6 +127,8 @@ pub fn copy_prop(d: &mut ComputedStyle, s: &ComputedStyle, p: Prop) {
         OutlineColor => outline_color;
         OutlineOffset => outline_offset;
         TableLayout => table_layout_fixed;
+        ObjectFit => object_fit;
+        ImageRendering => image_rendering;
         Content => content;
         TransitionProperty => transitions;
         TransitionDuration => transitions;
@@ -935,6 +937,20 @@ pub fn compute_prop(
             _ => false,
         },
         P::TableLayout => kw_map!(cs.table_layout_fixed, { "fixed" => true, "auto" => false }),
+        P::ObjectFit => kw_map!(cs.object_fit, {
+            "fill" => ObjectFit::Fill,
+            "contain" => ObjectFit::Contain,
+            "cover" => ObjectFit::Cover,
+            "none" => ObjectFit::None,
+            "scale-down" => ObjectFit::ScaleDown,
+        }),
+        P::ImageRendering => kw_map!(cs.image_rendering, {
+            "auto" => ImageRendering::Smooth,
+            "smooth" => ImageRendering::Smooth,
+            "high-quality" => ImageRendering::Smooth,
+            "pixelated" => ImageRendering::Pixelated,
+            "crisp-edges" => ImageRendering::Pixelated,
+        }),
         P::Content => match sv {
             SV::Kw(_) => {
                 cs.content = None;

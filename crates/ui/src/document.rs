@@ -404,6 +404,29 @@ impl Document {
         self.viewport
     }
 
+    /// Device pixels per CSS px.
+    pub fn device_scale(&self) -> f32 {
+        self.device_scale
+    }
+
+    /// Gives an element replaced content: it lays out with the picture's natural size and ratio
+    /// when its own size is `auto`, and paints the picture in its content box (`object-fit`,
+    /// `image-rendering`). `None` makes it an ordinary element again. A new picture of the same
+    /// natural size (an animation's next frame) only repaints.
+    pub fn set_image(&mut self, id: NodeId, image: Option<crate::image::ImageContent>) {
+        let n = self.node_mut(id);
+        let relayout = n.image.as_ref().map(|i| i.natural) != image.as_ref().map(|i| i.natural);
+        n.image = image.map(Box::new);
+        if relayout {
+            self.invalidate_layout(id);
+        }
+    }
+
+    /// An element's replaced content.
+    pub fn image(&self, id: NodeId) -> Option<&crate::image::ImageContent> {
+        self.node(id).image.as_deref()
+    }
+
     /// Device pixels per CSS px (2 on Retina displays). Border widths snap to device pixels.
     pub fn set_device_scale(&mut self, scale: f32) {
         if self.device_scale != scale {

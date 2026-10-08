@@ -137,6 +137,12 @@ pub enum ClientMsg {
         vars: BTreeMap<String, String>,
     },
     LayoutEdit(LayoutEdit),
+    /// Blobs the pane's documents name that this client doesn't hold (§7.12): the daemon answers
+    /// with a [`DaemonMsg::Blob`] for each one it has.
+    Blobs {
+        pane: PaneId,
+        ids: Vec<String>,
+    },
     Detach,
 }
 
@@ -231,6 +237,17 @@ pub enum DaemonMsg {
         pane: PaneId,
         you: bool,
     },
+    /// A blob of the pane (§7.12), outside the stream: snapshots don't carry blobs, so the daemon
+    /// sends those the pane's documents name after a snapshot, and any a client asks for. Blob
+    /// bytes are storage, not replicated state. Sent as a binary frame.
+    #[serde(skip)]
+    Blob {
+        pane: PaneId,
+        /// Lowercase hex SHA-256 of `bytes`.
+        id: String,
+        mime: Option<String>,
+        bytes: Vec<u8>,
+    },
 }
 
 /// A message with a frame encoding.
@@ -296,6 +313,30 @@ pub fn encode_output(out: &mut Vec<u8>, pane: PaneId, seq: u64, bytes: &[u8]) {
     );
 }
 
+/// The JSON header of a blob frame.
+#[derive(Serialize, Deserialize)]
+struct BlobHeader {
+    pane: PaneId,
+    id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    mime: Option<String>,
+}
+
+/// Encodes a blob frame without cloning its bytes.
+pub fn encode_blob(out: &mut Vec<u8>, pane: PaneId, id: &str, mime: Option<&str>, bytes: &[u8]) {
+    let header = serde_json::to_vec(&BlobHeader {
+        pane,
+        id: id.to_owned(),
+        mime: mime.map(str::to_owned),
+    })
+    .expect("blob headers serialize");
+    write_frame(
+        out,
+        kind::BLOB,
+        &[&(header.len() as u32).to_le_bytes(), &header, bytes],
+    );
+}
+
 /// Encodes a snapshot frame without cloning the snapshot's bytes.
 pub fn encode_snapshot(out: &mut Vec<u8>, pane: PaneId, snapshot: &Snapshot) {
     #[derive(Serialize)]
@@ -322,6 +363,12 @@ impl Message for DaemonMsg {
         match self {
             DaemonMsg::Output { pane, seq, bytes } => encode_output(out, *pane, *seq, bytes),
             DaemonMsg::Snapshot { pane, snapshot } => encode_snapshot(out, *pane, snapshot),
+            DaemonMsg::Blob {
+                pane,
+                id,
+                mime,
+                bytes,
+            } => encode_blob(out, *pane, id, mime.as_deref(), bytes),
             other => encode_json(other, out),
         }
     }
@@ -348,6 +395,21 @@ impl Message for DaemonMsg {
                 let SnapshotHeader { pane, mut snapshot } = serde_json::from_slice(header)?;
                 snapshot.bytes = bytes.to_vec();
                 Ok(DaemonMsg::Snapshot { pane, snapshot })
+            }
+            kind::BLOB => {
+                let (len, rest) = take_u32(frame.payload, "blob")?;
+                let len = len as usize;
+                if rest.len() < len {
+                    return Err(WireError::Truncated("blob"));
+                }
+                let (header, bytes) = rest.split_at(len);
+                let BlobHeader { pane, id, mime } = serde_json::from_slice(header)?;
+                Ok(DaemonMsg::Blob {
+                    pane,
+                    id,
+                    mime,
+                    bytes: bytes.to_vec(),
+                })
             }
             other => Err(WireError::UnknownKind(other)),
         }

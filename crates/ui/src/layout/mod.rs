@@ -140,6 +140,12 @@ impl Document {
         let id = NodeId::from_taffy(tid);
         self.stats.laid_out += 1;
         let n = self.node(id);
+        if n.image.is_some()
+            && n.layout_children.is_empty()
+            && matches!(n.inner, Inner::Flow | Inner::Flex | Inner::Grid)
+        {
+            return self.compute_replaced_layout(id, inputs);
+        }
         match n.inner {
             Inner::Ifc => self.compute_inline_layout(id, inputs),
             // A virtualized list: a block container or a flex column (Tern's `main`).
@@ -158,6 +164,63 @@ impl Document {
             Inner::Table => self.compute_table_layout(id, inputs),
             _ => LayoutOutput::HIDDEN,
         }
+    }
+
+    /// A replaced box (an element with [`crate::ImageContent`] and no children): its natural size
+    /// and ratio stand in for content, under its own size, min and max (CSS 2.1 §10.3.2, §10.4,
+    /// §10.6.2). Sizes the parent already decided (`known_dimensions`) are final.
+    fn compute_replaced_layout(&mut self, id: NodeId, inputs: LayoutInput) -> LayoutOutput {
+        let n = self.node(id);
+        // The natural size is in CSS px; the box's lengths are zoomed (§8.3's region zoom).
+        let zoom = n.style.as_ref().map_or(1.0, |s| s.zoom);
+        let natural = n
+            .image
+            .as_ref()
+            .map_or((0.0, 0.0), |i| (i.natural.0 * zoom, i.natural.1 * zoom));
+        let ts = &n.taffy_style;
+        let parent = inputs.parent_size;
+        let pad = ts.padding.resolve_or_zero(parent.width, resolve_calc);
+        let border = ts.border.resolve_or_zero(parent.width, resolve_calc);
+        let pb = Size {
+            width: pad.left + pad.right + border.left + border.right,
+            height: pad.top + pad.bottom + border.top + border.bottom,
+        };
+        let border_box = ts.box_sizing == taffy::BoxSizing::BorderBox;
+        // Specified sizes as content sizes.
+        let content =
+            |v: Option<f32>, pb: f32| v.map(|v| if border_box { (v - pb).max(0.0) } else { v });
+        let styled = inputs.sizing_mode == SizingMode::InherentSize;
+        let size = ts.size.maybe_resolve(parent, resolve_calc);
+        let min = ts.min_size.maybe_resolve(parent, resolve_calc);
+        let max = ts.max_size.maybe_resolve(parent, resolve_calc);
+        let known = inputs.known_dimensions;
+        let axis =
+            |known: Option<f32>, size: Option<f32>, min: Option<f32>, max: Option<f32>, pb: f32| {
+                match known {
+                    Some(k) => (Some((k - pb).max(0.0)), 0.0, None),
+                    None if styled => (
+                        content(size, pb),
+                        content(min, pb).unwrap_or(0.0),
+                        content(max, pb),
+                    ),
+                    None => (None, 0.0, None),
+                }
+            };
+        let (w, min_w, mut max_w) = axis(known.width, size.width, min.width, max.width, pb.width);
+        // Tern's rule for pictures (book:5929): an `auto` width also fits the available width,
+        // both axes shrinking together.
+        if w.is_none()
+            && let AvailableSpace::Definite(avail) = inputs.available_space.width
+        {
+            let fit = (avail - pb.width).max(0.0);
+            max_w = Some(max_w.map_or(fit, |m| m.min(fit)));
+        }
+        let (h, min_h, max_h) = axis(known.height, size.height, min.height, max.height, pb.height);
+        let (cw, ch) = crate::image::replaced_size(w, h, (min_w, min_h), (max_w, max_h), natural);
+        LayoutOutput::from_outer_size(Size {
+            width: cw + pb.width,
+            height: ch + pb.height,
+        })
     }
 
     /// Taffy places absolutely positioned children at their static position relative to the

@@ -1,5 +1,5 @@
-//! Kinds on rich sub-engines (§8.5, §18.4): `md code diff ansi rows`, and the T2 `math` and
-//! `image` drawn as plain fallbacks.
+//! Kinds on rich sub-engines (§8.5, §18.4): `md code diff ansi rows image`, and the T2 `math`
+//! drawn as a plain fallback.
 
 use super::layout::preview_lines;
 use super::{begin, icon, part};
@@ -8,12 +8,14 @@ use crate::common::{bool_prop, num_prop, str_prop};
 use crate::diff::{self, DLine, Hunk, Op};
 use crate::dom::Dom;
 use crate::highlight::{self, Highlighter, Runs};
+use crate::image::Picture;
 use crate::spans;
 use crate::state::{SurfaceState, state_key};
 use crate::view::{Cx, Extra, Look, Mount};
 use auk_tsp::NodeRef;
 use auk_ui::NodeId;
 use serde_json::Value;
+use std::sync::Arc;
 
 fn text_prop(node: NodeRef) -> String {
     match node.prop("text") {
@@ -597,21 +599,187 @@ pub(crate) fn math(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
     cx.dom.text(el, &tex);
 }
 
+/// Per-node state of an `image`: what it shows, its frame element and its animation clock.
+#[derive(Debug, Default)]
+pub(crate) struct ImageState {
+    /// The source and density shown; the clock restarts when it changes.
+    key: String,
+    picture: Option<Arc<Picture>>,
+    /// The box's natural size (from `w`/`h`, completed from the picture's ratio).
+    natural: (f32, f32),
+    frame: Option<NodeId>,
+    /// When the picture first drew (view clock, ms).
+    start: f64,
+    shown: usize,
+}
+
+/// What an `image` node can show.
+enum ImageSource {
+    Ready(Arc<Picture>),
+    /// The blob hasn't arrived.
+    Loading,
+    /// Why it can't show.
+    Unavailable(String),
+}
+
+/// `image` (book:5925-5969): a blob (raster or sanitized SVG) or a built-in picture in a replaced
+/// box, its children drawn over it in `.sf-img-over`. Until the blob arrives, or when it can't be
+/// decoded, a placeholder card with an icon and `alt`. Animations run on the view clock (§7.13),
+/// still under Reduce Motion. Blob images zoom on click unless the node has its own `click`.
 pub(crate) fn image(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
+    let prior = match std::mem::take(&mut m.extra) {
+        Extra::Image(st) => Some(st),
+        _ => None,
+    };
     begin(cx, m);
     let p = node.props();
-    look.class("missing");
-    let alt = str_prop(p, "alt").unwrap_or("Image").to_owned();
-    let card = part(cx, m, "div", "sf-img-card");
-    cx.dom.attr(card, "role", "img");
-    cx.dom.attr(card, "aria-label", &alt);
-    if let Some(w) = num_prop(p, "w") {
-        look.style(&format!("max-width: {}px;", crate::common::fmt_num(w)));
+    let alt = str_prop(p, "alt");
+    let builtin = str_prop(p, "builtin");
+    let blob = str_prop(p, "blob").map(str::to_ascii_lowercase);
+    // Vector pictures draw at the region zoom times the display scale (§8.3).
+    let density = cx.set.font_px / 13.0 * cx.dom.doc.device_scale();
+    let source = if let Some(name) = builtin {
+        match crate::image::load_builtin(name, density) {
+            Ok(pic) => ImageSource::Ready(pic),
+            Err(e) => ImageSource::Unavailable(e),
+        }
+    } else if let Some(id) = blob.as_deref() {
+        let held = cx
+            .blobs
+            .get(id)
+            .map(std::borrow::Cow::Borrowed)
+            .or_else(|| cx.blobs.load(id).map(std::borrow::Cow::Owned));
+        match held {
+            None => ImageSource::Loading,
+            Some(b) => match crate::image::load_blob(&b, density) {
+                Ok(pic) => ImageSource::Ready(pic),
+                Err(e) => ImageSource::Unavailable(e),
+            },
+        }
+    } else {
+        ImageSource::Unavailable("the node names no blob".into())
+    };
+    let size = |k: &str| num_prop(p, k).filter(|v| *v > 0.0).map(|v| v as f32);
+    match source {
+        ImageSource::Ready(pic) => {
+            let (pw, ph) = pic.size;
+            let natural = match (size("w"), size("h")) {
+                (Some(w), Some(h)) => (w, h),
+                (Some(w), None) if pw > 0.0 => (w, w * ph / pw),
+                (None, Some(h)) if ph > 0.0 => (h * pw / ph, h),
+                _ => (pw, ph),
+            };
+            let zoom =
+                builtin.is_none() && crate::common::Actions::read(p, "image").click.is_none();
+            look.class_if(zoom, "sf-zoom");
+            let label = alt.unwrap_or("Image");
+            let el = if pic.svg {
+                let el = part(cx, m, "svg", "sf-img-svg");
+                cx.dom.attr(el, "role", "img");
+                cx.dom.attr(el, "aria-label", label);
+                el
+            } else {
+                let el = part(cx, m, "img", "sf-img-frame");
+                cx.dom.attr(el, "alt", label);
+                el
+            };
+            // `max.h` bounds the picture's height; both axes shrink together.
+            if let Some(Value::Object(max)) = p.get("max")
+                && let Some(h @ Value::String(_)) = max.get("h")
+                && let Some(e) = crate::common::extent(h)
+            {
+                cx.dom.set_style(el, &format!("max-height: {e}"));
+            }
+            let key = format!(
+                "{}@{density}",
+                builtin.map_or_else(
+                    || blob.clone().unwrap_or_default(),
+                    |b| format!("builtin:{b}")
+                )
+            );
+            let start = prior.filter(|s| s.key == key).map_or(cx.now, |s| s.start);
+            let (shown, running) = if pic.animated() && !cx.set.reduce_motion {
+                pic.frame_at(cx.now - start)
+            } else {
+                (0, false)
+            };
+            let mut content = pic.frames[shown].content.clone();
+            content.natural = natural;
+            cx.dom.doc.set_image(el, Some(content));
+            m.clock = running;
+            m.extra = Extra::Image(Box::new(ImageState {
+                key,
+                picture: Some(pic),
+                natural,
+                frame: Some(el),
+                start,
+                shown,
+            }));
+        }
+        ImageSource::Loading | ImageSource::Unavailable(_) => {
+            look.class("missing");
+            let loading = matches!(source, ImageSource::Loading);
+            let (fallback, why) = match &source {
+                ImageSource::Loading => {
+                    ("Image loading", "The image data has not arrived".to_owned())
+                }
+                ImageSource::Unavailable(e) => (
+                    "Image unavailable",
+                    format!("Not an image format Auk can show ({e})"),
+                ),
+                ImageSource::Ready(_) => unreachable!("handled above"),
+            };
+            let text = alt.unwrap_or(fallback);
+            let card = part(cx, m, "div", "sf-img-card");
+            cx.dom.attr(card, "role", "img");
+            cx.dom.attr(card, "title", &why);
+            let state = if loading {
+                "image loading"
+            } else {
+                "image unavailable"
+            };
+            cx.dom
+                .attr(card, "aria-label", &format!("{text} ({state})"));
+            if loading {
+                cx.dom.attr(card, "aria-busy", "true");
+            }
+            if let Some(w) = size("w") {
+                look.style(&format!(
+                    "max-width: {}px;",
+                    crate::common::fmt_num(f64::from(w))
+                ));
+            }
+            let ic = cx.dom.child(card, "span", "sf-img-ic");
+            icon(cx, ic, "image");
+            cx.dom.child_text(card, "span", "sf-img-alt", text);
+        }
     }
-    let ic = cx.dom.child(card, "span", "sf-img-ic");
-    icon(cx, ic, "image");
-    cx.dom.child_text(card, "span", "sf-img-alt", &alt);
     let over = super::slot(cx, m, 0, "div", "sf-img-over");
     cx.dom.doc.append_child(m.el, over);
     m.generated.push(over);
+}
+
+/// An animated image's next frame (§7.13). Returns whether it still runs.
+pub(crate) fn tick_image(cx: &mut Cx, _node: NodeRef, m: &mut Mount) -> bool {
+    let Extra::Image(st) = &mut m.extra else {
+        return false;
+    };
+    let (Some(pic), Some(el)) = (st.picture.clone(), st.frame) else {
+        return false;
+    };
+    if cx.dom.doc.try_node(el).is_none() {
+        return false;
+    }
+    let (i, running) = if cx.set.reduce_motion {
+        (0, false)
+    } else {
+        pic.frame_at(cx.now - st.start)
+    };
+    if i != st.shown {
+        let mut content = pic.frames[i].content.clone();
+        content.natural = st.natural;
+        cx.dom.doc.set_image(el, Some(content));
+        st.shown = i;
+    }
+    running
 }

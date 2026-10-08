@@ -1,9 +1,11 @@
 //! Painting into a Vello scene (backgrounds, borders with radii, text from Parley glyph runs,
-//! overflow clips, opacity layers, 2D transforms) and hit testing in the same order.
+//! replaced content, overflow clips, opacity layers, 2D transforms) and hit testing in the same
+//! order.
 
 use crate::css::values::Color;
 use crate::document::Document;
 use crate::dom::{Inner, NodeId, NodeKind, Rect};
+use crate::image::{ImageContent, fit};
 use crate::layout::inline::InlineLayout;
 use crate::style::{BorderStyle, ComputedStyle, Position, TransformFn, Visibility};
 use vello::Scene;
@@ -184,6 +186,11 @@ impl Painter<'_> {
                 [l.border.top, l.border.right, l.border.bottom, l.border.left],
             );
         }
+        if let Some(image) = n.image.as_deref()
+            && s.visibility == Visibility::Visible
+        {
+            self.paint_image(image, s, r, l, xf);
+        }
         let clip = s.overflow_x.clips() || s.overflow_y.clips();
         if clip {
             let pad = Rect::new(
@@ -236,6 +243,39 @@ impl Painter<'_> {
         if layered {
             self.scene.pop_layer();
         }
+    }
+
+    /// Replaced content: the picture placed in the content box by `object-fit`, clipped to the
+    /// content box (with the box's radii, inset by its border).
+    fn paint_image(
+        &mut self,
+        image: &ImageContent,
+        s: &ComputedStyle,
+        r: Rect,
+        l: &taffy::Layout,
+        xf: Affine,
+    ) {
+        let content = Rect::new(
+            r.x + l.border.left + l.padding.left,
+            r.y + l.border.top + l.padding.top,
+            (r.w - l.border.left - l.border.right - l.padding.left - l.padding.right).max(0.0),
+            (r.h - l.border.top - l.border.bottom - l.padding.top - l.padding.bottom).max(0.0),
+        );
+        let (iw, ih) = (image.data.width, image.data.height);
+        if content.w <= 0.0 || content.h <= 0.0 || iw == 0 || ih == 0 {
+            return;
+        }
+        let (pw, ph) = image.picture_size();
+        let picture = (pw * s.zoom, ph * s.zoom);
+        let (x, y, w, h) = fit(s.object_fit, picture, (content.w, content.h));
+        let rr = shrink_radii(radii(s, r), l.border.top as f64 + l.padding.top as f64);
+        self.scene
+            .push_clip_layer(Fill::NonZero, xf, &RoundedRect::from_rect(kr(content), rr));
+        let place = Affine::translate(((content.x + x) as f64, (content.y + y) as f64))
+            * Affine::scale_non_uniform(w as f64 / iw as f64, h as f64 / ih as f64);
+        self.scene
+            .draw_image(&image.brush(s.image_rendering), xf * place);
+        self.scene.pop_layer();
     }
 
     fn paint_inline(

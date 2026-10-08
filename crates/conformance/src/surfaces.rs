@@ -3,12 +3,12 @@
 //! through `auk-views` into an `auk-ui` document, as a window does before painting. Suites read the
 //! laid-out boxes, the classes the views wrote, and the page `auk-views` exports for WebKit.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc::{self, Receiver};
 use std::time::Instant;
 
-use auk_mirror::{Client, ClientFacts, ClientKind, ClientMsg, DaemonMsg, Hello, PaneId};
+use auk_mirror::{Client, ClientFacts, ClientKind, ClientMsg, DaemonMsg, Hello, PaneId, write_msg};
 use auk_replica::{Item, Replica, Role, tsp_config};
 use auk_tsp::{MemoryBlobs, TspPane};
 use auk_ui::{Document, NodeId, SheetKind};
@@ -74,6 +74,8 @@ pub struct SurfaceWindow {
     stream: UnixStream,
     replicas: BTreeMap<PaneId, Replica>,
     projections: BTreeMap<PaneId, Projection>,
+    /// Blobs asked of the daemon, or sent by it after a snapshot (§7.12), per pane.
+    asked: BTreeMap<PaneId, BTreeSet<String>>,
     settings: ViewSettings,
     start: Instant,
     /// Out-of-order items or a lost connection; a correct daemon causes none.
@@ -113,6 +115,7 @@ impl SurfaceWindow {
             stream,
             replicas: BTreeMap::new(),
             projections: BTreeMap::new(),
+            asked: BTreeMap::new(),
             settings: ViewSettings::default(),
             start: Instant::now(),
             errors: Vec::new(),
@@ -143,12 +146,33 @@ impl SurfaceWindow {
                 let mut p = Projection::new(self.settings.clone());
                 let changes = replica.take_tsp_changes();
                 p.view.sync(&mut p.doc, replica.tsp(), &changes, now);
+                // The daemon sends the blobs the snapshot names right after it.
+                self.asked
+                    .insert(*pane, replica.tsp().missing_blobs().into_iter().collect());
                 self.replicas.insert(*pane, replica);
                 self.projections.insert(*pane, p);
                 return;
             }
             DaemonMsg::Output { pane, seq, bytes } => (*pane, *seq, Item::Output(bytes)),
             DaemonMsg::Record { pane, seq, record } => (*pane, *seq, Item::Record(record)),
+            DaemonMsg::Blob {
+                pane,
+                id,
+                mime,
+                bytes,
+            } => {
+                let (Some(replica), Some(p)) =
+                    (self.replicas.get_mut(pane), self.projections.get_mut(pane))
+                else {
+                    return;
+                };
+                if !replica.deliver_blob(id, mime.as_deref(), bytes.clone()) {
+                    self.errors.push(format!("pane {pane}: bad blob {id}"));
+                }
+                let changes = replica.take_tsp_changes();
+                p.view.sync(&mut p.doc, replica.tsp(), &changes, now);
+                return;
+            }
             _ => return,
         };
         let (Some(replica), Some(p)) = (
@@ -164,6 +188,19 @@ impl SurfaceWindow {
         let changes = replica.take_tsp_changes();
         if !changes.is_empty() {
             p.view.sync(&mut p.doc, replica.tsp(), &changes, now);
+        }
+        // Blobs a document names that this window lacks (they arrived before its snapshot).
+        let asked = self.asked.entry(pane).or_default();
+        let ask: Vec<String> = replica
+            .tsp()
+            .missing_blobs()
+            .into_iter()
+            .filter(|id| asked.insert(id.clone()))
+            .collect();
+        if !ask.is_empty()
+            && let Err(e) = write_msg(&mut self.stream, &ClientMsg::Blobs { pane, ids: ask })
+        {
+            self.errors.push(format!("ask for blobs: {e}"));
         }
     }
 

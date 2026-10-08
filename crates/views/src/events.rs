@@ -41,12 +41,34 @@ pub enum Outcome {
     Copy(String),
     /// Open a link or path.
     Open(String),
-    /// Show an image in the viewer.
-    Zoom(String),
+    /// Show an image in the viewer (the `zoom` action).
+    Zoom(Box<Zoom>),
     /// The input is keys: send them to the PTY.
     Keys,
     /// Only the view changed.
     Redraw,
+}
+
+/// What the image viewer shows (book:5957): the clicked image and, when its parent holds other
+/// blob images (a message's attachments), all of them in order, starting at `index`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Zoom {
+    pub surface: SurfaceKey,
+    pub images: Vec<ZoomImage>,
+    pub index: usize,
+}
+
+/// One image the viewer can step to.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ZoomImage {
+    /// The node.
+    pub id: String,
+    /// Its blob (builtin images never zoom).
+    pub blob: String,
+    /// The viewer title: `alt`, else `title`.
+    pub title: Option<String>,
+    /// A page or file the viewer may offer to open (`href` first, then `path`).
+    pub open: Option<String>,
 }
 
 /// A context menu entry: its label and the action it runs.
@@ -141,7 +163,7 @@ impl PaneView {
             if let Some(out) = self.click_part(doc, pane, surface, node, &hit, ev) {
                 return out;
             }
-            if let Some(out) = self.click_node(doc, pane, surface, node, ev) {
+            if let Some(out) = self.click_node(doc, pane, surface, node, &hit, ev) {
                 return out;
             }
         }
@@ -292,6 +314,7 @@ impl PaneView {
         pane: &TspPane,
         surface: &Surface,
         node: NodeRef,
+        hit: &Hit,
         ev: PointerEvent,
     ) -> Option<Vec<Outcome>> {
         let key = surface.key();
@@ -313,6 +336,17 @@ impl PaneView {
         match node.kind() {
             "editor" | "input" if actions.click.is_none() => {
                 return Some(self.click_field(doc, pane, surface, node, ev));
+            }
+            // A click on a drawn blob image (not on a child over it) opens the viewer.
+            "image" if actions.click.is_none() && ev.clicks < 2 => {
+                let on_child = hit.parts.iter().any(|&p| self.class_has(p, "sf-img-over"));
+                if !on_child
+                    && let Some(el) = self.node_element(surface.key(), node.id())
+                    && self.class_has(el, "sf-zoom")
+                    && let Some(z) = zoom(surface, node)
+                {
+                    return Some(vec![Outcome::Zoom(Box::new(z))]);
+                }
             }
             "item" => {
                 let list = node.parent().filter(|l| l.kind() == "list");
@@ -372,7 +406,9 @@ impl PaneView {
                 Some(h) => vec![Outcome::Open(h.to_owned())],
                 None => Vec::new(),
             },
-            "zoom" => vec![Outcome::Zoom(node.id().to_owned())],
+            "zoom" => zoom(surface, node)
+                .map(|z| vec![Outcome::Zoom(Box::new(z))])
+                .unwrap_or_default(),
             "select" | "activate" => {
                 let (id, item) = match node
                     .parent()
@@ -954,4 +990,35 @@ pub(crate) fn text_content(doc: &Document, id: NodeId) -> String {
         }
     }
     out
+}
+
+/// The viewer for a blob image: it and its parent's other blob images.
+fn zoom(surface: &Surface, node: NodeRef) -> Option<Zoom> {
+    let entry = |n: NodeRef| -> Option<ZoomImage> {
+        if n.kind() != "image" || n.prop("builtin").is_some() {
+            return None;
+        }
+        let p = n.props();
+        Some(ZoomImage {
+            id: n.id().to_owned(),
+            blob: str_prop(p, "blob")?.to_ascii_lowercase(),
+            title: str_prop(p, "alt")
+                .or(str_prop(p, "title"))
+                .map(str::to_owned),
+            open: str_prop(p, "href")
+                .or(str_prop(p, "path"))
+                .map(str::to_owned),
+        })
+    };
+    entry(node)?;
+    let images: Vec<ZoomImage> = match node.parent() {
+        Some(parent) => parent.children().filter_map(entry).collect(),
+        None => entry(node).into_iter().collect(),
+    };
+    let index = images.iter().position(|i| i.id == node.id())?;
+    Some(Zoom {
+        surface: surface.key(),
+        images,
+        index,
+    })
 }

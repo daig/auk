@@ -204,6 +204,17 @@ impl Session {
                     p.primary = you;
                 }
             }
+            DaemonMsg::Blob {
+                pane,
+                id,
+                mime,
+                bytes,
+            } => {
+                // The browser draws grids only; the replica keeps blobs like any other.
+                if let Some(p) = self.panes.get_mut(&pane) {
+                    p.replica.deliver_blob(&id, mime.as_deref(), bytes);
+                }
+            }
             DaemonMsg::LensView { .. } | DaemonMsg::Effect(_) | DaemonMsg::Presence { .. } => {}
         }
     }

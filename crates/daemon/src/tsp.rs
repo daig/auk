@@ -111,6 +111,19 @@ impl BlobStore for DiskBlobs {
     fn get(&self, id: &str) -> Option<&Blob> {
         self.memory.get(id)
     }
+
+    fn load(&self, id: &str) -> Option<Blob> {
+        if let Some(blob) = self.memory.get(id) {
+            return Some(blob.clone());
+        }
+        // Restored panes (§16) find their blobs on disk; the file name is the hash, checked again.
+        let bytes = fs::read(self.path(id)?).ok()?;
+        (auk_tsp::blob::blob_id(&bytes) == id).then(|| Blob {
+            id: id.to_owned(),
+            mime: None,
+            bytes,
+        })
+    }
 }
 
 /// Evicts the least recently shown blobs until the store fits `limit` bytes (at daemon start).

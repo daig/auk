@@ -308,6 +308,12 @@ impl Replica {
         &self.tsp
     }
 
+    /// A blob the daemon sent outside the stream ([`TspPane::deliver_blob`]): storage, not
+    /// replicated state. Returns whether it was stored.
+    pub fn deliver_blob(&mut self, id: &str, mime: Option<&str>, bytes: Vec<u8>) -> bool {
+        self.tsp.deliver_blob(id, mime, bytes)
+    }
+
     /// What changed in the TSP state since the last call, for views.
     pub fn take_tsp_changes(&mut self) -> TspChanges {
         self.tsp.take_changes()

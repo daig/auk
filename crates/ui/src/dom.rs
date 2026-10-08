@@ -250,6 +250,8 @@ pub struct Node {
     pub(crate) measured: Vec<Option<f32>>,
     /// Whether this child was laid out in the last pass (virtualized lists skip children).
     pub(crate) skipped: bool,
+    /// Replaced content: a picture painted into the content box ([`crate::Document::set_image`]).
+    pub(crate) image: Option<Box<crate::image::ImageContent>>,
 }
 
 impl Node {
@@ -279,6 +281,7 @@ impl Node {
             virtual_window: None,
             measured: Vec::new(),
             skipped: false,
+            image: None,
         }
     }
 

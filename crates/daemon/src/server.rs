@@ -700,6 +700,12 @@ impl Daemon {
         }
     }
 
+    pub(crate) fn client_blobs(&self, id: ClientId, pane: PaneId, ids: &[String]) {
+        if let Some(p) = self.pane(pane) {
+            lock(&p).client_blobs(id, ids);
+        }
+    }
+
     pub(crate) fn client_ack(&self, id: ClientId, pane: PaneId, sf: &str, s: u64) {
         if let Some(p) = self.pane(pane) {
             lock(&p).client_ack(id, sf, s);

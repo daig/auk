@@ -28,6 +28,7 @@ pub(crate) enum Extra {
     Shimmer(crate::motion::ShimmerState),
     Tool(Box<crate::kinds::agent::ToolState>),
     Toast(crate::kinds::layout::ToastState),
+    Image(Box<crate::kinds::rich::ImageState>),
 }
 
 /// One TSP node's element and its parts.
@@ -118,6 +119,8 @@ pub(crate) struct Cx<'a> {
     pub cols: u16,
     /// The sync pass.
     pub pass: u64,
+    /// The pane's blobs (`image`).
+    pub blobs: &'a dyn auk_tsp::BlobStore,
 }
 
 impl Cx<'_> {
@@ -300,7 +303,7 @@ impl PaneView {
             {
                 self.fit_dirty = true;
             }
-            self.sync_doc(doc, i, surface, &sc.doc, fresh, now);
+            self.sync_doc(doc, pane.blobs(), i, surface, &sc.doc, fresh, now);
             if sc.meta || sc.palette || fresh || sc.doc.children.contains(surface.id()) {
                 self.write_regions(doc, pane, i);
             }
@@ -311,6 +314,36 @@ impl PaneView {
                 .st
                 .scrolls
                 .extend(sc.scrolls.iter().cloned());
+        }
+        // Blobs that arrived redraw the images naming them (§7.12), whenever they arrive.
+        if !changes.blobs.is_empty() {
+            let arrived: HashSet<String> = changes
+                .blobs
+                .iter()
+                .map(|b| b.to_ascii_lowercase())
+                .collect();
+            for i in 0..self.surfaces.len() {
+                let Some(surface) = pane.surface(self.surfaces[i].key) else {
+                    continue;
+                };
+                let ids: Vec<String> = self.surfaces[i]
+                    .mounts
+                    .iter()
+                    .filter(|(_, m)| m.kind == "image")
+                    .filter(|(id, _)| {
+                        surface
+                            .document()
+                            .get(id)
+                            .and_then(|n| n.prop("blob"))
+                            .and_then(serde_json::Value::as_str)
+                            .is_some_and(|b| arrived.contains(&b.to_ascii_lowercase()))
+                    })
+                    .map(|(id, _)| id.clone())
+                    .collect();
+                if !ids.is_empty() {
+                    self.rerender_ids(doc, pane, i, &ids, now);
+                }
+            }
         }
         // Opening, closing or covering one surface changes the others' region state.
         if !changes.removed.is_empty() || changes.surfaces.iter().any(|s| s.opened || s.meta) {
@@ -508,9 +541,11 @@ impl PaneView {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn sync_doc(
         &mut self,
         doc: &mut Document,
+        blobs: &dyn auk_tsp::BlobStore,
         i: usize,
         surface: &Surface,
         dc: &auk_tsp::doc::DocChanges,
@@ -531,6 +566,7 @@ impl PaneView {
             st: &mut sv.st,
             cols,
             pass: self.pass,
+            blobs,
         };
         let mounts = &mut sv.mounts;
         let clocked = &mut sv.clocked;
@@ -634,6 +670,52 @@ impl PaneView {
         }
     }
 
+    /// Re-render some nodes of surface `i`, with their clocks and children.
+    fn rerender_ids(
+        &mut self,
+        doc: &mut Document,
+        pane: &TspPane,
+        i: usize,
+        ids: &[String],
+        now: f64,
+    ) {
+        let Some(surface) = pane.surface(self.surfaces[i].key) else {
+            return;
+        };
+        let settings = &self.settings;
+        let cols = self.cols;
+        let sv = &mut self.surfaces[i];
+        let mut cx = Cx {
+            dom: Dom {
+                doc: &mut *doc,
+                w: &mut self.written,
+            },
+            now,
+            set: settings,
+            sf: surface,
+            st: &mut sv.st,
+            cols,
+            pass: self.pass,
+            blobs: pane.blobs(),
+        };
+        for id in ids {
+            let (Some(node), Some(mut m)) = (surface.document().get(id), sv.mounts.remove(id))
+            else {
+                continue;
+            };
+            render_node(&mut cx, &mut m, node);
+            if m.clock {
+                sv.clocked.insert(id.clone());
+            } else {
+                sv.clocked.remove(id);
+            }
+            sv.mounts.insert(id.clone(), m);
+            if kinds::has_children(node.kind()) {
+                place_children(&mut cx, &mut sv.mounts, &mut sv.clocked, node);
+            }
+        }
+    }
+
     /// Re-render every node (settings, theme or width changed).
     pub(crate) fn rerender_all(&mut self, doc: &mut Document, pane: &TspPane, now: f64) {
         for i in 0..self.surfaces.len() {
@@ -654,6 +736,7 @@ impl PaneView {
                 st: &mut sv.st,
                 cols,
                 pass: self.pass,
+                blobs: pane.blobs(),
             };
             let ids: Vec<String> = sv.mounts.keys().cloned().collect();
             for id in ids {
@@ -825,11 +908,16 @@ fn apply_look(cx: &mut Cx, m: &mut Mount, node: NodeRef, look: Look) {
         class.push_str(" sf-act");
     }
     let mut style = String::new();
-    // `list` reads `max` as its own height, `seg` reads `min.w` as a truncation floor.
-    let clip = if matches!(kind, "list" | "seg") {
+    // `list` reads `max` as its own height, `seg` reads `min.w` as a truncation floor, and
+    // `image` bounds its picture with `max.h`.
+    let clip = if matches!(kind, "list" | "seg" | "image") {
         let mut q = p.clone();
         if kind == "list" {
             q.remove("max");
+        } else if kind == "image" {
+            if let Some(serde_json::Value::Object(max)) = q.get_mut("max") {
+                max.remove("h");
+            }
         } else {
             q.remove("min");
         }

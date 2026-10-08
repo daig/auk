@@ -8,7 +8,8 @@
 //!   ([`auk_replica::PARSER_VERSION`]), the Auk version, its kind and its facts. The daemon
 //!   answers [`DaemonMsg::Welcome`], or [`DaemonMsg::Refused`] when any version differs (X9).
 //!   Then [`ClientMsg::Attach`] brings the window's layout, a snapshot per visible pane at a
-//!   sequence number, and the live stream after it (§15.3).
+//!   sequence number, and the live stream after it (§15.3). Blobs the snapshot's documents name
+//!   follow it ([`DaemonMsg::Blob`]); a window asks for others with [`ClientMsg::Blobs`].
 //! - **Codecs**: blocking ([`read_msg`], [`write_msg`], [`Client`]) and, with the `tokio`
 //!   feature, [`codec::Codec`] for `tokio_util`'s framed streams.
 //!
@@ -35,7 +36,7 @@ pub use msg::{
 pub type PaneId = u64;
 
 /// The version of this protocol. Bump it with any change to frames or messages.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// The versions client and daemon must share (§4.5, §15.2).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
