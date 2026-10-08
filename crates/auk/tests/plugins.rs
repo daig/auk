@@ -727,7 +727,7 @@ fn s5_jit_runs_in_the_signed_app_bundle() {
 
     // The control: hardened runtime without allow-jit. Luau can't map its code and quietly
     // interprets instead.
-    let dir = tempfile_dir("s5-no-jit");
+    let dir = scratch_dir("s5-no-jit");
     let control = dir.join("Auk.app");
     let (ok, _, err) = output(std::process::Command::new("cp").arg("-R").arg(&app).arg(&control));
     assert!(ok, "cp: {err}");
@@ -746,7 +746,7 @@ fn s5_jit_runs_in_the_signed_app_bundle() {
 }
 
 /// A fresh directory under the test's target tmpdir.
-fn tempfile_dir(name: &str) -> PathBuf {
+fn scratch_dir(name: &str) -> PathBuf {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("mkdir");

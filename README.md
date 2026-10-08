@@ -7,12 +7,17 @@ A clean-room terminal with the same core design as Stencil's Tern: a session dae
 - **Oracles:** `third_party/` holds the pinned TSP SDKs and the omp sources.
 - **Recordings:** `fixtures/tsp/` holds TSP sessions recorded from real programs by `tools/tsp_record.py`.
 
-## Building
+## Build and run
 
 ```sh
 source scripts/env.sh   # rustup's toolchain, with the wasm target
-cargo test --workspace
+scripts/bundle.sh       # builds and signs target/Auk.app
+open target/Auk.app     # or copy it to /Applications first
 ```
+
+`bundle.sh` builds the release `auk` and the browser client, then signs the app ad hoc with the hardened runtime and the `allow-jit` entitlement (`crates/auk/Auk.entitlements`) that Luau's native code needs. The CLI is the same binary: run `target/Auk.app/Contents/MacOS/auk`, or symlink it onto your `PATH`. `auk doctor` reports whether native code runs.
+
+`scripts/verify.sh` is the completion gate: it runs every suite and writes `target/verify/summary.txt`.
 
 ## Layout
 
@@ -21,5 +26,4 @@ cargo test --workspace
 | `crates/` | the Cargo workspace (spec §22) |
 | `tools/` | development tools, such as the TSP recorder |
 | `fixtures/` | recorded and hand-written test inputs |
-| `spikes/` | throwaway prototypes that settle decisions (spec §23); each is its own workspace |
 | `scripts/` | shell helpers |
