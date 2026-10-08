@@ -50,6 +50,11 @@ impl Control {
         })
     }
 
+    /// Gives up on a reply after `timeout` (`None` waits forever).
+    pub fn set_timeout(&self, timeout: Option<std::time::Duration>) -> io::Result<()> {
+        self.writer.set_read_timeout(timeout)
+    }
+
     /// Sends a raw command line and returns the reply object.
     pub fn send_line(&mut self, line: &str) -> io::Result<Value> {
         debug_assert!(!line.contains('\n'));

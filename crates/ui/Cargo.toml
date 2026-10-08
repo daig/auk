@@ -20,6 +20,8 @@ skrifa = "0.44"
 fontique = { version = "0.11", features = ["fontconfig-dlopen"] }
 
 [dev-dependencies]
+# The probe pages, the WebKit tool and the box comparison, shared with the `layout` suite.
+auk-conformance = { path = "../conformance" }
 serde_json.workspace = true
 pollster = "0.4"
 

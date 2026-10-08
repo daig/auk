@@ -96,7 +96,11 @@ fn daemon_messages() -> Vec<DaemonMsg> {
             block: "b1".into(),
             node: json!({"k": "text"}),
         },
-        DaemonMsg::Effect(Effect::Toast { text: "hi".into() }),
+        DaemonMsg::Effect(Effect::Toast {
+            level: "info".into(),
+            text: "hi".into(),
+            sub: None,
+        }),
         DaemonMsg::Layout {
             window_key: "main".into(),
             window: layout.window("main").unwrap().clone(),

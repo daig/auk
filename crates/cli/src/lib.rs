@@ -3,6 +3,7 @@
 
 pub mod control;
 pub mod headless;
+pub mod plugin;
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -125,6 +126,28 @@ pub enum Command {
     /// The stand-in program `surface-play` restarts a pane as: raw mode, reads and drops input.
     #[command(hide = true)]
     StandIn,
+    /// Manage plugins: `list|reload|dir|install SRC [--force]|remove ID|link DIR|unlink ID|types
+    /// DIR [--json] [--window KEY]` (§9.11). Never starts a daemon.
+    #[command(disable_help_flag = true)]
+    Plugin {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Open a plugin block pane (§9.5): `block KIND [ARG…]`, KIND being `<plugin>.<block>`.
+    /// Prints the new pane's id.
+    Block {
+        kind: String,
+        #[arg(long)]
+        window: Option<String>,
+        #[arg(long)]
+        cwd: Option<PathBuf>,
+        /// COLSxROWS.
+        #[arg(long, value_parser = parse_size)]
+        size: Option<(u16, u16)>,
+        /// Launch arguments.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// Wait for a pane: `prompt`, `exit` or `idle=MS`. Exits 124 on timeout.
     Wait {
         target: String,
@@ -203,6 +226,7 @@ pub fn run(cli: Cli) -> ExitCode {
                 Err(err) => fail(format!("auk attach: {err}")),
             }
         }
+        Command::Plugin { args } => plugin::run(&socket, &args),
         Command::StandIn => match auk_daemon::play::stand_in() {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => fail(format!("auk stand-in: {err}")),
@@ -339,6 +363,30 @@ fn run_verb(socket: &Path, verb: Command) -> Result<ExitCode, VerbError> {
             }
             connect(socket, false)?.request(&words)?;
         }
+        Command::Block {
+            kind,
+            window,
+            cwd,
+            size,
+            args,
+        } => {
+            let mut words = vec!["block".to_owned(), kind];
+            if let Some(window) = window {
+                words.extend(["--window".to_owned(), window]);
+            }
+            if let Some(cwd) = cwd {
+                words.extend(["--cwd".to_owned(), absolute(&cwd).to_string_lossy().into_owned()]);
+            }
+            if let Some((c, r)) = size {
+                words.extend(["--size".to_owned(), format!("{c}x{r}")]);
+            }
+            if !args.is_empty() {
+                words.push("--".to_owned());
+                words.extend(args);
+            }
+            let value = connect(socket, true)?.request(&words)?;
+            writeln!(out, "{}", value["pane"])?;
+        }
         Command::SurfacePlay {
             file,
             pane,
@@ -354,7 +402,11 @@ fn run_verb(socket: &Path, verb: Command) -> Result<ExitCode, VerbError> {
             let value = connect(socket, false)?.request(&words)?;
             writeln!(out, "{value}")?;
         }
-        Command::Daemon | Command::Headless { .. } | Command::Attach { .. } | Command::StandIn => {
+        Command::Daemon
+        | Command::Headless { .. }
+        | Command::Attach { .. }
+        | Command::StandIn
+        | Command::Plugin { .. } => {
             unreachable!("handled by `run`")
         }
     }

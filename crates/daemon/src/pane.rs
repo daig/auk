@@ -35,6 +35,15 @@ pub enum PaneKind {
     Shell,
     /// `$SHELL -l -c <line>`.
     Command { line: String },
+    /// A plugin block (§9.5): its kind `<plugin>.<block>`, its launch args and its last `save`
+    /// (JSON text), which a restore starts it from.
+    Block {
+        block: String,
+        #[serde(default)]
+        args: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        saved: Option<String>,
+    },
 }
 
 /// One `C`…`D` span (§5.3): the daemon measures the duration itself.
@@ -84,7 +93,7 @@ impl ShellState {
                 self.awaiting_prompt = false;
             }
             Mark::PromptEnd => {}
-            Mark::CommandStart { cmdline } => {
+            Mark::CommandStart { cmdline, .. } => {
                 if self.running {
                     self.finish(None);
                 }
@@ -214,6 +223,8 @@ pub struct Pane {
     pub generation: u64,
     /// The pane runs `surface-play`'s stand-in program.
     pub stand_in: bool,
+    /// The plugin host: host events, lens captures, and a block pane's worker (§9).
+    pub plugin: Option<crate::plugins::PaneLink>,
 }
 
 impl Pane {
@@ -244,6 +255,7 @@ impl Pane {
             chunk: None,
             generation: 0,
             stand_in: false,
+            plugin: None,
         };
         // No client shows the pane yet.
         pane.apply_primary_facts();
@@ -268,6 +280,7 @@ impl Pane {
         encode_output(&mut frame, self.id, seq, bytes);
         self.broadcast(Bytes::from(frame));
         self.on_events(&events);
+        self.plugin_after(&events, None);
         self.after_tsp();
         self.last_output = Instant::now();
         self.bump();
@@ -311,6 +324,7 @@ impl Pane {
         {
             eprintln!("pane {}: resize: {err}", self.id);
         }
+        let resize = matches!(record, Record::Resize { .. }).then(|| record.clone());
         let msg = DaemonMsg::Record {
             pane: self.id,
             seq,
@@ -318,6 +332,7 @@ impl Pane {
         };
         self.broadcast(Bytes::from(msg.to_bytes()));
         self.on_events(&events);
+        self.plugin_after(&events, resize.as_ref());
         self.after_tsp();
         self.bump();
     }
@@ -326,7 +341,13 @@ impl Pane {
     /// the mode gate.
     fn forward_replies(&mut self) {
         let replies = self.replica.take_replies();
-        let Some(io) = &self.io else { return };
+        let Some(io) = &self.io else {
+            // A block pane's answers go to its worker (§9.5).
+            for answer in replies {
+                self.block_input(answer.bytes().to_vec());
+            }
+            return;
+        };
         for answer in replies {
             let _ = io.input.send(match answer {
                 Answer::Term(bytes) => PtyWrite::Answer(bytes),
@@ -380,7 +401,7 @@ impl Pane {
         }
         match &self.io {
             Some(io) => io.input.send(PtyWrite::Input(bytes)).is_ok(),
-            None => false,
+            None => self.block_input(bytes),
         }
     }
 
@@ -399,6 +420,7 @@ impl Pane {
         self.io = None;
         self.push_record(Record::Exit { status });
         self.exit = Some(status);
+        self.plugin_exited(status);
         self.broadcast(Bytes::from(
             DaemonMsg::PaneExit {
                 pane: self.id,
@@ -414,7 +436,7 @@ impl Pane {
         self.io.as_ref().and_then(|io| io.master.tty_mode().ok())
     }
 
-    fn broadcast(&self, frame: Bytes) {
+    pub(crate) fn broadcast(&self, frame: Bytes) {
         for viewer in self.viewers.values() {
             viewer.tx.send(frame.clone());
         }
@@ -428,6 +450,7 @@ impl Pane {
         let mut frame = Vec::new();
         encode_snapshot(&mut frame, self.id, &self.snapshot());
         tx.send(Bytes::from(frame));
+        self.send_lens_views(&tx);
         self.viewers.insert(
             client,
             Viewer {
@@ -670,6 +693,7 @@ mod tests {
         s.on_mark(
             &Mark::CommandStart {
                 cmdline: Some("sleep 1".into()),
+                typed: None,
             },
             Some("file:///tmp"),
             3,
@@ -690,7 +714,14 @@ mod tests {
     #[test]
     fn an_interrupted_command_closes_at_the_next_prompt() {
         let mut s = ShellState::default();
-        s.on_mark(&Mark::CommandStart { cmdline: None }, None, 0);
+        s.on_mark(
+            &Mark::CommandStart {
+                cmdline: None,
+                typed: None,
+            },
+            None,
+            0,
+        );
         s.on_mark(&Mark::PromptStart, None, 1);
         assert!(!s.running);
         assert_eq!(s.marks[0].status, None);

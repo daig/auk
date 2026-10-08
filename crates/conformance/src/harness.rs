@@ -103,7 +103,14 @@ impl TestEnv {
 
     /// Starts `auk daemon` and waits until its control endpoint answers.
     pub fn start_daemon(&self) -> u32 {
+        self.start_daemon_with(|_| {})
+    }
+
+    /// [`start_daemon`](Self::start_daemon), with the daemon's command adjusted first (an extra
+    /// `PATH` entry for stand-in programs its plugins run, say).
+    pub fn start_daemon_with(&self, configure: impl FnOnce(&mut Command)) -> u32 {
         let mut cmd = self.command();
+        configure(&mut cmd);
         cmd.arg("daemon");
         let pid = self.spawn(cmd, "daemon.log");
         let control = self.control_path();

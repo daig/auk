@@ -136,9 +136,20 @@ pub enum ClientMsg {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "effect", rename_all = "snake_case")]
 pub enum Effect {
-    Toast { text: String },
+    /// Two lines; `level` is `info`, `success` or `error` (§9.7).
+    Toast {
+        #[serde(default = "info")]
+        level: String,
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sub: Option<String>,
+    },
     Open { target: String },
     Copy { text: String },
+}
+
+fn info() -> String {
+    "info".to_owned()
 }
 
 /// An attached client, as presence reports it.
@@ -183,6 +194,8 @@ pub enum DaemonMsg {
         seq: u64,
         record: Record,
     },
+    /// A lens block's current view (§15.1): it replaces the last one whole; `null` shows the raw
+    /// output. `block` is the block's number in the pane.
     LensView {
         pane: PaneId,
         block: String,

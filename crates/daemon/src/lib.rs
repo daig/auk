@@ -18,6 +18,7 @@ pub mod pane;
 pub mod pane_socket;
 pub mod paths;
 pub mod play;
+pub mod plugins;
 pub mod pty;
 pub mod server;
 pub mod spawn;

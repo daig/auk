@@ -85,7 +85,7 @@ pub(crate) struct State {
     pub panes: BTreeMap<PaneId, Arc<Mutex<Pane>>>,
     pub layout: Layout,
     pub clients: BTreeMap<ClientId, ClientEntry>,
-    next_pane: PaneId,
+    pub(crate) next_pane: PaneId,
     next_client: ClientId,
     /// The pane most recently focused in any client, for the `@focused` target.
     pub focused: Option<PaneId>,
@@ -105,6 +105,8 @@ pub struct Daemon {
     pub(crate) versions: Versions,
     state: Mutex<State>,
     pub(crate) shutdown: CancellationToken,
+    /// The plugin host (§9, §20); loaded before panes are restored.
+    pub(crate) plugins: crate::plugins::Plugins,
 }
 
 /// Locks a mutex, recovering from a panic in another holder: daemon state stays usable.
@@ -151,6 +153,8 @@ pub async fn serve(config: Config) -> io::Result<()> {
     } else {
         None
     };
+    // Start order (§4.1): load plugins, then restore saved panes.
+    let plugins = crate::plugins::Plugins::start(config.state_dir.clone());
     let daemon = Arc::new(Daemon {
         socket: config.socket.clone(),
         state_dir: config.state_dir.clone(),
@@ -160,7 +164,9 @@ pub async fn serve(config: Config) -> io::Result<()> {
         versions: Versions::current(),
         state: Mutex::new(State::default()),
         shutdown: CancellationToken::new(),
+        plugins,
     });
+    crate::plugins::Plugins::run(&daemon);
     eprintln!(
         "auk daemon {} (pid {}) on {}",
         daemon.versions.auk,
@@ -191,6 +197,7 @@ pub async fn serve(config: Config) -> io::Result<()> {
             loop {
                 every.tick().await;
                 daemon.expire_chunks();
+                daemon.link_unlinked();
             }
         })
     };
@@ -306,6 +313,11 @@ impl Daemon {
             window_key.clone(),
             replica,
         )));
+        {
+            let mut p = lock(&pane);
+            p.plugin = Some(self.plugins.link());
+            self.sync_catalog(&mut p);
+        }
         self.start_process(&pane, id, &spec)?;
         st.next_pane = id;
 
@@ -335,6 +347,7 @@ impl Daemon {
             for (client, tx, facts) in viewers {
                 p.add_viewer(client, tx, facts);
             }
+            p.link_info();
         }
         Ok(id)
     }
@@ -463,8 +476,11 @@ impl Daemon {
         set("AUK_PANE_SOCKET", &pane_socket.to_string_lossy());
         set("AUK_WINDOW_KEY", window_key);
         set("AUK_WINDOW_SOCKET", "");
-        // Lens claims (M8) and native completion (out of v1) aren't offered yet.
-        set("AUK_LENSES", "0");
+        // Lens claims follow `command_lenses`; native completion is out of v1.
+        set(
+            "AUK_LENSES",
+            if self.settings().command_lenses { "1" } else { "0" },
+        );
         set("AUK_COMPLETE", "0");
         set("AUK_BLOB_DIR", &self.blob_dir().to_string_lossy());
         // `auk` run inside the pane talks to this daemon.
@@ -483,17 +499,20 @@ impl Daemon {
             args.push("-c".into());
             args.push(line.into());
         }
-        pty::SpawnSpec {
+        let mut spec = pty::SpawnSpec {
             program: self.login.shell.clone().into(),
             args,
             cwd: cwd.to_owned(),
             env,
             cols,
             rows,
-        }
+        };
+        // Plugin spawn filters run next (§5.2, §9.7); rc files run after them.
+        self.plugins.filter_spawn(&mut spec);
+        spec
     }
 
-    fn pane_exited(&self, id: PaneId, generation: u64, status: i32) {
+    pub(crate) fn pane_exited(&self, id: PaneId, generation: u64, status: i32) {
         let mut st = self.state();
         let Some(pane) = st.panes.get(&id).cloned() else {
             return;
@@ -523,6 +542,9 @@ impl Daemon {
 
     /// Hangs up a pane's process group and closes the pane.
     pub fn kill(&self, id: PaneId) -> Result<(), String> {
+        if self.close_block(id) {
+            return Ok(());
+        }
         let mut st = self.state();
         let pane = st
             .panes
@@ -565,7 +587,7 @@ impl Daemon {
         tx.send(Bytes::from(
             DaemonMsg::Welcome {
                 versions: self.versions.clone(),
-                catalog: serde_json::Value::Null,
+                catalog: self.plugins.catalog_json(),
                 sessions: st.layout.clone(),
                 client: id,
             }
@@ -639,6 +661,9 @@ impl Daemon {
         sf: &str,
         event: &serde_json::Value,
     ) -> Result<(), String> {
+        if let Some(block) = sf.strip_prefix(auk_replica::SF_PREFIX) {
+            return self.lens_view_event(id, pane, block, event);
+        }
         let p = self.pane(pane).ok_or_else(|| format!("no pane {pane}"))?;
         let mut p = lock(&p);
         p.client_view_event(id, sf, event).map(drop)

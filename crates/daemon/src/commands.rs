@@ -94,6 +94,21 @@ impl Daemon {
             "surface-play" => return self.cmd_play(args).await,
             "effect" => self.cmd_effect(args),
             "kill" => self.target(args.first()).and_then(|id| self.kill(id)).map(|()| Value::Null),
+            "plugin" | "block" | "blocks" | "pane-list" => self.plugin_command(cmd, args),
+            "lens" => self.with_pane(args, |p| {
+                let blocks: Vec<Value> = p
+                    .replica
+                    .lens_blocks()
+                    .iter()
+                    .map(|b| {
+                        let mut v = json!(b);
+                        let raw = p.replica.lens_raw(b.id).unwrap_or_default();
+                        v["raw"] = json!(String::from_utf8_lossy(raw));
+                        v
+                    })
+                    .collect();
+                Ok(json!({"blocks": blocks, "running": p.replica.lens_running(), "catalog": p.replica.lens_catalog()}))
+            }),
             "shutdown" => {
                 self.stop();
                 Ok(Value::Null)
@@ -190,6 +205,7 @@ impl Daemon {
                         p.shell.marks.last().and_then(|m| m.cmdline.clone())
                     }
                     PaneKind::Shell => None,
+                    PaneKind::Block { block, .. } => Some(block.clone()),
                 };
                 let program = line
                     .and_then(|l| l.split_whitespace().next().map(str::to_owned))
@@ -398,7 +414,11 @@ impl Daemon {
             _ => return Err("effect: expected toast, open or copy, then text".into()),
         };
         let effect = match kind {
-            "toast" => Effect::Toast { text },
+            "toast" => Effect::Toast {
+                level: "info".into(),
+                text,
+                sub: None,
+            },
             "open" => Effect::Open { target: text },
             "copy" => Effect::Copy { text },
             other => return Err(format!("effect: unknown effect `{other}`")),

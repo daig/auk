@@ -5,11 +5,14 @@
 
 pub mod fuzz;
 pub mod harness;
+pub mod layout;
 pub mod probe;
 pub mod remote;
+pub mod surfaces;
 pub mod viewer;
 pub mod vt;
 pub mod web;
+pub mod webkit;
 
 use std::fs;
 use std::path::{Path, PathBuf};

@@ -7,7 +7,7 @@
 //! `capture PANE [--scrollback]`, `send PANE text|paste WORD…`, `send PANE keys KEY…`,
 //! `focus PANE`, `resize PANE COLS ROWS`, `tsp PANE`, `event PANE SF JSON`,
 //! `click PANE SF NODE [--double] [--menu ACT] [--mods shift,ctrl,alt,meta]`, `facts JSON`,
-//! `effects`, `remote`, `quit`.
+//! `effects`, `catalog`, `lens PANE`, `remote`, `quit`.
 //!
 //! With [`Options::remote`] the window attaches to a remote host's daemon over SSH
 //! (`auk-remote`, §10.2): the link reconnects and resyncs after a drop, holding typing meanwhile,
@@ -56,6 +56,11 @@ struct View {
     effects: Vec<Value>,
     /// Stream errors seen (out-of-order items); a correct daemon never causes any.
     errors: Vec<String>,
+    /// The host's plugin catalog (§9.4), from the welcome and later `catalog` messages.
+    catalog: Value,
+    /// Lens views that arrived before this window's replica had their block, retried for 5 s
+    /// (§9.6): `(pane, block, view, when)`.
+    early_views: Vec<(PaneId, u64, Option<Value>, std::time::Instant)>,
 }
 
 #[derive(Debug)]
@@ -107,8 +112,23 @@ impl Headless {
                 draw = Some((pane, true));
             }
             DaemonMsg::Effect(effect) => view.effects.push(json!(effect)),
+            DaemonMsg::Catalog { catalog } => view.catalog = catalog,
+            DaemonMsg::LensView { pane, block, node } => {
+                if let Ok(block) = block.parse::<u64>() {
+                    let node = (!node.is_null()).then_some(node);
+                    let shown = view
+                        .replicas
+                        .get_mut(&pane)
+                        .is_some_and(|r| r.set_lens_view(block, node.clone()));
+                    if !shown {
+                        view.early_views
+                            .push((pane, block, node, std::time::Instant::now()));
+                    }
+                }
+            }
             _ => {}
         }
+        retry_views(&mut view);
         if let Some((pane, all)) = draw {
             let acks = draw_pane(&mut view, pane, all);
             drop(view);
@@ -156,6 +176,20 @@ impl Headless {
                 None => Err("facts: expected a JSON object".into()),
             },
             "effects" => Ok(json!(self.view().effects)),
+            "catalog" => Ok(self.view().catalog.clone()),
+            "lens" => self.with_replica(args, |r| {
+                let blocks: Vec<Value> = r
+                    .lens_blocks()
+                    .iter()
+                    .map(|b| {
+                        let mut v = json!(b);
+                        let raw = r.lens_raw(b.id).unwrap_or_default();
+                        v["raw"] = json!(String::from_utf8_lossy(raw));
+                        v
+                    })
+                    .collect();
+                Ok(json!({"blocks": blocks, "running": r.lens_running(), "catalog": r.lens_catalog()}))
+            }),
             "remote" => Ok(json!(self.link.status())),
             "focus" => pane_id(args).and_then(|pane| self.sent(&ClientMsg::Focus { pane })),
             "resize" => match (pane_id(args), args.get(1..3)) {
@@ -323,6 +357,21 @@ impl Headless {
     }
 }
 
+/// Applies early lens views whose block has appeared; drops those older than 5 s.
+fn retry_views(view: &mut View) {
+    let View {
+        replicas,
+        early_views,
+        ..
+    } = view;
+    early_views.retain(|(pane, block, node, at)| {
+        let Some(r) = replicas.get_mut(pane) else {
+            return at.elapsed() < std::time::Duration::from_secs(5);
+        };
+        !r.set_lens_view(*block, node.clone()) && at.elapsed() < std::time::Duration::from_secs(5)
+    });
+}
+
 fn apply(view: &mut View, pane: PaneId, seq: u64, item: Item<'_>) {
     let Some(replica) = view.replicas.get_mut(&pane) else {
         view.errors
@@ -372,13 +421,16 @@ pub fn run(opts: &Options) -> io::Result<()> {
         }
     };
     let hello = Hello::new(ClientKind::Headless, ClientFacts::default());
-    let (link, _welcome, mut reader) = auk_remote::Link::connect(target, hello)?;
+    let (link, welcome, mut reader) = auk_remote::Link::connect(target, hello)?;
     link.send(&ClientMsg::Attach {
         window_key: opts.window_key.clone(),
     })?;
 
     let headless = Arc::new(Headless {
-        view: Mutex::new(View::default()),
+        view: Mutex::new(View {
+            catalog: welcome.catalog,
+            ..View::default()
+        }),
         link,
         size: opts.size,
     });

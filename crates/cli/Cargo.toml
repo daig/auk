@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 auk-daemon = { version = "0.0.0", path = "../daemon" }
+auk-plugins = { version = "0.0.0", path = "../plugins", default-features = false }
 auk-mirror = { version = "0.0.0", path = "../mirror" }
 auk-remote = { version = "0.0.0", path = "../remote" }
 auk-replica = { version = "0.0.0", path = "../replica" }

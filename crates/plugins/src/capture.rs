@@ -7,7 +7,7 @@
 //! each one aborts at the same byte and replays the same raw output into its grid. Only the host
 //! hands the lines to the plugin.
 
-use auk_term::{Config, Event, Flags, MouseMode, Row, Terminal};
+use auk_term::{Config, Event, Flags, Mark, MouseMode, Row, Terminal};
 
 /// Rows of the scratch screen.
 pub const SCRATCH_ROWS: u16 = 8;
@@ -47,6 +47,23 @@ pub enum Abort {
     CursorQuery,
     /// The output passed [`MAX_CAPTURE`].
     TooLarge,
+}
+
+/// What [`Capture::feed_stream`] did with a piece of the pane's stream.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Step {
+    /// Bytes of the input the capture took: all of it, or up to and including the mark that
+    /// ended the command, or up to the end of the piece that aborted it. The rest is the grid's.
+    pub consumed: usize,
+    /// Lines that scrolled off the scratch screen.
+    pub lines: Vec<LensLine>,
+    /// The shell-integration mark that ended the command (OSC 133 `D`, or an `A` without one).
+    pub end: Option<Mark>,
+    /// Terminal answers the captured program asked for (other than a cursor position report,
+    /// which aborts), for the answering replica to forward.
+    pub replies: Vec<u8>,
+    /// Why the capture aborted, if it did; the caller replays [`Capture::raw`] into the grid.
+    pub abort: Option<Abort>,
 }
 
 /// A running capture.
@@ -119,6 +136,94 @@ impl Capture {
             self.drain_history(&mut lines);
         }
         Ok(lines)
+    }
+
+    /// Feeds a piece of the pane's stream while a claimed command runs, stopping after the mark
+    /// that ends the command (`D`, or `A` when the shell skipped `D`). Unlike [`feed`](Self::feed)
+    /// it looks at every event, so a replica can hand the bytes after the mark back to its grid.
+    ///
+    /// Deterministic in the bytes and in how they are split into calls: every replica of a pane
+    /// gets the same stream items, so each one stops and aborts at the same byte.
+    pub fn feed_stream(&mut self, bytes: &[u8]) -> Step {
+        let mut step = Step::default();
+        if let Some(why) = self.aborted {
+            step.abort = Some(why);
+            return step;
+        }
+        for piece in bytes.chunks(STEP) {
+            if self.raw.len() + piece.len() > MAX_CAPTURE {
+                self.raw.extend_from_slice(piece);
+                step.consumed += piece.len();
+                step.abort = Some(self.abort(Abort::TooLarge));
+                return step;
+            }
+            let mut rest = piece;
+            while !rest.is_empty() {
+                let (n, event) = self.term.advance(rest);
+                let n = n.min(rest.len());
+                self.raw.extend_from_slice(&rest[..n]);
+                step.consumed += n;
+                rest = &rest[n..];
+                let mut batch: Vec<Event> = event.into_iter().collect();
+                batch.extend(self.term.take_events());
+                for event in batch {
+                    match event {
+                        Event::AltScreen(true) => {
+                            self.take_rest(rest, &mut step);
+                            step.abort = Some(self.abort(Abort::AltScreen));
+                            return step;
+                        }
+                        Event::Mark(mark @ (Mark::CommandEnd { .. } | Mark::PromptStart)) => {
+                            step.end = Some(mark);
+                        }
+                        _ => {}
+                    }
+                }
+                let replies = self.term.take_replies();
+                if is_cursor_report(&replies) {
+                    self.take_rest(rest, &mut step);
+                    step.abort = Some(self.abort(Abort::CursorQuery));
+                    return step;
+                }
+                step.replies.extend(replies);
+                if step.end.is_some() {
+                    self.drain_history(&mut step.lines);
+                    return step;
+                }
+                if n == 0 && event_is_none(&self.term) {
+                    break;
+                }
+            }
+            let modes = self.term.modes();
+            if modes.app_keypad || modes.mouse != MouseMode::Off {
+                step.abort = Some(self.abort(Abort::Modes));
+                return step;
+            }
+            self.drain_history(&mut step.lines);
+        }
+        step
+    }
+
+    /// An aborting piece belongs to the capture whole: its rest joins the raw output.
+    fn take_rest(&mut self, rest: &[u8], step: &mut Step) {
+        self.raw.extend_from_slice(rest);
+        step.consumed += rest.len();
+    }
+
+    /// Rebuilds a running capture from its raw output so far (a replica built from a snapshot
+    /// taken while the command ran). Nothing is checked or handed out: the capture was running
+    /// when the snapshot was taken.
+    pub fn resume(cols: u16, raw: &[u8]) -> Self {
+        let mut capture = Capture::new(cols);
+        let mut discard = Vec::new();
+        for piece in raw.chunks(STEP) {
+            capture.raw.extend_from_slice(piece);
+            capture.term.feed(piece);
+            capture.term.take_replies();
+            capture.drain_history(&mut discard);
+            discard.clear();
+        }
+        capture
     }
 
     fn abort(&mut self, why: Abort) -> Abort {
@@ -194,6 +299,12 @@ impl Capture {
         }
         out
     }
+}
+
+/// Whether the parser stopped without consuming bytes and without an event (never expected;
+/// guards the loop).
+fn event_is_none(term: &Terminal) -> bool {
+    !term.pending_events()
 }
 
 /// Whether the terminal's answers include a cursor position report (`CSI row ; col R`).
@@ -302,6 +413,55 @@ mod tests {
                 href: "https://x.test".into()
             }]
         );
+    }
+
+    #[test]
+    fn the_stream_ends_at_the_mark_and_aborts_at_the_same_byte_however_it_is_split() {
+        let stream = b"one\r\ntwo\r\n\x1b]133;D;3\x07\x1b]133;A\x07$ ";
+        let mut c = Capture::new(20);
+        let step = c.feed_stream(stream);
+        let end = stream.len() - b"\x1b]133;A\x07$ ".len();
+        assert_eq!(step.consumed, end);
+        assert_eq!(step.end, Some(Mark::CommandEnd { status: Some(3) }));
+        assert_eq!(texts(&c.finish()), ["one", "two"]);
+        // Split byte by byte: the same stop.
+        let mut c = Capture::new(20);
+        let mut at = 0;
+        loop {
+            let step = c.feed_stream(&stream[at..at + 1]);
+            at += step.consumed;
+            if step.end.is_some() {
+                break;
+            }
+        }
+        assert_eq!(at, end);
+        // An abort takes the rest of its piece.
+        let mut c = Capture::new(20);
+        let step = c.feed_stream(b"x\x1b[?1049hmore");
+        assert_eq!((step.abort, step.consumed), (Some(Abort::AltScreen), 13));
+        assert_eq!(c.raw(), b"x\x1b[?1049hmore");
+        let step = Capture::new(20).feed_stream(b"a\x1b[cb");
+        assert_eq!(step.replies.is_empty(), false, "DA1 is answered");
+        assert_eq!(step.abort, None);
+        let step = Capture::new(20).feed_stream(b"a\x1b[6nb");
+        assert_eq!(step.abort, Some(Abort::CursorQuery));
+        let step = Capture::new(20).feed_stream(b"\x1b[?1000h");
+        assert_eq!(step.abort, Some(Abort::Modes));
+    }
+
+    #[test]
+    fn a_resumed_capture_continues_where_the_raw_output_left_off() {
+        let mut live = Capture::new(20);
+        let mut lines = Vec::new();
+        for i in 0..12 {
+            lines.extend(live.feed_stream(format!("l{i}\r\n").as_bytes()).lines);
+        }
+        let mut resumed = Capture::resume(20, live.raw());
+        let a = live.feed_stream(b"tail\r\n").lines;
+        let b = resumed.feed_stream(b"tail\r\n").lines;
+        assert_eq!(a, b);
+        assert_eq!(live.finish(), resumed.finish());
+        assert_eq!(live.raw(), resumed.raw());
     }
 
     #[test]

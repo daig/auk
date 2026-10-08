@@ -15,6 +15,10 @@ auk-term = { path = "../term" }
 # A test window on the daemon's wire (`viewer`), with a follower replica per pane.
 auk-mirror = { path = "../mirror" }
 auk-replica = { path = "../replica" }
+# The layout suite's renderer: TSP state projected through the views into the UI engine.
+auk-tsp = { path = "../tsp" }
+auk-ui = { path = "../ui" }
+auk-views = { path = "../views" }
 base64 = "0.23.1"
 # Decodes WebDriver screenshots in the web suite.
 png = "0.18.1"

@@ -1,0 +1,824 @@
+{
+ "main": [
+  {
+   "id": "c1",
+   "k": "col",
+   "p": {
+    "gap": "sm",
+    "align": "start",
+    "justify": "between"
+   },
+   "c": [
+    {
+     "id": "r1",
+     "k": "row",
+     "p": {
+      "gap": "md",
+      "wrap": true,
+      "grow": 1
+     },
+     "c": [
+      {
+       "id": "b1",
+       "k": "badge",
+       "p": {
+        "text": "ok",
+        "tone": "success"
+       }
+      },
+      {
+       "id": "i1",
+       "k": "icon",
+       "p": {
+        "name": "status.error",
+        "tone": "error"
+       }
+      },
+      {
+       "id": "k1",
+       "k": "kbd",
+       "p": {
+        "keys": [
+         "ctrl",
+         "o"
+        ]
+       }
+      },
+      {
+       "id": "sp1",
+       "k": "spinner",
+       "p": {
+        "style": "braille",
+        "label": "Fetching"
+       }
+      },
+      {
+       "id": "e1",
+       "k": "elapsed",
+       "p": {
+        "age": 245000
+       }
+      },
+      {
+       "id": "ra1",
+       "k": "rate",
+       "p": {
+        "value": 42.25,
+        "unit": "tok/s"
+       }
+      },
+      {
+       "id": "sh1",
+       "k": "shimmer",
+       "p": {
+        "text": "Thinking",
+        "mode": "kitt"
+       }
+      }
+     ]
+    },
+    {
+     "id": "row0",
+     "k": "row"
+    }
+   ]
+  },
+  {
+   "id": "card1",
+   "k": "card",
+   "p": {
+    "head": "card1.h",
+    "status": "error",
+    "tone": "error",
+    "collapsible": true,
+    "role": "lens.git.log",
+    "key": "build"
+   },
+   "c": [
+    {
+     "id": "card1.h",
+     "k": "text",
+     "p": {
+      "spans": [
+       {
+        "t": "Build ",
+        "s": "strong"
+       },
+       {
+        "t": "src/main.rs",
+        "s": "path"
+       },
+       " ",
+       {
+        "t": "ctrl+r",
+        "s": "key"
+       },
+       {
+        "t": "docs",
+        "href": "https://example.com"
+       }
+      ]
+     }
+    },
+    {
+     "id": "card1.b",
+     "k": "text",
+     "p": {
+      "text": "body"
+     }
+    }
+   ]
+  },
+  {
+   "id": "sec1",
+   "k": "section",
+   "p": {
+    "head": [
+     {
+      "t": "Env"
+     }
+    ],
+    "collapsible": true,
+    "collapsed": true
+   },
+   "c": [
+    {
+     "id": "sec1.kv",
+     "k": "kv",
+     "p": {
+      "items": [
+       {
+        "k": "context",
+        "v": "prod"
+       },
+       {
+        "k": "ns",
+        "v": [
+         {
+          "t": "default",
+          "s": "accent"
+         }
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "rule1",
+   "k": "rule",
+   "p": {
+    "label": "Older"
+   }
+  },
+  {
+   "id": "spc1",
+   "k": "spacer",
+   "p": {
+    "size": "lg"
+   }
+  },
+  {
+   "id": "pr1",
+   "k": "progress",
+   "p": {
+    "value": 0.5,
+    "label": "1/2"
+   }
+  },
+  {
+   "id": "pr2",
+   "k": "progress",
+   "p": {
+    "label": "waiting"
+   }
+  },
+  {
+   "id": "mt1",
+   "k": "meter",
+   "p": {
+    "value": 0.78,
+    "thresholds": {
+     "warn": 0.7,
+     "bad": 0.9
+    },
+    "label": "78%",
+    "total": "200K",
+    "marks": [
+     {
+      "at": 0.85,
+      "icon": "context",
+      "title": "compacts"
+     }
+    ]
+   }
+  },
+  {
+   "id": "mt2",
+   "k": "meter",
+   "p": {
+    "parts": [
+     {
+      "value": 0.2,
+      "token": "accent"
+     },
+     {
+      "value": 0.3,
+      "token": "success",
+      "hatch": true
+     }
+    ],
+    "style": "bar"
+   }
+  },
+  {
+   "id": "mt3",
+   "k": "meter",
+   "p": {
+    "value": 0.5,
+    "style": "blocks",
+    "steps": 4
+   }
+  },
+  {
+   "id": "an1",
+   "k": "ansi",
+   "p": {
+    "text": "\u001b[1mbold\u001b[0m and \u001b]8;;https://x.y\u001b\\link\u001b]8;;\u001b\\\nline2\nline3\nline4",
+    "preview": {
+     "lines": 2
+    }
+   }
+  },
+  {
+   "id": "rows1",
+   "k": "rows",
+   "p": {
+    "lines": [
+     "\u001b[31mred\u001b[0m row",
+     "second"
+    ],
+    "cols": 20
+   }
+  },
+  {
+   "id": "el1",
+   "k": "el",
+   "p": {
+    "tag": "div",
+    "class": "box sf-evil",
+    "attrs": {
+     "data-x": "1",
+     "aria-hidden": true,
+     "onclick": "x",
+     "style": "color:red",
+     "role": "note"
+    },
+    "text": "hello"
+   },
+   "c": [
+    {
+     "id": "el1.b",
+     "k": "el",
+     "p": {
+      "tag": "strong",
+      "text": "bold"
+     }
+    }
+   ]
+  },
+  {
+   "id": "el2",
+   "k": "el",
+   "p": {
+    "tag": "marquee",
+    "text": "unknown"
+   }
+  },
+  {
+   "id": "md1",
+   "k": "md",
+   "p": {
+    "text": "# Title\n\nSome *em* and **strong** with `#ff0000` and https://example.com and src/lib.rs:12.\n\n- [x] done\n- [ ] todo\n\n> [!WARNING]\n> careful\n\n| a | b |\n|:--|--:|\n| high | 2 |\n\n```rust\nfn main() {}\n```\n\n<div>raw</div>\n"
+   }
+  },
+  {
+   "id": "code1",
+   "k": "code",
+   "p": {
+    "text": "fn main() {\n    let x = 42;\n}",
+    "lang": "rust",
+    "path": "src/main.rs",
+    "numbers": true,
+    "start": 10,
+    "marks": [
+     {
+      "line": 11,
+      "tone": "warning",
+      "ranges": [
+       [
+        8,
+        9
+       ]
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "diff1",
+   "k": "diff",
+   "p": {
+    "text": "@@ -1,3 +1,3 @@ fn main()\n ctx\n-let x = 1;\n+let x = 2;\n ctx\n@@ -20,1 +20,1 @@\n-a\n+b\n",
+    "lang": "rust"
+   }
+  },
+  {
+   "id": "diff2",
+   "k": "diff",
+   "p": {
+    "hunks": [
+     {
+      "oldStart": 1,
+      "newStart": 1,
+      "lines": [
+       "-old line",
+       "+new line"
+      ]
+     }
+    ],
+    "mode": "split"
+   }
+  },
+  {
+   "id": "ed1",
+   "k": "editor",
+   "p": {
+    "text": "hello world",
+    "cursor": 5,
+    "anchor": 0,
+    "prompt": [
+     {
+      "t": "> ",
+      "s": "accent"
+     }
+    ],
+    "decor": [
+     {
+      "from": 6,
+      "to": 11,
+      "s": "typo"
+     }
+    ],
+    "mode": "insert",
+    "maxLines": 3
+   }
+  },
+  {
+   "id": "in1",
+   "k": "input",
+   "p": {
+    "text": "",
+    "placeholder": "Filter",
+    "ghost": ""
+   }
+  },
+  {
+   "id": "st1",
+   "k": "status",
+   "c": [
+    {
+     "id": "seg1",
+     "k": "seg",
+     "p": {
+      "icon": "branch",
+      "text": "main",
+      "tone": "accent",
+      "actions": {
+       "click": "branch"
+      }
+     }
+    },
+    {
+     "id": "seg2",
+     "k": "seg",
+     "p": {
+      "text": "ready",
+      "side": "right",
+      "priority": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "ls1",
+   "k": "list",
+   "p": {
+    "selected": "it2",
+    "filter": "lgn",
+    "max": {
+     "lines": 4
+    }
+   },
+   "c": [
+    {
+     "id": "it1",
+     "k": "item",
+     "p": {
+      "label": "fix-login",
+      "detail": "origin/fix-login",
+      "value": "↑2",
+      "icon": "branch",
+      "hint": [
+       "enter"
+      ]
+     }
+    },
+    {
+     "id": "it2",
+     "k": "item",
+     "p": {
+      "label": "main"
+     }
+    }
+   ]
+  },
+  {
+   "id": "tb1",
+   "k": "tabs",
+   "p": {
+    "items": [
+     {
+      "id": "files",
+      "label": "Files"
+     },
+     {
+      "id": "commits",
+      "label": "Commits"
+     }
+    ],
+    "active": "commits"
+   }
+  },
+  {
+   "id": "tab1",
+   "k": "table",
+   "p": {
+    "cols": [
+     {
+      "id": "pod",
+      "head": "Pod",
+      "grow": 1
+     },
+     {
+      "id": "cpu",
+      "head": "CPU",
+      "align": "end",
+      "priority": 1
+     },
+     {
+      "id": "mem",
+      "head": "Memory"
+     }
+    ],
+    "rows": [
+     {
+      "id": "api",
+      "cells": {
+       "pod": "api-7d9f",
+       "cpu": "120m",
+       "mem": {
+        "meter": {
+         "value": 0.72,
+         "thresholds": {
+          "warn": 0.7
+         }
+        }
+       }
+      }
+     },
+     {
+      "id": "w",
+      "cells": {
+       "pod": "worker",
+       "cpu": "80m",
+       "mem": "1Gi"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "tr1",
+   "k": "tree",
+   "p": {
+    "nodes": [
+     {
+      "id": "src",
+      "label": "src",
+      "icon": "folder",
+      "open": true,
+      "children": [
+       {
+        "id": "lib",
+        "label": "lib.rs",
+        "icon": "file-code"
+       }
+      ]
+     },
+     {
+      "id": "docs",
+      "label": "docs",
+      "children": [
+       {
+        "id": "x",
+        "label": "x.md"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "tool1",
+   "k": "tool",
+   "p": {
+    "name": "bash",
+    "title": "Run",
+    "target": "cargo test -p auk-views --lib | tail",
+    "targetKind": "command",
+    "status": "running",
+    "age": 1200,
+    "intent": "Testing",
+    "collapsible": true,
+    "meta": [
+     [
+      {
+       "t": "+8",
+       "s": "ins"
+      }
+     ]
+    ],
+    "badges": [
+     "prod"
+    ],
+    "tools": [
+     {
+      "id": "copy",
+      "label": "Copy",
+      "keys": "cmd+c"
+     }
+    ]
+   },
+   "c": [
+    {
+     "id": "tool1.out",
+     "k": "ansi",
+     "p": {
+      "text": "running 3 tests"
+     }
+    },
+    {
+     "id": "tool1.md",
+     "k": "md",
+     "p": {
+      "text": "done"
+     }
+    }
+   ]
+  },
+  {
+   "id": "tool2",
+   "k": "tool",
+   "p": {
+    "name": "read",
+    "title": "Read",
+    "target": "src/lib.rs",
+    "targetKind": "path",
+    "status": "done",
+    "took": 420,
+    "exit": 1
+   }
+  },
+  {
+   "id": "ag1",
+   "k": "agent",
+   "p": {
+    "name": "runner-3",
+    "badges": [
+     "linux"
+    ],
+    "task": "Build and test",
+    "status": "running",
+    "model": "opus",
+    "stats": {
+     "tools": 14,
+     "requests": 9,
+     "done": 0.4,
+     "context": 0.8,
+     "tokens": 12345,
+     "cost": 0.42,
+     "age": 72000
+    },
+    "tool": {
+     "name": "bash",
+     "intent": "Running tests",
+     "age": 8000
+    },
+    "retry": {
+     "attempt": 1,
+     "max": 3,
+     "delay": 5000,
+     "age": 1000,
+     "error": "overloaded"
+    },
+    "depth": 1,
+    "collapsible": true
+   },
+   "c": [
+    {
+     "id": "ag1.k",
+     "k": "text",
+     "p": {
+      "text": "child"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ck1",
+   "k": "checklist",
+   "p": {
+    "phases": [
+     {
+      "id": "p1",
+      "title": "Ship",
+      "items": [
+       {
+        "id": "a",
+        "text": "Tag",
+        "status": "done"
+       },
+       {
+        "id": "b",
+        "text": "Notes",
+        "status": "active",
+        "note": "waiting on CI"
+       },
+       {
+        "id": "c",
+        "text": "Blog",
+        "status": "blocked"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "ck2",
+   "k": "checklist",
+   "p": {
+    "mode": "hud",
+    "phases": [
+     {
+      "id": "p1",
+      "title": "Ship",
+      "items": [
+       {
+        "id": "a",
+        "text": "Tag",
+        "status": "active"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "ck3",
+   "k": "checklist",
+   "p": {
+    "mode": "reminder",
+    "phases": [
+     {
+      "id": "p1",
+      "title": "Ship",
+      "items": [
+       {
+        "id": "a",
+        "text": "Tag",
+        "status": "pending"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "tx1",
+   "k": "text",
+   "p": {
+    "text": "a/very/long/path/to/some/file.rs",
+    "wrap": "none",
+    "truncate": "middle",
+    "max": {
+     "w": "16ch"
+    }
+   }
+  },
+  {
+   "id": "tx2",
+   "k": "text",
+   "p": {
+    "spans": [
+     {
+      "t": "glow",
+      "fx": "shimmer"
+     },
+     {
+      "t": " nerd",
+      "s": "muted"
+     }
+    ],
+    "lines": 2
+   }
+  },
+  {
+   "id": "toast1",
+   "k": "toast",
+   "p": {
+    "text": "Saved",
+    "sub": "disk ok\nmore",
+    "tone": "info"
+   }
+  },
+  {
+   "id": "kv1",
+   "k": "kv",
+   "p": {
+    "items": [
+     {
+      "k": "cluster",
+      "v": "prod-eu"
+     },
+     {
+      "k": "pods",
+      "v": [
+       {
+        "t": "12",
+        "s": "num"
+       }
+      ]
+     }
+    ]
+   }
+  }
+ ],
+ "frame2": [
+  [
+   "add",
+   "layer",
+   "s1",
+   null,
+   {
+    "id": "layer",
+    "k": "col",
+    "c": [
+     {
+      "id": "ov1",
+      "k": "overlay",
+      "p": {
+       "anchor": {
+        "node": "ed1",
+        "side": "bottom"
+       },
+       "size": "sm",
+       "modal": true,
+       "head": [
+        {
+         "t": "Pick"
+        }
+       ],
+       "role": "omp.picker"
+      },
+      "c": [
+       {
+        "id": "ov1.t",
+        "k": "text",
+        "p": {
+         "text": "inside"
+        }
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  [
+   "focus",
+   "ed1"
+  ]
+ ]
+}

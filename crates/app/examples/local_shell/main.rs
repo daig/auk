@@ -395,7 +395,7 @@ impl WindowHandler for Shell {
             }
             Event::CloseRequested => window.close(),
             Event::Closed => self.pty = None,
-            Event::ModifiersChanged(_) | Event::Mouse(_) => {}
+            Event::ModifiersChanged(_) | Event::Mouse(_) | Event::Menu(_) => {}
         }
     }
 }
