@@ -551,6 +551,12 @@ fn rand16() -> [u8; 16] {
     out
 }
 
+/// Why a session fails while Safari is already running, and what to do.
+const SAFARI_RUNNING: &str = "Safari was already running. Safari only accepts WebDriver sessions in an \
+instance that safaridriver launched for automation (it logs \"Rejecting session: Safari was not \
+launched for automation\"), so quit Safari (Cmd-Q) before running the web suite; safaridriver \
+opens its own automation window and closes it afterwards.";
+
 /// What the browser test needs the user to have done once (PROGRESS.md, "Needs the user").
 pub const SAFARI_PREREQUISITE: &str = "Safari automation isn't enabled. Run `sudo safaridriver \
      --enable` once, then in Safari open Settings → Advanced, turn on \"Show features for web \
@@ -583,6 +589,13 @@ impl Safari {
             port,
             session: String::new(),
         };
+        // Safari 27 rejects automation sessions in an instance that wasn't launched for automation
+        // ("Safari was not launched for automation" in its log); safaridriver then only reports a
+        // 30 s timeout. So note whether the user's Safari was already running.
+        let safari_was_running = std::process::Command::new("/usr/bin/pgrep")
+            .args(["-x", "Safari"])
+            .output()
+            .is_ok_and(|o| o.status.success());
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
             if TcpStream::connect(("127.0.0.1", port)).is_ok() {
@@ -608,6 +621,9 @@ impl Safari {
         );
         match value["sessionId"].as_str() {
             Some(id) if status == 200 => safari.session = id.to_owned(),
+            _ if safari_was_running => panic!(
+                "Safari didn't start a WebDriver session (HTTP {status}: {value}).\n{SAFARI_RUNNING}"
+            ),
             _ => panic!(
                 "Safari didn't start a WebDriver session (HTTP {status}: {}).\n{SAFARI_PREREQUISITE}",
                 value
