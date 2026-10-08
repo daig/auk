@@ -58,6 +58,8 @@ impl Fixture {
             memory_limit: MEMORY_LIMIT,
             jit: true,
             log,
+            panes: None,
+            builtin_commands: None,
         }
     }
 

@@ -6,11 +6,12 @@ use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use auk_mirror::msg::{encode_output, encode_snapshot};
 use auk_mirror::{ClientFacts, DaemonMsg, Message, PaneId};
-use auk_replica::{Event, Item, Record, Replica, Snapshot};
+use auk_replica::{Answer, Delivery, Event, Item, Record, Replica, Snapshot, TspFacts};
 use auk_term::Mark;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -18,6 +19,10 @@ use tokio::sync::{mpsc, watch};
 
 use crate::client::{ClientId, ClientTx};
 use crate::pty::{Master, TtyMode};
+use crate::tsp::{Ages, parse_view_event};
+
+/// How long a chunk sequence may wait for its next chunk (§7.1).
+pub const CHUNK_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// How many finished command marks a pane keeps.
 const MAX_MARKS: usize = 1000;
@@ -126,6 +131,25 @@ struct Viewer {
     facts: ClientFacts,
 }
 
+/// One write to a pane's PTY, in the order the single writer (§14.2) makes them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PtyWrite {
+    /// Client input: keys, pastes.
+    Input(Vec<u8>),
+    /// Terminal answers (DA1, CPR, …).
+    Answer(Vec<u8>),
+    /// One TSP reply or event: written only through the mode gate (§12.1).
+    Tsp(Vec<u8>),
+}
+
+/// What the mode gate let through and held back (§12.1), for diagnostics.
+#[derive(Debug, Default)]
+pub struct GateStats {
+    pub written: AtomicU64,
+    /// Dropped because the tty was canonical or echoing.
+    pub dropped: AtomicU64,
+}
+
 /// The pane's PTY while its process runs.
 #[derive(Debug)]
 pub struct PaneIo {
@@ -134,7 +158,8 @@ pub struct PaneIo {
     pub pane_socket: Option<tokio::task::AbortHandle>,
     /// The single writer to the PTY (§14.2): client input and the replica's answers go through
     /// this queue, in order.
-    pub input: mpsc::UnboundedSender<Vec<u8>>,
+    pub input: mpsc::UnboundedSender<PtyWrite>,
+    pub gate: Arc<GateStats>,
 }
 
 impl Drop for PaneIo {
@@ -177,7 +202,18 @@ pub struct Pane {
     /// Clients by recency of input or focus, most recent last (§15.5).
     activity: Vec<ClientId>,
     primary: Option<ClientId>,
+    /// The facts TSP sees: the primary's, else the last primary's (§15.5).
+    facts: ClientFacts,
     changed: watch::Sender<u64>,
+    /// When ages arrived, for snapshots (§7.13).
+    ages: Ages,
+    /// A chunk sequence being joined: its size and when it last grew (§7.1).
+    chunk: Option<(usize, Instant)>,
+    /// Bumped when the pane's process is replaced (`surface-play`): output and exits of an older
+    /// process are ignored.
+    pub generation: u64,
+    /// The pane runs `surface-play`'s stand-in program.
+    pub stand_in: bool,
 }
 
 impl Pane {
@@ -188,7 +224,7 @@ impl Pane {
         window_key: String,
         replica: Replica,
     ) -> Self {
-        Pane {
+        let mut pane = Pane {
             id,
             kind,
             spawn_cwd,
@@ -202,8 +238,16 @@ impl Pane {
             viewers: BTreeMap::new(),
             activity: Vec::new(),
             primary: None,
+            facts: ClientFacts::default(),
             changed: watch::channel(0).0,
-        }
+            ages: Ages::default(),
+            chunk: None,
+            generation: 0,
+            stand_in: false,
+        };
+        // No client shows the pane yet.
+        pane.apply_primary_facts();
+        pane
     }
 
     /// A receiver that wakes on every change to the pane: output, marks, exit.
@@ -224,8 +268,37 @@ impl Pane {
         encode_output(&mut frame, self.id, seq, bytes);
         self.broadcast(Bytes::from(frame));
         self.on_events(&events);
+        self.after_tsp();
         self.last_output = Instant::now();
         self.bump();
+    }
+
+    /// Bookkeeping after the replica's TSP state may have changed: ages for snapshots, and the
+    /// chunk timeout.
+    fn after_tsp(&mut self) {
+        let changes = self.replica.take_tsp_changes();
+        if !changes.is_empty() {
+            self.ages.observe(self.replica.tsp(), &changes);
+        }
+        self.chunk = match (self.replica.tsp().chunk_pending(), self.chunk) {
+            (None, _) => None,
+            (Some(n), Some((m, at))) if n == m => Some((m, at)),
+            (Some(n), _) => Some((n, Instant::now())),
+        };
+    }
+
+    /// Whether a chunk sequence has waited past the timeout; the daemon then sequences
+    /// [`Record::ChunkTimeout`].
+    pub fn chunk_expired(&self) -> bool {
+        self.chunk
+            .is_some_and(|(_, at)| at.elapsed() >= CHUNK_TIMEOUT)
+    }
+
+    /// The snapshot at the current position, ages rewritten to now (§15.3).
+    pub fn snapshot(&self) -> Snapshot {
+        let ages = &self.ages;
+        self.replica
+            .snapshot_with(&mut |s, node, props| ages.rewrite(s, node, props))
     }
 
     /// Inserts a record into the stream at the current position (§15.2).
@@ -245,16 +318,48 @@ impl Pane {
         };
         self.broadcast(Bytes::from(msg.to_bytes()));
         self.on_events(&events);
+        self.after_tsp();
         self.bump();
     }
 
+    /// Sends the replica's answers to the PTY writer: terminal answers as they are, TSP through
+    /// the mode gate.
     fn forward_replies(&mut self) {
         let replies = self.replica.take_replies();
-        if !replies.is_empty()
-            && let Some(io) = &self.io
-        {
-            let _ = io.input.send(replies);
+        let Some(io) = &self.io else { return };
+        for answer in replies {
+            let _ = io.input.send(match answer {
+                Answer::Term(bytes) => PtyWrite::Answer(bytes),
+                Answer::Tsp(bytes) => PtyWrite::Tsp(bytes),
+            });
         }
+    }
+
+    /// An ack from a client (§7.10): only the primary's counts.
+    pub fn client_ack(&mut self, client: ClientId, sf: &str, s: u64) {
+        if self.primary != Some(client) {
+            return;
+        }
+        self.replica.ack(sf, s);
+        self.forward_replies();
+    }
+
+    /// A view event from a client showing the pane (§15.4), checked against the documents and
+    /// written subject to §7.7 and the mode gate. Pointer input makes the client primary.
+    pub fn client_view_event(
+        &mut self,
+        client: ClientId,
+        sf: &str,
+        event: &serde_json::Value,
+    ) -> Result<Delivery, String> {
+        if !self.viewers.contains_key(&client) {
+            return Err(format!("the client doesn't show pane {}", self.id));
+        }
+        let event = parse_view_event(event)?;
+        self.touch(client);
+        let result = self.replica.view_event(sf, event);
+        self.forward_replies();
+        result.map_err(|r| format!("refused: {r:?}"))
     }
 
     fn on_events(&mut self, events: &[Event]) {
@@ -274,9 +379,19 @@ impl Pane {
             self.shell.awaiting_prompt = true;
         }
         match &self.io {
-            Some(io) => io.input.send(bytes).is_ok(),
+            Some(io) => io.input.send(PtyWrite::Input(bytes)).is_ok(),
             None => false,
         }
+    }
+
+    /// The mode gate's counts: TSP messages written and dropped.
+    pub fn gate_stats(&self) -> Option<(u64, u64)> {
+        self.io.as_ref().map(|io| {
+            (
+                io.gate.written.load(Ordering::Relaxed),
+                io.gate.dropped.load(Ordering::Relaxed),
+            )
+        })
     }
 
     /// The process ended.
@@ -311,7 +426,7 @@ impl Pane {
     /// everything after it. The client ranks below every client that has been active here.
     pub fn add_viewer(&mut self, client: ClientId, tx: ClientTx, facts: ClientFacts) {
         let mut frame = Vec::new();
-        encode_snapshot(&mut frame, self.id, &self.replica.snapshot());
+        encode_snapshot(&mut frame, self.id, &self.snapshot());
         tx.send(Bytes::from(frame));
         self.viewers.insert(
             client,
@@ -338,6 +453,7 @@ impl Pane {
         self.viewers.clear();
         self.activity.clear();
         self.primary = None;
+        self.apply_primary_facts();
     }
 
     pub fn has_viewer(&self, client: ClientId) -> bool {
@@ -399,6 +515,8 @@ impl Pane {
             .copied()
             .find(|c| self.viewers.contains_key(c));
         if next == self.primary {
+            // Still update `visible`: the last viewer may have gone.
+            self.apply_primary_facts();
             return;
         }
         let previous = std::mem::replace(&mut self.primary, next);
@@ -423,13 +541,27 @@ impl Pane {
         }
     }
 
+    /// Client facts from the primary (§15.5): the terminal's answers and TSP's hello fields and
+    /// events. With no client attached, the last primary's facts stay, and the pane is hidden.
     fn apply_primary_facts(&mut self) {
-        // With no client attached, the last primary's facts stay (§15.5).
         if let Some(viewer) = self.primary.and_then(|c| self.viewers.get(&c)) {
+            self.facts = viewer.facts.clone();
             let [w, h] = viewer.facts.cell_px;
             let mut facts = default_facts();
             facts.cell_px = (w, h);
             self.replica.set_facts(facts);
+        }
+        let f = &self.facts;
+        let tsp = TspFacts {
+            cell: (f64::from(f.cell_px[0]), f64::from(f.cell_px[1])),
+            dark: f.dark,
+            reduce_motion: f.reduce_motion,
+            hour12: f.hour12,
+            visible: !self.viewers.is_empty(),
+        };
+        if *self.replica.tsp().facts() != tsp {
+            self.replica.set_tsp_facts(tsp);
+            self.forward_replies();
         }
     }
 
@@ -450,7 +582,7 @@ impl Pane {
             window_key: self.window_key.clone(),
             cols: term.cols(),
             rows: term.rows(),
-            snapshot: self.replica.snapshot(),
+            snapshot: self.snapshot(),
         }
     }
 

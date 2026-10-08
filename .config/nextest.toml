@@ -11,3 +11,13 @@ slow-timeout = { period = "60s", terminate-after = 5 }
 [test-groups]
 # Suites that drive GUI apps or Safari, or post key events, take turns: give them this group.
 screen = { max-threads = 1 }
+
+# The remote suite may start the Lima VM and build the Linux `auk` inside it first (GOAL.md).
+[[profile.default.overrides]]
+filter = 'binary_id(auk::remote)'
+slow-timeout = { period = "60s", terminate-after = 15 }
+
+# The web suite drives Safari through safaridriver.
+[[profile.default.overrides]]
+filter = 'binary_id(auk::web)'
+test-group = 'screen'

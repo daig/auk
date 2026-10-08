@@ -57,6 +57,8 @@ pub(crate) struct ViewState {
     pub delegate: RefCell<Option<Retained<WindowDelegate>>>,
     pub waker: Waker,
     closed: Cell<bool>,
+    /// AccessKit's adapter, once the app supplies a tree.
+    pub a11y: RefCell<Option<crate::accessibility::Accessibility>>,
 }
 
 define_class!(
@@ -253,6 +255,50 @@ define_class!(
         fn select_all(&self, _sender: Option<&AnyObject>) {
             self.emit(Event::Command(Command::SelectAll));
         }
+
+        /// A registry command from the menu (`MenuItem::Command`), by its tag.
+        #[unsafe(method(aukCommand:))]
+        fn auk_command(&self, sender: Option<&AnyObject>) {
+            let tag = sender
+                .and_then(|s| s.downcast_ref::<objc2_app_kit::NSMenuItem>())
+                .map_or(0, |item| item.tag());
+            self.emit(Event::Menu(tag as u32));
+        }
+
+        // Accessibility: AccessKit's adapter answers once the app supplies a tree.
+
+        #[unsafe(method(accessibilityChildren))]
+        fn accessibility_children(&self) -> *mut AnyObject {
+            let mut a11y = self.ivars().a11y.borrow_mut();
+            match a11y.as_mut() {
+                Some(a) => a.adapter.view_children(&mut a.activation).cast(),
+                // SAFETY: NSView's implementation, returning an autoreleased array or nil.
+                None => unsafe { msg_send![super(self), accessibilityChildren] },
+            }
+        }
+
+        #[unsafe(method(accessibilityFocusedUIElement))]
+        fn accessibility_focused_ui_element(&self) -> *mut AnyObject {
+            let mut a11y = self.ivars().a11y.borrow_mut();
+            match a11y.as_mut() {
+                Some(a) => a.adapter.focus(&mut a.activation).cast(),
+                // SAFETY: NSView's implementation.
+                None => unsafe { msg_send![super(self), accessibilityFocusedUIElement] },
+            }
+        }
+
+        #[unsafe(method(accessibilityHitTest:))]
+        fn accessibility_hit_test(&self, point: NSPoint) -> *mut AnyObject {
+            let mut a11y = self.ivars().a11y.borrow_mut();
+            match a11y.as_mut() {
+                Some(a) => a
+                    .adapter
+                    .hit_test(accesskit_macos::NSPoint::new(point.x, point.y), &mut a.activation)
+                    .cast(),
+                // SAFETY: NSView's implementation.
+                None => unsafe { msg_send![super(self), accessibilityHitTest: point] },
+            }
+        }
     }
 
     unsafe impl NSTextInputClient for AukView {
@@ -369,6 +415,7 @@ impl AukView {
             delegate: RefCell::new(None),
             waker: Waker::new(id),
             closed: Cell::new(false),
+            a11y: RefCell::new(None),
         };
         let this = Self::alloc(mtm).set_ivars(state);
         // SAFETY: NSView's designated initializer.
@@ -461,6 +508,19 @@ impl AukView {
         }
         registry::remove(self.ivars().id);
         self.emit(Event::Closed);
+    }
+
+    /// Tells AccessKit whether the window is key.
+    pub(crate) fn accessibility_focus(&self, focused: bool) {
+        let events = self
+            .ivars()
+            .a11y
+            .borrow_mut()
+            .as_mut()
+            .and_then(|a| a.adapter.update_view_focus_state(focused));
+        if let Some(events) = events {
+            events.raise();
+        }
     }
 
     fn update_scale(&self) {

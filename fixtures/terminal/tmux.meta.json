@@ -1,0 +1,43 @@
+{
+  "argv": [
+    "tmux",
+    "-L",
+    "vtrec",
+    "-f",
+    "/dev/null",
+    "new-session",
+    "zsh -f -i",
+    ";",
+    "set",
+    "-g",
+    "default-command",
+    "zsh -f -i",
+    ";",
+    "set",
+    "-g",
+    "status-right",
+    "auk %H:%M"
+  ],
+  "cwd": "{tmp}",
+  "cols": 100,
+  "rows": 30,
+  "env": [
+    "TMUX_TMPDIR={tmp}",
+    "SHELL=/bin/zsh",
+    "PS1=%# "
+  ],
+  "program": "/opt/homebrew/bin/tmux",
+  "version": "tmux 3.7c",
+  "scenario": "fixtures/terminal/tmux.scenario.json",
+  "recorded": "2026-10-08T04:16:29-0600",
+  "recorder": "tools/vt_record.py",
+  "exit_status": 1,
+  "counts": {
+    "out": 64,
+    "out_bytes": 8940,
+    "resize": 2,
+    "in": 10
+  },
+  "sha256": "b10fffb7995c9e665ef230a19fd4325460ec38ad992efbb0099c605d98c8239b",
+  "note": "tmux with no config on its own socket, zsh -f in each pane: two splits, zoom, resizes"
+}

@@ -56,7 +56,7 @@ pub fn decode(id: Option<&str>, mime: Option<&str>, body: &[u8]) -> Result<Blob,
 }
 
 /// Where a pane keeps its blobs.
-pub trait BlobStore: Debug {
+pub trait BlobStore: Debug + Send {
     /// Stores a blob. `referenced` tells which ids documents still use, for eviction.
     fn put(&mut self, blob: Blob, referenced: &dyn Fn(&str) -> bool);
     /// Whether the blob is held.

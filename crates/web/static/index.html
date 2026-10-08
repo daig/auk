@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auk</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #16181a; overflow: hidden; }
+  @media (prefers-color-scheme: light) { html, body { background: #fbfbfa; } }
+  #screen { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+  /* Keyboard and IME input land here; it follows the cursor so IME popups sit next to it. */
+  #input { position: fixed; left: 0; top: 0; width: 1px; height: 1em; opacity: 0; border: 0;
+           padding: 0; resize: none; outline: none; overflow: hidden; caret-color: transparent; }
+  #status { position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%); max-width: 36em;
+            font: 14px -apple-system, system-ui, sans-serif; color: #c5c8c6; text-align: center;
+            white-space: pre-wrap; }
+  #status:empty { display: none; }
+  @media (prefers-color-scheme: light) { #status { color: #1f2328; } }
+</style>
+</head>
+<body>
+<canvas id="screen"></canvas>
+<textarea id="input" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"
+          aria-label="Terminal input"></textarea>
+<div id="status">Loading…</div>
+<script type="module" src="/boot.js"></script>
+</body>
+</html>

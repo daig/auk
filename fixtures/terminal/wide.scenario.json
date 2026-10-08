@@ -1,0 +1,10 @@
+[
+  {"wait": "idle", "ms": 300},
+  {"keys": "cat wide.txt\r"}, {"wait": "idle", "ms": 300},
+  {"resize": [33, 20]}, {"wait": "idle", "ms": 300},
+  {"keys": "echo 中文中文中文中文中文中文中文中文中文中文中文\r"}, {"wait": "idle", "ms": 300},
+  {"resize": [47, 24]}, {"wait": "idle", "ms": 300},
+  {"resize": [80, 24]}, {"wait": "idle", "ms": 300},
+  {"keys": "exit\r"},
+  {"wait": "exit"}
+]

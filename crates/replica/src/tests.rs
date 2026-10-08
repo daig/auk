@@ -158,7 +158,7 @@ fn only_the_authoritative_replica_answers() {
     let mut client = follower();
     daemon.push(Item::Output(b"hi\x1b[6n"));
     client.push(Item::Output(b"hi\x1b[6n"));
-    assert_eq!(daemon.take_replies(), b"\x1b[1;3R");
+    assert_eq!(daemon.take_replies(), [Answer::Term(b"\x1b[1;3R".to_vec())]);
     assert!(daemon.take_replies().is_empty());
     assert!(client.take_replies().is_empty());
 }
@@ -212,30 +212,145 @@ fn settings_are_part_of_the_hash() {
     assert_ne!(a.state_hash(), b.state_hash());
 }
 
-/// A TSP handler that answers every string with its length, to check ordering and replay rules.
-#[derive(Debug, Default)]
-struct Echo {
-    seen: Vec<Vec<u8>>,
-}
-
-impl TspHandler for Echo {
-    fn on_tsp(&mut self, payload: &[u8], ctx: TspContext<'_>) {
-        self.seen.push(payload.to_vec());
-        ctx.replies
-            .extend_from_slice(format!("<{}>", payload.len()).as_bytes());
-    }
+fn tsp(verb: &str, body: &str) -> Vec<u8> {
+    format!("\x1b_tsp;{verb};{body}\x1b\\").into_bytes()
 }
 
 #[test]
-fn tsp_strings_reach_the_handler_in_order_with_answers() {
+fn tsp_answers_keep_stream_order_with_terminal_answers() {
     let mut r = Replica::new(80, 24, Settings::default(), Role::Authoritative);
-    r.set_tsp_handler(Box::new(Echo::default()));
-    r.push(Item::Output(b"\x1b_tsp;q;{}\x1b\\\x1b[c"));
+    let mut bytes = b"\x1b[6n".to_vec();
+    bytes.extend(tsp("q", r#"{"q":"hello","v":[1]}"#));
+    bytes.extend_from_slice(b"\x1b[c");
+    r.push(Item::Output(&bytes));
+    let replies = r.take_replies();
+    assert_eq!(replies.len(), 3, "{replies:?}");
+    assert_eq!(replies[0], Answer::Term(b"\x1b[1;1R".to_vec()));
+    let Answer::Tsp(hello) = &replies[1] else {
+        panic!("{replies:?}")
+    };
+    assert!(hello.starts_with(b"\x1b_tsp;r;{"));
+    assert!(matches!(&replies[2], Answer::Term(da1) if da1.starts_with(b"\x1b[?")));
+}
+
+/// A flow surface with a document, a prompt, more output.
+fn surface_session() -> Vec<u8> {
+    let mut out = b"$ prog\r\n".to_vec();
+    out.extend(tsp("q", r#"{"q":"hello","v":[1],"app":"t"}"#));
+    out.extend(tsp("o", r#"{"id":"s1","mode":"flow","title":"T"}"#));
+    out.extend(tsp(
+        "f",
+        r#"{"sf":"s1","s":1,"ops":[["add","main","s1",null,{"id":"main","k":"col","c":[{"id":"t","k":"text","p":{"text":"hi"}}]}]]}"#,
+    ));
+    out.extend(tsp("x", r#"{"id":"s1"}"#));
+    out.extend_from_slice(b"\x1b]133;A\x07$ ");
+    out.extend(tsp("o", r#"{"id":"s2","mode":"inline"}"#));
+    out.extend(tsp(
+        "f",
+        r#"{"sf":"s2","s":7,"ops":[["add","main","s2",null,{"id":"main","k":"col"}]]}"#,
+    ));
+    out.extend(tsp("f", r#"{"sf":"s2","s":8,"ops":[["add","p","main",null,{"id":"p","k":"progress","p":{"value":0.5}}]]}"#));
+    out
+}
+
+#[test]
+fn tsp_state_replicates_and_snapshots() {
+    let bytes = surface_session();
+    let mut daemon = Replica::new(80, 24, Settings::default(), Role::Authoritative);
+    let mut client = follower();
+    for (i, chunk) in chunks(&bytes, &[3, 50, 1, 9]).into_iter().enumerate() {
+        let (seq, _) = daemon.push(Item::Output(chunk));
+        client.apply(seq, Item::Output(chunk)).unwrap();
+        assert_eq!(daemon.state_hash(), client.state_hash(), "item {i}");
+    }
+    assert_eq!(daemon.tsp().surfaces().len(), 2);
+    assert!(client.take_replies().is_empty());
+    assert!(!daemon.take_replies().is_empty());
+
+    let late = Replica::from_snapshot(&daemon.snapshot(), Role::Follower, None);
+    assert_eq!(late.state_hash(), daemon.state_hash());
+    assert_eq!(late.tsp().surfaces().len(), 2);
+
+    // The snapshot answers nothing, even to the authoritative role.
+    let mut replayed = Replica::from_snapshot(&daemon.snapshot(), Role::Authoritative, None);
+    assert!(replayed.take_replies().is_empty());
+    assert_eq!(replayed.state_hash(), daemon.state_hash());
+}
+
+#[test]
+fn tsp_records_apply_on_every_replica() {
+    let mut a = Replica::new(80, 24, Settings::default(), Role::Authoritative);
+    let mut b = follower();
+    let mut items: Vec<Vec<u8>> = vec![surface_session()];
+    items.push(b"\x1b_tsp;f;c=k;m=1;{\"sf\":\x1b\\".to_vec());
+    for item in &items {
+        let (seq, _) = a.push(Item::Output(item));
+        b.apply(seq, Item::Output(item)).unwrap();
+    }
+    assert!(a.tsp().chunk_pending().is_some());
+    for record in [
+        Record::ChunkTimeout,
+        Record::Resize { cols: 60, rows: 20 },
+        Record::Exit { status: 0 },
+    ] {
+        let (seq, _) = a.push(Item::Record(&record));
+        b.apply(seq, Item::Record(&record)).unwrap();
+        assert_eq!(a.state_hash(), b.state_hash(), "{record:?}");
+    }
+    assert!(a.tsp().chunk_pending().is_none());
+    assert!(a.tsp().surfaces().iter().all(|s| !s.is_live()));
+    let off = Settings {
+        native_surfaces: false,
+        ..Settings::default()
+    };
+    let (seq, _) = a.push(Item::Record(&Record::Settings {
+        settings: off.clone(),
+    }));
+    b.apply(seq, Item::Record(&Record::Settings { settings: off }))
+        .unwrap();
+    assert!(!a.tsp().config().enabled);
+    assert_eq!(a.state_hash(), b.state_hash());
+}
+
+#[test]
+fn programs_cannot_forge_anchor_rows() {
+    let mut r = follower();
+    r.push(Item::Output(b"\x1b]6464;anchor;5\x1b\\x"));
+    let hash = r.state_hash();
+    let mut plain = follower();
+    plain.push(Item::Output(b"x"));
+    assert_eq!(hash, plain.state_hash());
+}
+
+#[test]
+fn erasing_an_anchor_row_ends_its_surface_with_gone() {
+    let mut r = Replica::new(80, 24, Settings::default(), Role::Authoritative);
+    r.push(Item::Output(&tsp("q", r#"{"q":"hello","v":[1]}"#)));
+    r.take_replies();
+    r.push(Item::Output(&tsp("o", r#"{"id":"e","mode":"flow"}"#)));
+    assert!(r.take_replies().is_empty());
+    r.push(Item::Output(b"\x1b[2J"));
     let replies = r.take_replies();
     assert!(
-        replies.starts_with(b"<8>"),
-        "{:?}",
-        String::from_utf8_lossy(&replies)
+        matches!(&replies[..], [Answer::Tsp(b)] if b.windows(4).any(|w| w == b"gone")),
+        "{replies:?}"
     );
-    assert!(replies.len() > 3, "DA1 follows the TSP answer");
+    assert!(r.tsp().surfaces().is_empty());
+}
+
+#[test]
+fn ris_and_reset_clear_surfaces_silently() {
+    for reset in [true, false] {
+        let mut r = Replica::new(80, 24, Settings::default(), Role::Authoritative);
+        r.push(Item::Output(&tsp("o", r#"{"id":"f","mode":"flow"}"#)));
+        r.push(Item::Output(&tsp("o", r#"{"id":"i","mode":"inline"}"#)));
+        r.take_replies();
+        if reset {
+            r.push(Item::Record(&Record::Reset));
+        } else {
+            r.push(Item::Output(b"\x1bc"));
+        }
+        assert!(r.take_replies().is_empty());
+        assert!(r.tsp().surfaces().is_empty());
+    }
 }

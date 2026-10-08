@@ -1,0 +1,20 @@
+CJK: 漢字かなカナ한글漢字かなカナ한글漢字かなカナ한글漢字かなカナ한글漢字かなカナ한글漢字かなカナ한글
+Fullwidth: ＡＢＣＤＥＦ１２３４５６！？ＡＢＣＤＥＦ１２３４５６！？ＡＢＣＤＥＦ１２３４５６！？ＡＢＣＤＥＦ１２３４５６！？
+Mixed: a中b文c字d Mixed: a中b文c字d Mixed: a中b文c字d Mixed: a中b文c字d Mixed: a中b文c字d Mixed: a中b文c字d Mixed: a中b文c字d 
+Combining: é ä ñ ộ Z̶ q̣̇ Combining: é ä ñ ộ Z̶ q̣̇ Combining: é ä ñ ộ Z̶ q̣̇ Combining: é ä ñ ộ Z̶ q̣̇ Combining: é ä ñ ộ Z̶ q̣̇ 
+Hangul jamo: 각 한 Hangul jamo: 각 한 Hangul jamo: 각 한 Hangul jamo: 각 한 Hangul jamo: 각 한 Hangul jamo: 각 한 
+Odd boundary:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx宽字符在边界
+Box: ┌─┬─┐ │中│文│ └─┴─┘ ═║╔╗╚╝ ▀▄█▌▐░▒▓
+Ambiguous: ¡§¨ª±²³´¶·¸¹º¼½¾ αβγδ АБВГ ①②③ ※
+00 |end
+01 长长长|end
+02 长长长长长长|end
+03 长长长长长长长长长|end
+04 长长长长长长长长长长长长|end
+05 长长长长长长长长长长长长长长长|end
+06 长长长长长长长长长长长长长长长长长长|end
+07 长长长长长长长长长长长长长长长长长长长长长|end
+08 长长长长长长长长长长长长长长长长长长长长长长长长|end
+09 长长长长长长长长长长长长长长长长长长长长长长长长长长长|end
+10 长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长|end
+11 长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长|end

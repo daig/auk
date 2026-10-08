@@ -13,6 +13,19 @@ struct Uniforms {
 @group(0) @binding(1) var backgrounds: texture_2d<f32>;
 @group(0) @binding(2) var coverage_atlas: texture_2d<f32>;
 @group(0) @binding(3) var color_atlas: texture_2d<f32>;
+// Row slots for the mixed layout (§6.2): each row's top and height, relative to the origin, two
+// rows per vec4. Rows past the table sit at their uniform position.
+@group(0) @binding(4) var<uniform> slots: array<vec4<f32>, 512>;
+
+const MAX_SLOT_ROWS: u32 = 1024u;
+
+fn row_slot(row: u32) -> vec2<f32> {
+    if row >= MAX_SLOT_ROWS {
+        return vec2<f32>(f32(row) * u.cell.y, u.cell.y);
+    }
+    let pair = slots[row / 2u];
+    return select(pair.xy, pair.zw, (row & 1u) == 1u);
+}
 
 fn to_clip(px: vec2<f32>) -> vec4<f32> {
     let ndc = px / u.viewport * 2.0 - 1.0;
@@ -24,19 +37,28 @@ fn corner(vertex: u32) -> vec2<f32> {
     return vec2<f32>(f32(vertex & 1u), f32(vertex >> 1u));
 }
 
-// Backgrounds: one quad over the grid; each pixel reads its cell's color.
+// Backgrounds: one quad per row, in the row's slot; each pixel reads its cell's color.
+
+struct BgVaryings {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) @interpolate(flat) row: u32,
+}
 
 @vertex
-fn bg_vs(@builtin(vertex_index) vertex: u32) -> @builtin(position) vec4<f32> {
-    let size = vec2<f32>(u.grid) * u.cell;
-    return to_clip(u.origin + corner(vertex) * size);
+fn bg_vs(@builtin(vertex_index) vertex: u32, @builtin(instance_index) row: u32) -> BgVaryings {
+    let slot = row_slot(row);
+    let size = vec2<f32>(f32(u.grid.x) * u.cell.x, slot.y);
+    var out: BgVaryings;
+    out.clip = to_clip(u.origin + vec2<f32>(0.0, slot.x) + corner(vertex) * size);
+    out.row = row;
+    return out;
 }
 
 @fragment
-fn bg_fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
-    let cell = vec2<i32>(floor((pos.xy - u.origin) / u.cell));
-    let clamped = clamp(cell, vec2<i32>(0), vec2<i32>(u.grid) - 1);
-    return textureLoad(backgrounds, clamped, 0);
+fn bg_fs(v: BgVaryings) -> @location(0) vec4<f32> {
+    let col = i32(floor((v.clip.x - u.origin.x) / u.cell.x));
+    let cell = vec2<i32>(clamp(col, 0, i32(u.grid.x) - 1), i32(v.row));
+    return textureLoad(backgrounds, cell, 0);
 }
 
 // Foreground: one instance per glyph, decoration or cursor part.
@@ -55,6 +77,8 @@ struct Instance {
     @location(3) color: vec4<f32>,
     @location(4) kind: u32,
     @location(5) param: f32,
+    // The grid row the quad belongs to; `pos.y` is relative to the row's top.
+    @location(6) row: u32,
 }
 
 struct Varyings {
@@ -70,9 +94,12 @@ struct Varyings {
 
 @vertex
 fn fg_vs(@builtin(vertex_index) vertex: u32, inst: Instance) -> Varyings {
-    let local = corner(vertex) * inst.size;
+    let slot = row_slot(inst.row);
+    // A hidden row (height 0) draws nothing.
+    let size = select(inst.size, vec2<f32>(0.0), slot.y <= 0.0);
+    let local = corner(vertex) * size;
     var out: Varyings;
-    out.clip = to_clip(u.origin + inst.pos + local);
+    out.clip = to_clip(u.origin + vec2<f32>(inst.pos.x, inst.pos.y + slot.x) + local);
     out.local = local;
     out.uv = inst.uv;
     out.color = inst.color;

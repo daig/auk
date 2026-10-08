@@ -1,0 +1,28 @@
+{
+  "argv": [
+    "vim",
+    "-u",
+    "vimrc",
+    "-i",
+    "NONE",
+    "sample.rs"
+  ],
+  "cwd": "{fixtures}",
+  "cols": 80,
+  "rows": 24,
+  "env": [],
+  "program": "/usr/bin/vim",
+  "version": "VIM - Vi IMproved 9.1 (2024 Jan 02, compiled Aug  8 2026 16:52:02)",
+  "scenario": "fixtures/terminal/vim.scenario.json",
+  "recorded": "2026-10-08T04:16:50-0600",
+  "recorder": "tools/vt_record.py",
+  "exit_status": 0,
+  "counts": {
+    "out": 93,
+    "out_bytes": 81138,
+    "resize": 2,
+    "in": 18
+  },
+  "sha256": "9d48a07fc990f88a99a08e0b1e873368cb1a0914b32be675252105a76fa12817",
+  "note": "vim with the test vimrc editing sample.rs; splits and resizes"
+}

@@ -26,7 +26,7 @@ pub struct WindowId(pub u64);
 /// A window. Main thread only; cheap to clone.
 #[derive(Clone)]
 pub struct Window {
-    view: Retained<AukView>,
+    pub(crate) view: Retained<AukView>,
 }
 
 impl std::fmt::Debug for Window {
@@ -92,7 +92,7 @@ impl Window {
         self.view.ivars().id
     }
 
-    fn ns_window(&self) -> Option<Retained<NSWindow>> {
+    pub(crate) fn ns_window(&self) -> Option<Retained<NSWindow>> {
         self.view.window()
     }
 
@@ -152,6 +152,114 @@ impl Window {
     pub fn metal_layer(&self) -> NonNull<c_void> {
         let layer: *const objc2_quartz_core::CAMetalLayer = &*self.view.ivars().layer;
         NonNull::new(layer as *mut c_void).expect("a reference is never null")
+    }
+
+    /// Makes the window key and brings it forward.
+    pub fn focus(&self) {
+        if let Some(w) = self.ns_window() {
+            w.makeKeyAndOrderFront(None);
+        }
+    }
+
+    /// Whether the window fills the screen (full-screen mode).
+    pub fn is_full_screen(&self) -> bool {
+        self.ns_window().is_some_and(|w| {
+            w.styleMask()
+                .contains(objc2_app_kit::NSWindowStyleMask::FullScreen)
+        })
+    }
+
+    /// The window's frame on screen, in points: x, y (from the bottom-left), width, height.
+    pub fn frame(&self) -> (f64, f64, f64, f64) {
+        self.ns_window().map_or((0.0, 0.0, 0.0, 0.0), |w| {
+            let f = w.frame();
+            (f.origin.x, f.origin.y, f.size.width, f.size.height)
+        })
+    }
+
+    /// Resizes the content area to `width`×`height` points.
+    pub fn set_content_size(&self, width: f64, height: f64) {
+        if let Some(w) = self.ns_window() {
+            w.setContentSize(NSSize::new(width, height));
+        }
+    }
+
+    /// Hands the window's accessibility to AccessKit's adapter, fed by `handler`.
+    pub fn enable_accessibility(&self, handler: Box<dyn crate::AccessibilityHandler>) {
+        use crate::accessibility::{Accessibility, Actions, Activation};
+        let shared = std::rc::Rc::new(std::cell::RefCell::new(handler));
+        let view: *const AukView = &*self.view;
+        // SAFETY: the view is alive; the adapter holds it weakly.
+        let adapter = unsafe {
+            accesskit_macos::Adapter::new(
+                view as *mut c_void,
+                self.is_focused(),
+                Actions(shared.clone()),
+            )
+        };
+        *self.view.ivars().a11y.borrow_mut() = Some(Accessibility {
+            adapter,
+            activation: Activation(shared),
+        });
+    }
+
+    /// Applies a tree update if an assistive app has asked for the tree; `update` isn't called
+    /// otherwise. Returns whether the tree is active.
+    pub fn update_accessibility(&self, update: impl FnOnce() -> accesskit::TreeUpdate) -> bool {
+        let events = {
+            let mut a11y = self.view.ivars().a11y.borrow_mut();
+            let Some(a) = a11y.as_mut() else {
+                return false;
+            };
+            a.adapter.update_if_active(update)
+        };
+        match events {
+            Some(events) => {
+                events.raise();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The window's accessibility tree, read through the `NSAccessibility` calls an assistive
+    /// app makes (which activates AccessKit's tree on first use). `depth` bounds the walk.
+    pub fn accessibility_tree(&self, depth: usize) -> crate::AxNode {
+        crate::accessibility::read(&self.view, depth)
+    }
+
+    /// Calls the view's `NSTextInputClient` `setMarkedText:selectedRange:replacementRange:`, as
+    /// an input method does. `selection` is a UTF-16 range within `text`.
+    pub fn set_marked_text(&self, text: &str, selection: std::ops::Range<usize>) {
+        let string = NSString::from_str(text);
+        let selected = objc2_foundation::NSRange::new(selection.start, selection.len());
+        let replacement = objc2_foundation::NSRange::new(objc2_foundation::NSNotFound as usize, 0);
+        // SAFETY: the view implements NSTextInputClient.
+        let () = unsafe {
+            msg_send![&*self.view, setMarkedText: &*string, selectedRange: selected, replacementRange: replacement]
+        };
+    }
+
+    /// Calls the view's `NSTextInputClient` `insertText:replacementRange:`, as an input method
+    /// committing text does.
+    pub fn insert_text(&self, text: &str) {
+        let string = NSString::from_str(text);
+        let replacement = objc2_foundation::NSRange::new(objc2_foundation::NSNotFound as usize, 0);
+        // SAFETY: the view implements NSTextInputClient.
+        let () =
+            unsafe { msg_send![&*self.view, insertText: &*string, replacementRange: replacement] };
+    }
+
+    /// Calls the view's `NSTextInputClient` `unmarkText`.
+    pub fn unmark_text(&self) {
+        // SAFETY: the view implements NSTextInputClient.
+        let () = unsafe { msg_send![&*self.view, unmarkText] };
+    }
+
+    /// Calls the view's `NSTextInputClient` `hasMarkedText`.
+    pub fn has_marked_text(&self) -> bool {
+        // SAFETY: the view implements NSTextInputClient.
+        unsafe { msg_send![&*self.view, hasMarkedText] }
     }
 
     /// Delivers an `NSEvent` to the window as if it came from the system: keys go to the view
@@ -266,6 +374,7 @@ define_class!(
         #[unsafe(method(windowDidBecomeKey:))]
         fn window_did_become_key(&self, _notification: &NSNotification) {
             if let Some(view) = self.ivars().load() {
+                view.accessibility_focus(true);
                 view.emit(Event::Focus(true));
             }
         }
@@ -273,6 +382,7 @@ define_class!(
         #[unsafe(method(windowDidResignKey:))]
         fn window_did_resign_key(&self, _notification: &NSNotification) {
             if let Some(view) = self.ivars().load() {
+                view.accessibility_focus(false);
                 view.emit(Event::Focus(false));
             }
         }

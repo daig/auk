@@ -1,0 +1,54 @@
+data.aws_ami.ubuntu: Reading...
+aws_s3_bucket.logs: Refreshing state... [id=logs-bucket]
+aws_instance.old: Refreshing state... [id=i-0123456789abcdef0]
+data.aws_ami.ubuntu: Read complete after 1s [id=ami-0abc1234]
+
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  + create
+  ~ update in-place
+  - destroy
+-/+ destroy and then create replacement
+
+Terraform will perform the following actions:
+
+  # aws_db_instance.main must be replaced
+-/+ resource "aws_db_instance" "main" {
+      ~ engine_version = "13" -> "15" # forces replacement
+        id             = "main-db"
+    }
+
+  # aws_instance.old will be destroyed
+  # (because aws_instance.old is not in configuration)
+  - resource "aws_instance" "old" {
+      - ami           = "ami-0old" -> null
+      - instance_type = "t2.micro" -> null
+    }
+
+  # aws_instance.web will be created
+  + resource "aws_instance" "web" {
+      + ami           = "ami-0abc1234"
+      + instance_type = "t3.micro"
+    }
+
+  # aws_s3_bucket.logs will be updated in-place
+  ~ resource "aws_s3_bucket" "logs" {
+        id   = "logs-bucket"
+      ~ tags = {
+          + "env" = "prod"
+        }
+    }
+
+Plan: 2 to add, 1 to change, 2 to destroy.
+
+Changes to Outputs:
+  + web_ip = (known after apply)
+╷
+│ Warning: Argument is deprecated
+│ 
+│   with aws_s3_bucket.logs,
+│   on main.tf line 12, in resource "aws_s3_bucket" "logs":
+│   12:   acl    = "private"
+│ 
+│ Use the aws_s3_bucket_acl resource instead
+╵

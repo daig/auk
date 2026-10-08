@@ -7,14 +7,22 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+auk-app = { path = "../app" }
 auk-cli = { path = "../cli" }
+auk-web = { path = "../web" }
+auk-daemon = { path = "../daemon" }
 clap = { version = "4.6.7", features = ["derive"] }
 
 [dev-dependencies]
 auk-conformance = { path = "../conformance" }
+auk-daemon = { path = "../daemon" }
 auk-mirror = { path = "../mirror" }
 auk-replica = { path = "../replica" }
 serde_json.workspace = true
+# The SDK's chunker and input parser are the program-side oracles in the tsp suite.
+tern-sdk = { path = "../../third_party/tern-sdk/rust" }
+base64 = "0.23.1"
+sha2 = "0.11.0"
 
 [lints]
 workspace = true

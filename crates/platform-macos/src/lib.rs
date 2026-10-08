@@ -28,7 +28,11 @@ pub mod keys;
 #[cfg(target_os = "macos")]
 mod app;
 #[cfg(target_os = "macos")]
+mod accessibility;
+#[cfg(target_os = "macos")]
 mod clipboard;
+#[cfg(target_os = "macos")]
+mod menu;
 #[cfg(target_os = "macos")]
 pub mod synth;
 #[cfg(target_os = "macos")]
@@ -38,6 +42,8 @@ mod window;
 
 #[cfg(target_os = "macos")]
 pub use app::{AppContext, run, run_on_main};
+#[cfg(target_os = "macos")]
+pub use accessibility::{AccessibilityHandler, AxNode};
 #[cfg(target_os = "macos")]
 pub use clipboard::Clipboard;
 #[cfg(target_os = "macos")]
@@ -69,8 +75,11 @@ pub enum Event {
     /// The display is ready for a frame: draw now. Sent on the display's refresh while frames
     /// are requested ([`Window::request_frame`]).
     Frame,
-    /// A menu command reached the window.
+    /// A standard edit command (`copy:`, `paste:`, `selectAll:`) reached the window: from the
+    /// Services menu, or a [`StandardAction`] menu item.
     Command(Command),
+    /// A [`MenuItem::Command`] reached the window (it was key): the item's command id.
+    Menu(u32),
     /// The user asked to close the window (close button, ⌘W). Call [`Window::close`] to close it.
     CloseRequested,
     /// The window closed; the handler is dropped after this.
@@ -188,6 +197,78 @@ pub enum Command {
     Paste,
     SelectAll,
     NewWindow,
+}
+
+/// Key-equivalent modifiers for a menu item.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct KeyMods {
+    pub cmd: bool,
+    pub shift: bool,
+    pub opt: bool,
+    pub ctrl: bool,
+}
+
+impl KeyMods {
+    pub const NONE: KeyMods = KeyMods {
+        cmd: false,
+        shift: false,
+        opt: false,
+        ctrl: false,
+    };
+    pub const CMD: KeyMods = KeyMods {
+        cmd: true,
+        ..KeyMods::NONE
+    };
+}
+
+/// AppKit's own actions, sent down the responder chain by their standard selectors.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum StandardAction {
+    About,
+    Hide,
+    HideOthers,
+    ShowAll,
+    Quit,
+    ToggleFullScreen,
+    Minimize,
+    Zoom,
+    BringAllToFront,
+    Copy,
+    Paste,
+    SelectAll,
+}
+
+/// A menu, for [`AppContext::set_main_menu`]. The menu bar is a `Menu` whose items are
+/// submenus.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Menu {
+    pub title: String,
+    pub items: Vec<MenuItem>,
+    /// This is the Window menu: AppKit lists the open windows in it.
+    pub windows_menu: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum MenuItem {
+    /// Sends `command` to the key window ([`Event::Menu`]), or, with no key window, to the
+    /// app's command handler. `key` is the key equivalent (`"t"`, `"["`, `"\r"`), empty for
+    /// none.
+    Command {
+        title: String,
+        command: u32,
+        key: String,
+        mods: KeyMods,
+    },
+    Standard {
+        title: String,
+        action: StandardAction,
+        key: String,
+        mods: KeyMods,
+    },
+    /// The system's Services submenu.
+    Services { title: String },
+    Separator,
+    Submenu(Menu),
 }
 
 /// How a window starts.

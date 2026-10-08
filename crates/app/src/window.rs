@@ -1,0 +1,1217 @@
+//! One app window (§4.2, §4.3): a window key's sessions, shown through follower replicas over
+//! the window's own daemon connection. Layout is daemon state, replicated to every window; focus,
+//! the shown session and tab, scrolling and selection belong to the window.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use auk_mirror::layout::{Session, SessionId, SplitDir, Tab, TabId, Window as Sessions};
+use auk_mirror::{ClientFacts, ClientMsg, LayoutEdit, PaneId};
+use auk_platform_macos::{
+    Appearance, Command, Event, KeyInput, MouseButton, MouseEvent, MouseKind, OptionAsAlt, Preedit,
+    ScrollEvent, Size, Window, WindowHandler,
+};
+use auk_render::{Attrs, Gpu, GridSnapshot, Theme, View};
+use auk_term::input::{
+    self, Key, KeyEvent, Mods, MouseAction, MouseButton as TermButton, encode_focus, encode_key,
+    encode_mouse, encode_paste,
+};
+use auk_term::{Line, Modes, MouseMode};
+
+use crate::chrome::{BAR_HEIGHT, Chrome, ChromeAction, ChromeModel, DIVIDER};
+use crate::commands::{self, Cmd};
+use crate::compose::{self, Composed, Scroll};
+use crate::conn::{Connection, Shared};
+use crate::geometry::{self, Rect, TabLayout};
+use crate::gfx::{FrameClock, FrameCost, Gfx, PaneDraw};
+use crate::select::{Selection, Unit};
+
+/// Space around a pane's grid, in points.
+pub const PADDING: f64 = 6.0;
+
+/// A layout edit this window asked for, whose result it should show when it arrives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Pending {
+    Session,
+    Tab(SessionId),
+    Split(PaneId),
+}
+
+/// Per-pane view state (§4.4): never replicated.
+#[derive(Clone, Debug, Default)]
+pub struct PaneView {
+    pub scroll: Scroll,
+    pub selection: Option<Selection>,
+    /// The composition last drawn, for mapping points to lines.
+    pub composed: Composed,
+    /// The grid's origin last drawn, in points from the window's top-left.
+    pub grid_origin: (f64, f64),
+    /// Wheel movement not yet sent as whole lines (mouse reports, alternate scroll), in pixels.
+    pub wheel: f64,
+}
+
+/// A button held over a pane.
+#[derive(Clone, Copy, Debug)]
+struct Press {
+    pane: PaneId,
+    /// The press went to the program as a mouse report.
+    reported: bool,
+}
+
+/// Frame statistics for the automation endpoint.
+#[derive(Debug, Default)]
+pub struct Stats {
+    pub frames: u64,
+    /// CPU work per frame: snapshots, chrome and encoding, without the drawable wait.
+    pub cpu: Vec<Duration>,
+    pub drawable_wait: Vec<Duration>,
+}
+
+pub struct WinState {
+    pub window: Option<Window>,
+    pub conn: Arc<Connection>,
+    gpu: Rc<Gpu>,
+    pub clock: FrameClock,
+    pub size: Option<Size>,
+    gfx: Option<Gfx>,
+    pub chrome: Chrome,
+    ui_dirty: bool,
+    pub dark: bool,
+    theme: Theme,
+    pub active_session: Option<SessionId>,
+    pub active_tab: BTreeMap<SessionId, TabId>,
+    pub tab_focus: BTreeMap<TabId, PaneId>,
+    pub views: BTreeMap<PaneId, PaneView>,
+    layout_generation: u64,
+    known_sessions: BTreeSet<SessionId>,
+    known_tabs: BTreeSet<TabId>,
+    known_panes: BTreeSet<PaneId>,
+    pending: Option<Pending>,
+    asked_for_session: bool,
+    had_panes: bool,
+    pub preedit: Option<Preedit>,
+    pub key_window: bool,
+    press: Option<Press>,
+    /// Where a single-click press went down: a drag from it starts a selection.
+    press_anchor: Option<(PaneId, Line, u16, bool)>,
+    /// The last cell a motion report named, so motion reports only on cell changes.
+    last_motion: Option<(PaneId, u16, u16)>,
+    sent_sizes: BTreeMap<PaneId, (u16, u16)>,
+    facts_sent: Option<ClientFacts>,
+    /// The tab's layout last computed, in points.
+    pub tab_layout: TabLayout,
+    pub stats: Stats,
+    pub option_as_alt: OptionAsAlt,
+    /// The window is going away; ignore further work.
+    closing: bool,
+    /// Surface frames this window drew and acked: (pane, surface id) → `s`.
+    acked: BTreeMap<(PaneId, String), u64>,
+    /// The focused pane's text and the chrome, as the accessibility tree last saw them.
+    a11y_seen: Option<(u64, u64)>,
+    pub a11y_generation: u64,
+}
+
+impl std::fmt::Debug for WinState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WinState")
+            .field("window_key", &self.conn.window_key)
+            .field("active_session", &self.active_session)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The window's handler: forwards to the shared state, which the automation endpoint also
+/// reaches.
+#[derive(Debug)]
+pub struct Handler(pub Rc<std::cell::RefCell<WinState>>);
+
+impl WindowHandler for Handler {
+    fn event(&mut self, window: &Window, event: Event) {
+        let closed = matches!(event, Event::Closed);
+        {
+            let mut state = self.0.borrow_mut();
+            if state.window.is_none() {
+                state.window = Some(window.clone());
+            }
+            state.event(window, event);
+        }
+        if closed {
+            crate::app::window_closed(&self.0);
+        }
+    }
+}
+
+impl WinState {
+    pub fn new(conn: Arc<Connection>, gpu: Rc<Gpu>, clock: FrameClock, option_as_alt: OptionAsAlt) -> WinState {
+        WinState {
+            window: None,
+            conn,
+            gpu,
+            clock,
+            size: None,
+            gfx: None,
+            chrome: Chrome::new(2.0),
+            ui_dirty: true,
+            dark: true,
+            theme: Theme::dark(),
+            active_session: None,
+            active_tab: BTreeMap::new(),
+            tab_focus: BTreeMap::new(),
+            views: BTreeMap::new(),
+            layout_generation: 0,
+            known_sessions: BTreeSet::new(),
+            known_tabs: BTreeSet::new(),
+            known_panes: BTreeSet::new(),
+            pending: None,
+            asked_for_session: false,
+            had_panes: false,
+            preedit: None,
+            key_window: false,
+            press: None,
+            press_anchor: None,
+            last_motion: None,
+            sent_sizes: BTreeMap::new(),
+            facts_sent: None,
+            tab_layout: TabLayout::default(),
+            stats: Stats::default(),
+            option_as_alt,
+            closing: false,
+            acked: BTreeMap::new(),
+            a11y_seen: None,
+            a11y_generation: 0,
+        }
+    }
+
+    fn event(&mut self, window: &Window, event: Event) {
+        if self.closing && !matches!(event, Event::Closed) {
+            return;
+        }
+        match event {
+            Event::Resized(size) => self.resized(window, size),
+            Event::Appearance(appearance) => {
+                self.dark = appearance == Appearance::Dark;
+                self.theme = if self.dark { Theme::dark() } else { Theme::light() };
+                self.ui_dirty = true;
+                self.send_facts();
+                window.request_frame();
+            }
+            Event::Wake => self.wake(window),
+            Event::Frame => self.frame(window),
+            Event::Key(key) => self.key(window, key),
+            Event::Text(text) => {
+                if let Some(pane) = self.focused_pane() {
+                    self.typed(window, pane, text.into_bytes());
+                }
+            }
+            Event::Preedit(preedit) => {
+                self.preedit = preedit;
+                window.request_frame();
+            }
+            Event::ModifiersChanged(_) => {}
+            Event::Mouse(m) => self.mouse(window, m),
+            Event::Scroll(s) => self.scroll(window, s),
+            Event::Focus(focused) => {
+                self.key_window = focused;
+                if let Some(pane) = self.focused_pane() {
+                    let modes = self.modes(pane);
+                    self.conn.input(pane, encode_focus(focused, &modes));
+                    if focused {
+                        let _ = self.conn.send(&ClientMsg::Focus { pane });
+                    }
+                }
+                window.request_frame();
+            }
+            Event::Command(c) => match c {
+                Command::Copy => self.command(window, Cmd::Copy),
+                Command::Paste => self.command(window, Cmd::Paste),
+                Command::SelectAll => self.command(window, Cmd::SelectAll),
+                Command::NewWindow => self.command(window, Cmd::NewWindow),
+            },
+            Event::Menu(id) => {
+                if let Some(cmd) = commands::by_id(id) {
+                    self.command(window, cmd);
+                }
+            }
+            Event::CloseRequested => {
+                self.closing = true;
+                self.conn.detach();
+                window.close();
+            }
+            Event::Closed => {
+                self.closing = true;
+                self.conn.detach();
+                self.gfx = None;
+            }
+        }
+    }
+
+    // Layout and focus.
+
+    /// The sessions as the daemon last sent them.
+    fn sessions(&self) -> Sessions {
+        self.conn.shared().sessions.clone()
+    }
+
+    fn session<'a>(&self, sessions: &'a Sessions) -> Option<&'a Session> {
+        let id = self.active_session?;
+        sessions.sessions.iter().find(|s| s.id == id)
+    }
+
+    fn tab<'a>(&self, sessions: &'a Sessions) -> Option<&'a Tab> {
+        let session = self.session(sessions)?;
+        let id = self.active_tab.get(&session.id)?;
+        session.tabs.iter().find(|t| t.id == *id)
+    }
+
+    pub fn active_tab_id(&self) -> Option<TabId> {
+        self.active_tab.get(&self.active_session?).copied()
+    }
+
+    pub fn focused_pane(&self) -> Option<PaneId> {
+        self.tab_focus.get(&self.active_tab_id()?).copied()
+    }
+
+    /// Makes the shown session, tab and focus valid for the current layout, and shows what this
+    /// window asked to create.
+    fn reconcile(&mut self, sessions: &Sessions) {
+        let new_sessions: Vec<SessionId> = sessions
+            .sessions
+            .iter()
+            .map(|s| s.id)
+            .filter(|id| !self.known_sessions.contains(id))
+            .collect();
+        let all_tabs: Vec<(SessionId, &Tab)> = sessions
+            .sessions
+            .iter()
+            .flat_map(|s| s.tabs.iter().map(move |t| (s.id, t)))
+            .collect();
+        let new_tabs: Vec<(SessionId, TabId)> = all_tabs
+            .iter()
+            .filter(|(_, t)| !self.known_tabs.contains(&t.id))
+            .map(|(s, t)| (*s, t.id))
+            .collect();
+        let new_panes: Vec<(TabId, PaneId)> = all_tabs
+            .iter()
+            .flat_map(|(_, t)| t.root.panes().into_iter().map(move |p| (t.id, p)))
+            .filter(|(_, p)| !self.known_panes.contains(p))
+            .collect();
+
+        match self.pending {
+            Some(Pending::Session) if !new_sessions.is_empty() => {
+                self.active_session = new_sessions.last().copied();
+                self.pending = None;
+            }
+            Some(Pending::Tab(session)) => {
+                if let Some((_, tab)) = new_tabs.iter().find(|(s, _)| *s == session) {
+                    self.active_session = Some(session);
+                    self.active_tab.insert(session, *tab);
+                    self.pending = None;
+                }
+            }
+            Some(Pending::Split(from)) => {
+                if let Some((tab, pane)) = new_panes
+                    .iter()
+                    .find(|(t, _)| all_tabs.iter().any(|(_, x)| x.id == *t && x.root.contains(from)))
+                {
+                    self.tab_focus.insert(*tab, *pane);
+                    self.pending = None;
+                }
+            }
+            _ => {}
+        }
+
+        // The shown session: still there, else the first.
+        if !sessions
+            .sessions
+            .iter()
+            .any(|s| Some(s.id) == self.active_session)
+        {
+            self.active_session = sessions.sessions.first().map(|s| s.id);
+        }
+        for s in &sessions.sessions {
+            let tab_ok = self
+                .active_tab
+                .get(&s.id)
+                .is_some_and(|t| s.tabs.iter().any(|x| x.id == *t));
+            if !tab_ok && let Some(first) = s.tabs.first() {
+                self.active_tab.insert(s.id, first.id);
+            }
+            for t in &s.tabs {
+                let focus_ok = self.tab_focus.get(&t.id).is_some_and(|p| t.root.contains(*p));
+                if !focus_ok {
+                    let panes = t.root.panes();
+                    let pick = t.zoom.or_else(|| panes.first().copied());
+                    if let Some(p) = pick {
+                        self.tab_focus.insert(t.id, p);
+                    }
+                }
+            }
+        }
+        self.known_sessions = sessions.sessions.iter().map(|s| s.id).collect();
+        self.known_tabs = all_tabs.iter().map(|(_, t)| t.id).collect();
+        self.known_panes = sessions.panes().into_iter().collect();
+        self.active_tab.retain(|s, _| self.known_sessions.contains(s));
+        let tabs = self.known_tabs.clone();
+        self.tab_focus.retain(|t, _| tabs.contains(t));
+        let panes = self.known_panes.clone();
+        self.views.retain(|p, _| panes.contains(p));
+        self.sent_sizes.retain(|p, _| panes.contains(p));
+        self.ui_dirty = true;
+    }
+
+    /// News from the daemon: layout changes, output, a closed connection.
+    fn wake(&mut self, window: &Window) {
+        let (generation, layout_seen, empty, closed) = {
+            let shared = self.conn.shared();
+            (
+                shared.layout_generation,
+                shared.layout_seen,
+                shared.sessions.sessions.is_empty(),
+                shared.closed.clone(),
+            )
+        };
+        if let Some(reason) = closed {
+            eprintln!(
+                "auk: window {}: {reason}",
+                self.conn.window_key
+            );
+            self.closing = true;
+            window.close();
+            return;
+        }
+        if generation != self.layout_generation {
+            self.layout_generation = generation;
+            let sessions = self.sessions();
+            if layout_seen && empty {
+                if self.had_panes {
+                    // Every pane ended: the window has nothing left to show.
+                    self.closing = true;
+                    self.conn.detach();
+                    window.close();
+                    return;
+                }
+                if !self.asked_for_session {
+                    self.asked_for_session = true;
+                    self.pending = Some(Pending::Session);
+                    self.edit(LayoutEdit::NewSession { name: None });
+                }
+            } else {
+                self.had_panes = true;
+            }
+            self.reconcile(&sessions);
+            self.relayout();
+        }
+        window.request_frame();
+    }
+
+    pub fn edit(&self, edit: LayoutEdit) {
+        if let Err(err) = self.conn.send(&ClientMsg::LayoutEdit(edit)) {
+            eprintln!("auk: layout edit: {err}");
+        }
+    }
+
+    /// Focuses a pane in this window (its session and tab come forward) and makes this window
+    /// its primary (§15.5).
+    pub fn focus_pane(&mut self, pane: PaneId) -> bool {
+        let sessions = self.sessions();
+        let Some((session, tab)) = sessions.sessions.iter().find_map(|s| {
+            s.tabs
+                .iter()
+                .find(|t| t.root.contains(pane))
+                .map(|t| (s.id, t.id))
+        }) else {
+            return false;
+        };
+        let before = self.focused_pane();
+        self.active_session = Some(session);
+        self.active_tab.insert(session, tab);
+        self.tab_focus.insert(tab, pane);
+        if before != Some(pane) {
+            if let Some(old) = before {
+                let modes = self.modes(old);
+                self.conn.input(old, encode_focus(false, &modes));
+            }
+            if self.key_window {
+                let modes = self.modes(pane);
+                self.conn.input(pane, encode_focus(true, &modes));
+            }
+        }
+        let _ = self.conn.send(&ClientMsg::Focus { pane });
+        self.ui_dirty = true;
+        self.relayout();
+        if let Some(w) = &self.window {
+            w.request_frame();
+        }
+        true
+    }
+
+    fn select_session(&mut self, session: SessionId) {
+        self.active_session = Some(session);
+        self.after_switch();
+    }
+
+    fn select_tab(&mut self, tab: TabId) {
+        let sessions = self.sessions();
+        if let Some(s) = sessions
+            .sessions
+            .iter()
+            .find(|s| s.tabs.iter().any(|t| t.id == tab))
+        {
+            self.active_session = Some(s.id);
+            self.active_tab.insert(s.id, tab);
+        }
+        self.after_switch();
+    }
+
+    fn after_switch(&mut self) {
+        self.ui_dirty = true;
+        self.relayout();
+        if let Some(pane) = self.focused_pane() {
+            let _ = self.conn.send(&ClientMsg::Focus { pane });
+        }
+        if let Some(w) = &self.window {
+            w.request_frame();
+        }
+    }
+
+    /// The content area below the tab bar, in points.
+    fn content_area(&self) -> Rect {
+        let size = self.size.unwrap_or(Size {
+            width: 1200.0,
+            height: 800.0,
+            scale: 2.0,
+        });
+        Rect::new(0.0, BAR_HEIGHT, size.width, (size.height - BAR_HEIGHT).max(0.0))
+    }
+
+    /// Recomputes the shown tab's layout and asks the daemon for each pane's size.
+    fn relayout(&mut self) {
+        let sessions = self.sessions();
+        self.tab_layout = match self.tab(&sessions) {
+            Some(tab) => geometry::layout_tab(tab, self.content_area(), DIVIDER),
+            None => TabLayout::default(),
+        };
+        let Some(gfx) = &self.gfx else { return };
+        let scale = self.size.map_or(2.0, |s| s.scale);
+        let m = gfx.metrics();
+        for (pane, rect) in self.tab_layout.panes.clone() {
+            let w = ((rect.w - 2.0 * PADDING) * scale).max(0.0) as u32;
+            let h = ((rect.h - 2.0 * PADDING) * scale).max(0.0) as u32;
+            let cols = (w / m.cell_width).clamp(2, u32::from(u16::MAX)) as u16;
+            let rows = (h / m.cell_height).clamp(1, u32::from(u16::MAX)) as u16;
+            if self.sent_sizes.get(&pane) != Some(&(cols, rows)) {
+                self.sent_sizes.insert(pane, (cols, rows));
+                let _ = self.conn.send(&ClientMsg::Resize { pane, cols, rows });
+            }
+        }
+    }
+
+    fn send_facts(&mut self) {
+        let Some(gfx) = &self.gfx else { return };
+        let m = gfx.metrics();
+        let facts = ClientFacts {
+            cell_px: [m.cell_width as u16, m.cell_height as u16],
+            dark: self.dark,
+            reduce_motion: false,
+            hour12: false,
+        };
+        if self.facts_sent.as_ref() != Some(&facts) {
+            let _ = self.conn.send(&ClientMsg::Facts(facts.clone()));
+            self.facts_sent = Some(facts);
+        }
+    }
+
+    fn resized(&mut self, window: &Window, size: Size) {
+        self.size = Some(size);
+        let (w, h) = size.physical();
+        match &mut self.gfx {
+            Some(gfx) => gfx.resize(w, h, size.scale),
+            None => self.gfx = Some(Gfx::new(self.gpu.clone(), window, w, h, size.scale)),
+        }
+        self.ui_dirty = true;
+        self.send_facts();
+        self.relayout();
+        window.request_frame();
+    }
+
+    // Drawing.
+
+    fn frame(&mut self, window: &Window) {
+        let start = Instant::now();
+        if self.gfx.is_none() || self.size.is_none() {
+            return;
+        }
+        let size = self.size.expect("checked");
+        let scale = size.scale;
+        let metrics = self.gfx.as_ref().expect("checked").metrics();
+        let (cw, ch) = (f64::from(metrics.cell_width), f64::from(metrics.cell_height));
+        let sessions = self.sessions();
+        let focused = self.focused_pane();
+        let mut draws = Vec::new();
+        let mut ime_area = None;
+        let mut titles: BTreeMap<PaneId, String> = BTreeMap::new();
+        let mut a11y_text_gen = 0;
+        let mut to_ack: Vec<(PaneId, String, u64)> = Vec::new();
+        {
+            let mut shared = self.conn.shared();
+            for (pane, title) in titles_of(&shared, &sessions) {
+                titles.insert(pane, title);
+            }
+            for (pane, rect) in self.tab_layout.panes.clone() {
+                let Some(data) = shared.panes.get_mut(&pane) else {
+                    continue;
+                };
+                if Some(pane) == focused {
+                    a11y_text_gen = data.generation;
+                }
+                let term = data.replica.terminal();
+                let view = self.views.entry(pane).or_default();
+                let area_h = ((rect.h - 2.0 * PADDING) * scale).max(0.0) as f32;
+                let grid_h = (f32::from(term.rows()) * ch as f32).min(area_h.max(ch as f32));
+                let blocks: Vec<compose::Block> = Vec::new();
+                let input = compose::Input {
+                    lines: term.history_len() + usize::from(term.rows()),
+                    cell: ch as f32,
+                    view: grid_h,
+                    blocks: &blocks,
+                    hide_from: None,
+                };
+                let composed = compose::compose(&input, view.scroll);
+                view.scroll = composed.scroll;
+                let render_view = View {
+                    scroll: 0,
+                    selection: view.selection.map(|s| s.for_render(term)),
+                    focused: self.key_window && Some(pane) == focused,
+                    cursor_on: true,
+                };
+                let rows = composed.slots.len().clamp(1, usize::from(u16::MAX)) as u16;
+                let mut snap = GridSnapshot::from_lines(term, &self.theme, &render_view, composed.first, rows);
+                let origin = (rect.x + PADDING, rect.y + PADDING);
+                view.grid_origin = origin;
+                // The input method's composition draws over the cursor's cells (§19).
+                let cursor = term.cursor();
+                let cursor_line = term.history_len() + usize::from(cursor.row);
+                if Some(pane) == focused
+                    && let Some(slot_row) = cursor_line.checked_sub(composed.first)
+                    && slot_row < usize::from(snap.rows)
+                {
+                    let slot = composed.slots[slot_row];
+                    let x = origin.0 + f64::from(cursor.col) * cw / scale;
+                    let y = origin.1 + f64::from(slot.top) / scale;
+                    ime_area = Some((x, y, cw / scale, ch / scale));
+                    if let Some(p) = &self.preedit {
+                        snap.write(
+                            cursor.col,
+                            slot_row as u16,
+                            &p.text,
+                            self.theme.foreground,
+                            self.theme.background,
+                            Attrs::UNDERLINE,
+                        );
+                        snap.cursor = None;
+                    }
+                }
+                let slots = (!composed.is_uniform(ch as f32)).then(|| composed.slots.clone());
+                view.composed = composed;
+                let px = |v: f64| (v * scale).round();
+                draws.push(PaneDraw {
+                    pane,
+                    origin: (px(origin.0) as f32, px(origin.1) as f32),
+                    clip: (
+                        px(rect.x) as u32,
+                        px(rect.y) as u32,
+                        px(rect.w) as u32,
+                        px(rect.h) as u32,
+                    ),
+                    snapshot: snap,
+                    slots,
+                });
+                // Acks (§15.5): surfaces this frame drew, only as the pane's primary.
+                if data.primary {
+                    for s in data.replica.tsp().surfaces() {
+                        if s.listens()
+                            && s.is_live()
+                            && let Some(last) = s.last_s()
+                        {
+                            to_ack.push((pane, s.id().to_owned(), last));
+                        }
+                    }
+                }
+            }
+        }
+        if let Some((x, y, w, h)) = ime_area {
+            window.set_ime_cursor_area(x, y, w, h);
+        }
+
+        // The chrome.
+        let model = self.chrome_model(&sessions, &titles, size);
+        if self.chrome.update(&model, scale as f32) {
+            self.ui_dirty = true;
+        }
+        let gfx = self.gfx.as_mut().expect("checked");
+        if self.ui_dirty || gfx.ui_stale() {
+            let mut scene = auk_render::vello::Scene::new();
+            auk_ui::paint::paint_with_transform(
+                &self.chrome.doc,
+                &mut scene,
+                auk_render::vello::kurbo::Affine::scale(scale),
+            );
+            gfx.render_ui(&scene);
+            self.ui_dirty = false;
+        }
+        let background = self.theme.background;
+        let cost: FrameCost = gfx.draw(background, &draws, self.clock.done_callback(start));
+        if cost.presented {
+            self.clock.submitted();
+            for (pane, sf, s) in to_ack {
+                let key = (pane, sf.clone());
+                if self.acked.get(&key) != Some(&s) {
+                    self.acked.insert(key, s);
+                    let _ = self.conn.send(&ClientMsg::Ack { pane, sf, s });
+                }
+            }
+        } else {
+            window.request_frame();
+        }
+        let a11y_key = (a11y_text_gen ^ focused.unwrap_or(0).rotate_left(32), self.chrome_generation());
+        if self.a11y_seen != Some(a11y_key) {
+            self.a11y_seen = Some(a11y_key);
+            self.a11y_generation += 1;
+            crate::a11y::update(self, window);
+        }
+        self.stats.frames += 1;
+        let cpu = start.elapsed().saturating_sub(cost.drawable_wait);
+        push_capped(&mut self.stats.cpu, cpu);
+        push_capped(&mut self.stats.drawable_wait, cost.drawable_wait);
+    }
+
+    fn chrome_generation(&self) -> u64 {
+        // The chrome model's identity is enough: a hash of its debug form.
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        format!("{:?}", self.chrome.doc.viewport()).hash(&mut h);
+        self.active_session.hash(&mut h);
+        self.active_tab_id().hash(&mut h);
+        self.known_tabs.hash(&mut h);
+        h.finish()
+    }
+
+    fn chrome_model(&self, sessions: &Sessions, titles: &BTreeMap<PaneId, String>, size: Size) -> ChromeModel {
+        let active_tab = self.active_tab_id();
+        let tabs = self
+            .session(sessions)
+            .map(|s| {
+                s.tabs
+                    .iter()
+                    .map(|t| {
+                        let title = t.title.clone().unwrap_or_else(|| {
+                            let pane = self
+                                .tab_focus
+                                .get(&t.id)
+                                .copied()
+                                .or_else(|| t.root.panes().first().copied());
+                            pane.and_then(|p| titles.get(&p).cloned())
+                                .unwrap_or_else(|| "shell".to_owned())
+                        });
+                        (t.id, title, Some(t.id) == active_tab, t.zoom.is_some())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        ChromeModel {
+            width: size.width,
+            height: size.height,
+            dark: self.dark,
+            sessions: sessions
+                .sessions
+                .iter()
+                .map(|s| (s.id, s.name.clone(), Some(s.id) == self.active_session))
+                .collect(),
+            tabs,
+            dividers: self.tab_layout.dividers.clone(),
+            focus: self
+                .focused_pane()
+                .and_then(|p| self.tab_layout.rect(p)),
+        }
+    }
+
+    // Input.
+
+    pub fn modes(&self, pane: PaneId) -> Modes {
+        self.conn
+            .shared()
+            .panes
+            .get(&pane)
+            .map(|p| p.replica.terminal().modes())
+            .unwrap_or_default()
+    }
+
+    /// Sends bytes the user typed into a pane: the view returns to the tail and the selection
+    /// clears.
+    fn typed(&mut self, window: &Window, pane: PaneId, bytes: Vec<u8>) {
+        if bytes.is_empty() {
+            return;
+        }
+        self.conn.input(pane, bytes);
+        if let Some(v) = self.views.get_mut(&pane) {
+            v.scroll = Scroll::default();
+            v.selection = None;
+        }
+        window.request_frame();
+    }
+
+    fn key(&mut self, window: &Window, key: KeyInput) {
+        // ⌘ keys belong to the app: the menu took the ones it binds.
+        if key.event.mods.meta {
+            return;
+        }
+        let Some(pane) = self.focused_pane() else {
+            return;
+        };
+        let modes = self.modes(pane);
+        let bytes = encode_key(&key.event, &modes);
+        self.typed(window, pane, bytes);
+    }
+
+    pub fn command(&mut self, window: &Window, cmd: Cmd) {
+        let sessions = self.sessions();
+        let focused = self.focused_pane();
+        match cmd {
+            Cmd::NewWindow => crate::app::new_window(),
+            Cmd::NewSession => {
+                self.pending = Some(Pending::Session);
+                self.edit(LayoutEdit::NewSession { name: None });
+            }
+            Cmd::NewTab => {
+                if let Some(session) = self.active_session {
+                    self.pending = Some(Pending::Tab(session));
+                    self.edit(LayoutEdit::NewTab { session });
+                } else {
+                    self.pending = Some(Pending::Session);
+                    self.edit(LayoutEdit::NewSession { name: None });
+                }
+            }
+            Cmd::SplitRight | Cmd::SplitDown => {
+                if let Some(pane) = focused {
+                    let dir = if cmd == Cmd::SplitRight {
+                        SplitDir::Right
+                    } else {
+                        SplitDir::Down
+                    };
+                    self.pending = Some(Pending::Split(pane));
+                    self.edit(LayoutEdit::Split { pane, dir });
+                }
+            }
+            Cmd::ClosePane => {
+                if let Some(pane) = focused {
+                    self.edit(LayoutEdit::Close { pane });
+                }
+            }
+            Cmd::ToggleZoom => {
+                if let (Some(tab), Some(pane)) = (self.tab(&sessions), focused) {
+                    let zoom = if tab.zoom.is_some() { None } else { Some(pane) };
+                    self.edit(LayoutEdit::Zoom { tab: tab.id, pane: zoom });
+                }
+            }
+            Cmd::NextTab | Cmd::PreviousTab => {
+                if let Some(s) = self.session(&sessions) {
+                    let ids: Vec<TabId> = s.tabs.iter().map(|t| t.id).collect();
+                    if let Some(next) = cycle(&ids, self.active_tab_id(), cmd == Cmd::NextTab) {
+                        self.select_tab(next);
+                    }
+                }
+            }
+            Cmd::SelectTab(n) => {
+                if let Some(s) = self.session(&sessions) {
+                    let pick = if n >= 9 {
+                        s.tabs.last()
+                    } else {
+                        s.tabs.get(usize::from(n.saturating_sub(1)))
+                    };
+                    if let Some(t) = pick.map(|t| t.id) {
+                        self.select_tab(t);
+                    }
+                }
+            }
+            Cmd::NextSession | Cmd::PreviousSession => {
+                let ids: Vec<SessionId> = sessions.sessions.iter().map(|s| s.id).collect();
+                if let Some(next) = cycle(&ids, self.active_session, cmd == Cmd::NextSession) {
+                    self.select_session(next);
+                }
+            }
+            Cmd::Focus(dir) => {
+                if let Some(from) = focused
+                    && let Some(to) = geometry::neighbor(&self.tab_layout, from, dir)
+                {
+                    self.focus_pane(to);
+                }
+            }
+            Cmd::Copy => {
+                if let Some(text) = self.selection_text() {
+                    crate::app::clipboard_set(&text);
+                }
+            }
+            Cmd::Paste => {
+                if let (Some(pane), Some(text)) = (focused, crate::app::clipboard_get()) {
+                    let modes = self.modes(pane);
+                    self.typed(window, pane, encode_paste(&text, &modes));
+                }
+            }
+            Cmd::SelectAll => {
+                if let Some(pane) = focused {
+                    let lines = {
+                        let shared = self.conn.shared();
+                        shared.panes.get(&pane).map(|p| {
+                            let t = p.replica.terminal();
+                            (t.history_len() + usize::from(t.rows()), t.cols())
+                        })
+                    };
+                    if let Some((lines, cols)) = lines {
+                        let v = self.views.entry(pane).or_default();
+                        v.selection = Some(Selection {
+                            anchor: (0, 0),
+                            head: (lines.saturating_sub(1), cols.saturating_sub(1)),
+                            unit: Unit::Cell,
+                            block: false,
+                        });
+                    }
+                }
+            }
+            Cmd::ClearScrollback => {
+                // Clearing is a replicated action (§15.2); the daemon records it. Until the
+                // daemon takes it from a window, ⌘K sends the shell's clear sequence.
+                if let Some(pane) = focused {
+                    self.typed(window, pane, b"\x0c".to_vec());
+                }
+            }
+            Cmd::ScrollToTop | Cmd::ScrollToBottom => {
+                if let Some(pane) = focused
+                    && let Some(v) = self.views.get_mut(&pane)
+                {
+                    v.scroll = if cmd == Cmd::ScrollToTop {
+                        Scroll {
+                            from_bottom: f32::MAX,
+                            anchor: None,
+                        }
+                    } else {
+                        Scroll::default()
+                    };
+                }
+            }
+        }
+        window.request_frame();
+    }
+
+    /// The focused pane's selected text.
+    pub fn selection_text(&self) -> Option<String> {
+        let pane = self.focused_pane()?;
+        let selection = self.views.get(&pane)?.selection?;
+        let shared = self.conn.shared();
+        let term = shared.panes.get(&pane)?.replica.terminal();
+        Some(selection.text(term))
+    }
+
+    /// The pane, buffer line and column under a point, through the pane's mixed layout.
+    fn cell_at(&self, x: f64, y: f64) -> Option<(PaneId, Line, u16)> {
+        let pane = self.tab_layout.pane_at(x, y)?;
+        let view = self.views.get(&pane)?;
+        let scale = self.size.map_or(2.0, |s| s.scale);
+        let m = self.gfx.as_ref()?.metrics();
+        let gy = ((y - view.grid_origin.1) * scale) as f32;
+        let gx = (x - view.grid_origin.0) * scale;
+        let line = match view.composed.hit(gy.max(0.0), &[])? {
+            compose::Hit::Line(line, _) => line,
+            compose::Hit::Block(..) => return None,
+        };
+        let col = (gx.max(0.0) / f64::from(m.cell_width)) as u16;
+        Some((pane, line, col))
+    }
+
+    fn mouse(&mut self, window: &Window, m: MouseEvent) {
+        match m.kind {
+            MouseKind::Down(button) => {
+                if m.y < BAR_HEIGHT {
+                    if button == MouseButton::Left
+                        && let Some(action) = self.chrome.action_at(m.x, m.y)
+                    {
+                        self.chrome_action(action);
+                    }
+                    return;
+                }
+                let Some(pane) = self.tab_layout.pane_at(m.x, m.y) else {
+                    return;
+                };
+                if self.focused_pane() != Some(pane) {
+                    self.focus_pane(pane);
+                } else {
+                    let _ = self.conn.send(&ClientMsg::Focus { pane });
+                }
+                let reported = self.report_mouse(pane, &m, button, MouseAction::Press);
+                self.press = Some(Press {
+                    pane,
+                    reported,
+                });
+                if !reported
+                    && button == MouseButton::Left
+                    && let Some((p, line, col)) = self.cell_at(m.x, m.y)
+                    && p == pane
+                {
+                    let unit = match m.clicks {
+                        0 | 1 => Unit::Cell,
+                        2 => Unit::Word,
+                        _ => Unit::Line,
+                    };
+                    let view = self.views.entry(pane).or_default();
+                    view.selection = (m.clicks >= 2).then_some(Selection {
+                        anchor: (line, col),
+                        head: (line, col),
+                        unit,
+                        block: m.mods.alt,
+                    });
+                    if m.clicks < 2 {
+                        // A single click starts a selection only once the mouse drags.
+                        view.selection = None;
+                        self.press_anchor = Some((pane, line, col, m.mods.alt));
+                    }
+                }
+                window.request_frame();
+            }
+            MouseKind::Dragged(button) => {
+                let Some(press) = self.press else { return };
+                if press.reported {
+                    self.report_mouse(press.pane, &m, button, MouseAction::Motion);
+                    return;
+                }
+                if let Some((p, line, col)) = self.cell_at(m.x, m.y.max(BAR_HEIGHT + 1.0))
+                    && p == press.pane
+                {
+                    let anchor = self.press_anchor.filter(|a| a.0 == p);
+                    let view = self.views.entry(p).or_default();
+                    match (&mut view.selection, anchor) {
+                        (Some(s), _) => s.head = (line, col),
+                        (None, Some((_, l0, c0, block))) => {
+                            view.selection = Some(Selection {
+                                anchor: (l0, c0),
+                                head: (line, col),
+                                unit: Unit::Cell,
+                                block,
+                            })
+                        }
+                        (None, None) => {}
+                    }
+                    window.request_frame();
+                }
+            }
+            MouseKind::Up(button) => {
+                if let Some(press) = self.press.take()
+                    && press.reported
+                {
+                    self.report_mouse(press.pane, &m, button, MouseAction::Release);
+                }
+                self.press_anchor = None;
+            }
+            MouseKind::Moved => {
+                if let Some(pane) = self.tab_layout.pane_at(m.x, m.y)
+                    && self.modes(pane).mouse == MouseMode::AnyMotion
+                {
+                    self.report_motion(pane, &m);
+                }
+            }
+            MouseKind::Entered | MouseKind::Exited => {}
+        }
+    }
+
+    fn report_motion(&mut self, pane: PaneId, m: &MouseEvent) {
+        let Some((p, line, col)) = self.cell_at(m.x, m.y) else {
+            return;
+        };
+        if p != pane {
+            return;
+        }
+        let Some(row) = self.screen_row(pane, line) else {
+            return;
+        };
+        if self.last_motion == Some((pane, col, row)) {
+            return;
+        }
+        self.last_motion = Some((pane, col, row));
+        let modes = self.modes(pane);
+        let bytes = encode_mouse(TermButton::None, MouseAction::Motion, m.mods, col, row, &modes);
+        self.conn.input(pane, bytes);
+    }
+
+    /// The screen row of a buffer line, if it's on the screen.
+    fn screen_row(&self, pane: PaneId, line: Line) -> Option<u16> {
+        let shared = self.conn.shared();
+        let term = shared.panes.get(&pane)?.replica.terminal();
+        let row = line.checked_sub(term.history_len())?;
+        (row < usize::from(term.rows())).then_some(row as u16)
+    }
+
+    /// Sends a mouse report when the program asked for mouse events (and Shift isn't held, which
+    /// keeps selection available). Returns whether the event went to the program.
+    fn report_mouse(&mut self, pane: PaneId, m: &MouseEvent, button: MouseButton, action: MouseAction) -> bool {
+        let modes = self.modes(pane);
+        if modes.mouse == MouseMode::Off || m.mods.shift {
+            return false;
+        }
+        let Some((p, line, col)) = self.cell_at(m.x, m.y) else {
+            return action != MouseAction::Press;
+        };
+        if p != pane {
+            return true;
+        }
+        let Some(row) = self.screen_row(pane, line) else {
+            return true;
+        };
+        let b = match button {
+            MouseButton::Left => TermButton::Left,
+            MouseButton::Right => TermButton::Right,
+            MouseButton::Middle => TermButton::Middle,
+            MouseButton::Other(_) => return false,
+        };
+        let mods = Mods {
+            meta: false,
+            ..m.mods
+        };
+        let bytes = encode_mouse(b, action, mods, col, row, &modes);
+        self.conn.input(pane, bytes);
+        true
+    }
+
+    fn scroll(&mut self, window: &Window, s: ScrollEvent) {
+        let Some(pane) = self.tab_layout.pane_at(s.x, s.y).or(self.focused_pane()) else {
+            return;
+        };
+        let scale = self.size.map_or(2.0, |sz| sz.scale);
+        let Some(m) = self.gfx.as_ref().map(Gfx::metrics) else {
+            return;
+        };
+        let ch = f64::from(m.cell_height);
+        // Pixels: trackpads report points, wheels report lines.
+        let dy = if s.precise { s.dy * scale } else { s.dy * ch };
+        let modes = self.modes(pane);
+        let following = self.views.get(&pane).is_none_or(|v| v.scroll.following());
+        if modes.mouse != MouseMode::Off && !s.mods.shift {
+            // Wheel reports, a line at a time.
+            let view = self.views.entry(pane).or_default();
+            view.wheel += dy;
+            let lines = (view.wheel / ch).trunc();
+            view.wheel -= lines * ch;
+            let Some((_, line, col)) = self.cell_at(s.x, s.y) else { return };
+            let Some(row) = self.screen_row(pane, line) else { return };
+            let button = if lines > 0.0 { TermButton::WheelUp } else { TermButton::WheelDown };
+            let mut bytes = Vec::new();
+            for _ in 0..(lines.abs() as usize).min(20) {
+                bytes.extend(encode_mouse(button, MouseAction::Press, s.mods, col, row, &modes));
+            }
+            self.conn.input(pane, bytes);
+            return;
+        }
+        if modes.alt_screen && following {
+            // The alternate screen has no scrollback: wheel turns into arrow keys.
+            let view = self.views.entry(pane).or_default();
+            view.wheel += dy;
+            let lines = (view.wheel / ch).trunc();
+            view.wheel -= lines * ch;
+            let key = if lines > 0.0 { Key::Up } else { Key::Down };
+            let ev = KeyEvent {
+                key,
+                mods: Mods::default(),
+                text: None,
+            };
+            let mut bytes = Vec::new();
+            for _ in 0..(lines.abs() as usize).min(20) {
+                bytes.extend(input::encode_key(&ev, &modes));
+            }
+            self.conn.input(pane, bytes);
+            return;
+        }
+        let view = self.views.entry(pane).or_default();
+        let from_bottom = (f64::from(view.composed.scroll.from_bottom) + dy)
+            .clamp(0.0, f64::from(view.composed.max_scroll));
+        view.scroll = Scroll {
+            from_bottom: from_bottom as f32,
+            anchor: None,
+        };
+        window.request_frame();
+    }
+
+    fn chrome_action(&mut self, action: ChromeAction) {
+        match action {
+            ChromeAction::Session(id) => self.select_session(id),
+            ChromeAction::Tab(id) => self.select_tab(id),
+            ChromeAction::NewSession => {
+                self.pending = Some(Pending::Session);
+                self.edit(LayoutEdit::NewSession { name: None });
+            }
+            ChromeAction::NewTab => {
+                if let Some(session) = self.active_session {
+                    self.pending = Some(Pending::Tab(session));
+                    self.edit(LayoutEdit::NewTab { session });
+                }
+            }
+        }
+    }
+
+    pub fn set_option_as_alt(&mut self, setting: OptionAsAlt) {
+        self.option_as_alt = setting;
+        if let Some(w) = &self.window {
+            w.set_option_as_alt(setting);
+        }
+    }
+}
+
+fn push_capped(v: &mut Vec<Duration>, d: Duration) {
+    if v.len() >= 4096 {
+        v.remove(0);
+    }
+    v.push(d);
+}
+
+/// The next (or previous) id after `current`, wrapping.
+fn cycle<T: Copy + PartialEq>(ids: &[T], current: Option<T>, forward: bool) -> Option<T> {
+    if ids.is_empty() {
+        return None;
+    }
+    let i = current.and_then(|c| ids.iter().position(|x| *x == c)).unwrap_or(0);
+    let n = ids.len();
+    Some(ids[if forward { (i + 1) % n } else { (i + n - 1) % n }])
+}
+
+/// A pane's title: the program's (OSC 0/2), else its cwd's last component.
+fn titles_of(shared: &Shared, sessions: &Sessions) -> Vec<(PaneId, String)> {
+    sessions
+        .panes()
+        .into_iter()
+        .filter_map(|p| {
+            let data = shared.panes.get(&p)?;
+            let title = data.replica.terminal().title().trim().to_owned();
+            let title = if title.is_empty() {
+                data.replica
+                    .cwd()
+                    .and_then(|c| c.trim_end_matches('/').rsplit('/').next().map(str::to_owned))
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "shell".to_owned())
+            } else {
+                title
+            };
+            Some((p, title))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cycling_wraps() {
+        assert_eq!(cycle(&[1, 2, 3], Some(3), true), Some(1));
+        assert_eq!(cycle(&[1, 2, 3], Some(1), false), Some(3));
+        assert_eq!(cycle(&[1, 2, 3], None, true), Some(2));
+        assert_eq!(cycle::<u64>(&[], None, true), None);
+    }
+}

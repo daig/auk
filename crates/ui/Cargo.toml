@@ -14,6 +14,11 @@ parley = "0.11"
 vello = "0.11"
 skrifa = "0.44"
 
+# On Linux (the daemon, D7), load fontconfig at run time instead of linking it, so building needs
+# no fontconfig headers; the daemon parses CSS but never enumerates fonts.
+[target.'cfg(target_os = "linux")'.dependencies]
+fontique = { version = "0.11", features = ["fontconfig-dlopen"] }
+
 [dev-dependencies]
 serde_json.workspace = true
 pollster = "0.4"

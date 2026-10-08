@@ -45,6 +45,8 @@ fn options(dir: &std::path::Path, context: Context, jit: bool) -> VmOptions {
         memory_limit: MEMORY_LIMIT,
         jit,
         log: Arc::new(|_| {}),
+        panes: None,
+        builtin_commands: None,
     }
 }
 
@@ -156,6 +158,7 @@ fn main() {
         settings: PluginSettings::default(),
         waker: None,
         log: Arc::new(|_| {}),
+        panes: None,
     });
     println!("host start with one plugin: {:?}", started.elapsed());
     let mut events: Vec<Duration> = (0..2000)

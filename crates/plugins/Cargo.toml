@@ -7,20 +7,39 @@ publish.workspace = true
 
 [features]
 default = ["runtime"]
-# The Luau runtime: VMs, budgets, workers and the host. Without it the crate is the manifest,
-# discovery and catalog data only, which builds for wasm32 (replicas receive the catalog).
-runtime = ["dep:mlua", "dep:crossbeam-channel", "dep:tracing"]
+# The Luau runtime: VMs, budgets, workers, blocks, lenses, the window runtime and the watcher.
+# Without it the crate is the manifest, discovery, catalog, lens claims, capture and the CLI's
+# backing functions, which build for wasm32 (replicas receive the catalog and claim on their own).
+runtime = [
+    "dep:mlua",
+    "dep:crossbeam-channel",
+    "dep:tracing",
+    "dep:tern-sdk",
+    "dep:base64",
+    "dep:ureq",
+    "dep:notify",
+]
 
 [dependencies]
+# The lens capture's scratch screen; the same terminal core every replica runs.
+auk-term = { path = "../term" }
 mlua = { version = "0.12.2", features = ["luau", "luau-jit", "vendored", "serde"], optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = "1.1.7"
 crossbeam-channel = { version = "0.5.17", optional = true }
 tracing = { version = "0.1.44", optional = true }
+# The program-side TSP library (§22: we use the MIT SDKs rather than writing our own): block
+# workers reconcile views, encode frames and decode keys with it, as Tern's plugin worker does.
+tern-sdk = { path = "../../third_party/tern-sdk/rust", optional = true }
+base64 = { version = "0.23.1", optional = true }
+ureq = { version = "3", optional = true, default-features = false, features = ["rustls", "platform-verifier", "socks-proxy"] }
+notify = { version = "8", optional = true, default-features = false, features = ["macos_fsevent"] }
 
 [dev-dependencies]
 tempfile = "3"
+# The terminal side applies block frames in tests, as the daemon's replica does.
+auk-tsp = { path = "../tsp" }
 
 [[test]]
 name = "vm"
@@ -28,6 +47,22 @@ required-features = ["runtime"]
 
 [[test]]
 name = "host"
+required-features = ["runtime"]
+
+[[test]]
+name = "api"
+required-features = ["runtime"]
+
+[[test]]
+name = "examples"
+required-features = ["runtime"]
+
+[[test]]
+name = "review_queue"
+required-features = ["runtime"]
+
+[[test]]
+name = "window"
 required-features = ["runtime"]
 
 [[example]]

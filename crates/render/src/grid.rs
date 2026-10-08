@@ -2,7 +2,12 @@
 //! with damage tracking per row.
 
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
+// std's clock panics in the browser.
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
 use auk_text::{CellMetrics, GlyphFormat, GlyphStyle, GridFonts};
 use bytemuck::{Pod, Zeroable};
@@ -13,7 +18,7 @@ use crate::theme::Rgba;
 use crate::{Gpu, GpuTimer};
 
 /// One quad: a glyph, a decoration run or a cursor part. Positions are relative to the grid's
-/// origin, in physical pixels.
+/// origin (x) and to the top of the quad's row (y), in physical pixels.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 struct Instance {
@@ -25,6 +30,8 @@ struct Instance {
     kind: u32,
     /// Line thickness for patterned decorations.
     param: f32,
+    /// The grid row the quad belongs to; `pos.y` is relative to the row's top.
+    row: u32,
 }
 
 const KIND_COVERAGE: u32 = 0;
@@ -39,6 +46,18 @@ type DecorationLine = (f32, f32, u32);
 
 /// Instances a row can hold per cell: a glyph and up to four decoration runs.
 const SLOTS_PER_CELL: usize = 5;
+
+/// Rows whose slot (top, height) the mixed layout can set; rows past it sit at their uniform
+/// position. Matches `MAX_SLOT_ROWS` in the shader.
+pub const MAX_SLOT_ROWS: usize = 1024;
+
+/// Where one grid row is drawn, relative to the grid's origin, in physical pixels: its top and
+/// height. A height of 0 hides the row.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RowSlot {
+    pub top: f32,
+    pub height: f32,
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -112,6 +131,11 @@ pub struct GridRenderer {
     viewport: (u32, u32),
     /// Scratch for one row's instances.
     scratch: Vec<Instance>,
+    /// The row slots (§6.2's mixed layout); `None` lays rows out uniformly.
+    custom_slots: Option<Vec<RowSlot>>,
+    /// The slot table last uploaded, as (top, height) pairs.
+    uploaded_slots: Vec<[f32; 2]>,
+    slot_buffer: wgpu::Buffer,
 }
 
 impl std::fmt::Debug for GridRenderer {
@@ -158,6 +182,16 @@ impl GridRenderer {
                 texture_entry(1),
                 texture_entry(2),
                 texture_entry(3),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -200,7 +234,8 @@ impl GridRenderer {
             array_stride: std::mem::size_of::<Instance>() as u64,
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &wgpu::vertex_attr_array![
-                0 => Float32x2, 1 => Float32x2, 2 => Float32x2, 3 => Unorm8x4, 4 => Uint32, 5 => Float32
+                0 => Float32x2, 1 => Float32x2, 2 => Float32x2, 3 => Unorm8x4, 4 => Uint32, 5 => Float32,
+                6 => Uint32
             ],
         };
         let fg_pipeline = pipeline(
@@ -220,6 +255,12 @@ impl GridRenderer {
             label: Some("grid cursor"),
             size: (std::mem::size_of::<Instance>() * 4) as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let slot_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("grid row slots"),
+            size: (MAX_SLOT_ROWS * 8) as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let metrics = fonts.metrics();
@@ -247,6 +288,9 @@ impl GridRenderer {
             origin: [0.0; 2],
             viewport: (1, 1),
             scratch: Vec::new(),
+            custom_slots: None,
+            uploaded_slots: Vec::new(),
+            slot_buffer,
         };
         renderer.resize_grid(device, 1, 1);
         renderer
@@ -285,6 +329,32 @@ impl GridRenderer {
     /// Where the grid's top-left corner goes in the target, in pixels.
     pub fn set_origin(&mut self, x: f32, y: f32) {
         self.origin = [x, y];
+    }
+
+    /// Places each row of the next snapshots: its top and height relative to the origin (§6.2:
+    /// runs of grid rows with surface blocks between them). `None` lays rows out uniformly, one
+    /// cell height apart. Rows past the slice, or past [`MAX_SLOT_ROWS`], sit at their uniform
+    /// position.
+    pub fn set_row_slots(&mut self, slots: Option<Vec<RowSlot>>) {
+        self.custom_slots = slots;
+    }
+
+    fn upload_slots(&mut self, gpu: &Gpu) {
+        let ch = self.metrics.cell_height as f32;
+        let rows = usize::from(self.rows).min(MAX_SLOT_ROWS);
+        let table: Vec<[f32; 2]> = (0..rows)
+            .map(|r| {
+                match self.custom_slots.as_ref().and_then(|s| s.get(r)) {
+                    Some(slot) => [slot.top, slot.height],
+                    None => [r as f32 * ch, ch],
+                }
+            })
+            .collect();
+        if table != self.uploaded_slots {
+            gpu.queue
+                .write_buffer(&self.slot_buffer, 0, bytemuck::cast_slice(&table));
+            self.uploaded_slots = table;
+        }
     }
 
     /// Forgets the previous frame: the next `prepare` rebuilds every row.
@@ -338,6 +408,7 @@ impl GridRenderer {
             }
         };
         self.upload_backgrounds(gpu, &rows);
+        self.upload_slots(gpu);
         self.build_cursor(gpu, snap);
         if self.bind_group.is_none() {
             self.bind_group = Some(self.create_bind_group(&gpu.device));
@@ -389,7 +460,7 @@ impl GridRenderer {
         };
         pass.set_bind_group(0, bind_group, &[]);
         pass.set_pipeline(&self.bg_pipeline);
-        pass.draw(0..4, 0..1);
+        pass.draw(0..4, 0..u32::from(self.rows));
         pass.set_pipeline(&self.fg_pipeline);
         pass.set_vertex_buffer(0, self.instances.slice(..));
         let cap = self.row_capacity() as u32;
@@ -452,6 +523,10 @@ impl GridRenderer {
                     binding: 3,
                     resource: wgpu::BindingResource::TextureView(&self.color.view),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: self.slot_buffer.as_entire_binding(),
+                },
             ],
         })
     }
@@ -498,8 +573,7 @@ impl GridRenderer {
         stats: &mut PrepareStats,
     ) -> Result<(), AtlasFull> {
         let m = self.metrics;
-        let (cw, ch) = (m.cell_width as f32, m.cell_height as f32);
-        let y = f32::from(r) * ch;
+        let cw = m.cell_width as f32;
         for (c, cell) in row.iter().enumerate() {
             if cell.text.is_blank() || cell.attrs.has(Attrs::SPACER) {
                 continue;
@@ -518,7 +592,7 @@ impl GridRenderer {
                 continue;
             };
             out.push(Instance {
-                pos: [c as f32 * cw + glyph.offset[0], y + glyph.offset[1]],
+                pos: [c as f32 * cw + glyph.offset[0], glyph.offset[1]],
                 size: glyph.size,
                 uv: glyph.uv,
                 color: cell.fg.to_array(),
@@ -527,15 +601,16 @@ impl GridRenderer {
                     GlyphFormat::Color => KIND_COLOR,
                 },
                 param: 0.0,
+                row: u32::from(r),
             });
         }
-        self.decorations(row, y, out);
+        self.decorations(row, r, out);
         Ok(())
     }
 
     /// Decoration runs: consecutive cells with the same decoration and color share one quad,
     /// so patterns run unbroken.
-    fn decorations(&self, row: &[SnapCell], y: f32, out: &mut Vec<Instance>) {
+    fn decorations(&self, row: &[SnapCell], r: u16, out: &mut Vec<Instance>) {
         let m = self.metrics;
         let (cw, ch) = (m.cell_width as f32, m.cell_height as f32);
         let t = m.underline_thickness as f32;
@@ -577,12 +652,13 @@ impl GridRenderer {
                 for &(top, height, kind) in lines {
                     let top = top.clamp(0.0, (ch - height).max(0.0));
                     out.push(Instance {
-                        pos: [start as f32 * cw, y + top],
+                        pos: [start as f32 * cw, top],
                         size: [(c - start) as f32 * cw, height],
                         uv: [0.0; 2],
                         color: color.to_array(),
                         kind,
                         param: t,
+                        row: u32::from(r),
                     });
                 }
             }
@@ -669,7 +745,7 @@ impl GridRenderer {
         let m = self.metrics;
         let (cw, ch) = (m.cell_width as f32, m.cell_height as f32);
         let x = f32::from(cursor.col) * cw;
-        let y = f32::from(cursor.row) * ch;
+        let y = 0.0;
         let w = f32::from(cursor.width) * cw;
         // Strokes about one point thick at the font's scale.
         let stroke = (m.cell_width as f32 / 7.0).round().max(1.0);
@@ -680,6 +756,7 @@ impl GridRenderer {
             color: cursor.color.to_array(),
             kind: KIND_RECT,
             param: 0.0,
+            row: u32::from(cursor.row),
         };
         let parts: Vec<Instance> = match cursor.style {
             // Drawn by the cells it covers.

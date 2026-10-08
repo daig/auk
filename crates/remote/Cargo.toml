@@ -1,11 +1,17 @@
 [package]
 name = "auk-remote"
+description = "Remote hosts over SSH (spec §10.2): the `auk attach --stdio` bridge, and a reconnecting mirror link with connection states and the identity chain."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+auk-daemon = { version = "0.0.0", path = "../daemon" }
+auk-mirror = { version = "0.0.0", path = "../mirror" }
+rustix = { version = "1.1.5", features = ["process", "system"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 
 [lints]
 workspace = true

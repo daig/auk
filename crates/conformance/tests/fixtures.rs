@@ -10,7 +10,11 @@ fn every_fixture_is_well_formed() {
         .filter(|p| p.extension().is_some_and(|ext| ext == "jsonl"))
         .collect();
     paths.sort();
-    assert!(!paths.is_empty(), "no recordings in {}", fixtures_dir().display());
+    assert!(
+        !paths.is_empty(),
+        "no recordings in {}",
+        fixtures_dir().display()
+    );
 
     let mut failures = Vec::new();
     for path in &paths {
@@ -23,5 +27,9 @@ fn every_fixture_is_well_formed() {
             Err(err) => failures.push(err),
         }
     }
-    assert!(failures.is_empty(), "malformed fixtures:\n{}", failures.join("\n"));
+    assert!(
+        failures.is_empty(),
+        "malformed fixtures:\n{}",
+        failures.join("\n")
+    );
 }

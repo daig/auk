@@ -7,12 +7,13 @@ use std::io;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use auk_mirror::layout::{Layout, SessionId, SplitDir};
 use auk_mirror::{ClientFacts, ClientKind, DaemonMsg, LayoutEdit, Message, PaneId, Versions};
-use auk_replica::{Replica, Role, Settings};
+use auk_replica::{Record, Replica, Role, Settings};
 use bytes::Bytes;
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
@@ -20,8 +21,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::client::{self, ClientId, ClientTx};
 use crate::login::LoginEnv;
-use crate::pane::{Pane, PaneIo, PaneKind, default_facts};
-use crate::{control, pane_socket, paths, pty, zsh};
+use crate::pane::{GateStats, Pane, PaneIo, PaneKind, PtyWrite, default_facts};
+use crate::{control, pane_socket, paths, pty, tsp, zsh};
 
 /// The window key panes go to when none is named.
 pub const DEFAULT_WINDOW_KEY: &str = "main";
@@ -98,7 +99,9 @@ pub struct Daemon {
     pub(crate) state_dir: PathBuf,
     pub(crate) login: LoginEnv,
     zdotdir: Option<PathBuf>,
-    settings: Settings,
+    /// Host settings that change parsing (§15.2): new panes start with them, and a change
+    /// reaches every pane as a record.
+    settings: Mutex<Settings>,
     pub(crate) versions: Versions,
     state: Mutex<State>,
     pub(crate) shutdown: CancellationToken,
@@ -136,6 +139,12 @@ pub async fn serve(config: Config) -> io::Result<()> {
     let control_listener = listen(&control_path)?;
     private_dir(&paths::pane_socket_dir(&config.socket))?;
 
+    let blob_dir = config.state_dir.join("blobs");
+    match tsp::evict_blobs(&blob_dir, tsp::BLOB_DISK_LIMIT) {
+        Ok(_) => {}
+        Err(err) => eprintln!("auk daemon: blob store {}: {err}", blob_dir.display()),
+    }
+
     let login = LoginEnv::probe().await;
     let zdotdir = if zsh::is_zsh(&login.shell) {
         Some(zsh::install(&config.state_dir.join("shell/zsh"))?)
@@ -147,7 +156,7 @@ pub async fn serve(config: Config) -> io::Result<()> {
         state_dir: config.state_dir.clone(),
         login,
         zdotdir,
-        settings: Settings::default(),
+        settings: Mutex::new(Settings::default()),
         versions: Versions::current(),
         state: Mutex::new(State::default()),
         shutdown: CancellationToken::new(),
@@ -175,6 +184,17 @@ pub async fn serve(config: Config) -> io::Result<()> {
         }))
     };
 
+    let ticker = {
+        let daemon = daemon.clone();
+        tokio::spawn(async move {
+            let mut every = tokio::time::interval(Duration::from_millis(50));
+            loop {
+                every.tick().await;
+                daemon.expire_chunks();
+            }
+        })
+    };
+
     let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     tokio::select! {
         _ = daemon.shutdown.cancelled() => {}
@@ -184,6 +204,7 @@ pub async fn serve(config: Config) -> io::Result<()> {
     daemon.shutdown.cancel();
     accept.abort();
     control.abort();
+    ticker.abort();
     let _ = fs::remove_file(&config.socket);
     let _ = fs::remove_file(&control_path);
     daemon.hang_up_all();
@@ -267,25 +288,26 @@ impl Daemon {
             Some(line) => PaneKind::Command { line: line.clone() },
             None => PaneKind::Shell,
         };
-        let pane_socket = paths::pane_socket_dir(&self.socket).join(format!("{id}.sock"));
-        let spec = self.spawn_spec(id, &kind, &window_key, &cwd, &pane_socket, cols, rows);
-        let (master, child) = pty::spawn(&spec).map_err(|e| format!("spawn: {e}"))?;
-        let master = Arc::new(master);
-        st.next_pane = id;
-
-        let mut replica = Replica::new(cols, rows, self.settings.clone(), Role::Authoritative);
+        let settings = self.settings();
+        let replica = Replica::with_tsp(
+            cols,
+            rows,
+            settings.clone(),
+            Role::Authoritative,
+            tsp::engine(&settings, &self.blob_dir()),
+        );
+        let spec = self.spawn_spec(id, &kind, &window_key, &cwd, cols, rows);
+        let mut replica = replica;
         replica.set_facts(default_facts());
-        let mut pane = Pane::new(id, kind, cwd, window_key.clone(), replica);
-        pane.pid = child.id();
-        let (input_tx, input_rx) = mpsc::unbounded_channel();
-        pane.io = Some(PaneIo {
-            master: master.clone(),
-            input: input_tx,
-            pane_socket: pane_socket::spawn(&pane_socket)
-                .map_err(|e| eprintln!("pane {id}: pane socket: {e}"))
-                .ok(),
-        });
-        let pane = Arc::new(Mutex::new(pane));
+        let pane = Arc::new(Mutex::new(Pane::new(
+            id,
+            kind,
+            cwd,
+            window_key.clone(),
+            replica,
+        )));
+        self.start_process(&pane, id, &spec)?;
+        st.next_pane = id;
 
         match req.place {
             Place::NewSession { name } => {
@@ -299,32 +321,6 @@ impl Daemon {
             }
         }
         st.panes.insert(id, pane.clone());
-
-        // PTY I/O runs on threads: kqueue doesn't report a macOS PTY master as readable.
-        spawn_thread(format!("pane {id} writer"), {
-            let master = master.clone();
-            move || write_pty(&master, input_rx)
-        })?;
-        let (drained_tx, drained) = tokio::sync::oneshot::channel::<()>();
-        spawn_thread(format!("pane {id} reader"), {
-            let pane = pane.clone();
-            move || {
-                read_pty(&pane, &master);
-                let _ = drained_tx.send(());
-            }
-        })?;
-        let daemon = self.clone();
-        tokio::spawn(async move {
-            let mut child = child;
-            let status = match child.wait().await {
-                Ok(s) => s.code().unwrap_or_else(|| 128 + s.signal().unwrap_or(0)),
-                Err(_) => -1,
-            };
-            // Let the output drain. If something else still holds the tty open, the pane is
-            // done anyway; its output keeps reaching the replica until the tty closes.
-            let _ = tokio::time::timeout(EXIT_DRAIN, drained).await;
-            daemon.pane_exited(id, status);
-        });
 
         // Clients showing this window key see the new pane.
         let viewers: Vec<_> = st
@@ -343,17 +339,115 @@ impl Daemon {
         Ok(id)
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn spawn_spec(
+    /// Where blobs live (§7.11, §16): `<state>/blobs`, by SHA-256.
+    pub fn blob_dir(&self) -> PathBuf {
+        self.state_dir.join("blobs")
+    }
+
+    /// The current host settings.
+    pub fn settings(&self) -> Settings {
+        lock(&self.settings).clone()
+    }
+
+    /// Changes host settings: every live pane gets them as a record (§15.2), and new panes start
+    /// with them.
+    pub fn set_settings(&self, settings: Settings) {
+        *lock(&self.settings) = settings.clone();
+        let panes: Vec<_> = self.state().panes.values().cloned().collect();
+        for pane in panes {
+            let mut p = lock(&pane);
+            if p.exit.is_none() && *p.replica.settings() != settings {
+                p.push_record(Record::Settings {
+                    settings: settings.clone(),
+                });
+            }
+        }
+    }
+
+    /// Sequences the chunk timeout (§7.1) in panes whose chunk sequence waited 1 s.
+    fn expire_chunks(&self) {
+        let panes: Vec<_> = self.state().panes.values().cloned().collect();
+        for pane in panes {
+            let mut p = lock(&pane);
+            if p.chunk_expired() {
+                p.push_record(Record::ChunkTimeout);
+            }
+        }
+    }
+
+    /// Starts a process on a new PTY for `pane` (a new pane, or `surface-play`'s stand-in): the
+    /// writer and reader threads and the exit watcher. Output and exits of the pane's earlier
+    /// processes are ignored from here on.
+    pub(crate) fn start_process(
+        self: &Arc<Self>,
+        pane: &Arc<Mutex<Pane>>,
+        id: PaneId,
+        spec: &pty::SpawnSpec,
+    ) -> Result<(), String> {
+        let (master, child) = pty::spawn(spec).map_err(|e| format!("spawn: {e}"))?;
+        let master = Arc::new(master);
+        let pane_socket = paths::pane_socket_dir(&self.socket).join(format!("{id}.sock"));
+        let gate = Arc::new(GateStats::default());
+        let (input_tx, input_rx) = mpsc::unbounded_channel();
+        let generation = {
+            let mut p = lock(pane);
+            p.generation += 1;
+            p.pid = child.id();
+            p.exit = None;
+            // A replaced process hands its pane socket on; the path stays the same.
+            let socket = p.io.as_mut().and_then(|io| io.pane_socket.take());
+            let socket = socket.or_else(|| {
+                pane_socket::spawn(&pane_socket)
+                    .map_err(|e| eprintln!("pane {id}: pane socket: {e}"))
+                    .ok()
+            });
+            p.io = Some(PaneIo {
+                master: master.clone(),
+                input: input_tx,
+                gate: gate.clone(),
+                pane_socket: socket,
+            });
+            p.generation
+        };
+
+        // PTY I/O runs on threads: kqueue doesn't report a macOS PTY master as readable.
+        spawn_thread(format!("pane {id} writer"), {
+            let master = master.clone();
+            move || write_pty(&master, input_rx, &gate)
+        })?;
+        let (drained_tx, drained) = tokio::sync::oneshot::channel::<()>();
+        spawn_thread(format!("pane {id} reader"), {
+            let pane = pane.clone();
+            move || {
+                read_pty(&pane, &master, generation);
+                let _ = drained_tx.send(());
+            }
+        })?;
+        let daemon = self.clone();
+        tokio::spawn(async move {
+            let mut child = child;
+            let status = match child.wait().await {
+                Ok(s) => s.code().unwrap_or_else(|| 128 + s.signal().unwrap_or(0)),
+                Err(_) => -1,
+            };
+            // Let the output drain. If something else still holds the tty open, the pane is
+            // done anyway; its output keeps reaching the replica until the tty closes.
+            let _ = tokio::time::timeout(EXIT_DRAIN, drained).await;
+            daemon.pane_exited(id, generation, status);
+        });
+        Ok(())
+    }
+
+    pub(crate) fn spawn_spec(
         &self,
         id: PaneId,
         kind: &PaneKind,
         window_key: &str,
         cwd: &Path,
-        pane_socket: &Path,
         cols: u16,
         rows: u16,
     ) -> pty::SpawnSpec {
+        let pane_socket = paths::pane_socket_dir(&self.socket).join(format!("{id}.sock"));
         let mut env = self.login.vars.clone();
         let mut set = |k: &str, v: &str| {
             env.insert(k.to_owned(), v.to_owned());
@@ -372,10 +466,7 @@ impl Daemon {
         // Lens claims (M8) and native completion (out of v1) aren't offered yet.
         set("AUK_LENSES", "0");
         set("AUK_COMPLETE", "0");
-        set(
-            "AUK_BLOB_DIR",
-            &self.state_dir.join("blobs").to_string_lossy(),
-        );
+        set("AUK_BLOB_DIR", &self.blob_dir().to_string_lossy());
         // `auk` run inside the pane talks to this daemon.
         set(paths::DAEMON_SOCKET_ENV, &self.socket.to_string_lossy());
         if let Some(dir) = &self.zdotdir {
@@ -402,13 +493,17 @@ impl Daemon {
         }
     }
 
-    fn pane_exited(&self, id: PaneId, status: i32) {
+    fn pane_exited(&self, id: PaneId, generation: u64, status: i32) {
         let mut st = self.state();
         let Some(pane) = st.panes.get(&id).cloned() else {
             return;
         };
         {
             let mut p = lock(&pane);
+            if p.generation != generation {
+                // A replaced process (`surface-play`'s restart): the pane lives on.
+                return;
+            }
             p.on_exit(status);
             p.clear_viewers();
         }
@@ -531,6 +626,24 @@ impl Daemon {
         }
     }
 
+    pub(crate) fn client_ack(&self, id: ClientId, pane: PaneId, sf: &str, s: u64) {
+        if let Some(p) = self.pane(pane) {
+            lock(&p).client_ack(id, sf, s);
+        }
+    }
+
+    pub(crate) fn client_view_event(
+        &self,
+        id: ClientId,
+        pane: PaneId,
+        sf: &str,
+        event: &serde_json::Value,
+    ) -> Result<(), String> {
+        let p = self.pane(pane).ok_or_else(|| format!("no pane {pane}"))?;
+        let mut p = lock(&p);
+        p.client_view_event(id, sf, event).map(drop)
+    }
+
     pub(crate) fn client_focus(&self, id: ClientId, pane: PaneId) {
         let Some(p) = self.pane(pane) else { return };
         if lock(&p).has_viewer(id) {
@@ -612,6 +725,25 @@ impl Daemon {
     }
 }
 
+impl Daemon {
+    /// Asks every client showing `window_key` to perform an effect (§15.6). Returns how many
+    /// clients it went to.
+    pub fn send_effect(&self, window_key: &str, effect: auk_mirror::Effect) -> usize {
+        let frame = Bytes::from(DaemonMsg::Effect(effect).to_bytes());
+        let st = self.state();
+        let mut n = 0;
+        for client in st
+            .clients
+            .values()
+            .filter(|c| c.window_key.as_deref() == Some(window_key))
+        {
+            client.tx.send(frame.clone());
+            n += 1;
+        }
+        n
+    }
+}
+
 /// Sends a window key's layout to every client showing it.
 fn broadcast_layout(st: &State, key: &str) {
     let window = st.layout.window(key).cloned().unwrap_or_default();
@@ -631,7 +763,7 @@ fn broadcast_layout(st: &State, key: &str) {
     }
 }
 
-fn hang_up(pid: u32) {
+pub(crate) fn hang_up(pid: u32) {
     if let Some(pid) = rustix::process::Pid::from_raw(pid as i32) {
         let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::HUP);
     }
@@ -645,13 +777,20 @@ fn spawn_thread(name: String, f: impl FnOnce() + Send + 'static) -> Result<(), S
         .map_err(|e| e.to_string())
 }
 
-/// Feeds PTY output to the pane until every slave descriptor is closed.
-fn read_pty(pane: &Mutex<Pane>, master: &pty::Master) {
+/// Feeds PTY output to the pane until every slave descriptor is closed, or the pane's process
+/// was replaced.
+fn read_pty(pane: &Mutex<Pane>, master: &pty::Master, generation: u64) {
     let mut buf = vec![0u8; 64 * 1024];
     loop {
         match rustix::io::read(master, &mut buf) {
             Ok(0) => return,
-            Ok(n) => lock(pane).on_output(&buf[..n]),
+            Ok(n) => {
+                let mut p = lock(pane);
+                if p.generation != generation {
+                    return;
+                }
+                p.on_output(&buf[..n]);
+            }
             Err(rustix::io::Errno::INTR) => {}
             // EIO: every slave descriptor closed.
             Err(_) => return,
@@ -659,16 +798,107 @@ fn read_pty(pane: &Mutex<Pane>, master: &pty::Master) {
     }
 }
 
-/// Writes queued input to the PTY until the queue closes (the pane exited).
-fn write_pty(master: &pty::Master, mut input: mpsc::UnboundedReceiver<Vec<u8>>) {
-    while let Some(bytes) = input.blocking_recv() {
-        let mut rest = &bytes[..];
-        while !rest.is_empty() {
-            match rustix::io::write(master, rest) {
-                Ok(n) => rest = &rest[n..],
-                Err(rustix::io::Errno::INTR) => {}
-                Err(_) => return,
+/// Writes queued input and answers to the PTY until the queue closes (the pane exited).
+///
+/// TSP replies and events pass the mode gate (§12.1) first: written only while the tty is
+/// non-canonical with echo off, read with `tcgetattr` on the master right before the write, and
+/// dropped otherwise. While client input has opened a bracketed paste the program sees, TSP waits
+/// until the paste ends.
+fn write_pty(master: &pty::Master, mut input: mpsc::UnboundedReceiver<PtyWrite>, gate: &GateStats) {
+    let mut paste = PasteTracker::default();
+    let mut held: Vec<Vec<u8>> = Vec::new();
+    while let Some(write) = input.blocking_recv() {
+        let ok = match write {
+            PtyWrite::Input(bytes) => {
+                let ok = write_all(master, &bytes);
+                paste.scan(&bytes);
+                ok
+            }
+            PtyWrite::Answer(bytes) => write_all(master, &bytes),
+            PtyWrite::Tsp(bytes) => {
+                held.push(bytes);
+                true
+            }
+        };
+        if !ok {
+            return;
+        }
+        if paste.inside {
+            continue;
+        }
+        for bytes in held.drain(..) {
+            let open = master.tty_mode().is_ok_and(|m| m.accepts_tsp_input());
+            if !open {
+                gate.dropped.fetch_add(1, Ordering::Relaxed);
+                continue;
+            }
+            if !write_all(master, &bytes) {
+                return;
+            }
+            gate.written.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+fn write_all(master: &pty::Master, mut rest: &[u8]) -> bool {
+    while !rest.is_empty() {
+        match rustix::io::write(master, rest) {
+            Ok(n) => rest = &rest[n..],
+            Err(rustix::io::Errno::INTR) => {}
+            Err(_) => return false,
+        }
+    }
+    true
+}
+
+/// Follows bracketed-paste markers in client input (`ESC [ 200 ~` … `ESC [ 201 ~`), across
+/// writes.
+#[derive(Debug, Default)]
+struct PasteTracker {
+    inside: bool,
+    /// The tail of the last write, in case a marker spans two.
+    tail: Vec<u8>,
+}
+
+impl PasteTracker {
+    const START: &[u8] = b"\x1b[200~";
+    const END: &[u8] = b"\x1b[201~";
+
+    fn scan(&mut self, bytes: &[u8]) {
+        let mut buf = std::mem::take(&mut self.tail);
+        buf.extend_from_slice(bytes);
+        let mut i = 0;
+        while i + Self::START.len() <= buf.len() {
+            let window = &buf[i..i + Self::START.len()];
+            if window == Self::START {
+                self.inside = true;
+                i += Self::START.len();
+            } else if window == Self::END {
+                self.inside = false;
+                i += Self::END.len();
+            } else {
+                i += 1;
             }
         }
+        let keep = buf.len().saturating_sub(Self::START.len() - 1).max(i);
+        self.tail = buf[keep..].to_vec();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PasteTracker;
+
+    #[test]
+    fn paste_markers_are_followed_across_writes() {
+        let mut p = PasteTracker::default();
+        p.scan(b"abc\x1b[20");
+        assert!(!p.inside);
+        p.scan(b"0~pasted");
+        assert!(p.inside);
+        p.scan(b"more\x1b[201~");
+        assert!(!p.inside);
+        p.scan(b"\x1b[200~x\x1b[201~\x1b[200~");
+        assert!(p.inside);
     }
 }

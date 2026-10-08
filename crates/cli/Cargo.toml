@@ -9,8 +9,10 @@ publish.workspace = true
 [dependencies]
 auk-daemon = { version = "0.0.0", path = "../daemon" }
 auk-mirror = { version = "0.0.0", path = "../mirror" }
+auk-remote = { version = "0.0.0", path = "../remote" }
 auk-replica = { version = "0.0.0", path = "../replica" }
 auk-term = { version = "0.0.0", path = "../term" }
+auk-tsp = { version = "0.0.0", path = "../tsp" }
 clap = { version = "4.6.7", features = ["derive"] }
 serde_json.workspace = true
 shlex = "2.0.1"

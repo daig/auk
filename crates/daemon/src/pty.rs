@@ -200,7 +200,8 @@ mod tests {
         let mut out = String::new();
         read_until(&rx, &mut out, "done");
         assert!(out.contains("33 91"), "{out}");
-        assert!(out.contains("/dev/tty"), "{out}");
+        // macOS names ptys /dev/ttysN; Linux /dev/pts/N.
+        assert!(out.contains("/dev/tty") || out.contains("/dev/pts/"), "{out}");
         // The child leads its own process group (setsid).
         assert!(out.contains(&pid.to_string()), "{out}");
         assert!(child.wait().await.unwrap().success());

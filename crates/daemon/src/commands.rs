@@ -16,6 +16,11 @@
 //! | `tty-mode TARGET` | the mode gate's reading (§12.1) |
 //! | `resize TARGET COLS ROWS`, `clear-scrollback TARGET`, `reset TARGET` | sequenced records |
 //! | `clients` | attached clients and the panes they are primary for |
+//! | `snapshot TARGET` | the pane's snapshot (§15.3): its stream position and bytes, base64 |
+//! | `tsp TARGET` | the authoritative replica's TSP state (§7) and the mode gate's counts |
+//! | `settings [--native-surfaces on\|off] [--command-lenses on\|off] [--scrollback N] [--retention BYTES]` | host settings (§15.2); changes reach every pane as a record |
+//! | `surface-play [--pane TARGET] FILE [from N] [until N] [paced [TIMES]]` | plays a TSP recording into a pane (§7.15) |
+//! | `effect [--window K] toast\|open\|copy TEXT` | asks the windows showing a window key to perform an effect |
 //! | `kill TARGET` | hangs up and closes a pane |
 //! | `shutdown` | stops the daemon |
 //!
@@ -70,6 +75,24 @@ impl Daemon {
             "clear-scrollback" => self.record(args, Record::ClearScrollback),
             "reset" => self.record(args, Record::Reset),
             "clients" => Ok(self.clients()),
+            "tsp" => self.with_pane(args, |p| {
+                let mut v = crate::tsp::state_json(p.replica.tsp(), p.replica.terminal());
+                if let Some((written, dropped)) = p.gate_stats() {
+                    v["gate_stats"] = json!({"written": written, "dropped": dropped});
+                }
+                v["stand_in"] = json!(p.stand_in);
+                Ok(v)
+            }),
+            "settings" => self.cmd_settings(args),
+            "snapshot" => self.with_pane(args, |p| {
+                use base64::Engine as _;
+                let snap = p.snapshot();
+                let mut v = json!(snap);
+                v["bytes"] = json!(base64::engine::general_purpose::STANDARD.encode(&snap.bytes));
+                Ok(v)
+            }),
+            "surface-play" => return self.cmd_play(args).await,
+            "effect" => self.cmd_effect(args),
             "kill" => self.target(args.first()).and_then(|id| self.kill(id)).map(|()| Value::Null),
             "shutdown" => {
                 self.stop();
@@ -304,6 +327,85 @@ impl Daemon {
         })
     }
 
+    fn cmd_settings(&self, args: &[String]) -> Reply {
+        let opts = Opts::parse(args)?;
+        let mut settings = self.settings();
+        let on_off = |name: &str| -> Result<Option<bool>, String> {
+            match opts.get(name) {
+                None => Ok(None),
+                Some("on") => Ok(Some(true)),
+                Some("off") => Ok(Some(false)),
+                Some(other) => Err(format!("--{name}: expected on or off, got `{other}`")),
+            }
+        };
+        let number = |name: &str| -> Result<Option<u64>, String> {
+            opts.get(name)
+                .map(|v| v.parse().map_err(|_| format!("--{name}: bad number `{v}`")))
+                .transpose()
+        };
+        if let Some(on) = on_off("native-surfaces")? {
+            settings.native_surfaces = on;
+        }
+        if let Some(on) = on_off("command-lenses")? {
+            settings.command_lenses = on;
+        }
+        if let Some(n) = number("scrollback")? {
+            settings.scrollback = n as usize;
+        }
+        if let Some(n) = number("retention")? {
+            settings.retention = n;
+        }
+        if let Some(word) = opts.positional.first() {
+            return Err(format!("settings: unexpected `{word}`"));
+        }
+        self.set_settings(settings.clone());
+        Ok(json!(settings))
+    }
+
+    async fn cmd_play(self: &Arc<Self>, args: &[String]) -> Value {
+        let result = async {
+            let (target, rest) = match args.split_first() {
+                Some((flag, rest)) if flag == "--pane" => {
+                    let (t, rest) = rest.split_first().ok_or("--pane needs a target")?;
+                    (t.clone(), rest)
+                }
+                _ => ("@focused".to_owned(), args),
+            };
+            let (file, rest) = rest
+                .split_first()
+                .ok_or("surface-play: expected a recording")?;
+            let opts = crate::play::PlayOptions::parse(rest)?;
+            let pane = self.pane_arc(std::slice::from_ref(&target))?;
+            let apc = lock(&pane).replica.tsp().config().chunk_size() as usize;
+            let steps = crate::play::load(std::path::Path::new(file), apc)?;
+            self.play(pane, steps, opts).await
+        }
+        .await;
+        match result {
+            Ok(value) => ok(value),
+            Err(message) => error(message),
+        }
+    }
+
+    fn cmd_effect(&self, args: &[String]) -> Reply {
+        use auk_mirror::Effect;
+        let mut opts = Opts::parse(args)?;
+        let key = opts
+            .take("window")
+            .unwrap_or_else(|| crate::server::DEFAULT_WINDOW_KEY.to_owned());
+        let (kind, text) = match opts.positional.split_first() {
+            Some((kind, text)) if !text.is_empty() => (kind.as_str(), text.join(" ")),
+            _ => return Err("effect: expected toast, open or copy, then text".into()),
+        };
+        let effect = match kind {
+            "toast" => Effect::Toast { text },
+            "open" => Effect::Open { target: text },
+            "copy" => Effect::Copy { text },
+            other => return Err(format!("effect: unknown effect `{other}`")),
+        };
+        Ok(json!({"delivered": self.send_effect(&key, effect)}))
+    }
+
     fn cmd_resize(&self, args: &[String]) -> Reply {
         let (cols, rows) = match args.get(1..3) {
             Some([c, r]) => (c.parse::<u16>(), r.parse::<u16>()),
@@ -429,7 +531,7 @@ impl Opts {
             positional: Vec::new(),
             command: Vec::new(),
         };
-        let mut it = args.iter();
+        let mut it = args.iter().peekable();
         while let Some(arg) = it.next() {
             if arg == "--" {
                 opts.command = it.cloned().collect();
@@ -438,7 +540,12 @@ impl Opts {
             match arg.strip_prefix("--") {
                 Some(name) => match name.split_once('=') {
                     Some((name, value)) => opts.flags.push((name.into(), value.into())),
-                    None if name == "scrollback" => opts.flags.push((name.into(), String::new())),
+                    // `capture --scrollback` is a switch; `settings --scrollback N` takes a value.
+                    None if name == "scrollback"
+                        && !it.peek().is_some_and(|v| v.parse::<u64>().is_ok()) =>
+                    {
+                        opts.flags.push((name.into(), String::new()))
+                    }
                     None => {
                         let value = it.next().ok_or_else(|| format!("--{name} needs a value"))?;
                         opts.flags.push((name.into(), value.clone()));

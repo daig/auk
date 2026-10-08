@@ -3,15 +3,14 @@
 use std::cell::RefCell;
 
 use objc2::rc::Retained;
-use objc2::runtime::{NSObjectProtocol, ProtocolObject, Sel};
-use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
+use objc2::runtime::{AnyObject, NSObjectProtocol, ProtocolObject};
+use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSEventModifierFlags,
-    NSMenu, NSMenuItem,
+    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSMenuItem,
 };
-use objc2_foundation::{NSNotification, NSObject, NSString};
+use objc2_foundation::{NSNotification, NSObject};
 
-use crate::{Clipboard, Window, WindowAttributes, WindowHandler};
+use crate::{Clipboard, Menu, Window, WindowAttributes, WindowHandler, menu};
 
 /// What the app's startup closure and later main-thread code create windows with.
 #[derive(Clone, Copy, Debug)]
@@ -35,6 +34,39 @@ impl AppContext {
 
     pub fn clipboard(&self) -> Clipboard {
         Clipboard::new(self.mtm)
+    }
+
+    /// Replaces the menu bar.
+    pub fn set_main_menu(&self, description: &Menu) {
+        menu::install(self.mtm, description);
+    }
+
+    /// Receives menu commands ([`crate::MenuItem::Command`]) that no window took: those chosen
+    /// while no window is key.
+    pub fn set_command_handler(&self, handler: impl FnMut(&AppContext, u32) + 'static) {
+        menu::set_app_handler(Box::new(handler));
+    }
+
+    /// The menu bar's menus and their item titles.
+    pub fn menu_titles(&self) -> Vec<(String, Vec<String>)> {
+        menu::dump(self.mtm)
+    }
+
+    /// Chooses a menu item as a click would: `path` is a menu's title, then item titles.
+    /// Returns false when no enabled item has that path.
+    pub fn perform_menu(&self, path: &[&str]) -> bool {
+        menu::perform(self.mtm, path)
+    }
+
+    /// Whether the app is the active (frontmost) app.
+    pub fn is_active(&self) -> bool {
+        NSApplication::sharedApplication(self.mtm).isActive()
+    }
+
+    /// Brings the app forward.
+    pub fn activate(&self) {
+        #[allow(deprecated)]
+        NSApplication::sharedApplication(self.mtm).activateIgnoringOtherApps(true);
     }
 
     /// Quits the app.
@@ -77,6 +109,17 @@ define_class!(
             true
         }
     }
+
+    impl AppDelegate {
+        /// A menu command no window took.
+        #[unsafe(method(aukCommand:))]
+        fn auk_command(&self, sender: Option<&AnyObject>) {
+            let tag = sender
+                .and_then(|s| s.downcast_ref::<NSMenuItem>())
+                .map_or(0, |item| item.tag());
+            menu::app_command(&AppContext { mtm: self.mtm() }, tag as u32);
+        }
+    }
 );
 
 /// Runs the app: sets up `NSApplication` and the main menu, calls `init` once the app has
@@ -92,109 +135,7 @@ pub fn run(init: impl FnOnce(&AppContext) + 'static) {
         unsafe { msg_send![super(this), init] }
     };
     app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
-    app.setMainMenu(Some(&main_menu(mtm)));
+    menu::install(mtm, &menu::default_menu());
     app.run();
 }
 
-/// The menu bar: the app menu, Edit, View and Window.
-fn main_menu(mtm: MainThreadMarker) -> Retained<NSMenu> {
-    let bar = NSMenu::new(mtm);
-    let none = NSEventModifierFlags::empty();
-    let cmd = NSEventModifierFlags::Command;
-    let cmd_opt = NSEventModifierFlags::Command | NSEventModifierFlags::Option;
-    let cmd_ctrl = NSEventModifierFlags::Command | NSEventModifierFlags::Control;
-
-    let app_menu = submenu(mtm, &bar, "Auk");
-    add(
-        mtm,
-        &app_menu,
-        "About Auk",
-        Some(sel!(orderFrontStandardAboutPanel:)),
-        "",
-        none,
-    );
-    app_menu.addItem(&NSMenuItem::separatorItem(mtm));
-    let services = NSMenu::new(mtm);
-    let services_item = add(mtm, &app_menu, "Services", None, "", none);
-    services_item.setSubmenu(Some(&services));
-    NSApplication::sharedApplication(mtm).setServicesMenu(Some(&services));
-    app_menu.addItem(&NSMenuItem::separatorItem(mtm));
-    add(mtm, &app_menu, "Hide Auk", Some(sel!(hide:)), "h", cmd);
-    add(
-        mtm,
-        &app_menu,
-        "Hide Others",
-        Some(sel!(hideOtherApplications:)),
-        "h",
-        cmd_opt,
-    );
-    add(
-        mtm,
-        &app_menu,
-        "Show All",
-        Some(sel!(unhideAllApplications:)),
-        "",
-        none,
-    );
-    app_menu.addItem(&NSMenuItem::separatorItem(mtm));
-    add(mtm, &app_menu, "Quit Auk", Some(sel!(terminate:)), "q", cmd);
-
-    let edit = submenu(mtm, &bar, "Edit");
-    add(mtm, &edit, "Copy", Some(sel!(copy:)), "c", cmd);
-    add(mtm, &edit, "Paste", Some(sel!(paste:)), "v", cmd);
-    add(mtm, &edit, "Select All", Some(sel!(selectAll:)), "a", cmd);
-
-    let view = submenu(mtm, &bar, "View");
-    add(
-        mtm,
-        &view,
-        "Enter Full Screen",
-        Some(sel!(toggleFullScreen:)),
-        "f",
-        cmd_ctrl,
-    );
-
-    let window = submenu(mtm, &bar, "Window");
-    add(mtm, &window, "Close", Some(sel!(performClose:)), "w", cmd);
-    add(
-        mtm,
-        &window,
-        "Minimize",
-        Some(sel!(performMiniaturize:)),
-        "m",
-        cmd,
-    );
-    add(mtm, &window, "Zoom", Some(sel!(performZoom:)), "", none);
-    NSApplication::sharedApplication(mtm).setWindowsMenu(Some(&window));
-    bar
-}
-
-fn submenu(mtm: MainThreadMarker, bar: &NSMenu, title: &str) -> Retained<NSMenu> {
-    let menu = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str(title));
-    let item = NSMenuItem::new(mtm);
-    item.setSubmenu(Some(&menu));
-    bar.addItem(&item);
-    menu
-}
-
-fn add(
-    mtm: MainThreadMarker,
-    menu: &NSMenu,
-    title: &str,
-    action: Option<Sel>,
-    key: &str,
-    mods: NSEventModifierFlags,
-) -> Retained<NSMenuItem> {
-    // SAFETY: the actions are standard responder-chain selectors taking a sender.
-    let item = unsafe {
-        NSMenuItem::initWithTitle_action_keyEquivalent(
-            NSMenuItem::alloc(mtm),
-            &NSString::from_str(title),
-            action,
-            &NSString::from_str(key),
-        )
-    };
-    item.setKeyEquivalentModifierMask(mods);
-    menu.addItem(&item);
-    item
-}

@@ -1,0 +1,28 @@
+{
+  "argv": [
+    "sh",
+    "{fixtures}/gitlog.sh"
+  ],
+  "cwd": "{tmp}",
+  "cols": 80,
+  "rows": 24,
+  "env": [
+    "LESSHISTFILE=-",
+    "LESS=FRX",
+    "PAGER=less"
+  ],
+  "program": "/bin/sh",
+  "version": "GNU bash, version 3.2.57(1)-release (arm64-apple-darwin26)",
+  "scenario": "fixtures/terminal/gitlog.scenario.json",
+  "recorded": "2026-10-08T04:15:36-0600",
+  "recorder": "tools/vt_record.py",
+  "exit_status": 0,
+  "counts": {
+    "out": 12,
+    "out_bytes": 5230,
+    "resize": 1,
+    "in": 5
+  },
+  "sha256": "f2fbca3cf3bae79a71ea9795c279d3200c01373e2b167aa0a291cd3d26230101",
+  "note": "git log --color --graph --decorate --stat --all over a fixed repository, paged by less (LESS=FRX)"
+}

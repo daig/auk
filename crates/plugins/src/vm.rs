@@ -15,7 +15,10 @@ use std::time::Instant;
 use mlua::{FromLuaMulti, Function, IntoLuaMulti, Lua, Table, Value, ffi};
 
 use crate::api::effects::{Effect, EffectCx, EffectTarget};
-use crate::api::{self, ApiState, BlockHandlers, LensHandlers};
+use crate::api::tasks::{Callback, Outcome, Wake};
+use crate::api::window::WindowRegistry;
+use crate::api::{self, ApiOptions, ApiState, BlockHandlers, LensHandlers};
+use crate::events::{PaneDirectory, PaneId};
 use crate::budget::{Budget, CallClock, FrameGuard};
 use crate::manifest::Manifest;
 use crate::require::{PackageRequirer, chunk_name};
@@ -129,6 +132,10 @@ pub struct VmOptions {
     pub jit: bool,
     /// Where `tern.log` and `print` go.
     pub log: LogSink,
+    /// The host's panes for `tern.pane.list` (host halves).
+    pub panes: Option<Arc<dyn PaneDirectory>>,
+    /// Built-in palette command ids `tern.override` accepts (window halves); `None` accepts any.
+    pub builtin_commands: Option<Arc<Vec<String>>>,
 }
 
 impl fmt::Debug for VmOptions {
@@ -158,6 +165,8 @@ impl VmOptions {
             memory_limit: MEMORY_LIMIT,
             jit: true,
             log: tracing_log_sink(),
+            panes: None,
+            builtin_commands: None,
         }
     }
 }
@@ -262,14 +271,16 @@ impl Vm {
         let requirer = PackageRequirer::new(&plugin.dir).map_err(|e| {
             mlua::Error::runtime(format!("cannot read {}: {e}", plugin.dir.display()))
         })?;
-        let api = Rc::new(ApiState::new(
-            options.context,
+        let api = Rc::new(ApiState::new(ApiOptions {
+            context: options.context,
             plugin,
             jit,
-            options.log,
-            options.declared_blocks,
-            options.declared_lenses,
-        ));
+            log: options.log,
+            declared_blocks: options.declared_blocks,
+            declared_lenses: options.declared_lenses,
+            panes: options.panes,
+            builtin_commands: options.builtin_commands,
+        }));
 
         let tern = api::install(&lua, &api)?;
         let globals = lua.globals();
@@ -438,14 +449,117 @@ impl Vm {
         self.api.take_effects()
     }
 
-    /// When the next `tern.timer` callback is due.
+    /// When the next timer (`tern.timer`, `tern.sleep`) is due.
     pub fn next_timer(&self) -> Option<Instant> {
-        self.api.timers.borrow().next_due()
+        self.api.tasks.borrow().next_due()
     }
 
-    /// Removes and returns the oldest timer callback due at `now`.
-    pub fn pop_due_timer(&self, now: Instant) -> Option<Function> {
-        self.api.timers.borrow_mut().pop_due(now)
+    /// Wakes the owner thread when a process or request completes. Set it before the entry runs.
+    pub fn set_waker(&self, wake: Option<Wake>) {
+        self.api.tasks.borrow_mut().set_wake(wake);
+    }
+
+    /// The channel completions arrive on, for an owner that selects on it (it must not
+    /// receive from it: [`Vm::next_callback`] does).
+    pub(crate) fn completion_receiver(&self) -> crossbeam_channel::Receiver<crate::api::tasks::Completion> {
+        self.api.tasks.borrow().receiver().clone()
+    }
+
+    /// The block cx of `pane`.
+    pub(crate) fn block_cx(
+        &self,
+        pane: PaneId,
+        geometry: Rc<RefCell<crate::api::block::Geometry>>,
+    ) -> mlua::Result<Value> {
+        self.lua
+            .create_userdata(crate::api::block::BlockCx {
+                pane,
+                geometry,
+                state: Rc::clone(&self.api),
+            })
+            .map(Value::UserData)
+    }
+
+    /// Whether callbacks are waiting (completions arrived or callbacks are queued).
+    pub fn has_callbacks(&self) -> bool {
+        self.api.tasks.borrow().has_ready()
+    }
+
+    /// The next callback to run on the owner thread, oldest first: completed processes and
+    /// requests, due timers and settled awaitables. The caller runs it under its hook with
+    /// [`Vm::call`] (a window adds a fresh cx as the last argument).
+    pub fn next_callback(&self, now: Instant) -> Option<Callback> {
+        let completions = self.api.tasks.borrow().take_completions();
+        for c in completions {
+            let (hook, result, err) = match &c.outcome {
+                Outcome::Process(r) => ("process", r.to_lua(&self.lua), Value::Nil),
+                Outcome::Fetch(r) => ("fetch", r.to_lua(&self.lua), Value::Nil),
+                Outcome::Value(Ok(v)) => ("await", api::convert::to_lua(&self.lua, v), Value::Nil),
+                Outcome::Value(Err(e)) => (
+                    "await",
+                    Ok(Value::Nil),
+                    self.lua.create_string(e).map_or(Value::Nil, Value::String),
+                ),
+            };
+            match result {
+                Ok(v) => self.api.tasks.borrow_mut().settle(c.id, hook, v, err),
+                Err(error) => {
+                    tracing::warn!(plugin = %self.api.plugin.id, %error, "cannot hand a process result to Lua");
+                }
+            }
+        }
+        let sleeps = self.api.tasks.borrow_mut().take_due(now);
+        for id in sleeps {
+            self.api
+                .tasks
+                .borrow_mut()
+                .settle(id, "await", Value::Nil, Value::Nil);
+        }
+        self.api.tasks.borrow_mut().pop_ready()
+    }
+
+    /// `tern.pane.write` requests since the last call, in order.
+    pub fn take_pane_writes(&self) -> Vec<(PaneId, String)> {
+        std::mem::take(&mut *self.api.pane_writes.borrow_mut())
+    }
+
+    /// Block cx requests since the last call, in order.
+    pub fn take_block_requests(&self) -> Vec<(PaneId, api::block::BlockRequest)> {
+        std::mem::take(&mut *self.api.block_requests.borrow_mut())
+    }
+
+    /// Converts JSON to a Lua value with Tern's rules (arrays tagged, null members dropped).
+    pub fn to_lua(&self, json: &serde_json::Value) -> mlua::Result<Value> {
+        api::convert::to_lua(&self.lua, json)
+    }
+
+    /// Converts a Lua value to JSON with Tern's rules (sorted keys, integral numbers as integers).
+    pub fn to_json(&self, value: &Value) -> Result<serde_json::Value, String> {
+        api::convert::to_json(&self.lua, value)
+    }
+
+    /// The window registrations (commands, binds, overrides, routes, formatters, sheets).
+    pub fn window_registry(&self) -> std::cell::Ref<'_, WindowRegistry> {
+        std::cell::Ref::map(self.api.registry.borrow(), |r| &r.window)
+    }
+
+    /// Whether a window registration changed since the last call (and clears the flag).
+    pub fn take_registrations_changed(&self) -> bool {
+        self.api.registrations_changed.replace(false)
+    }
+
+    /// Whether `tern.chrome.refresh` was called since the last call (and clears the flag).
+    pub fn take_chrome_refresh(&self) -> bool {
+        self.api.chrome_refresh.replace(false)
+    }
+
+    /// Marks that a chrome formatter is running (so `tern.chrome.refresh` raises).
+    pub(crate) fn set_in_formatter(&self, on: bool) {
+        self.api.in_formatter.set(on);
+    }
+
+    pub(crate) fn api(&self) -> &Rc<ApiState> {
+        &self.api
     }
 
     /// The flag raised once a `spawn` handler is registered.

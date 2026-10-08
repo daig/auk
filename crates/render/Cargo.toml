@@ -14,6 +14,12 @@ unicode-width = "0.2"
 pollster = "0.4"
 raw-window-handle = "0.6.2"
 wgpu = "30.0.1"
+# The UI layer: auk-ui paints surfaces and chrome into a Vello scene (§18.1).
+vello = "0.11"
+
+# The browser client (auk-web): std's Instant panics on wasm32-unknown-unknown.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-time = "1"
 
 [lints]
 workspace = true

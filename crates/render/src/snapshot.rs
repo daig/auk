@@ -124,7 +124,8 @@ pub struct Selection {
 }
 
 impl Selection {
-    fn contains(&self, line: Line, col: u16) -> bool {
+    /// Whether the cell at buffer line `line`, column `col` is selected.
+    pub fn contains(&self, line: Line, col: u16) -> bool {
         let (start, end) = if self.anchor <= self.head {
             (self.anchor, self.head)
         } else {
@@ -244,13 +245,26 @@ impl GridSnapshot {
     /// The visible rows of `term` under `view`, in `theme`'s colors (with the program's color
     /// overrides applied).
     pub fn from_terminal(term: &Terminal, theme: &Theme, view: &View) -> GridSnapshot {
-        let theme = theme.with_overrides(term.color_overrides());
-        let (cols, rows) = (term.cols(), term.rows());
-        let mut snap = GridSnapshot::new(cols, rows, &theme);
         let history = term.history_len();
         let top = history - view.scroll.min(history);
+        GridSnapshot::from_lines(term, theme, view, top, term.rows())
+    }
+
+    /// `rows` buffer lines of `term` starting at line `first` (lines past the end are blank),
+    /// for a mixed layout that shows a different run of lines than the screen. `view.scroll` is
+    /// ignored; the selection and cursor apply where they fall.
+    pub fn from_lines(
+        term: &Terminal,
+        theme: &Theme,
+        view: &View,
+        first: Line,
+        rows: u16,
+    ) -> GridSnapshot {
+        let theme = theme.with_overrides(term.color_overrides());
+        let cols = term.cols();
+        let mut snap = GridSnapshot::new(cols, rows, &theme);
         for r in 0..rows {
-            let line = top + usize::from(r);
+            let line = first + usize::from(r);
             let Some(row) = term.line(line) else { continue };
             for (c, cell) in row.cells.iter().take(usize::from(cols)).enumerate() {
                 let col = c as u16;
@@ -261,13 +275,13 @@ impl GridSnapshot {
 
         let cursor = term.cursor();
         let modes = term.modes();
-        let cursor_row = (history - top) + usize::from(cursor.row);
+        let cursor_line = term.history_len() + usize::from(cursor.row);
         if cursor.visible
             && modes.cursor_visible
             && view.cursor_on
-            && cursor_row < usize::from(rows)
+            && (first..first + usize::from(rows)).contains(&cursor_line)
         {
-            let row = cursor_row as u16;
+            let row = (cursor_line - first) as u16;
             let col = cursor.col.min(cols.saturating_sub(1));
             let width = if snap.row(row)[usize::from(col)].attrs.has(Attrs::WIDE) {
                 2

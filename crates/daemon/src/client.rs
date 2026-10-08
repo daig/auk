@@ -130,8 +130,12 @@ fn on_message(daemon: &Arc<Daemon>, id: ClientId, msg: ClientMsg) {
                 eprintln!("auk daemon: client {id}: layout edit: {err}");
             }
         }
-        // Surfaces arrive with TSP (M3); until then no surface exists to ack or act on.
-        ClientMsg::ViewEvent { .. } | ClientMsg::Ack { .. } => {}
+        ClientMsg::Ack { pane, sf, s } => daemon.client_ack(id, pane, &sf, s),
+        ClientMsg::ViewEvent { pane, sf, event } => {
+            if let Err(err) = daemon.client_view_event(id, pane, &sf, &event) {
+                eprintln!("auk daemon: client {id}: view event: {err}");
+            }
+        }
         // Client environments matter once windows spawn panes with them (M4).
         ClientMsg::Env { .. } => {}
         ClientMsg::Hello(_) | ClientMsg::Detach => {}

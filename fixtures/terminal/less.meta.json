@@ -1,0 +1,27 @@
+{
+  "argv": [
+    "sh",
+    "-c",
+    "{fixtures}/less-input.sh >{tmp}/input.txt && exec less -R {tmp}/input.txt"
+  ],
+  "cwd": "{tmp}",
+  "cols": 80,
+  "rows": 24,
+  "env": [
+    "LESSHISTFILE=-"
+  ],
+  "program": "/bin/sh",
+  "version": "GNU bash, version 3.2.57(1)-release (arm64-apple-darwin26)",
+  "scenario": "fixtures/terminal/less.scenario.json",
+  "recorded": "2026-10-08T04:15:26-0600",
+  "recorder": "tools/vt_record.py",
+  "exit_status": 0,
+  "counts": {
+    "out": 38,
+    "out_bytes": 16087,
+    "resize": 2,
+    "in": 11
+  },
+  "sha256": "f408e93ebec9275484623aef3bc819f43b57cae14e4bdc9cc202a8dd61e011e7",
+  "note": "less -R over colored, wide and tabbed text; search, chop toggle, resizes"
+}

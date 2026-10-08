@@ -1,0 +1,637 @@
+//! The web client (GOAL.md `web`, §10.3, §12.5, M11): `auk web serve` serves the wasm client,
+//! trades the URL's token for a cookie, binds loopback only unless told otherwise, and bridges
+//! the replication protocol over a WebSocket (refusing other versions, X9). In Safari, driven
+//! through safaridriver, the client attaches to a live pane, draws it over WebGPU and types
+//! into the shell. And wasm replicas reach the native state hashes on fuzzed streams (AC2).
+//!
+//! The client, its JS glue (the pinned wasm-bindgen CLI) and the wasm32-wasip1 replica driver
+//! are built fresh in each run (`auk_conformance::web::Builds`).
+
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
+use auk_conformance::fuzz;
+use auk_conformance::harness::{TestEnv, wait_for};
+use auk_conformance::web::{
+    Builds, Rgba, Safari, WebServer, WsClient, WsMessage, cookie_value, http,
+};
+use auk_mirror::{ClientFacts, ClientKind, ClientMsg, DaemonMsg, Frame, Hello, Message, Versions};
+use auk_web::replay::{self, Case, Step};
+use serde_json::Value;
+
+fn env(name: &str) -> TestEnv {
+    TestEnv::new(env!("CARGO_BIN_EXE_auk"), name)
+}
+
+fn builds() -> Builds {
+    Builds::new(env!("CARGO_TARGET_TMPDIR"))
+}
+
+/// A daemon with one pane at its prompt.
+fn daemon_with_pane(env: &TestEnv) -> u64 {
+    env.start_daemon();
+    let pane = env.new_pane(&[]);
+    env.wait(pane, "prompt");
+    pane
+}
+
+fn capture(env: &TestEnv, pane: u64) -> String {
+    env.daemon(&format!("capture {pane}"))["text"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// The address a process listens on, from lsof.
+fn listening(pid: u32) -> Vec<String> {
+    let out = Command::new("/usr/sbin/lsof")
+        .args([
+            "-nP",
+            "-a",
+            "-p",
+            &pid.to_string(),
+            "-iTCP",
+            "-sTCP:LISTEN",
+            "-Fn",
+        ])
+        .output()
+        .expect("run lsof");
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.strip_prefix('n'))
+        .map(str::to_owned)
+        .collect()
+}
+
+fn decode(bytes: &[u8]) -> DaemonMsg {
+    let (frame, used) = auk_mirror::frame::split_frame(bytes)
+        .expect("a frame")
+        .expect("a whole frame");
+    assert_eq!(used, bytes.len(), "one frame per WebSocket message");
+    DaemonMsg::decode(Frame {
+        kind: frame.kind,
+        payload: frame.payload,
+    })
+    .expect("a daemon message")
+}
+
+/// The next daemon message on a WebSocket.
+fn next_msg(ws: &mut WsClient) -> DaemonMsg {
+    match ws.recv() {
+        Some(WsMessage::Binary(bytes)) => decode(&bytes),
+        other => panic!("expected a binary frame, got {other:?}"),
+    }
+}
+
+#[test]
+fn web_serve_trades_the_url_token_for_a_session_cookie() {
+    let env = env("webtoken");
+    env.start_daemon();
+    let assets = builds().web_client();
+    let server = WebServer::start(&env, &assets, &["--port", "0"]);
+    let host = server.host();
+    let port = server.port;
+    assert!(
+        server.url.starts_with(&format!("http://{host}/?token=")),
+        "{}",
+        server.url
+    );
+    assert_eq!(server.token.len(), 64, "a 256-bit token as hex");
+    assert!(server.token.bytes().all(|b| b.is_ascii_hexdigit()));
+
+    // Nothing without the cookie.
+    for path in [
+        "/",
+        "/auk_web.js",
+        "/auk_web_bg.wasm",
+        "/boot.js",
+        "/font/0",
+    ] {
+        let r = http(port, "GET", path, &[("Host", &host)], b"");
+        assert_eq!(r.status, 401, "{path}: {r:?}");
+    }
+    let wrong = format!("/?token={}", "0".repeat(64));
+    assert_eq!(
+        http(port, "GET", &wrong, &[("Host", &host)], b"").status,
+        403
+    );
+
+    // The first load trades the token for an HttpOnly, SameSite=Strict cookie and redirects to
+    // the same URL without the token.
+    let first = http(
+        port,
+        "GET",
+        &format!("/?window=main&token={}", server.token),
+        &[("Host", &host)],
+        b"",
+    );
+    assert_eq!(first.status, 303, "{first:?}");
+    assert_eq!(first.header("location"), Some("/?window=main"));
+    let set = first.header("set-cookie").expect("a cookie");
+    for attr in ["HttpOnly", "SameSite=Strict", "Path=/"] {
+        assert!(set.split("; ").any(|a| a == attr), "{set}");
+    }
+    let cookie = cookie_value(&first).expect("auk_session");
+    assert_eq!(cookie.len(), 64);
+    assert_ne!(cookie, server.token);
+
+    // The token is one-time.
+    let again = http(
+        port,
+        "GET",
+        &format!("/?token={}", server.token),
+        &[("Host", &host)],
+        b"",
+    );
+    assert_eq!(again.status, 403, "{again:?}");
+
+    // With the cookie: the page and the client's files, as built.
+    let with = format!("auk_session={cookie}");
+    let page = http(port, "GET", "/", &[("Host", &host), ("Cookie", &with)], b"");
+    assert_eq!(page.status, 200);
+    assert!(page.text().contains("/boot.js"), "{}", page.text());
+    let csp = page.header("content-security-policy").expect("a CSP");
+    assert!(csp.contains("default-src 'none'"), "{csp}");
+    for (path, file, kind) in [
+        ("/auk_web_bg.wasm", "auk_web_bg.wasm", "application/wasm"),
+        ("/auk_web.js", "auk_web.js", "text/javascript"),
+    ] {
+        let r = http(
+            port,
+            "GET",
+            path,
+            &[("Host", &host), ("Cookie", &with)],
+            b"",
+        );
+        assert_eq!(r.status, 200, "{path}");
+        assert_eq!(r.header("content-type"), Some(kind));
+        assert_eq!(r.body, std::fs::read(assets.join(file)).unwrap(), "{path}");
+    }
+    let font = http(
+        port,
+        "GET",
+        "/font/0",
+        &[("Host", &host), ("Cookie", &with)],
+        b"",
+    );
+    assert_eq!(font.status, 200);
+    assert!(font.body.len() > 10_000);
+
+    // A forged cookie, another Host (DNS rebinding) and a cross-origin WebSocket are refused.
+    let forged = format!("auk_session={}", "f".repeat(64));
+    assert_eq!(
+        http(
+            port,
+            "GET",
+            "/",
+            &[("Host", &host), ("Cookie", &forged)],
+            b""
+        )
+        .status,
+        401
+    );
+    let evil_host = format!("evil.example:{port}");
+    assert_eq!(
+        http(
+            port,
+            "GET",
+            "/",
+            &[("Host", &evil_host), ("Cookie", &with)],
+            b""
+        )
+        .status,
+        403
+    );
+    let origin = format!("http://{host}");
+    let err = WsClient::connect(port, &[("Host", &host), ("Origin", &origin)]).unwrap_err();
+    assert_eq!(err.status, 401);
+    let err = WsClient::connect(
+        port,
+        &[
+            ("Host", &host),
+            ("Origin", "http://evil.example"),
+            ("Cookie", &with),
+        ],
+    )
+    .unwrap_err();
+    assert_eq!(err.status, 403);
+    WsClient::connect(
+        port,
+        &[("Host", &host), ("Origin", &origin), ("Cookie", &with)],
+    )
+    .expect("a same-origin WebSocket with the cookie");
+}
+
+#[test]
+fn web_socket_bridges_the_replication_protocol_to_the_daemon() {
+    let env = env("webbridge");
+    let pane = daemon_with_pane(&env);
+    env.run(pane, "echo before-$((40+2))");
+    let assets = builds().web_client();
+    let server = WebServer::start(&env, &assets, &["--port", "0"]);
+    let cookie = format!("auk_session={}", server.login());
+    let host = server.host();
+    let origin = format!("http://{host}");
+    let mut ws = WsClient::connect(
+        server.port,
+        &[("Host", &host), ("Origin", &origin), ("Cookie", &cookie)],
+    )
+    .expect("upgrade");
+
+    ws.send_binary(
+        &ClientMsg::Hello(Hello::new(ClientKind::Web, ClientFacts::default())).to_bytes(),
+    );
+    match next_msg(&mut ws) {
+        DaemonMsg::Welcome { versions, .. } => assert_eq!(versions, Versions::current()),
+        other => panic!("expected a welcome, got {other:?}"),
+    }
+    ws.send_binary(
+        &ClientMsg::Attach {
+            window_key: "main".into(),
+        }
+        .to_bytes(),
+    );
+    let mut replica = None;
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while replica.is_none() {
+        assert!(Instant::now() < deadline, "no snapshot");
+        if let DaemonMsg::Snapshot { pane: p, snapshot } = next_msg(&mut ws)
+            && p == pane
+        {
+            replica = Some(auk_replica::Replica::from_snapshot(
+                &snapshot,
+                auk_replica::Role::Follower,
+                None,
+            ));
+        }
+    }
+    let mut replica = replica.unwrap();
+    assert!(replica.text().contains("before-42"), "{}", replica.text());
+
+    // Input through the bridge reaches the shell, and its output comes back as live items.
+    ws.send_binary(
+        &ClientMsg::Input {
+            pane,
+            bytes: b"echo through-the-bridge-$((6*7))\r".to_vec(),
+        }
+        .to_bytes(),
+    );
+    while !replica.screen_text().contains("through-the-bridge-42\n") {
+        assert!(Instant::now() < deadline, "{}", replica.screen_text());
+        match next_msg(&mut ws) {
+            DaemonMsg::Output {
+                pane: p,
+                seq,
+                bytes,
+            } if p == pane => {
+                replica
+                    .apply(seq, auk_replica::Item::Output(&bytes))
+                    .unwrap();
+            }
+            DaemonMsg::Record {
+                pane: p,
+                seq,
+                record,
+            } if p == pane => {
+                replica
+                    .apply(seq, auk_replica::Item::Record(&record))
+                    .unwrap();
+            }
+            _ => {}
+        }
+    }
+    assert!(capture(&env, pane).contains("through-the-bridge-42"));
+
+    // A message that isn't one whole frame closes the connection.
+    ws.send_binary(&[1, 2, 3]);
+    loop {
+        match ws.recv() {
+            Some(WsMessage::Close(code, _)) => {
+                assert_eq!(code, Some(1008));
+                break;
+            }
+            Some(_) => {}
+            None => panic!("closed without a close frame"),
+        }
+    }
+}
+
+#[test]
+fn web_serve_refuses_a_client_of_another_version() {
+    let env = env("webx9");
+    env.start_daemon();
+    let assets = builds().web_client();
+    let server = WebServer::start(&env, &assets, &["--port", "0"]);
+    let cookie = format!("auk_session={}", server.login());
+    let host = server.host();
+    let origin = format!("http://{host}");
+    for change in ["parser", "protocol", "auk"] {
+        let mut ws = WsClient::connect(
+            server.port,
+            &[("Host", &host), ("Origin", &origin), ("Cookie", &cookie)],
+        )
+        .expect("upgrade");
+        let mut hello = Hello::new(ClientKind::Web, ClientFacts::default());
+        match change {
+            "parser" => hello.versions.parser.push_str("-other"),
+            "protocol" => hello.versions.protocol += 1,
+            _ => hello.versions.auk.push_str("-other"),
+        }
+        ws.send_binary(&ClientMsg::Hello(hello).to_bytes());
+        match next_msg(&mut ws) {
+            DaemonMsg::Refused(refusal) => {
+                assert!(
+                    refusal.reason.to_lowercase().contains(change),
+                    "{}",
+                    refusal.reason
+                );
+                assert_eq!(refusal.daemon, Versions::current());
+            }
+            other => panic!("{change}: expected a refusal, got {other:?}"),
+        }
+        // Then the connection closes.
+        match ws.recv() {
+            Some(WsMessage::Close(..)) | None => {}
+            other => panic!("{change}: expected the close, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn web_serve_binds_loopback_only_by_default() {
+    let env = env("webloop");
+    let help = env.cli(&["web", "serve", "--help"]);
+    let help = String::from_utf8_lossy(&help.stdout);
+    assert!(help.contains("127.0.0.1:8377"), "{help}");
+
+    let assets = builds().web_client();
+    let server = WebServer::start(&env, &assets, &["--port", "0"]);
+    assert!(
+        server.url.starts_with("http://127.0.0.1:"),
+        "{}",
+        server.url
+    );
+    let addrs = wait_for("the server to listen", || {
+        let a = listening(server.pid());
+        (!a.is_empty()).then_some(a)
+    });
+    assert_eq!(addrs, vec![format!("127.0.0.1:{}", server.port)]);
+}
+
+#[test]
+fn web_serve_refuses_a_non_loopback_bind_without_the_flag() {
+    let env = env("webremote");
+    let assets = builds().web_client();
+    for bind in ["0.0.0.0:0", "[::]:0"] {
+        let out = env
+            .command()
+            .args(["web", "serve", "--assets"])
+            .arg(&*assets)
+            .args(["--bind", bind])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .expect("run auk web serve");
+        assert!(!out.status.success(), "{bind} was accepted");
+        assert!(out.stdout.is_empty(), "printed a URL for {bind}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("--allow-remote"), "{err}");
+    }
+    // With the flag it listens on every interface.
+    let server = WebServer::start(&env, &assets, &["--bind", "0.0.0.0:0", "--allow-remote"]);
+    let addrs = wait_for("the server to listen", || {
+        let a = listening(server.pid());
+        (!a.is_empty()).then_some(a)
+    });
+    assert_eq!(addrs, vec![format!("*:{}", server.port)]);
+}
+
+/// Polls the page's state hook until `f` accepts it.
+fn page_state(safari: &Safari, what: &str, mut f: impl FnMut(&Value) -> bool) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let mut last = Value::Null;
+    loop {
+        let raw = safari.execute("return window.aukDebug ? window.aukDebug() : null;");
+        if let Some(s) = raw.as_str() {
+            last = serde_json::from_str(s).unwrap_or(Value::Null);
+            if f(&last) {
+                return last;
+            }
+        }
+        if Instant::now() > deadline {
+            let err = safari.execute("return window.aukError || null;");
+            panic!("timed out waiting for {what}; page state: {last}; page error: {err}");
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn pane_state(state: &Value, pane: u64) -> Option<&Value> {
+    state["panes"].as_array()?.iter().find(|p| p["id"] == pane)
+}
+
+#[test]
+fn web_client_in_safari_attaches_draws_over_webgpu_and_types() {
+    // First, so a missing prerequisite fails fast and says what to do.
+    let safari = Safari::start();
+    let env = env("websafari");
+    let pane = daemon_with_pane(&env);
+    // Exact colors, whatever the page's theme: red text, then text on a green background.
+    env.run(
+        pane,
+        "printf '\\e[38;2;255;0;0mred\\e[0m \\e[48;2;0;200;0mgreen\\e[0m web-marker-%d\\n' 7",
+    );
+    let assets = builds().web_client();
+    let server = WebServer::start(&env, &assets, &["--port", "0"]);
+
+    safari.navigate(&server.url);
+    // The token is gone from the URL after the first load.
+    let url = safari.current_url();
+    assert!(!url.contains("token"), "{url}");
+
+    // Attached, drawn, and the same state as the daemon's replica.
+    let state = page_state(&safari, "the client to draw the pane", |s| {
+        s["status"] == "attached"
+            && s["frames"].as_u64().unwrap_or(0) > 0
+            && pane_state(s, pane).is_some_and(|p| !p["rect"].is_null())
+    });
+    assert!(
+        state["adapter"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("BrowserWebGpu"),
+        "not drawing over WebGPU: {}",
+        state["adapter"]
+    );
+    let state = page_state(&safari, "the page's replica to match the daemon's", |s| {
+        let (hash, seq) = env.daemon_hash(pane);
+        pane_state(s, pane).is_some_and(|p| p["hash"] == hash.as_str() && p["seq"] == seq)
+    });
+    let p = pane_state(&state, pane).expect("the pane");
+    assert_eq!(p["screen"].as_str().unwrap(), capture(&env, pane));
+    assert!(p["screen"].as_str().unwrap().contains("web-marker-7"));
+    assert!(
+        state["errors"].as_array().is_some_and(Vec::is_empty),
+        "{state}"
+    );
+
+    // Typed keys reach the shell. A click focuses the pane (and its text field); keys go where
+    // the focus is.
+    safari.click(&safari.element("#screen"));
+    safari.press_keys("echo typed-in-safari-$((6*7))\u{E007}");
+    wait_for("the shell to run the typed command", || {
+        capture(&env, pane)
+            .contains("\ntyped-in-safari-42")
+            .then_some(())
+    });
+    let state = page_state(&safari, "the page to show the output", |s| {
+        pane_state(s, pane).is_some_and(|p| {
+            p["screen"]
+                .as_str()
+                .is_some_and(|t| t.contains("\ntyped-in-safari-42"))
+        })
+    });
+    // As the pane's primary, the page's size applies to the pane.
+    let p = pane_state(&state, pane).unwrap();
+    assert_eq!(p["primary"], true, "{p}");
+    let info = env.pane_info(pane);
+    assert_eq!(
+        (info["cols"].as_u64(), info["rows"].as_u64()),
+        (p["cols"].as_u64(), p["rows"].as_u64()),
+        "{info}"
+    );
+
+    // The screenshot shows the grid: in the pane's area, ink that isn't the background,
+    // including the program's red and green. WebKit's snapshots can miss a WebGPU canvas drawn
+    // before the window was on screen, so this waits for a screenshot showing the frames drawn
+    // after the typing.
+    let rect = p["rect"].clone();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let (ink, reddish, greenish) = screen_ink(&safari, &rect);
+        if ink > 500 && reddish > 20 && greenish > 100 {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the screenshot shows only {ink} drawn pixels in the pane's area (red {reddish}, \
+             green {greenish})"
+        );
+        std::thread::sleep(Duration::from_millis(250));
+    }
+}
+
+/// Drawn pixels in a page rect (CSS pixels) of a screenshot: (unlike the background, red,
+/// green).
+fn screen_ink(safari: &Safari, rect: &Value) -> (u32, u32, u32) {
+    let shot = Rgba::from_png(&safari.screenshot());
+    let css_width = safari
+        .execute("return window.innerWidth;")
+        .as_f64()
+        .unwrap();
+    let ratio = f64::from(shot.width) / css_width;
+    let px = |v: &Value| (v.as_f64().unwrap() * ratio) as u32;
+    let (x0, y0) = (px(&rect["x"]), px(&rect["y"]));
+    let x1 = (x0 + px(&rect["w"])).min(shot.width);
+    let y1 = (y0 + px(&rect["h"])).min(shot.height);
+    let background = shot.get(x1 - 2, y1 - 2);
+    let (mut ink, mut reddish, mut greenish) = (0u32, 0u32, 0u32);
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let c = shot.get(x, y);
+            let diff: u32 = (0..3)
+                .map(|i| u32::from(c[i].abs_diff(background[i])))
+                .sum();
+            if diff > 60 {
+                ink += 1;
+            }
+            // By hue, so a color-managed screenshot still counts.
+            let [r, g, b, _] = c.map(i32::from);
+            if r > g + 100 && r > b + 100 {
+                reddish += 1;
+            }
+            if g > r + 60 && g > b + 60 {
+                greenish += 1;
+            }
+        }
+    }
+    (ink, reddish, greenish)
+}
+
+/// Fuzzed cases: the native AC2 shape (records among byte soup, a late snapshot follower) with
+/// TSP traffic mixed in.
+fn fuzz_cases() -> Vec<Case> {
+    (1..=40u64)
+        .map(|seed| {
+            let mut rng = fuzz::Rng::new(seed);
+            let mut steps = Vec::new();
+            for step in 0..60 {
+                if step == 30 {
+                    steps.push(Step::Snapshot);
+                }
+                match fuzz::record(&mut rng) {
+                    Some(record) => steps.push(Step::Record(record)),
+                    None => {
+                        let len = 1 + rng.below(400) as usize;
+                        steps.push(Step::Output(fuzz::bytes(&mut rng, len)));
+                    }
+                }
+            }
+            Case {
+                cols: 20 + rng.below(100) as u16,
+                rows: 5 + rng.below(40) as u16,
+                steps,
+            }
+        })
+        .collect()
+}
+
+#[test]
+fn ac02_wasm_replicas_reach_the_native_state_hashes_under_fuzzing() {
+    let wasm = builds().wasi_replay();
+    let cases = fuzz_cases();
+    let native = replay::run(&cases);
+    for (i, line) in native.iter().enumerate() {
+        let words: Vec<&str> = line.split(' ').collect();
+        assert_eq!(words.len(), 6, "case {i}: {line}");
+        // The authoritative replica, both followers and the late follower agree. The last
+        // word, a replica rebuilt from the final snapshot, is compared with wasm's only: a
+        // snapshot taken in the middle of an escape sequence or TSP string doesn't carry the
+        // parser's partial state.
+        assert!(
+            words[1..5].iter().all(|h| *h == words[1]),
+            "case {i}: native replicas disagree: {line}"
+        );
+    }
+
+    let mut child = Command::new("wasmtime")
+        .arg("run")
+        .arg(&wasm)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("wasmtime can't run ({e}): brew install wasmtime"));
+    let input = replay::encode(&cases);
+    let mut stdin = child.stdin.take().unwrap();
+    let writer = std::thread::spawn(move || {
+        use std::io::Write;
+        stdin.write_all(&input).expect("feed the cases");
+    });
+    let out = child.wait_with_output().expect("wasmtime");
+    writer.join().unwrap();
+    assert!(
+        out.status.success(),
+        "the wasm replica driver failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let wasm_lines: Vec<String> = String::from_utf8(out.stdout)
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(wasm_lines.len(), native.len());
+    for (i, (w, n)) in wasm_lines.iter().zip(&native).enumerate() {
+        assert_eq!(w, n, "case {i}: wasm32 and native replicas differ");
+    }
+}

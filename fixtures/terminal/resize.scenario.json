@@ -1,0 +1,18 @@
+[
+  {"wait": "idle", "ms": 300},
+  {"keys": "for i in $(seq 1 60); do printf '\\033[3%dm%03d\\033[0m %s\\n' $((i % 8)) $i \"$(printf 'word%.0s ' $(seq 1 $((i % 23))))\"; done\r"},
+  {"wait": "idle", "ms": 400},
+  {"keys": "ls -la /usr/bin | head -30\r"}, {"wait": "idle", "ms": 300},
+  {"resize": [50, 24]}, {"wait": "idle", "ms": 300},
+  {"resize": [50, 10]}, {"wait": "idle", "ms": 300},
+  {"resize": [23, 40]}, {"wait": "idle", "ms": 300},
+  {"keys": "echo a long line typed at a narrow width that wraps several times over\r"}, {"wait": "idle", "ms": 300},
+  {"resize": [131, 12]}, {"wait": "idle", "ms": 300},
+  {"resize": [80, 24]}, {"wait": "idle", "ms": 300},
+  {"keys": "printf 'no newline at the end'"}, {"wait": "idle", "ms": 300},
+  {"resize": [11, 24]}, {"wait": "idle", "ms": 300},
+  {"resize": [80, 24]}, {"wait": "idle", "ms": 300},
+  {"keys": "\u0003"}, {"wait": "idle", "ms": 200},
+  {"keys": "exit\r"},
+  {"wait": "exit"}
+]

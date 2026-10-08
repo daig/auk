@@ -1,0 +1,16 @@
+" The test vimrc for recordings: no plugins, syntax colors in truecolor, splits and a status line.
+set nocompatible
+syntax on
+set number
+set cursorline
+set laststatus=2
+set ruler
+set termguicolors
+set background=dark
+colorscheme habamax
+set listchars=tab:>-,trail:~
+set list
+set nowrap
+set sidescroll=1
+set noswapfile
+set viminfo=

@@ -3,7 +3,13 @@
 //! M0 provides the recording format and fixture validation. The TSP checklist
 //! (`research/sdk-wire.md` §10) and the SDK and omp runs build on these in M3 and M5.
 
+pub mod fuzz;
 pub mod harness;
+pub mod probe;
+pub mod remote;
+pub mod viewer;
+pub mod vt;
+pub mod web;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -37,8 +43,8 @@ pub struct Record {
 
 /// The frame ops of TSP v1 (spec §7.6).
 pub const OPS: [&str; 12] = [
-    "add", "set", "text", "splice", "move", "del", "settle", "focus", "reveal", "scroll", "suspend",
-    "resume",
+    "add", "set", "text", "splice", "move", "del", "settle", "focus", "reveal", "scroll",
+    "suspend", "resume",
 ];
 
 /// The terminal-to-program events of TSP v1 (spec §7.7).

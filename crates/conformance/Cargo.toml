@@ -7,6 +7,17 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+# The SDK's input parser is the program-side oracle for what the terminal writes.
+tern-sdk = { path = "../../third_party/tern-sdk/rust" }
+# The reference grid for the terminal suite (spec §21), the same version auk-term tests against.
+alacritty_terminal = "0.26.0"
+auk-term = { path = "../term" }
+# A test window on the daemon's wire (`viewer`), with a follower replica per pane.
+auk-mirror = { path = "../mirror" }
+auk-replica = { path = "../replica" }
+base64 = "0.23.1"
+# Decodes WebDriver screenshots in the web suite.
+png = "0.18.1"
 serde.workspace = true
 serde_json.workspace = true
 

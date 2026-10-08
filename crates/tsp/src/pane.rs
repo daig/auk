@@ -491,6 +491,12 @@ impl TspPane {
         Ok(Delivery::Sent)
     }
 
+    /// The bytes joined so far when a chunk sequence is being joined. The daemon arms its 1 s
+    /// timeout (§7.1) while this is `Some`, and restarts it whenever a chunk arrives.
+    pub fn chunk_pending(&self) -> Option<usize> {
+        self.joiner.pending().map(|seq| seq.body.len())
+    }
+
     /// The daemon's chunk timeout fired (a record): drops the sequence being joined.
     pub fn expire_chunks(&mut self) {
         if let Some(msg) = self.joiner.expire() {

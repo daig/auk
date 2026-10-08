@@ -103,7 +103,7 @@ pub fn valid_sheet_name(name: &str) -> bool {
 /// Checks program CSS. The UI engine supplies the real one; it reports dropped and rejected
 /// constructs (`url()`, `position: fixed`, `@import`, parse errors) as `<line>:<col>: …` messages.
 /// A sheet is installed even when it has messages; they are reported once, joined with `; `.
-pub trait SheetChecker: Debug {
+pub trait SheetChecker: Debug + Send {
     fn check(&self, css: &str) -> Vec<String>;
 }
 

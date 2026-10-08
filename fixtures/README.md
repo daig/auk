@@ -16,6 +16,22 @@ Each `.jsonl` file uses Tern's recording format (book:11579): one message per li
 
 Re-record with the commands in each `.meta.json` (`argv`, `cwd`, `env`). Recordings of model output aren't reproducible; keep the originals.
 
+## `terminal/`: recorded terminal sessions
+
+Raw output of real programs in a PTY, for the `terminal` suite's reference grid (Auk against `alacritty_terminal`). Each `<name>.vt.jsonl` holds, in stream order, the program's reads (`{"t","out":<base64>}`), the resizes (`{"t","resize":[cols,rows]}`) and what the scenario typed (`{"t","in"}`, not replayed). `<name>.meta.json` holds the command, size, environment, program version, scenario and counts. `tools/vt_record.py` records them; `terminal/record.sh [name…]` re-records with the exact commands, each in a fresh temporary `HOME`.
+
+| Recording | Program |
+| --- | --- |
+| `vim` | vim 9.1 with `terminal/vimrc` (syntax colors in truecolor, splits) editing `sample.rs`, resized twice |
+| `less` | `less -R` over `less-input.sh`'s colored, wide and tabbed text: search, chop toggle, resizes |
+| `htop` | htop 3.5 with no config, showing itself and three `sleep`s: tree view, setup screen, resizes |
+| `gitlog` | `git log --color --graph --decorate --stat --all` over the repository `gitlog.sh` builds with fixed dates, paged by less |
+| `tmux` | tmux 3.7 with `-f /dev/null` on its own socket, `zsh -f` in each pane: two splits, zoom, resizes |
+| `wide`, `emoji` | `zsh -f` printing `wide.txt` (CJK, fullwidth, combining marks, Hangul jamo) and `emoji.txt` (skin tones, ZWJ, flags, keycaps, VS16), resized |
+| `resize` | `zsh -f` with colored wrapped output, resized through seven sizes |
+
+htop and tmux show the time, so re-recording gives different bytes; the committed recordings are the reference inputs.
+
 ## `scenarios/`
 
 Step lists for `tools/tsp_record.py --scenario` (see the tool's docstring).

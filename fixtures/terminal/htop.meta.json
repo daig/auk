@@ -1,0 +1,25 @@
+{
+  "argv": [
+    "sh",
+    "-c",
+    "sleep 600 & a=$!; sleep 601 & b=$!; sleep 602 & c=$!; exec htop -p $$,$a,$b,$c"
+  ],
+  "cwd": "{tmp}",
+  "cols": 100,
+  "rows": 30,
+  "env": [],
+  "program": "/bin/sh",
+  "version": "GNU bash, version 3.2.57(1)-release (arm64-apple-darwin26)",
+  "scenario": "fixtures/terminal/htop.scenario.json",
+  "recorded": "2026-10-08T04:17:16-0600",
+  "recorder": "tools/vt_record.py",
+  "exit_status": 0,
+  "counts": {
+    "out": 71,
+    "out_bytes": 18916,
+    "resize": 2,
+    "in": 6
+  },
+  "sha256": "c5be1e7dd0f94926c71ca30a0949a9d68c306905806a84373227b9731d8aee41",
+  "note": "htop with no config, showing only itself and three sleeps it starts: tree view, setup screen, resizes"
+}

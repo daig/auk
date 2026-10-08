@@ -95,6 +95,95 @@ impl Window {
     }
 }
 
+/// A synthetic mouse event for [`Window::send_mouse`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MouseAction {
+    Down,
+    Up,
+    Dragged,
+    Moved,
+}
+
+impl Window {
+    /// Delivers a left- or right-button mouse event at (`x`, `y`) points from the view's
+    /// top-left corner, as an `NSEvent` through the window (`sendEvent:`), as AppKit delivers a
+    /// real one. `flags` are modifier flags ([`crate::keys::flags`]).
+    pub fn send_mouse(&self, action: MouseAction, right: bool, x: f64, y: f64, clicks: u32, flags: u64) -> bool {
+        use objc2_app_kit::{NSEventModifierFlags, NSEventType};
+        let Some(window) = self.ns_window() else {
+            return false;
+        };
+        let kind = match (action, right) {
+            (MouseAction::Down, false) => NSEventType::LeftMouseDown,
+            (MouseAction::Up, false) => NSEventType::LeftMouseUp,
+            (MouseAction::Dragged, false) => NSEventType::LeftMouseDragged,
+            (MouseAction::Down, true) => NSEventType::RightMouseDown,
+            (MouseAction::Up, true) => NSEventType::RightMouseUp,
+            (MouseAction::Dragged, true) => NSEventType::RightMouseDragged,
+            (MouseAction::Moved, _) => NSEventType::MouseMoved,
+        };
+        let point = self
+            .view
+            .convertPoint_toView(objc2_foundation::NSPoint::new(x, y), None);
+        let time = objc2_foundation::NSProcessInfo::processInfo().systemUptime();
+        let event = NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
+            kind,
+            point,
+            NSEventModifierFlags(flags as usize),
+            time,
+            window.windowNumber(),
+            None,
+            0,
+            clicks as isize,
+            if matches!(action, MouseAction::Up | MouseAction::Moved) { 0.0 } else { 1.0 },
+        );
+        match event {
+            Some(event) => {
+                window.sendEvent(&event);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Delivers a scroll-wheel event of `lines` lines (positive scrolls toward the top) at
+    /// (`x`, `y`) points from the view's top-left corner, through the window.
+    pub fn send_scroll(&self, lines: i32, x: f64, y: f64) -> bool {
+        use objc2::MainThreadOnly;
+        use objc2_core_foundation::CGPoint;
+        use objc2_core_graphics::CGScrollEventUnit;
+        let Some(window) = self.ns_window() else {
+            return false;
+        };
+        let Some(event) = CGEvent::new_scroll_wheel_event2(None, CGScrollEventUnit::Line, 1, lines, 0, 0)
+        else {
+            return false;
+        };
+        // CGEvent locations are global, from the top-left of the main display.
+        let in_window = self
+            .view
+            .convertPoint_toView(objc2_foundation::NSPoint::new(x, y), None);
+        let on_screen = window.convertPointToScreen(in_window);
+        let main_height = objc2_app_kit::NSScreen::screens(window.mtm())
+            .firstObject()
+            .map_or(0.0, |s| s.frame().size.height);
+        CGEvent::set_location(
+            Some(&event),
+            CGPoint {
+                x: on_screen.x,
+                y: main_height - on_screen.y,
+            },
+        );
+        match NSEvent::eventWithCGEvent(&event) {
+            Some(ns) => {
+                window.sendEvent(&ns);
+                true
+            }
+            None => false,
+        }
+    }
+}
+
 /// Runs the main run loop for `time`, so asynchronous input methods (which answer over mach
 /// messages) finish handling the keys typed so far. Main thread only.
 pub fn settle(time: std::time::Duration) {

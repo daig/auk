@@ -1,0 +1,17 @@
+[
+  {"wait": "idle", "ms": 400},
+  {"keys": " "}, {"wait": "idle", "ms": 200},
+  {"keys": "b"}, {"wait": "idle", "ms": 200},
+  {"keys": "jjjjj"}, {"wait": "idle", "ms": 200},
+  {"keys": "/中\r"}, {"wait": "idle", "ms": 300},
+  {"keys": "n"}, {"wait": "idle", "ms": 200},
+  {"keys": "-S\r"}, {"wait": "idle", "ms": 300},
+  {"keys": "\u001b[C"}, {"wait": "idle", "ms": 200},
+  {"keys": "-S\r"}, {"wait": "idle", "ms": 300},
+  {"resize": [50, 15]}, {"wait": "idle", "ms": 400},
+  {"keys": "G"}, {"wait": "idle", "ms": 200},
+  {"resize": [90, 30]}, {"wait": "idle", "ms": 400},
+  {"keys": "g"}, {"wait": "idle", "ms": 200},
+  {"keys": "q"},
+  {"wait": "exit"}
+]

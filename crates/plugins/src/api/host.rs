@@ -1,5 +1,5 @@
-//! Host-only registration: `tern.on` (host events), `tern.block.define`, `tern.lens.define`.
-//! Running blocks and lenses, and `tern.pane`, come with M7 and M8.
+//! Host-only members: `tern.on` (host events), `tern.block.define`, `tern.lens.define` and
+//! `tern.pane`. Nothing here names a window (AC14): effects target a pane or the whole host.
 
 use std::rc::Rc;
 
@@ -51,7 +51,7 @@ pub(super) fn install(lua: &Lua, tern: &Table, state: &Rc<ApiState>) -> mlua::Re
             Ok(())
         })?,
     )?;
-    tern.set("block", block)?;
+    tern.set("block", &block)?;
 
     let lens = lua.create_table()?;
     let lens_state = Rc::clone(state);
@@ -74,7 +74,44 @@ pub(super) fn install(lua: &Lua, tern: &Table, state: &Rc<ApiState>) -> mlua::Re
             Ok(())
         })?,
     )?;
-    tern.set("lens", lens)?;
+    tern.set("lens", &lens)?;
+
+    let pane = lua.create_table()?;
+    let writes = Rc::clone(state);
+    pane.set(
+        "write",
+        lua.create_function(move |_, (pane, text): (f64, mlua::LuaString)| {
+            if pane >= 0.0 && pane.fract() == 0.0 {
+                writes
+                    .pane_writes
+                    .borrow_mut()
+                    .push((pane as u64, text.to_string_lossy()));
+            }
+            Ok(())
+        })?,
+    )?;
+    let lister = Rc::clone(state);
+    pane.set(
+        "list",
+        lua.create_function(move |lua, ()| {
+            let panes = lister.panes.as_ref().map(|p| p.list()).unwrap_or_default();
+            let out = lua.create_table_with_capacity(panes.len(), 0)?;
+            for (i, p) in panes.iter().enumerate() {
+                let t = lua.create_table()?;
+                t.set("pane", p.pane as f64)?;
+                t.set("cwd", p.cwd.as_deref())?;
+                t.set("program", p.program.as_str())?;
+                t.set("title", p.title.as_str())?;
+                t.set("busy", p.busy)?;
+                out.raw_set(i + 1, t)?;
+            }
+            Ok(out)
+        })?,
+    )?;
+    pane.set_readonly(true);
+    tern.set("pane", pane)?;
+    block.set_readonly(true);
+    lens.set_readonly(true);
     Ok(())
 }
 

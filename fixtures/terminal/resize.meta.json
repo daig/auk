@@ -1,0 +1,27 @@
+{
+  "argv": [
+    "zsh",
+    "-f",
+    "-i"
+  ],
+  "cwd": "{tmp}",
+  "cols": 80,
+  "rows": 24,
+  "env": [
+    "PS1=%# "
+  ],
+  "program": "/bin/zsh",
+  "version": "zsh 5.9 (arm64-apple-darwin26.0)",
+  "scenario": "fixtures/terminal/resize.scenario.json",
+  "recorded": "2026-10-08T04:16:32-0600",
+  "recorder": "tools/vt_record.py",
+  "exit_status": 130,
+  "counts": {
+    "out": 168,
+    "out_bytes": 6607,
+    "resize": 7,
+    "in": 6
+  },
+  "sha256": "00a85fb511eb461f766d120ea75b1a88a7834e8084e575c9b657c4c7d79c1feb",
+  "note": "zsh -f with colored wrapped output, resized through many sizes"
+}

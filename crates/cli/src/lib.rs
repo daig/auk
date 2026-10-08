@@ -45,6 +45,22 @@ pub enum Command {
         /// The size to ask for each pane, as COLSxROWS.
         #[arg(long, value_parser = parse_size)]
         size: Option<(u16, u16)>,
+        /// Attach to this host's daemon over SSH (`ssh HOST auk attach --stdio`, §10.2).
+        #[arg(long)]
+        host: Option<String>,
+        /// With --host: the SSH config file (`ssh -F`).
+        #[arg(long, requires = "host")]
+        ssh_config: Option<PathBuf>,
+        /// With --host: the command the remote shell runs (default: `auk attach --stdio`).
+        #[arg(long, requires = "host")]
+        remote_command: Option<String>,
+    },
+    /// The remote end of an SSH link: bridge stdio to this host's daemon, starting it if none
+    /// answers (§10.2). Run by `ssh HOST auk attach --stdio`.
+    Attach {
+        /// Speak the replication protocol on stdin and stdout (the only mode).
+        #[arg(long, required = true)]
+        stdio: bool,
     },
     /// List sessions, tabs and panes.
     Ls {
@@ -95,6 +111,20 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Play a TSP recording into a pane (§7.15): `surface-play FILE [from N] [until N]
+    /// [paced [TIMES]]`. The first play restarts the pane as a stand-in program.
+    SurfacePlay {
+        file: PathBuf,
+        /// The pane (default: the focused one).
+        #[arg(long, default_value = "@focused")]
+        pane: String,
+        /// `from N`, `until N`, `paced [TIMES]`.
+        #[arg(trailing_var_arg = true)]
+        options: Vec<String>,
+    },
+    /// The stand-in program `surface-play` restarts a pane as: raw mode, reads and drops input.
+    #[command(hide = true)]
+    StandIn,
     /// Wait for a pane: `prompt`, `exit` or `idle=MS`. Exits 124 on timeout.
     Wait {
         target: String,
@@ -141,7 +171,18 @@ pub fn run(cli: Cli) -> ExitCode {
             control,
             window,
             size,
+            host,
+            ssh_config,
+            remote_command,
         } => {
+            let remote = host.map(|host| {
+                let mut target = auk_remote::SshTarget::new(host);
+                target.config = ssh_config;
+                if let Some(command) = remote_command {
+                    target.remote_command = command;
+                }
+                target
+            });
             let opts = headless::Options {
                 control: control.unwrap_or_else(|| headless::default_control(&socket)),
                 socket,
@@ -149,12 +190,23 @@ pub fn run(cli: Cli) -> ExitCode {
                 size,
                 exe: current_exe(),
                 state_dir: paths::state_dir(),
+                remote,
             };
             match headless::run(&opts) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(err) => fail(format!("auk headless: {err}")),
             }
         }
+        Command::Attach { .. } => {
+            match auk_remote::bridge::run_stdio(&current_exe(), &socket, &paths::state_dir()) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(err) => fail(format!("auk attach: {err}")),
+            }
+        }
+        Command::StandIn => match auk_daemon::play::stand_in() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => fail(format!("auk stand-in: {err}")),
+        },
         verb => match run_verb(&socket, verb) {
             Ok(code) => code,
             Err(VerbError::Timeout) => ExitCode::from(EXIT_TIMEOUT),
@@ -287,7 +339,24 @@ fn run_verb(socket: &Path, verb: Command) -> Result<ExitCode, VerbError> {
             }
             connect(socket, false)?.request(&words)?;
         }
-        Command::Daemon | Command::Headless { .. } => unreachable!("handled by `run`"),
+        Command::SurfacePlay {
+            file,
+            pane,
+            options,
+        } => {
+            let mut words = vec![
+                "surface-play".to_owned(),
+                "--pane".to_owned(),
+                pane,
+                absolute(&file).to_string_lossy().into_owned(),
+            ];
+            words.extend(options);
+            let value = connect(socket, false)?.request(&words)?;
+            writeln!(out, "{value}")?;
+        }
+        Command::Daemon | Command::Headless { .. } | Command::Attach { .. } | Command::StandIn => {
+            unreachable!("handled by `run`")
+        }
     }
     Ok(ExitCode::SUCCESS)
 }

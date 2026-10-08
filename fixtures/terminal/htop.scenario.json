@@ -1,0 +1,13 @@
+[
+  {"wait": "idle", "ms": 300, "timeout": 20},
+  {"sleep": 1600},
+  {"keys": "t"}, {"sleep": 800},
+  {"keys": "jjj"}, {"sleep": 400},
+  {"keys": "t"}, {"sleep": 800},
+  {"keys": "\u001bOP"}, {"sleep": 800},
+  {"keys": "\u001b"}, {"sleep": 600},
+  {"resize": [70, 20]}, {"sleep": 1200},
+  {"resize": [120, 35]}, {"sleep": 1200},
+  {"keys": "q"},
+  {"wait": "exit"}
+]

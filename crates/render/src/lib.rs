@@ -16,9 +16,10 @@ mod snapshot;
 mod surface;
 mod theme;
 mod timing;
+mod ui_layer;
 
 pub use gpu::{Gpu, GpuError};
-pub use grid::{GridRenderer, PrepareStats};
+pub use grid::{GridRenderer, MAX_SLOT_ROWS, PrepareStats, RowSlot};
 pub use offscreen::{Image, OFFSCREEN_FORMAT, OffscreenTarget, ReadbackError};
 pub use snapshot::{
     Attrs, CellText, CursorStyle, GridSnapshot, Selection, SnapCell, SnapCursor, View,
@@ -28,6 +29,11 @@ pub use theme::{
     OVERRIDE_BACKGROUND, OVERRIDE_CURSOR, OVERRIDE_FOREGROUND, Rgba, Theme, xterm_palette,
 };
 pub use timing::GpuTimer;
+pub use ui_layer::{UI_FORMAT, UiError, UiLayer};
+/// The 2D scene type the UI layer renders (Vello's).
+pub use vello;
+/// The GPU API the renderer is built on, for callers composing their own passes.
+pub use wgpu;
 
 /// Renders `snapshot` into a new offscreen target of `width`×`height` pixels and reads it back.
 /// `renderer` must have been made with [`OFFSCREEN_FORMAT`].

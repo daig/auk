@@ -1,0 +1,27 @@
+{
+  "argv": [
+    "zsh",
+    "-f",
+    "-i"
+  ],
+  "cwd": "{fixtures}",
+  "cols": 80,
+  "rows": 24,
+  "env": [
+    "PS1=%# "
+  ],
+  "program": "/bin/zsh",
+  "version": "zsh 5.9 (arm64-apple-darwin26.0)",
+  "scenario": "fixtures/terminal/wide.scenario.json",
+  "recorded": "2026-10-08T04:16:29-0600",
+  "recorder": "tools/vt_record.py",
+  "exit_status": 0,
+  "counts": {
+    "out": 39,
+    "out_bytes": 2440,
+    "resize": 3,
+    "in": 3
+  },
+  "sha256": "8581ab369ea148cee9eb658421d1d3d78f189d14cecc40553a7f77fe85c6a3dd",
+  "note": "zsh -f printing wide.txt (CJK, fullwidth, combining marks), resizes"
+}

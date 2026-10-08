@@ -10,6 +10,9 @@ publish.workspace = true
 auk-mirror = { version = "0.0.0", path = "../mirror", features = ["tokio"] }
 auk-replica = { version = "0.0.0", path = "../replica" }
 auk-term = { version = "0.0.0", path = "../term" }
+auk-tsp = { version = "0.0.0", path = "../tsp" }
+auk-ui = { version = "0.0.0", path = "../ui" }
+base64 = "0.23.1"
 bytes = "1.12.1"
 futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
 libc = "0.2.190"

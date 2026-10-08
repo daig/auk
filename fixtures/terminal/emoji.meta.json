@@ -1,0 +1,27 @@
+{
+  "argv": [
+    "zsh",
+    "-f",
+    "-i"
+  ],
+  "cwd": "{fixtures}",
+  "cols": 80,
+  "rows": 24,
+  "env": [
+    "PS1=%# "
+  ],
+  "program": "/bin/zsh",
+  "version": "zsh 5.9 (arm64-apple-darwin26.0)",
+  "scenario": "fixtures/terminal/emoji.scenario.json",
+  "recorded": "2026-10-08T04:16:30-0600",
+  "recorder": "tools/vt_record.py",
+  "exit_status": 0,
+  "counts": {
+    "out": 38,
+    "out_bytes": 1570,
+    "resize": 2,
+    "in": 3
+  },
+  "sha256": "60dc791005e186f39a6f3ff44b617a106d1aa506b2b4f88ba407b3ca2cd5e6af",
+  "note": "zsh -f printing emoji.txt (emoji, skin tones, ZWJ, flags, VS16), resizes"
+}

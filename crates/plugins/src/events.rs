@@ -29,6 +29,66 @@ pub const WINDOW_EVENTS: &[&str] = &[
     "title",
 ];
 
+/// A pane as `tern.pane.list` reports it (§9.7): every pane on the host whose program hasn't
+/// exited, as its owner last reported it. A plugin block's `program` is its kind.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaneInfo {
+    /// Pane id.
+    pub pane: PaneId,
+    /// Working directory, when known.
+    pub cwd: Option<String>,
+    /// The program (the block kind for a plugin block).
+    pub program: String,
+    /// The pane title.
+    pub title: String,
+    /// Whether a shell-integrated command is running.
+    pub busy: bool,
+}
+
+/// What the daemon provides for `tern.pane.list`. Called on worker threads.
+pub trait PaneDirectory: Send + Sync {
+    /// Every live pane on this host.
+    fn list(&self) -> Vec<PaneInfo>;
+}
+
+/// A [`PaneDirectory`] the daemon keeps up to date by replacing the list.
+#[derive(Debug, Default)]
+pub struct PaneTable {
+    panes: std::sync::RwLock<Vec<PaneInfo>>,
+}
+
+impl PaneTable {
+    /// Replaces the list.
+    pub fn set(&self, panes: Vec<PaneInfo>) {
+        if let Ok(mut p) = self.panes.write() {
+            *p = panes;
+        }
+    }
+
+    /// Adds or replaces one pane.
+    pub fn upsert(&self, info: PaneInfo) {
+        if let Ok(mut p) = self.panes.write() {
+            match p.iter_mut().find(|x| x.pane == info.pane) {
+                Some(x) => *x = info,
+                None => p.push(info),
+            }
+        }
+    }
+
+    /// Removes a pane.
+    pub fn remove(&self, pane: PaneId) {
+        if let Ok(mut p) = self.panes.write() {
+            p.retain(|x| x.pane != pane);
+        }
+    }
+}
+
+impl PaneDirectory for PaneTable {
+    fn list(&self) -> Vec<PaneInfo> {
+        self.panes.read().map(|p| p.clone()).unwrap_or_default()
+    }
+}
+
 /// A pane event the daemon sends to every host worker. (`spawn` is a request, not an event.)
 #[derive(Debug, Clone, PartialEq)]
 pub enum HostEvent {

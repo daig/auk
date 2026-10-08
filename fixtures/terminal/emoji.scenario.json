@@ -1,0 +1,9 @@
+[
+  {"wait": "idle", "ms": 300},
+  {"keys": "cat emoji.txt\r"}, {"wait": "idle", "ms": 300},
+  {"resize": [41, 24]}, {"wait": "idle", "ms": 300},
+  {"keys": "echo 🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀\r"}, {"wait": "idle", "ms": 300},
+  {"resize": [80, 30]}, {"wait": "idle", "ms": 300},
+  {"keys": "exit\r"},
+  {"wait": "exit"}
+]

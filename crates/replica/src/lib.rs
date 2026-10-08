@@ -6,15 +6,22 @@
 //! (DA1, CPR, TSP replies) reach the program (§14.2). Client replicas follow: they apply the same
 //! items, start from a snapshot taken at a sequence number (§15.3), and drop every answer.
 //!
-//! TSP is a seam: complete `ESC _ tsp;…` strings go to an optional [`TspHandler`], which the
-//! TSP crate provides. Without one, TSP strings are consumed and dropped.
+//! Every replica runs the same TSP engine (`auk-tsp`, §7) on the same stream: TSP strings, the
+//! prompt mark, RIS, the alternate screen, cleared screens and ended anchors reach it in stream
+//! order, as do the records it depends on (process exit, the chunk timeout, settings). Only the
+//! authoritative replica's answers reach the program; acks, view events and client facts come
+//! from the daemon on behalf of the pane's primary client (§15.5) and touch no replicated state.
 //!
 //! Builds for wasm32: the browser client runs the same replica.
 
 use std::collections::BTreeMap;
 use std::fmt;
 
-use auk_term::{Config, Terminal};
+use auk_term::{Config, Mark, Terminal};
+pub use auk_tsp::{
+    Changes as TspChanges, Config as TspConfig, Delivery, Facts as TspFacts, Refused, Rewrite,
+    TspPane, ViewEvent,
+};
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -25,7 +32,7 @@ pub use auk_term::Event;
 /// differs from the daemon's are refused at attach (X9). It names this crate's version, which the
 /// whole workspace shares (so it covers `auk-term`, its Unicode width tables and `auk-tsp`), plus
 /// a revision bumped whenever parsing changes between releases.
-pub const PARSER_VERSION: &str = concat!("auk-replica/", env!("CARGO_PKG_VERSION"), "+r1");
+pub const PARSER_VERSION: &str = concat!("auk-replica/", env!("CARGO_PKG_VERSION"), "+r2");
 
 /// Host settings that change parsing (§15.2, §5.5). They change only through
 /// [`Record::Settings`], so every replica switches at the same stream position.
@@ -78,6 +85,9 @@ pub enum Record {
     Exit {
         status: i32,
     },
+    /// The daemon's 1 s chunk timeout passed (§7.1): the chunk sequence being joined is dropped
+    /// here on every replica.
+    ChunkTimeout,
 }
 
 /// One item of a pane's stream.
@@ -109,7 +119,7 @@ pub struct Snapshot {
     /// The process's exit status, once it has ended.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit: Option<i32>,
-    /// VT bytes, then the replica's own state as OSC sequences, then TSP (when a handler exists).
+    /// VT bytes, then the replica's own state as OSC sequences, then TSP (§15.3).
     #[serde(skip)]
     pub bytes: Vec<u8>,
 }
@@ -133,42 +143,30 @@ impl fmt::Display for SeqError {
 
 impl std::error::Error for SeqError {}
 
-/// What a [`TspHandler`] may touch while handling a TSP string or a terminal event.
-#[derive(Debug)]
-pub struct TspContext<'a> {
-    pub term: &'a mut Terminal,
-    pub settings: &'a Settings,
-    /// True while a snapshot is being replayed: nothing may reach the program.
-    pub replaying: bool,
-    /// Answers for the program, in order with the terminal's own. Dropped unless the replica is
-    /// authoritative and not replaying.
-    pub replies: &'a mut Vec<u8>,
+/// An answer for the program, in stream order. The daemon writes terminal answers as they come
+/// and TSP messages only through the tty mode gate (§12.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Answer {
+    /// Terminal answers: DA1, CPR, color queries and the like.
+    Term(Vec<u8>),
+    /// One TSP reply or event: `ESC _ tsp;<r|e>;<json> ESC \`.
+    Tsp(Vec<u8>),
 }
 
-/// The TSP document model behind a replica (§7). The `auk-tsp` crate implements it.
-pub trait TspHandler: Send + fmt::Debug {
-    /// A complete TSP string: the bytes after `ESC _`, without the terminator.
-    fn on_tsp(&mut self, payload: &[u8], ctx: TspContext<'_>);
-
-    /// A terminal event the surface rules depend on: marks, reset, the alternate screen, cleared
-    /// screens and ended anchors.
-    fn on_event(&mut self, event: &Event, ctx: TspContext<'_>) {
-        let _ = (event, ctx);
+impl Answer {
+    pub fn bytes(&self) -> &[u8] {
+        match self {
+            Answer::Term(b) | Answer::Tsp(b) => b,
+        }
     }
+}
 
-    /// A record, after the terminal applied it: resizes, settings, process exit.
-    fn on_record(&mut self, record: &Record, ctx: TspContext<'_>) {
-        let _ = (record, ctx);
-    }
-
-    /// TSP bytes that rebuild the documents (§15.3, steps 1–5), appended to the VT snapshot.
-    fn snapshot(&self) -> Vec<u8> {
-        Vec::new()
-    }
-
-    /// A hash of the replicated document state.
-    fn state_hash(&self) -> [u8; 32] {
-        [0; 32]
+/// The TSP engine's replicated config for these settings (§15.2).
+pub fn tsp_config(settings: &Settings) -> TspConfig {
+    TspConfig {
+        enabled: settings.native_surfaces,
+        retention: settings.retention,
+        ..TspConfig::default()
     }
 }
 
@@ -182,15 +180,25 @@ pub struct Replica {
     exit: Option<i32>,
     cwd: Option<String>,
     user_vars: BTreeMap<String, Vec<u8>>,
-    replies: Vec<u8>,
-    tsp: Option<Box<dyn TspHandler>>,
+    replies: Vec<Answer>,
+    tsp: TspPane,
 }
 
 impl Replica {
-    /// An empty replica at stream position 0.
+    /// An empty replica at stream position 0, with the TSP engine's in-memory blob store.
     pub fn new(cols: u16, rows: u16, settings: Settings, role: Role) -> Self {
+        let tsp = TspPane::new(tsp_config(&settings));
+        Self::with_tsp(cols, rows, settings, role, tsp)
+    }
+
+    /// An empty replica whose TSP engine was built by the caller (the daemon's has the CSS
+    /// checker and the disk blob store). Its config must be [`tsp_config`] of `settings`.
+    pub fn with_tsp(cols: u16, rows: u16, settings: Settings, role: Role, tsp: TspPane) -> Self {
+        let mut term = Terminal::new(cols, rows, settings.term_config());
+        // A program can't forge anchor rows; only snapshot replay rebuilds them.
+        term.set_accept_anchor_sequences(false);
         Replica {
-            term: Terminal::new(cols, rows, settings.term_config()),
+            term,
             role,
             seq: 0,
             settings,
@@ -198,36 +206,31 @@ impl Replica {
             cwd: None,
             user_vars: BTreeMap::new(),
             replies: Vec::new(),
-            tsp: None,
+            tsp,
         }
     }
 
     /// Rebuilds a replica from a snapshot. Live items continue at `snapshot.seq + 1`. Nothing the
-    /// replay would answer is kept (§15.3).
-    pub fn from_snapshot(
-        snapshot: &Snapshot,
-        role: Role,
-        tsp: Option<Box<dyn TspHandler>>,
-    ) -> Self {
-        let mut replica = Replica::new(
-            snapshot.cols,
-            snapshot.rows,
-            snapshot.settings.clone(),
-            role,
-        );
-        replica.tsp = tsp;
+    /// replay would answer is kept (§15.3). `tsp` is the engine to rebuild into (its config is
+    /// replaced by the snapshot's settings); `None` builds the default one.
+    pub fn from_snapshot(snapshot: &Snapshot, role: Role, tsp: Option<TspPane>) -> Self {
+        let settings = snapshot.settings.clone();
+        let mut tsp = tsp.unwrap_or_else(|| TspPane::new(tsp_config(&settings)));
+        let mut term = Terminal::new(snapshot.cols, snapshot.rows, settings.term_config());
+        tsp.set_config(&mut term, tsp_config(&settings));
+        let mut replica = Replica::with_tsp(snapshot.cols, snapshot.rows, settings, role, tsp);
         replica.exit = snapshot.exit;
+        replica.term.set_accept_anchor_sequences(true);
+        replica.tsp.begin_replay();
         let mut events = Vec::new();
         replica.feed(&snapshot.bytes, true, &mut events);
+        replica.tsp.end_replay();
+        replica.term.set_accept_anchor_sequences(false);
         replica.term.take_replies();
+        replica.tsp.take_output();
         replica.replies.clear();
         replica.seq = snapshot.seq;
         replica
-    }
-
-    /// Installs the TSP handler. Set it before the first item; documents aren't rebuilt.
-    pub fn set_tsp_handler(&mut self, handler: Box<dyn TspHandler>) {
-        self.tsp = Some(handler);
     }
 
     /// The sequence number of the last item applied; 0 before any.
@@ -263,7 +266,7 @@ impl Replica {
     }
 
     /// Answers for the program, in order. Always empty for a follower.
-    pub fn take_replies(&mut self) -> Vec<u8> {
+    pub fn take_replies(&mut self) -> Vec<Answer> {
         std::mem::take(&mut self.replies)
     }
 
@@ -275,9 +278,40 @@ impl Replica {
         &self.term
     }
 
+    /// The pane's TSP state (§7): surfaces, documents, the program's hello.
+    pub fn tsp(&self) -> &TspPane {
+        &self.tsp
+    }
+
+    /// What changed in the TSP state since the last call, for views.
+    pub fn take_tsp_changes(&mut self) -> TspChanges {
+        self.tsp.take_changes()
+    }
+
     /// Client facts for answers (§15.5). Not replicated.
     pub fn set_facts(&mut self, facts: auk_term::Facts) {
         self.term.set_facts(facts);
+    }
+
+    /// The primary client's facts for TSP (§15.5): the hello's `cell`, `dark`, `reduceMotion`
+    /// and `hour12`, and `theme`, `motion`, `resize` and `visible` events as they change.
+    pub fn set_tsp_facts(&mut self, facts: TspFacts) {
+        self.tsp.set_facts(&self.term, facts);
+        self.collect_tsp(false);
+    }
+
+    /// The primary drew surface `sf` up to frame `s` (§7.10): queues the `ack` (and the
+    /// first-draw `resize`) for the program.
+    pub fn ack(&mut self, sf: &str, s: u64) {
+        self.tsp.ack(&self.term, sf, s);
+        self.collect_tsp(false);
+    }
+
+    /// An event a client built from its view (§15.4), checked against the documents.
+    pub fn view_event(&mut self, sf: &str, event: ViewEvent) -> Result<Delivery, Refused> {
+        let result = self.tsp.view_event(&self.term, sf, event);
+        self.collect_tsp(false);
+        result
     }
 
     pub fn settings(&self) -> &Settings {
@@ -312,7 +346,7 @@ impl Replica {
     }
 
     /// A hash of all replicated state: the terminal's, the stream position, the settings, the
-    /// cwd and user variables, and the TSP documents. Equal on every platform for equal streams.
+    /// cwd and user variables, and the TSP state. Equal on every platform for equal streams.
     pub fn state_hash(&self) -> [u8; 32] {
         let mut h = Sha256::new();
         h.update(b"auk-replica state v1\0");
@@ -335,12 +369,18 @@ impl Replica {
             hash_bytes(&mut h, Some(name.as_bytes()));
             hash_bytes(&mut h, Some(value));
         }
-        h.update(self.tsp.as_ref().map_or([0; 32], |t| t.state_hash()));
+        h.update(self.tsp.state_hash());
         h.finalize().into()
     }
 
     /// The snapshot at the current stream position (§15.3).
     pub fn snapshot(&self) -> Snapshot {
+        self.snapshot_with(&mut |_, _, _| {})
+    }
+
+    /// The snapshot, with each TSP node's props passed through `rewrite` (the daemon rewrites
+    /// ages to snapshot time, §7.13).
+    pub fn snapshot_with(&self, rewrite: &mut Rewrite<'_>) -> Snapshot {
         let mut bytes = self.term.snapshot();
         if let Some(cwd) = &self.cwd {
             write_osc(&mut bytes, &format!("7;{cwd}"));
@@ -352,9 +392,7 @@ impl Replica {
                 &format!("1337;SetUserVar={name}={}", b64.encode(value)),
             );
         }
-        if let Some(tsp) = &self.tsp {
-            bytes.extend(tsp.snapshot());
-        }
+        bytes.extend(self.tsp.snapshot_with(rewrite));
         Snapshot {
             seq: self.seq,
             cols: self.term.cols(),
@@ -369,30 +407,33 @@ impl Replica {
         match record {
             Record::Resize { cols, rows } => self.term.resize(*cols, *rows),
             Record::ClearScrollback => self.term.clear_scrollback(),
-            Record::Reset => {
-                self.term.reset();
-                self.observe(Event::Reset, false, events);
-            }
+            Record::Reset => self.term.reset(),
             Record::Settings { settings } => {
                 self.term.set_config(settings.term_config());
                 self.settings = settings.clone();
             }
             Record::Exit { status } => self.exit = Some(*status),
+            Record::ChunkTimeout => {}
         }
         self.collect_replies(false);
-        if let Some(tsp) = &mut self.tsp {
-            let mut replies = Vec::new();
-            tsp.on_record(
-                record,
-                TspContext {
-                    term: &mut self.term,
-                    settings: &self.settings,
-                    replaying: false,
-                    replies: &mut replies,
-                },
-            );
-            self.keep_replies(replies, false);
+        // A reset clears every surface silently, before the anchors it ended are reported.
+        if matches!(record, Record::Reset) {
+            self.observe(Event::Reset, false, events);
         }
+        // Anchors the record ended come next, then the record's own TSP rule.
+        self.drain_events(false, events);
+        match record {
+            Record::Resize { .. } => self.tsp.on_resize(&self.term),
+            Record::Reset => {}
+            Record::Settings { settings } => {
+                self.tsp.set_config(&mut self.term, tsp_config(settings))
+            }
+            Record::Exit { .. } => self.tsp.on_exit(&mut self.term),
+            Record::ChunkTimeout => self.tsp.expire_chunks(),
+            Record::ClearScrollback => {}
+        }
+        self.collect_tsp(false);
+        self.drain_events(false, events);
     }
 
     fn feed(&mut self, mut bytes: &[u8], replaying: bool, events: &mut Vec<Event>) {
@@ -400,13 +441,36 @@ impl Replica {
             let (n, event) = self.term.advance(bytes);
             bytes = &bytes[n.min(bytes.len())..];
             match event {
-                Some(event) => self.observe(event, replaying, events),
+                Some(event) => {
+                    // The rest of this byte's events. RIS ends anchors as it resets; surfaces are
+                    // cleared silently by the reset, not ended one by one with `gone` (§7.3).
+                    let mut batch = vec![event];
+                    batch.extend(self.term.take_events());
+                    if let Some(i) = batch.iter().position(|e| *e == Event::Reset) {
+                        let reset = batch.remove(i);
+                        batch.insert(0, reset);
+                    }
+                    for event in batch {
+                        self.observe(event, replaying, events);
+                    }
+                }
                 // The terminal consumes at least one byte unless it stops on an event.
                 None if n == 0 => break,
                 None => {}
             }
         }
+        self.drain_events(replaying, events);
         self.collect_replies(replaying);
+    }
+
+    /// Handles events the terminal queued without consuming bytes (a record's, or the rest of a
+    /// byte's), until none are left.
+    fn drain_events(&mut self, replaying: bool, events: &mut Vec<Event>) {
+        while self.term.pending_events() {
+            for event in self.term.take_events() {
+                self.observe(event, replaying, events);
+            }
+        }
     }
 
     fn observe(&mut self, event: Event, replaying: bool, events: &mut Vec<Event>) {
@@ -415,41 +479,25 @@ impl Replica {
             Event::Tsp(payload) => {
                 // Answers already queued go first, so replies keep stream order.
                 self.collect_replies(replaying);
-                if let Some(tsp) = &mut self.tsp {
-                    let mut replies = Vec::new();
-                    tsp.on_tsp(
-                        &payload,
-                        TspContext {
-                            term: &mut self.term,
-                            settings: &self.settings,
-                            replaying,
-                            replies: &mut replies,
-                        },
-                    );
-                    self.keep_replies(replies, replaying);
-                }
+                self.tsp.on_apc(&mut self.term, &payload);
+                self.collect_tsp(replaying);
             }
             event => {
+                self.collect_replies(replaying);
                 match &event {
                     Event::Cwd(cwd) => self.cwd = Some(cwd.clone()),
                     Event::UserVar { name, value } => {
                         self.user_vars.insert(name.clone(), value.clone());
                     }
+                    Event::Mark(Mark::PromptStart) => self.tsp.on_prompt(&mut self.term),
+                    Event::Reset => self.tsp.on_reset(&mut self.term),
+                    Event::AltScreen(entered) => self.tsp.on_alt_screen(&mut self.term, *entered),
+                    Event::ScreenCleared => self.tsp.on_screen_cleared(&mut self.term),
+                    Event::AnchorGone(key) => self.tsp.on_anchor_gone(&mut self.term, *key),
+                    Event::Title(_) => self.tsp.on_title(),
                     _ => {}
                 }
-                if let Some(tsp) = &mut self.tsp {
-                    let mut replies = Vec::new();
-                    tsp.on_event(
-                        &event,
-                        TspContext {
-                            term: &mut self.term,
-                            settings: &self.settings,
-                            replaying,
-                            replies: &mut replies,
-                        },
-                    );
-                    self.keep_replies(replies, replaying);
-                }
+                self.collect_tsp(replaying);
                 if !replaying {
                     events.push(event);
                 }
@@ -459,13 +507,24 @@ impl Replica {
 
     fn collect_replies(&mut self, replaying: bool) {
         let replies = self.term.take_replies();
-        self.keep_replies(replies, replaying);
+        if !replies.is_empty() && self.answers(replaying) {
+            match self.replies.last_mut() {
+                Some(Answer::Term(last)) => last.extend(replies),
+                _ => self.replies.push(Answer::Term(replies)),
+            }
+        }
     }
 
-    fn keep_replies(&mut self, replies: Vec<u8>, replaying: bool) {
-        if self.role == Role::Authoritative && !replaying {
-            self.replies.extend(replies);
+    fn collect_tsp(&mut self, replaying: bool) {
+        let out = self.tsp.take_output();
+        if self.answers(replaying) {
+            self.replies
+                .extend(out.iter().map(|msg| Answer::Tsp(msg.encode())));
         }
+    }
+
+    fn answers(&self, replaying: bool) -> bool {
+        self.role == Role::Authoritative && !replaying
     }
 }
 

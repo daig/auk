@@ -1,0 +1,10 @@
+[
+  {"wait": "idle", "ms": 500},
+  {"keys": " "}, {"wait": "idle", "ms": 200},
+  {"keys": "jjjj"}, {"wait": "idle", "ms": 200},
+  {"keys": "b"}, {"wait": "idle", "ms": 200},
+  {"resize": [60, 20]}, {"wait": "idle", "ms": 400},
+  {"keys": "G"}, {"wait": "idle", "ms": 200},
+  {"keys": "q"},
+  {"wait": "exit"}
+]

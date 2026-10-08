@@ -152,7 +152,7 @@ impl ViewEvent {
     }
 
     /// The event body for surface `sf`.
-    pub(crate) fn body(&self, sf: &str) -> Value {
+    pub fn body(&self, sf: &str) -> Value {
         let mut m = Map::new();
         let mut put = |k: &str, v: Value| {
             m.insert(k.to_owned(), v);
