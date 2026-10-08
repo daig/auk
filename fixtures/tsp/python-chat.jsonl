@@ -1,0 +1,25 @@
+{"t":1791445277670,"dir":"out","verb":"q","params":{},"body":{"q":"hello","v":[1],"app":"chat"}}
+{"t":1791445277670,"dir":"in","verb":"r","params":{},"body":{"r":"hello","v":1,"term":"auk","ver":"0.0.0-recorder","kinds":["col","row","card","section","rule","spacer","text","md","code","diff","ansi","math","image","kv","table","tree","badge","kbd","icon","spinner","shimmer","elapsed","progress","rate","list","item","tabs","editor","input","status","seg","overlay","toast","rows","picker","prefs","tool","checklist","agent","chart","meter","block","effort","el"],"features":["blobs","settle","adopt","dock","program-palette","reduce-motion","aside","scroll","styles","flow"],"apc":65536,"credits":2,"cols":120,"cell":{"w":8,"h":17},"dark":true,"reduceMotion":false,"hour12":false}}
+{"t":1791445277670,"dir":"out","verb":"o","params":{},"body":{"id":"s1","mode":"inline","title":"chat"}}
+{"t":1791445277673,"dir":"out","verb":"f","params":{},"body":{"sf":"s1","s":1,"ops":[["add","main","s1",null,{"id":"main","k":"col","p":{"gap":"sm"},"c":[{"id":"main.hint","k":"md","p":{"text":"Type a message and press **Enter**. **Escape** quits.","key":"hint"}}]}],["add","dock","s1",null,{"id":"dock","k":"col","c":[{"id":"dock.ed","k":"editor","p":{"text":"","cursor":0,"placeholder":"Message","prompt":[{"t":"> ","s":"accent"}],"key":"ed"}},{"id":"dock.bar","k":"status","p":{"key":"bar"},"c":[{"id":"dock.bar.0","k":"seg","p":{"text":"chat","icon":"message"}},{"id":"dock.bar.1","k":"seg","p":{"text":"0 sent","side":"right"}}]}]}]]}}
+{"t":1791445277673,"dir":"out","verb":"f","params":{},"body":{"sf":"s1","s":2,"ops":[["focus","dock.ed"]]}}
+{"t":1791445277698,"dir":"in","verb":"e","params":{},"body":{"ev":"ack","sf":"s1","s":1}}
+{"t":1791445277698,"dir":"in","verb":"e","params":{},"body":{"ev":"resize","sf":"s1","cols":120,"cell":{"w":8,"h":17},"visible":true}}
+{"t":1791445277698,"dir":"in","verb":"e","params":{},"body":{"ev":"ack","sf":"s1","s":2}}
+{"t":1791445278012,"dir":"out","verb":"f","params":{},"body":{"sf":"s1","s":3,"ops":[["set","dock.ed",{"cursor":1}],["text","dock.ed","replace","H"]]}}
+{"t":1791445278012,"dir":"out","verb":"f","params":{},"body":{"sf":"s1","s":4,"ops":[["set","dock.ed",{"cursor":2}],["text","dock.ed","append","e"]]}}
+{"t":1791445278036,"dir":"in","verb":"e","params":{},"body":{"ev":"ack","sf":"s1","s":3}}
+{"t":1791445278036,"dir":"in","verb":"e","params":{},"body":{"ev":"ack","sf":"s1","s":4}}
+{"t":1791445278037,"dir":"out","verb":"f","params":{},"body":{"sf":"s1","s":5,"ops":[["set","dock.ed",{"cursor":23}],["text","dock.ed","append","llo from the recorder"]]}}
+{"t":1791445278058,"dir":"in","verb":"e","params":{},"body":{"ev":"ack","sf":"s1","s":5}}
+{"t":1791445278369,"dir":"out","verb":"f","params":{},"body":{"sf":"s1","s":6,"ops":[["del","main.hint"],["add","main.m0","main",null,{"id":"main.m0","k":"card","p":{"head":"You","key":"m0","tone":"user"},"c":[{"id":"main.m0.0","k":"md","p":{"text":"Hello from the recorder"}}]}],["set","dock.bar.1",{"text":"1 sent"}],["set","dock.ed",{"cursor":0}],["text","dock.ed","replace",""]]}}
+{"t":1791445278393,"dir":"in","verb":"e","params":{},"body":{"ev":"ack","sf":"s1","s":6}}
+{"t":1791445278702,"dir":"out","verb":"f","params":{},"body":{"sf":"s1","s":7,"ops":[["set","dock.ed",{"cursor":1}],["text","dock.ed","replace","A"]]}}
+{"t":1791445278702,"dir":"out","verb":"f","params":{},"body":{"sf":"s1","s":8,"ops":[["set","dock.ed",{"cursor":2}],["text","dock.ed","append"," "]]}}
+{"t":1791445278724,"dir":"in","verb":"e","params":{},"body":{"ev":"ack","sf":"s1","s":7}}
+{"t":1791445278724,"dir":"in","verb":"e","params":{},"body":{"ev":"ack","sf":"s1","s":8}}
+{"t":1791445278724,"dir":"out","verb":"f","params":{},"body":{"sf":"s1","s":9,"ops":[["set","dock.ed",{"cursor":45}],["text","dock.ed","append","second message with **markdown** and `code`"]]}}
+{"t":1791445278750,"dir":"in","verb":"e","params":{},"body":{"ev":"ack","sf":"s1","s":9}}
+{"t":1791445279054,"dir":"out","verb":"f","params":{},"body":{"sf":"s1","s":10,"ops":[["add","main.m1","main",null,{"id":"main.m1","k":"card","p":{"head":"You","key":"m1","tone":"user"},"c":[{"id":"main.m1.0","k":"md","p":{"text":"A second message with **markdown** and `code`"}}]}],["set","dock.bar.1",{"text":"2 sent"}],["set","dock.ed",{"cursor":0}],["text","dock.ed","replace",""]]}}
+{"t":1791445279078,"dir":"in","verb":"e","params":{},"body":{"ev":"ack","sf":"s1","s":10}}
+{"t":1791445279584,"dir":"out","verb":"x","params":{},"body":{"id":"s1","keep":true}}

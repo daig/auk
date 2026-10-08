@@ -1,0 +1,21 @@
+[
+  {"wait": "open", "timeout": 20},
+  {"wait": "idle", "ms": 2500, "timeout": 20},
+  {"keys": "Give me a short overview of this repository: a heading, then one bullet per top-level directory, then a small Python example from python/examples in a fenced code block."},
+  {"wait": "idle", "ms": 400},
+  {"key": "enter"},
+  {"wait": "frame", "timeout": 30},
+  {"wait": "idle", "ms": 25000, "timeout": 300},
+  {"keys": "In python/examples/table.py, rename the \"Size\" column header to \"Bytes\", then show me the diff."},
+  {"wait": "idle", "ms": 400},
+  {"key": "enter"},
+  {"wait": "frame", "timeout": 30},
+  {"wait": "idle", "ms": 25000, "timeout": 300},
+  {"keys": "Run `ls -la python` with the shell tool and summarize the output as a markdown table."},
+  {"wait": "idle", "ms": 400},
+  {"key": "enter"},
+  {"wait": "frame", "timeout": 30},
+  {"wait": "idle", "ms": 25000, "timeout": 300},
+  {"signal": "TERM"},
+  {"wait": "exit", "timeout": 15}
+]

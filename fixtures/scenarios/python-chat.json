@@ -1,0 +1,14 @@
+[
+  {"wait": "frame", "timeout": 10},
+  {"sleep": 300},
+  {"keys": "Hello from the recorder"},
+  {"wait": "idle", "ms": 300},
+  {"key": "enter"},
+  {"wait": "idle", "ms": 300},
+  {"keys": "A second message with **markdown** and `code`"},
+  {"wait": "idle", "ms": 300},
+  {"key": "enter"},
+  {"wait": "idle", "ms": 500},
+  {"key": "escape"},
+  {"wait": "exit", "timeout": 10}
+]

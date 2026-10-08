@@ -1,0 +1,4 @@
+{"dir":"out","verb":"o","params":{},"body":{"id":"ls","mode":"flow","listen":false}}
+{"dir":"out","verb":"s","params":{},"body":{"sf":"ls","name":"main","css":".size{text-align:right}"}}
+{"dir":"out","verb":"f","params":{},"body":{"sf":"ls","s":1,"ops":[["add","main","ls",null,{"id":"main","k":"col","c":[{"id":"t","k":"el","p":{"tag":"table"},"c":[{"id":"a","k":"el","p":{"tag":"tr"},"c":[{"id":"a.n","k":"el","p":{"tag":"td","text":"Cargo.toml"}},{"id":"a.s","k":"el","p":{"tag":"td","class":"size","text":"2.1K"}}]},{"id":"b","k":"el","p":{"tag":"tr"},"c":[{"id":"b.n","k":"el","p":{"tag":"td","text":"README.md"}},{"id":"b.s","k":"el","p":{"tag":"td","class":"size","text":"14K"}}]},{"id":"c","k":"el","p":{"tag":"tr"},"c":[{"id":"c.n","k":"el","p":{"tag":"td","text":"build.rs"}},{"id":"c.s","k":"el","p":{"tag":"td","class":"size","text":"312"}}]}]}]}]]}}
+{"dir":"out","verb":"x","params":{},"body":{"id":"ls","keep":true}}

@@ -1,0 +1,8 @@
+[
+  {"wait": "frame", "contains": "Create", "timeout": 10},
+  {"sleep": 200},
+  {"event": {"ev": "change", "sf": "$sf", "id": "$find:k=el,tag=input,value=l", "value": "l", "checked": true, "name": "size", "values": {"size": "l"}}},
+  {"sleep": 200},
+  {"event": {"ev": "action", "sf": "$sf", "id": "$find:k=el,tag=button", "act": "submit", "values": {"size": "l"}}},
+  {"wait": "exit", "timeout": 10}
+]

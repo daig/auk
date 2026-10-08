@@ -1,0 +1,21 @@
+{"t":1791445262265,"dir":"out","verb":"q","params":{},"body":{"q":"hello","v":[1],"app":"progress"}}
+{"t":1791445262265,"dir":"in","verb":"r","params":{},"body":{"r":"hello","v":1,"term":"auk","ver":"0.0.0-recorder","kinds":["col","row","card","section","rule","spacer","text","md","code","diff","ansi","math","image","kv","table","tree","badge","kbd","icon","spinner","shimmer","elapsed","progress","rate","list","item","tabs","editor","input","status","seg","overlay","toast","rows","picker","prefs","tool","checklist","agent","chart","meter","block","effort","el"],"features":["blobs","settle","adopt","dock","program-palette","reduce-motion","aside","scroll","styles","flow"],"apc":65536,"credits":2,"cols":120,"cell":{"w":8,"h":17},"dark":true,"reduceMotion":false,"hour12":false}}
+{"t":1791445262266,"dir":"out","verb":"o","params":{},"body":{"id":"s1","mode":"flow"}}
+{"t":1791445262266,"dir":"out","verb":"f","params":{},"body":{"sf":"s1","s":1,"ops":[["add","main","s1",null,{"id":"main","k":"col","c":[{"id":"main.build","k":"card","p":{"head":"cargo build --release","status":"running","key":"build"},"c":[{"id":"main.build.h","k":"row","p":{"gap":"sm","key":"h"},"c":[{"id":"main.build.h.sp","k":"spinner","p":{"style":"dots","label":"Building","key":"sp"}},{"id":"main.build.h.t","k":"elapsed","p":{"age":0,"key":"t"}}]},{"id":"main.build.log","k":"ansi","p":{"text":"","key":"log"}},{"id":"main.build.p","k":"progress","p":{"value":0.0,"label":"0/7","key":"p"}}]}]}]]}}
+{"t":1791445262291,"dir":"in","verb":"e","params":{},"body":{"ev":"ack","sf":"s1","s":1}}
+{"t":1791445262291,"dir":"in","verb":"e","params":{},"body":{"ev":"resize","sf":"s1","cols":120,"cell":{"w":8,"h":17},"visible":true}}
+{"t":1791445262671,"dir":"out","verb":"f","params":{},"body":{"sf":"s1","s":2,"ops":[["set","main.build.p",{"value":0.14285714285714285,"label":"1/7"}],["text","main.build.log","replace","   \u001b[32mok\u001b[0m resolving dependencies"]]}}
+{"t":1791445262697,"dir":"in","verb":"e","params":{},"body":{"ev":"ack","sf":"s1","s":2}}
+{"t":1791445263073,"dir":"out","verb":"f","params":{},"body":{"sf":"s1","s":3,"ops":[["set","main.build.p",{"value":0.2857142857142857,"label":"2/7"}],["text","main.build.log","append","\n   \u001b[32mok\u001b[0m fetching 12 crates"]]}}
+{"t":1791445263099,"dir":"in","verb":"e","params":{},"body":{"ev":"ack","sf":"s1","s":3}}
+{"t":1791445263479,"dir":"out","verb":"f","params":{},"body":{"sf":"s1","s":4,"ops":[["set","main.build.p",{"value":0.42857142857142855,"label":"3/7"}],["text","main.build.log","append","\n   \u001b[32mok\u001b[0m compiling stencil-css"]]}}
+{"t":1791445263501,"dir":"in","verb":"e","params":{},"body":{"ev":"ack","sf":"s1","s":4}}
+{"t":1791445263885,"dir":"out","verb":"f","params":{},"body":{"sf":"s1","s":5,"ops":[["set","main.build.p",{"value":0.5714285714285714,"label":"4/7"}],["text","main.build.log","append","\n   \u001b[32mok\u001b[0m compiling stencil-term"]]}}
+{"t":1791445263910,"dir":"in","verb":"e","params":{},"body":{"ev":"ack","sf":"s1","s":5}}
+{"t":1791445264290,"dir":"out","verb":"f","params":{},"body":{"sf":"s1","s":6,"ops":[["set","main.build.p",{"value":0.7142857142857143,"label":"5/7"}],["text","main.build.log","append","\n   \u001b[32mok\u001b[0m compiling tern"]]}}
+{"t":1791445264315,"dir":"in","verb":"e","params":{},"body":{"ev":"ack","sf":"s1","s":6}}
+{"t":1791445264696,"dir":"out","verb":"f","params":{},"body":{"sf":"s1","s":7,"ops":[["set","main.build.p",{"value":0.8571428571428571,"label":"6/7"}],["text","main.build.log","append","\n   \u001b[32mok\u001b[0m linking"]]}}
+{"t":1791445264717,"dir":"in","verb":"e","params":{},"body":{"ev":"ack","sf":"s1","s":7}}
+{"t":1791445265101,"dir":"out","verb":"f","params":{},"body":{"sf":"s1","s":8,"ops":[["set","main.build.p",{"value":1.0,"label":"7/7"}],["text","main.build.log","append","\n   \u001b[32mok\u001b[0m writing target/release/tern"]]}}
+{"t":1791445265101,"dir":"out","verb":"f","params":{},"body":{"sf":"s1","s":9,"ops":[["set","main.build",{"status":"done"}],["set","main.build.p",{"tone":"success"}],["set","main.build.h.t",{"stopped":2834.87691701157}],["del","main.build.h.sp"],["add","main.build.h.sp","main.build.h","main.build.h.t",{"id":"main.build.h.sp","k":"text","p":{"text":"Built","key":"sp"}}]]}}
+{"t":1791445265101,"dir":"out","verb":"x","params":{},"body":{"id":"s1","keep":true}}

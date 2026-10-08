@@ -1,0 +1,37 @@
+{
+  "argv": [
+    "/Users/dai/.local/bin/omp"
+  ],
+  "cwd": "/private/tmp/claude-501/-Users-dai-code-tern-clone/31364f1a-19f4-408f-a94a-d692aa417101/scratchpad/omp-work/tern-sdk",
+  "cols": 120,
+  "rows": 40,
+  "env": [
+    "PI_TUI_TSP_RECORD=/Users/dai/code/tern-clone/fixtures/tsp/omp-session-own.jsonl"
+  ],
+  "recorded": "2026-10-08T01:44:30-0600",
+  "recorder": "tools/tsp_record.py",
+  "exit_status": 143,
+  "counts": {
+    "in e": 560,
+    "in r": 2,
+    "out b": 1,
+    "out f": 559,
+    "out o": 1,
+    "out osc": 6,
+    "out q": 2,
+    "out t": 1,
+    "out x": 1
+  },
+  "user_vars": {},
+  "unanswered_queries": {
+    "CSI ?2026$p": 1,
+    "CSI ?2048$p": 1,
+    "CSI ?2031$p": 1,
+    "CSI ?2004$p": 1,
+    "CSI ?1010$p": 1,
+    "CSI ?1011$p": 1,
+    "CSI 22;2t": 1,
+    "CSI 0 q": 2
+  },
+  "note": "omp 18.8.4 (installed binary), three prompts in a scratch copy of tern-sdk; omp-session-own.jsonl is omp's own PI_TUI_TSP_RECORD log"
+}
