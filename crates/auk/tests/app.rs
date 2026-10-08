@@ -1118,6 +1118,89 @@ fn the_chrome_names_the_reporting_app_only_while_a_listening_surface_is_open() {
     assert!(app.request("chrome")["pane_app"].is_null());
 }
 
+/// The system's 12/24-hour setting, read apart from the app: the hour pattern Foundation gives
+/// the `j` skeleton in the current locale (through JavaScript for Automation), 12-hour when it has
+/// an `h` or `K` field outside quotes.
+fn system_hour12() -> bool {
+    let out = std::process::Command::new("/usr/bin/osascript")
+        .args([
+            "-l",
+            "JavaScript",
+            "-e",
+            "ObjC.import('Foundation'); \
+             ObjC.unwrap($.NSDateFormatter.dateFormatFromTemplateOptionsLocale('j', 0, $.NSLocale.currentLocale))",
+        ])
+        .output()
+        .expect("run osascript");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let pattern = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    assert!(!pattern.is_empty(), "no hour pattern");
+    let mut quoted = false;
+    pattern.chars().any(|c| {
+        if c == '\'' {
+            quoted = !quoted;
+        }
+        !quoted && (c == 'h' || c == 'K')
+    })
+}
+
+/// §4.5, §7.2: the app reports the system's 12/24-hour clock, so the hello reply's `hour12` is
+/// the system setting, and the daemon holds it as the pane's fact.
+#[test]
+fn the_hello_reply_carries_the_systems_12_hour_clock() {
+    let env = env("hour12");
+    let app = App::start(&env, "a", &[]);
+    let probe = focused_probe(&env, &app);
+    let want = system_hour12();
+    probe.write(&hello(&[]));
+    let input = probe.read_until("the hello reply", |b| {
+        tsp_bodies(&split_input(b)).iter().any(|v| v.get("hour12").is_some())
+    });
+    let reply = tsp_bodies(&split_input(&input)).into_iter().find(|v| v.get("hour12").is_some()).unwrap();
+    assert_eq!(reply["hour12"], want, "{reply}");
+    let tsp = env.daemon(&format!("tsp {}", probe.pane));
+    assert_eq!(tsp["facts"]["hour12"], want, "{tsp}");
+}
+
+/// §5.1: an agent pane's tab shows the agent icon in the app's tab bar; a shell's tab doesn't.
+#[test]
+fn an_agent_panes_tab_shows_the_agent_icon() {
+    let env = env("agent-icon");
+    write_settings(&env, json!({"agent_command": "echo agent-ready; sleep 300"}));
+    let app = App::start(&env, "a", &[]);
+    let shell_tab = app.state()["tab"].as_u64().expect("a shown tab");
+    let out = env.cli(&["--json", "new", "tab", "--agent", "--cwd", &env.home.to_string_lossy()]);
+    let made: Value = serde_json::from_slice(&out.stdout).expect("new prints JSON");
+    let agent = made["pane"].as_u64().expect("the agent pane");
+    let agent_tab = wait_for("the agent pane's tab in the app", || {
+        tabs(&app.layout())
+            .into_iter()
+            .find(|t| t["root"]["pane"] == agent)
+            .and_then(|t| t["id"].as_u64())
+    });
+    let chrome = wait_for("the agent icon in the tab bar", || {
+        let c = app.request("chrome");
+        c["agent_badges"].as_array().is_some_and(|b| !b.is_empty()).then_some(c)
+    });
+    let badges = chrome["agent_badges"].as_array().unwrap();
+    assert_eq!(badges.len(), 1, "{chrome}");
+    assert_eq!(badges[0]["tab"], agent_tab, "{chrome}");
+    assert_ne!(agent_tab, shell_tab);
+    // Drawn inside the agent tab's button, at a visible size.
+    let r = &badges[0]["rect"];
+    let tab_rect = chrome["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["action"] == format!("tab:{agent_tab}"))
+        .map(|a| a["rect"].clone())
+        .expect("the agent tab's box");
+    let f = |v: &Value, i: usize| v[i].as_f64().unwrap();
+    assert!(f(r, 2) > 4.0 && f(r, 3) > 4.0, "{r}");
+    assert!(f(r, 0) >= f(&tab_rect, 0) && f(r, 0) + f(r, 2) <= f(&tab_rect, 0) + f(&tab_rect, 2), "{r} in {tab_rect}");
+    assert!(f(r, 1) >= 0.0 && f(r, 1) + f(r, 3) <= 30.0, "in the bar: {r}");
+}
+
 #[test]
 fn native_editing_drag_selects_in_a_field_and_copy_and_paste_go_through_it() {
     let env = env("field-drag");
@@ -1294,6 +1377,88 @@ fn the_open_action_opens_href_or_path_copy_takes_the_href_and_the_checklist_hud_
         (b[3] > hud[3] + 10.0).then_some(())
     });
     // None of that typed anything, and opening ran nothing else.
+    assert_eq!(app.request("opens")["opened"].as_array().unwrap().len(), 2);
+}
+
+/// §7.8: "A link click opens the link instead of running click." A node with a `click` action
+/// holds a link span: the link gesture (⌘-click, or a plain click under `links_plain_click`) on
+/// the link opens it and sends the program nothing; a plain click elsewhere, or on the link
+/// without the setting, runs the node's click.
+#[test]
+fn a_link_click_inside_a_clickable_node_opens_the_link_instead_of_running_click() {
+    let env = env("link-click");
+    let (opener, log) = logging_opener(&env);
+    let app = App::start_with(&env, "a", &[], &[("AUK_OPENER", &opener.to_string_lossy())]);
+    let probe = focused_probe(&env, &app);
+    let pane = probe.pane;
+    probe.write(&hello(&[]));
+    probe.write(&open_with(
+        "s1",
+        "inline",
+        json!([{"id": "go", "k": "text", "p": {
+            "spans": [{"t": "run me "}, {"t": "or read the linked docs", "href": "https://example.com/linked"}],
+            "actions": {"click": "run"}
+        }}]),
+    ));
+    acked(&probe, 1);
+    caught_up(&env, &app, pane);
+    let b = wait_for("the node", || node_box(&app, pane, "go"));
+    let y = b[1] + b[3] / 2.0;
+    // Where the link is, by the hover readout; and a point on the node off the link.
+    let on_link = |x: f64| {
+        app.request(&format!("mouse move {x} {y}"));
+        std::thread::sleep(Duration::from_millis(60));
+        app.request("chrome")["hover_link"] == "https://example.com/linked"
+    };
+    let link_x = (1..40)
+        .map(|i| b[0] + f64::from(i) * 8.0)
+        .find(|&x| on_link(x))
+        .expect("a point over the link");
+    let plain_x = b[0] + 3.0;
+    assert!(!on_link(plain_x), "the node's first word isn't the link");
+    let opened = |n: usize| {
+        wait_for(&format!("{n} opens"), || {
+            let o = app.request("opens")["opened"].clone();
+            (o.as_array()?.len() >= n).then_some(o)
+        })
+    };
+    let actions = |wait| -> Vec<Value> {
+        program_input(&probe, wait).0.into_iter().filter(|b| b["ev"] == "action").collect()
+    };
+
+    // ⌘-click on the link: the link opens, and click doesn't run.
+    app.request(&format!("mouse down {link_x} {y} --cmd"));
+    app.request(&format!("mouse up {link_x} {y} --cmd"));
+    let o = opened(1);
+    assert_eq!(o[0]["target"], "https://example.com/linked", "{o}");
+    assert_eq!(actions(Duration::from_millis(400)), Vec::<Value>::new());
+    wait_for("the opener to run", || {
+        std::fs::read_to_string(&log).ok().filter(|l| l.contains("https://example.com/linked")).map(|_| ())
+    });
+
+    // A plain click: no link gesture, so the node's click runs, on the link or off it.
+    for x in [link_x, plain_x] {
+        click(&app, (x, y));
+        let action = program_event(&probe, "action");
+        assert_eq!((&action["sf"], &action["id"]), (&json!("s1"), &json!("go")), "{action}");
+    }
+    assert_eq!(app.request("opens")["opened"].as_array().unwrap().len(), 1);
+
+    // With plain clicks opening links, a plain click on the link opens it instead of running
+    // click; off the link, click still runs.
+    write_settings(&env, json!({"links_plain_click": true}));
+    menu(&app, "View", "Reload Settings");
+    // (The pane's views take the setting on the window's next frame.)
+    wait_for("the setting in the pane's views", || {
+        (app.request("settings")["view"]["links_plain_click"] == true).then_some(())
+    });
+    click(&app, (link_x, y));
+    let o = opened(2);
+    assert_eq!(o[1]["target"], "https://example.com/linked", "{o}");
+    assert_eq!(actions(Duration::from_millis(400)), Vec::<Value>::new());
+    click(&app, (plain_x, y));
+    let action = program_event(&probe, "action");
+    assert_eq!(action["id"], "go", "{action}");
     assert_eq!(app.request("opens")["opened"].as_array().unwrap().len(), 2);
 }
 

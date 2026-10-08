@@ -495,6 +495,14 @@ fn web_client_in_safari_attaches_draws_over_webgpu_and_types() {
     // As the pane's primary, the page's size applies to the pane.
     let p = pane_state(&state, pane).unwrap();
     assert_eq!(p["primary"], true, "{p}");
+    // §4.5: the page reports the browser's 12/24-hour clock, read here through Intl in the page.
+    let cycle = safari.execute(
+        "return new Intl.DateTimeFormat(undefined, {hour: 'numeric'}).resolvedOptions().hourCycle;",
+    );
+    let hour12 = matches!(cycle.as_str(), Some("h11" | "h12"));
+    wait_for("the page's clock as the pane's fact", || {
+        (env.daemon(&format!("tsp {pane}"))["facts"]["hour12"] == hour12).then_some(())
+    });
     let info = env.pane_info(pane);
     assert_eq!(
         (info["cols"].as_u64(), info["rows"].as_u64()),

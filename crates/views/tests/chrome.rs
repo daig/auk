@@ -35,6 +35,7 @@ fn tab_bar_dividers_status_line_and_palette_lay_out_with_actions_and_roles() {
             active: true,
             zoomed: false,
             app: None,
+            agent: false,
         },
         TabItem {
             id: 8,
@@ -42,6 +43,7 @@ fn tab_bar_dividers_status_line_and_palette_lay_out_with_actions_and_roles() {
             active: false,
             zoomed: true,
             app: Some("omp".into()),
+            agent: false,
         },
     ];
     let bar = chrome::tab_bar(&mut doc, body, &sessions, &tabs);
@@ -142,4 +144,74 @@ fn tab_bar_dividers_status_line_and_palette_lay_out_with_actions_and_roles() {
         doc.computed_style(bar).unwrap().background_color.to_rgba8(),
         dark_bg
     );
+}
+
+/// §5.1: an agent pane's tab shows the agent icon, a badge before its title, beside the
+/// program's name when one draws, and no other tab does.
+#[test]
+fn agent_tabs_carry_the_agent_icon() {
+    let mut doc = Document::new();
+    assert!(
+        doc.set_stylesheet("chrome-widgets", SheetKind::BuiltIn, None, chrome::CSS)
+            .is_empty()
+    );
+    doc.set_viewport(800.0, 500.0);
+    let root = doc.root();
+    let body = doc.create_element("body");
+    doc.append_child(root, body);
+    let tab = |id, agent, app: Option<&str>| TabItem {
+        id,
+        title: format!("t{id}"),
+        active: id == 1,
+        zoomed: false,
+        app: app.map(str::to_owned),
+        agent,
+    };
+    chrome::tab_bar(
+        &mut doc,
+        body,
+        &[],
+        &[
+            tab(1, false, None),
+            tab(2, true, None),
+            tab(3, true, Some("omp")),
+        ],
+    );
+    doc.update();
+    let badges = chrome::agent_badges(&doc);
+    assert_eq!(
+        badges.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+        vec![2, 3]
+    );
+    let tabs: Vec<(String, Rect)> = chrome::actions(&doc)
+        .into_iter()
+        .filter(|(a, _)| a == "tab:2" || a == "tab:3")
+        .collect();
+    for ((_, badge), (_, tab)) in badges.iter().zip(&tabs) {
+        assert!(badge.w > 4.0 && badge.h > 4.0, "{badge:?}");
+        assert!(
+            badge.x >= tab.x && badge.x + badge.w <= tab.x + tab.w,
+            "{badge:?} in {tab:?}"
+        );
+    }
+    // The badge reads as "Agent", and the title follows it.
+    let mut found = 0;
+    let mut stack = vec![doc.root()];
+    while let Some(n) = stack.pop() {
+        if doc.attribute(n, "data-icon") == Some("agent") {
+            assert_eq!(doc.attribute(n, "aria-label"), Some("Agent"));
+            assert_eq!(doc.attribute(n, "role"), Some("img"));
+            let tab = doc.parent(n).unwrap();
+            assert_eq!(doc.attribute(tab, "data-kind"), Some("agent"));
+            let kids = doc.children(tab);
+            assert_eq!(kids[0], n, "the icon leads the tab");
+            assert_eq!(
+                kids.len(),
+                2 + usize::from(doc.attribute(tab, "data-app").is_some())
+            );
+            found += 1;
+        }
+        stack.extend(doc.children(n).iter().copied());
+    }
+    assert_eq!(found, 2);
 }

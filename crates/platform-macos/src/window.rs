@@ -355,6 +355,11 @@ pub(crate) mod registry {
     pub fn get(id: WindowId) -> Option<Retained<AukView>> {
         VIEWS.with(|v| v.borrow().get(&id).and_then(Weak::load))
     }
+
+    /// Every open window's view.
+    pub fn all() -> Vec<Retained<AukView>> {
+        VIEWS.with(|v| v.borrow().values().filter_map(Weak::load).collect())
+    }
 }
 
 define_class!(

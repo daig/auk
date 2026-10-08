@@ -2444,6 +2444,110 @@ fn block_frames_diff_views_by_derived_ids_and_quiet_keys_and_view_events_behave(
     assert!(text.contains("log: toggle:main.a change:main.b:true focus:main.t"), "{text}");
 }
 
+/// A block with a `resize` handler, an `event` log, a list to activate and a `layer` region.
+fn resizer_plugin(env: &TestEnv) {
+    package(
+        env,
+        "rs",
+        "schema = 1\nid = \"rs\"\nname = \"Rs\"\nversion = \"1\"\nhost = \"host.luau\"\n[[blocks]]\nid = \"b\"\ntitle = \"B\"\n",
+        &[(
+            "host.luau",
+            r#"tern.block.define("b", {
+                init = function(cx, args, saved)
+                    return { args = table.concat(args, "|"), resized = saved and saved.resized or "none", log = "" }
+                end,
+                view = function(s, cx)
+                    return {
+                        main = tern.ui.col({
+                            tern.ui.text("args=[" .. s.args .. "] resized=" .. s.resized .. " log=" .. s.log),
+                            tern.ui.list({ { label = "first" }, { label = "second" } }),
+                        }),
+                        layer = tern.ui.col({ tern.ui.badge("overlay " .. cx.cols .. "x" .. cx.rows, "info") }),
+                    }
+                end,
+                event = function(s, ev) s.log ..= ev.ev .. ":" .. tostring(ev.id) .. ":" .. tostring(ev.item) .. ";" end,
+                resize = function(s, cols, rows, cx)
+                    s.resized = cols .. "x" .. rows .. "/cx " .. cx.cols .. "x" .. cx.rows
+                end,
+                save = function(s) return { resized = s.resized } end,
+            })"#,
+        )],
+    );
+}
+
+/// Every node of a TSP doc with kind `k`, as `(id, node)`.
+fn nodes_of(doc: &Value, k: &str) -> Vec<(String, Value)> {
+    let mut out = Vec::new();
+    fn walk(v: &Value, k: &str, out: &mut Vec<(String, Value)>) {
+        if v["k"] == k {
+            out.push((v["id"].as_str().unwrap_or_default().to_owned(), v.clone()));
+        }
+        v["c"].as_array().into_iter().flatten().for_each(|c| walk(c, k, out));
+    }
+    walk(doc, k, &mut out);
+    out
+}
+
+#[test]
+fn a_block_gets_resize_through_the_daemon_activate_in_event_and_draws_its_layer_in_a_window() {
+    let env = TestEnv::new(EXE, "blockresize");
+    resizer_plugin(&env);
+    let _daemon = env.start_daemon();
+    let window = env.start_headless("w", &[]);
+    let pane = env.daemon("block rs.b --size 80x24")["pane"].as_u64().expect("a pane");
+    let (sf, _) = wait_for("the block's surface in the window", || window_doc(&window, pane));
+    assert!(daemon_doc(&env, pane).contains("args=[] resized=none"), "{}", daemon_doc(&env, pane));
+
+    // The window resizes the pane: the daemon sends it to the worker, `resize` gets the new size
+    // (and so does cx), the block re-renders and its save is stored.
+    window.request(&format!("resize {pane} 72 20"));
+    wait_for("resize to reach the handler", || {
+        daemon_doc(&env, pane).contains("resized=72x20/cx 72x20").then_some(())
+    });
+    let info = env.pane_info(pane);
+    assert_eq!((info["cols"].as_u64(), info["rows"].as_u64()), (Some(72), Some(20)), "{info}");
+    wait_for("the save after resize", || {
+        (env.pane_info(pane)["kind"]["saved"] == r#"{"resized":"72x20/cx 72x20"}"#).then_some(())
+    });
+    // A resize from the daemon's side reaches it too.
+    env.daemon(&format!("resize {pane} 64 18"));
+    wait_for("the daemon-side resize", || {
+        daemon_doc(&env, pane).contains("resized=64x18/cx 64x18").then_some(())
+    });
+
+    // A double click on a list item sends `activate`, which reaches `event` with the list's id
+    // and the item.
+    let doc = live(&env.daemon(&format!("tsp {pane}"))).expect("a live surface").1;
+    let lists = nodes_of(&doc, "list");
+    assert_eq!(lists.len(), 1, "{doc}");
+    let (list_id, list) = &lists[0];
+    let items = nodes_of(list, "item");
+    assert_eq!(items.len(), 2, "{list}");
+    let (item_id, _) = &items[1];
+    let sent = window.request(&format!("click {pane} {sf} {item_id} --double"));
+    assert_eq!(sent["ev"], "activate", "{sent}");
+    let want = format!("log=activate:{list_id}:{};", sent["item"].as_str().expect("an item"));
+    wait_for("activate to reach event", || daemon_doc(&env, pane).contains(&want).then_some(()));
+
+    // The `layer` region is drawn by the window, with the block's overlay in it.
+    let layer = &doc["c"].as_array().expect("regions").iter().find(|r| r["id"] == "layer").cloned().expect("a layer region");
+    let badge = nodes_of(layer, "badge");
+    assert_eq!(badge.len(), 1, "{layer}");
+    let badge_id = badge[0].0.clone();
+    assert!(strings(&badge[0].1).contains("overlay 64x18"), "{layer}");
+    let drawn = wait_for("the layer region in the window", || {
+        let tree = window.request(&format!("tree {pane} .sf-layer"));
+        let els = tree.as_array()?.clone();
+        els.iter().any(|e| e["id"] == badge_id.as_str()).then_some(els)
+    });
+    assert!(
+        drawn[0]["class"].as_str().is_some_and(|c| c.contains("sf-region") && c.contains("sf-layer")),
+        "{drawn:?}"
+    );
+    let badge_box = &drawn.iter().find(|e| e["id"] == badge_id.as_str()).expect("the badge")["box"];
+    assert!(badge_box[2].as_f64() > Some(0.0) && badge_box[3].as_f64() > Some(0.0), "{drawn:?}");
+}
+
 // ---------------------------------------------------------------------------------------------
 // Data and paths (§9.1)
 
@@ -2685,6 +2789,75 @@ fn lenses_claim_only_with_shell_integration_lenses_on_and_the_main_screen_and_ab
     // And the pane still claims afterwards.
     env.run(pane, "./lensme f");
     assert_eq!(lines().last().map(String::as_str), Some("./lensme f"));
+}
+
+#[test]
+fn an_alias_is_claimed_by_its_expansion_while_lenses_and_hooks_see_the_typed_line() {
+    let env = TestEnv::new(EXE, "aliaslens");
+    package(
+        &env,
+        "al",
+        "schema = 1\nid = \"al\"\nname = \"Al\"\nversion = \"1\"\nhost = \"host.luau\"\n[[lenses]]\nid = \"l\"\nmatch = [\"lensme *\"]\n",
+        &[(
+            "host.luau",
+            r#"tern.lens.define("l", {
+                open = function(run) return { line = run.line, typed = run.typed, args = table.concat(run.args, ",") } end,
+                line = function(s) end,
+                finish = function(s) end,
+                view = function(s) return tern.ui.text("line=" .. s.line .. " typed=" .. s.typed .. " args=" .. s.args) end,
+            })
+            tern.on("command_started", function(ev, cx) cx:toast("info", "started " .. ev.line) end)
+            tern.on("command_finished", function(ev, cx) cx:toast("info", "finished " .. ev.line .. " " .. ev.status) end)"#,
+        )],
+    );
+    executable(&env.home.join("lensme"), "#!/bin/sh\necho lens-out-$*\n");
+    // The user's own aliases, in the test shell's .zshrc: one whose expansion a lens claims, and
+    // one whose typed form looks claimable but whose expansion isn't.
+    let rc = env.zdotdir.join(".zshrc");
+    let mut text = std::fs::read_to_string(&rc).expect("the test .zshrc");
+    text.push_str("alias lz='./lensme via-alias'\nalias lensme='echo not-a-lens'\n");
+    std::fs::write(&rc, text).expect("write .zshrc");
+    let _daemon = env.start_daemon();
+    let window = env.start_headless("w", &[]);
+    let pane = env.new_pane(&[]);
+    env.wait(pane, "prompt");
+    let last_mark = || env.daemon(&format!("marks {pane}")).as_array().and_then(|m| m.last().cloned()).unwrap_or_default();
+    let blocks = || env.daemon(&format!("lens {pane}"))["blocks"].as_array().cloned().unwrap_or_default();
+
+    // The daemon's command mark carries both lines.
+    let done = env.run(pane, "lz one");
+    assert_eq!(done["status"], 0, "{done}");
+    let mark = last_mark();
+    assert_eq!((&mark["cmdline"], &mark["typed"]), (&json!("./lensme via-alias one"), &json!("lz one")), "{mark}");
+
+    // The lens claimed the expanded line; the block keeps both, and `open` saw run.line as the
+    // expansion and run.typed as typed.
+    let block = blocks().first().cloned().expect("a lens block for the alias");
+    assert_eq!((&block["line"], &block["typed"], &block["lens"]), (&json!("./lensme via-alias one"), &json!("lz one"), &json!("l")), "{block}");
+    let view = wait_for("the lens view", || {
+        let v = blocks().first()?["view"].clone();
+        (!v.is_null()).then(|| strings(&v))
+    });
+    assert!(view.contains("line=./lensme via-alias one typed=lz one args=via-alias,one"), "{view}");
+    // The same view reaches a window's replica, with the same block lines.
+    let seen = wait_for("the window's lens block", || {
+        let b = window.request(&format!("lens {pane}"))["blocks"][0].clone();
+        (!b["view"].is_null()).then_some(b)
+    });
+    assert_eq!((&seen["line"], &seen["typed"]), (&block["line"], &block["typed"]), "{seen}");
+
+    // Host hooks get the line as typed (§9.7).
+    wait_effect(&window, "command_started with the typed line", |e| e["text"] == "started lz one");
+    wait_effect(&window, "command_finished with the typed line", |e| e["text"] == "finished lz one 0");
+
+    // Typed `lensme two` matches the lens's pattern, but the shell runs `echo not-a-lens two`:
+    // the claim reads the expansion, so nothing is claimed and the output stays in the grid.
+    env.run(pane, "lensme two");
+    let mark = last_mark();
+    assert_eq!((&mark["cmdline"], &mark["typed"]), (&json!("echo not-a-lens two"), &json!("lensme two")), "{mark}");
+    assert_eq!(blocks().len(), 1, "the typed line was claimed: {:?}", blocks());
+    let screen = env.daemon(&format!("capture {pane}"))["text"].as_str().unwrap_or_default().to_owned();
+    assert!(screen.contains("not-a-lens two"), "{screen}");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -3187,4 +3360,185 @@ fn m9_pane_and_tab_created_fire_for_this_windows_additions_and_never_re_enter() 
     });
     std::thread::sleep(Duration::from_millis(500));
     assert_eq!(info_toasts(&app).len(), 3, "{:?}", info_toasts(&app));
+}
+
+/// §9.8 through the app, for a window half: the `cwd`, `title` and `pane_closed` events reach
+/// its handlers with the pane; `cx.session:event` sends a TSP event to a pane's program; the
+/// user's `keybinds` layer wins over a plugin bind of the same chord; and a plugin bind whose
+/// chord the keymap preset binds is left out, the preset's action running instead.
+#[cfg(target_os = "macos")]
+#[test]
+fn m9_window_half_events_session_event_and_keymap_layers_over_plugin_binds() {
+    use auk_conformance::probe::{Probe, events, hello, open_with, split_input, tsp_bodies};
+    use window_half::*;
+    let env = TestEnv::new(EXE, "m9-win-events");
+    std::fs::write(
+        env.state.join("settings.json"),
+        json!({
+            "keymap": "tmux",
+            "keymap_prefix": "ctrl+a",
+            "keybinds": {"ctrl+shift+u": "split_down"},
+        })
+        .to_string(),
+    )
+    .expect("write settings.json");
+    package(
+        &env,
+        "probe",
+        "schema = 1\nid = \"probe\"\nname = \"Probe\"\nversion = \"1\"\nwindow = \"window.luau\"\n",
+        &[(
+            "window.luau",
+            r##"
+            tern.on("cwd", function(ev, cx)
+                if string.sub(ev.path, -10) == "window-cwd" then
+                    cx:toast("info", "cwd " .. ev.pane .. " " .. ev.path)
+                end
+            end)
+            tern.on("title", function(ev, cx)
+                if ev.title == "window-title" then cx:toast("info", "title " .. ev.pane .. " " .. ev.title) end
+            end)
+            tern.on("pane_closed", function(ev, cx) cx:toast("info", "pane_closed " .. ev.pane) end)
+            -- The tmux preset binds ctrl+a>c (new tab): left out.
+            tern.bind("ctrl+a>c", function(cx) cx:toast("info", "plugin ctrl+a>c") end)
+            -- The user's keybinds take ctrl+shift+u.
+            tern.bind("ctrl+shift+u", function(cx) cx:toast("info", "plugin ctrl+shift+u") end)
+            -- Nobody else binds ctrl+shift+y: the plugin's.
+            tern.bind("ctrl+shift+y", function(cx) cx:toast("info", "plugin ctrl+shift+y") end)
+            tern.command({id = "poke", title = "Poke the surface", run = function(cx)
+                cx.session:event(cx.session:focused(), {ev = "action", id = "go", act = "run"})
+                cx:toast("info", "poked")
+            end})
+            "##,
+        )],
+    );
+    env.start_daemon();
+    let app = auk_conformance::app::App::start(&env, "app", &[]);
+    let _us = auk_conformance::app::InputSource::select(&app, auk_conformance::app::US_LAYOUT);
+    let pane = shell(&env, &app);
+    let plugins = loaded(&app, &["probe"]);
+    assert!(plugins["failures"].as_array().unwrap().is_empty(), "{plugins}");
+    assert_eq!(plugins["dropped_binds"], json!(["ctrl+a>c"]), "{plugins}");
+    let keymap = plugins["keymap"].as_array().unwrap();
+    let bound: Vec<&str> = keymap.iter().filter_map(|k| k["action"].as_str()).collect();
+    assert_eq!(bound, ["plugin.probe.bind.2"], "only the free chord is the plugin's: {plugins}");
+
+    // cwd and title, from the shell's own reports.
+    let dir = env.home.join("window-cwd");
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    env.run(pane, "cd window-cwd");
+    let toast = wait_for("the cwd event", || {
+        info_toasts(&app).into_iter().find(|t| t.starts_with("cwd "))
+    });
+    let (who, path) = toast.trim_start_matches("cwd ").split_once(' ').expect("pane and path");
+    assert_eq!(who, pane.to_string(), "{toast}");
+    assert_eq!(
+        Path::new(path).canonicalize().expect("a real path"),
+        dir.canonicalize().expect("canonical"),
+        "{toast}"
+    );
+    env.run(pane, "printf '\\033]2;window-title\\007'");
+    wait_toast(&app, &format!("title {pane} window-title"));
+
+    // Keys: the preset's ctrl+a c opens a tab (the plugin's bind was left out); the user's
+    // ctrl+shift+u splits down (the plugin's bind doesn't run); the free chord runs the plugin.
+    app.request(&format!("focus {pane}"));
+    app.request("type ctrl+a c");
+    wait_for("the preset's new tab", || (tab_panes(&app).len() == 2).then_some(()));
+    app.request(&format!("focus {pane}"));
+    app.request("type ctrl+shift+u");
+    let split = wait_for("the user's split", || {
+        tab_panes(&app).into_iter().find(|(_, p)| p.len() == 2 && p[0] == pane).map(|(_, p)| p[1])
+    });
+    app.request(&format!("focus {pane}"));
+    app.request("type ctrl+shift+y");
+    wait_toast(&app, "plugin ctrl+shift+y");
+    std::thread::sleep(Duration::from_millis(300));
+    let infos = info_toasts(&app);
+    assert!(
+        !infos.iter().any(|t| t == "plugin ctrl+a>c" || t == "plugin ctrl+shift+u"),
+        "{infos:?}"
+    );
+
+    // pane_closed: the user's split closes.
+    env.daemon(&format!("close {split}"));
+    wait_toast(&app, &format!("pane_closed {split}"));
+
+    // cx.session:event: the focused pane's program gets the action, as a click would send it.
+    let probe = Probe::start(&env, &[]);
+    wait_for("the app to show the probe", || {
+        (app.send(&format!("focus {}", probe.pane))["ok"] == true).then_some(())
+    });
+    app.wait_primary(probe.pane);
+    probe.write(&hello(&[]));
+    probe.write(&open_with(
+        "s1",
+        "inline",
+        json!([{"id": "go", "k": "text", "p": {"text": "poke me", "actions": {"click": "run"}}}]),
+    ));
+    probe.read_until("the ack", |b| !events(&tsp_bodies(&split_input(b)), "ack").is_empty());
+    let seq = env.daemon(&format!("state-hash {}", probe.pane))["seq"].as_u64().expect("a seq");
+    app.caught_up(probe.pane, seq);
+    palette_run(&app, "poke the surface", "plugin.probe.poke");
+    wait_toast(&app, "poked");
+    let input = probe.read_until("the action", |b| {
+        !events(&tsp_bodies(&split_input(b)), "action").is_empty()
+    });
+    let bodies = tsp_bodies(&split_input(&input));
+    let action = events(&bodies, "action")[0];
+    assert_eq!((&action["sf"], &action["id"]), (&json!("s1"), &json!("go")), "{action}");
+}
+
+/// §9.3 "Window reload": editing a plugin's CSS file reloads the window halves, and the
+/// `plugin:local:*` sheet is reinstalled with the new contents: the window's sheet changes and
+/// the chrome draws with the new rule (a stale sheet would keep the old one).
+#[cfg(target_os = "macos")]
+#[test]
+fn m9_a_window_reload_reinstalls_a_plugins_changed_css() {
+    use window_half::*;
+    let env = TestEnv::new(EXE, "m9-css-reload");
+    let v1 = "#statusline .sl-plugin[data-plugin=\"probe\"] { font-weight: 700; }";
+    let v2 = "#statusline .sl-plugin[data-plugin=\"probe\"] { font-weight: 300; }";
+    package(
+        &env,
+        "probe",
+        "schema = 1\nid = \"probe\"\nname = \"Probe\"\nversion = \"1\"\nwindow = \"window.luau\"\n",
+        &[
+            (
+                "window.luau",
+                r#"tern.css("look", tern.fs.read(tern.plugin.dir .. "/look.css"))
+                   tern.chrome.status(function(p) return { { text = "styled segment" } } end)"#,
+            ),
+            ("look.css", v1),
+        ],
+    );
+    env.start_daemon();
+    let app = auk_conformance::app::App::start(&env, "app", &[]);
+    shell(&env, &app);
+    loaded(&app, &["probe"]);
+    let sheet = |app: &auk_conformance::app::App| {
+        app.request("catalog")["sheet_css"]["plugin:local:probe:look"].as_str().map(str::to_owned)
+    };
+    let weight = |app: &auk_conformance::app::App| {
+        let r = app.send("chrome-style probe");
+        (r["ok"] == true).then(|| r["value"]["font_weight"].to_string())
+    };
+    assert_eq!(wait_for("the plugin's sheet", || sheet(&app)), v1);
+    let w = wait_for("the styled segment", || weight(&app));
+    assert!(w.contains("700"), "{w}");
+    assert!(app.request("plugins")["sheets"].as_array().unwrap().iter().any(|s| s == "plugin:local:probe:look"));
+
+    std::fs::write(plugins_dir(&env).join("probe/look.css"), v2).expect("rewrite the CSS");
+    wait_for("the reinstalled sheet", || (sheet(&app).as_deref() == Some(v2)).then_some(()));
+    let w = wait_for("the segment restyled", || weight(&app).filter(|w| !w.contains("700")));
+    assert!(w.contains("300"), "{w}");
+    assert_eq!(
+        app.request("plugins")["sheets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|s| s.as_str().is_some_and(|s| s.starts_with("plugin:local:probe:")))
+            .count(),
+        1,
+        "one sheet, replaced"
+    );
 }

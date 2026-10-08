@@ -1027,7 +1027,10 @@ impl Pane {
                 auk_replica::Event::Mark(auk_term::Mark::CommandEnd { status }) => {
                     changed = true;
                     let mark = self.shell.marks.last();
-                    let line = mark.and_then(|m| m.cmdline.clone()).unwrap_or_default();
+                    // The same line `command_started` carried: as typed, else as reported.
+                    let line = mark
+                        .and_then(|m| m.typed.clone().or_else(|| m.cmdline.clone()))
+                        .unwrap_or_default();
                     let took_ms = mark.and_then(|m| m.duration_ms).unwrap_or(0) as f64;
                     Some(HostEvent::CommandFinished {
                         pane: id,

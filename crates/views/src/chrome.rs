@@ -63,6 +63,11 @@ html.light #statusline .sl-plugin { color: #2a2d31; }
   background-color: #34507e; color: #eceef0;
 }
 #statusline .sl-app { margin-right: 0; }
+.tab .tab-agent {
+  padding: 0 4px; margin-right: 5px; border-radius: 4px; font-size: 10px;
+  background-color: #5b3f8c; color: #f1e9ff;
+}
+html.light .tab .tab-agent { background-color: #e4d8f7; color: #4a2d7a; }
 .backdrop { position: absolute; left: 0; top: 0; }
 .backdrop.dim { background-color: rgba(0, 0, 0, 0.6); }
 .palette {
@@ -100,7 +105,13 @@ pub struct TabItem {
     /// The program its focused pane reports (the hello's `app`, §7.2), shown as the tab's icon
     /// while a listening surface is open.
     pub app: Option<String>,
+    /// Its focused pane is an agent pane (§5.1): the tab shows the agent icon.
+    pub agent: bool,
 }
+
+/// The agent icon's glyph: a sparkle every system font has, so the badge never draws as an empty
+/// box. The badge is `span.tab-agent[data-icon=agent]`, named "Agent" to assistive technology.
+pub const AGENT_GLYPH: &str = "\u{2726}";
 
 /// A status line segment (`tern.chrome.status`).
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -190,17 +201,22 @@ pub fn tab_bar(
             (false, true) => "tab zoomed",
             (false, false) => "tab",
         };
-        let e = child(
-            doc,
-            list,
-            "div",
-            class,
-            t.app.is_none().then_some(t.title.as_str()),
-        );
+        let plain = t.app.is_none() && !t.agent;
+        let e = child(doc, list, "div", class, plain.then_some(t.title.as_str()));
+        if t.agent {
+            // An agent pane's tab carries the agent icon (§5.1).
+            doc.set_attribute(e, "data-kind", "agent");
+            let badge = child(doc, e, "span", "tab-agent", Some(AGENT_GLYPH));
+            doc.set_attribute(badge, "role", "img");
+            doc.set_attribute(badge, "aria-label", "Agent");
+            doc.set_attribute(badge, "data-icon", "agent");
+        }
         if let Some(app) = &t.app {
             // The pane's program names the tab (its icon) while it draws.
             doc.set_attribute(e, "data-app", app);
             child(doc, e, "span", "tab-app", Some(app));
+        }
+        if !plain {
             child(doc, e, "span", "tab-title", Some(&t.title));
         }
         doc.set_attribute(e, "data-action", &format!("tab:{}", t.id));
@@ -309,6 +325,28 @@ pub fn palette(doc: &mut Document, parent: NodeId, w: f64, h: f64, p: &PaletteVi
         child(doc, r, "span", "p-group", Some(group));
     }
     box_
+}
+
+/// The tabs showing the agent icon, by tab id, each with the badge's box.
+pub fn agent_badges(doc: &Document) -> Vec<(u64, Rect)> {
+    let mut out = Vec::new();
+    let mut stack = vec![doc.root()];
+    while let Some(n) = stack.pop() {
+        if doc.attribute(n, "data-icon") == Some("agent")
+            && let Some(tab) = doc.parent(n)
+            && let Some(id) = doc
+                .attribute(tab, "data-action")
+                .and_then(|a| a.strip_prefix("tab:"))
+                .and_then(|id| id.parse().ok())
+            && let Some(r) = doc.border_box(n)
+        {
+            out.push((id, r));
+        }
+        for &c in doc.children(n).iter().rev() {
+            stack.push(c);
+        }
+    }
+    out
 }
 
 /// Every element with a `data-action` and its box, in document order: what a click at a point

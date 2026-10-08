@@ -73,8 +73,12 @@ impl PaneKind {
 /// One `C`…`D` span (§5.3): the daemon measures the duration itself.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommandMark {
-    /// The command line, as the shell reported it at `C`.
+    /// The command line, as the shell reported it at `C` (alias-expanded when the shell
+    /// reports that).
     pub cmdline: Option<String>,
+    /// The line as typed, when the shell reports it too (Auk's zsh integration).
+    #[serde(default)]
+    pub typed: Option<String>,
     /// The cwd at `C` (the last OSC 7).
     pub cwd: Option<String>,
     /// The buffer line the command's output starts on.
@@ -117,7 +121,7 @@ impl ShellState {
                 self.awaiting_prompt = false;
             }
             Mark::PromptEnd => {}
-            Mark::CommandStart { cmdline, .. } => {
+            Mark::CommandStart { cmdline, typed } => {
                 if self.running {
                     self.finish(None);
                 }
@@ -125,6 +129,7 @@ impl ShellState {
                 self.at_prompt = false;
                 self.marks.push(CommandMark {
                     cmdline: cmdline.clone(),
+                    typed: typed.clone(),
                     cwd: cwd.map(str::to_owned),
                     line,
                     started_ms: SystemTime::now()

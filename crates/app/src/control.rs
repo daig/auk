@@ -582,6 +582,7 @@ fn main_command(cmd: &str, mut args: Vec<String>, win: usize) -> Result<Value, S
             Ok(json!({
                 "pane_app": s.chrome_pane_app(),
                 "tab_apps": s.chrome_tab_apps(),
+                "agent_badges": s.chrome.agent_badges().into_iter().map(|(t, r)| json!({"tab": t, "rect": [r.x, r.y, r.w, r.h]})).collect::<Vec<_>>(),
                 "hover_link": s.hover_link,
                 "tooltip": s.hover_title.as_ref().map(|(t, x, y)| json!({"text": t, "at": [x, y]})),
                 "tooltip_drawn": s.chrome.tooltip().map(|(t, r)| json!({"text": t, "rect": [r.x, r.y, r.w, r.h]})),

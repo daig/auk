@@ -16,6 +16,9 @@
                overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: default;
                background: transparent; color: #8b9096; font: inherit; }
   #tabs .tab.active { background: #16181a; color: #e6e8ea; }
+  /* An agent pane's tab carries the agent icon (§5.1), as in the app. */
+  #tabs .tab .tab-agent { padding: 0 4px; margin-right: 5px; border-radius: 4px; font-size: 10px;
+                          background: #5b3f8c; color: #f1e9ff; }
   #screen { position: fixed; left: 0; right: 0; bottom: 0; top: 0; width: 100vw; height: 100vh;
             display: block; }
   #tabs:not(:empty) ~ #screen { top: 28px; height: calc(100vh - 28px); }
@@ -39,6 +42,7 @@
     #tabs { background: #ecebe8; }
     #tabs .tab { color: #6a6f75; }
     #tabs .tab.active { background: #fbfbfa; color: #1f2328; }
+    #tabs .tab .tab-agent { background: #e4d8f7; color: #4a2d7a; }
   }
 </style>
 </head>

@@ -80,7 +80,6 @@ impl AppContext {
     }
 }
 
-/// Runs `f` on the main thread, from the event loop, soon. Callable from any thread.
 /// The system's Reduce Motion setting (System Settings › Accessibility › Display).
 pub fn system_reduce_motion() -> bool {
     objc2_app_kit::NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceMotion()
@@ -96,8 +95,59 @@ pub fn system_increase_contrast() -> bool {
     objc2_app_kit::NSWorkspace::sharedWorkspace().accessibilityDisplayShouldIncreaseContrast()
 }
 
+/// Whether the system shows a 12-hour clock: the locale's hour pattern for the `j` skeleton,
+/// which follows the region and the "24-hour time" setting (`AppleICUForce12HourTime` and
+/// `AppleICUForce24HourTime`). The auto-updating locale picks up a change as it happens.
+pub fn system_hour12() -> bool {
+    let locale = objc2_foundation::NSLocale::autoupdatingCurrentLocale();
+    objc2_foundation::NSDateFormatter::dateFormatFromTemplate_options_locale(
+        &objc2_foundation::NSString::from_str("j"),
+        0,
+        Some(&locale),
+    )
+    .is_some_and(|pattern| crate::hour_pattern_is_12h(&pattern.to_string()))
+}
+
+/// Runs `f` on the main thread, from the event loop, soon. Callable from any thread.
 pub fn run_on_main(f: impl FnOnce() + Send + 'static) {
     dispatch2::DispatchQueue::main().exec_async(f);
+}
+
+/// Tells every window when the locale or the accessibility display options change
+/// ([`crate::Event::SystemSettings`]).
+fn observe_system_settings() {
+    use objc2_foundation::{NSNotificationCenter, NSOperationQueue};
+    let block = block2::RcBlock::new(|_: std::ptr::NonNull<NSNotification>| {
+        for view in crate::window::registry::all() {
+            view.emit(crate::Event::SystemSettings);
+        }
+    });
+    let queue = NSOperationQueue::mainQueue();
+    let centers = [
+        (
+            NSNotificationCenter::defaultCenter(),
+            // SAFETY: a static NSString AppKit/Foundation define.
+            unsafe { objc2_foundation::NSCurrentLocaleDidChangeNotification },
+        ),
+        (
+            objc2_app_kit::NSWorkspace::sharedWorkspace().notificationCenter(),
+            // SAFETY: as above.
+            unsafe { objc2_app_kit::NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification },
+        ),
+    ];
+    for (center, name) in centers {
+        // SAFETY: no object filter; the block runs on the main queue, where the views live.
+        let observer = unsafe {
+            center.addObserverForName_object_queue_usingBlock(
+                Some(name),
+                None,
+                Some(&queue),
+                &block,
+            )
+        };
+        // Observed for the app's lifetime.
+        std::mem::forget(observer);
+    }
 }
 
 type Init = Box<dyn FnOnce(&AppContext)>;
@@ -161,5 +211,6 @@ pub fn run(init: impl FnOnce(&AppContext) + 'static) {
     };
     app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
     menu::install(mtm, &menu::default_menu());
+    observe_system_settings();
     app.run();
 }

@@ -71,6 +71,9 @@ struct App {
     scale: f32,
     cell: (u32, u32),
     dark: bool,
+    /// The facts last told the daemon: the page's look, motion and clock, followed as they
+    /// change (§4.5).
+    facts: ClientFacts,
     views: BTreeMap<PaneId, PaneView>,
     /// Surfaces, drawn with Vello over the grids (§6.2, §18.1).
     ui: UiLayer,
@@ -222,7 +225,8 @@ async fn start_inner() -> Result<(), String> {
 
     let window_key = param("window").unwrap_or_else(|| "main".to_owned());
     let want_pane = param("pane").and_then(|p| p.parse().ok());
-    let session = Session::new(&window_key, facts(cell, dark));
+    let first_facts = facts(cell, dark);
+    let session = Session::new(&window_key, first_facts.clone());
 
     let location = window().location();
     let host = location.host().map_err(js_err)?;
@@ -238,6 +242,7 @@ async fn start_inner() -> Result<(), String> {
         scale,
         cell,
         dark,
+        facts: first_facts,
         views: BTreeMap::new(),
         ui,
         ui_painted: false,
@@ -442,8 +447,21 @@ fn facts(cell: (u32, u32), dark: bool) -> ClientFacts {
             .ok()
             .flatten()
             .is_some_and(|m| m.matches()),
-        hour12: false,
+        hour12: browser_hour12(),
     }
+}
+
+/// Whether the browser's locale shows a 12-hour clock: the resolved `hourCycle` (`h11`/`h12`) of
+/// an hour format for the default locale, which follows the system's 12/24-hour setting.
+fn browser_hour12() -> bool {
+    let opts = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(&opts, &"hour".into(), &"numeric".into());
+    let resolved =
+        js_sys::Intl::DateTimeFormat::new(&js_sys::Array::new(), &opts).resolved_options();
+    js_sys::Reflect::get(&resolved, &"hourCycle".into())
+        .ok()
+        .and_then(|v| v.as_string())
+        .is_some_and(|c| matches!(c.as_str(), "h11" | "h12"))
 }
 
 impl App {
@@ -666,7 +684,24 @@ impl App {
         for t in &entries {
             if let Ok(el) = doc.create_element("button") {
                 el.set_class_name(if t.active { "tab active" } else { "tab" });
-                el.set_text_content(Some(&t.title));
+                if t.agent {
+                    // The agent icon (§5.1), the glyph the app's tab bar draws.
+                    let _ = el.set_attribute("data-kind", "agent");
+                    if let Ok(badge) = doc.create_element("span") {
+                        badge.set_class_name("tab-agent");
+                        badge.set_text_content(Some(auk_views::chrome::AGENT_GLYPH));
+                        let _ = badge.set_attribute("role", "img");
+                        let _ = badge.set_attribute("aria-label", "Agent");
+                        let _ = badge.set_attribute("data-icon", "agent");
+                        let _ = el.append_child(&badge);
+                    }
+                    if let Ok(title) = doc.create_element("span") {
+                        title.set_text_content(Some(&t.title));
+                        let _ = el.append_child(&title);
+                    }
+                } else {
+                    el.set_text_content(Some(&t.title));
+                }
                 let _ = el.set_attribute("role", "tab");
                 let _ = el.set_attribute("aria-selected", if t.active { "true" } else { "false" });
                 if let Some(p) = t.pane {
@@ -697,12 +732,13 @@ impl App {
                 let m = fonts.metrics();
                 self.cell = (m.cell_width, m.cell_height);
             }
-            self.session.facts(facts(self.cell, self.dark));
         }
-        let dark = prefers_dark();
-        if dark != self.dark {
-            self.dark = dark;
-            self.session.facts(facts(self.cell, dark));
+        self.dark = prefers_dark();
+        // Each frame: a changed look, Reduce Motion or 12-hour clock reaches the daemon.
+        let now = facts(self.cell, self.dark);
+        if now != self.facts {
+            self.facts = now.clone();
+            self.session.facts(now);
         }
         let (w, h) = canvas_size(&self.canvas, scale);
         if (self.canvas.width(), self.canvas.height()) != (w, h) {

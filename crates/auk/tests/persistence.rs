@@ -87,6 +87,8 @@ fn zsh_integration_reports_prompts_commands_and_status() {
     let marks = env.daemon(&format!("marks {pane}"));
     let last = marks.as_array().unwrap().last().unwrap().clone();
     assert_eq!(last["cmdline"], "sh -c 'exit 3'", "{marks}");
+    // Without an alias the typed line is the line itself.
+    assert_eq!(last["typed"], "sh -c 'exit 3'", "{marks}");
     assert_eq!(last["status"], 3);
     assert!(last["line"].as_u64().is_some());
     let info = env.pane_info(pane);
@@ -999,6 +1001,52 @@ fn a_restored_block_restarts_at_its_last_size_on_a_blank_screen_and_needs_its_ty
         "{ls}"
     );
     assert!(ls["layout"].get("main").is_none_or(|w| !w.to_string().contains(&format!("\"pane\":{pane}"))), "{ls}");
+}
+
+#[test]
+fn a_block_survives_a_daemon_restart_with_the_same_args_and_its_save() {
+    let env = env("blockargs");
+    let dir = env.state.join("plugins/argsy");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("plugin.toml"),
+        "schema = 1\nid = \"argsy\"\nname = \"Argsy\"\nversion = \"1\"\nhost = \"host.luau\"\n[[blocks]]\nid = \"b\"\ntitle = \"B\"\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("host.luau"),
+        r#"tern.block.define("b", {
+            init = function(cx, args, saved)
+                return { args = table.concat(args, "|"), n = #args, inits = (saved and saved.inits or 0) + 1 }
+            end,
+            view = function(s)
+                return { main = tern.ui.text("args=[" .. s.args .. "] n=" .. s.n .. " inits=" .. s.inits) }
+            end,
+            save = function(s) return { inits = s.inits } end,
+        })"#,
+    )
+    .unwrap();
+    let daemon = env.start_daemon();
+    // Opened through the CLI with args, one of them with a space.
+    let out = env.cli(&["block", "argsy.b", "alpha", "two words", "-x"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let pane: u64 = String::from_utf8_lossy(&out.stdout).trim().parse().expect("a block pane id");
+    wait_for("the block's first view", || {
+        block_text(&env, pane).contains("args=[alpha|two words|-x] n=3 inits=1").then_some(())
+    });
+    let kind = env.pane_info(pane)["kind"].clone();
+    assert_eq!(kind["args"], json!(["alpha", "two words", "-x"]), "{kind}");
+    wait_for("the first save", || (env.pane_info(pane)["kind"]["saved"] == r#"{"inits":1}"#).then_some(()));
+    wait_checkpoint(&env, &[pane]);
+
+    env.kill9(daemon);
+    env.start_daemon();
+    // The same pane id, restarted with the same args and its last save.
+    wait_for("the restored block", || {
+        block_text(&env, pane).contains("args=[alpha|two words|-x] n=3 inits=2").then_some(())
+    });
+    let kind = env.pane_info(pane)["kind"].clone();
+    assert_eq!((&kind["block"], &kind["args"]), (&json!("argsy.b"), &json!(["alpha", "two words", "-x"])), "{kind}");
 }
 
 #[test]

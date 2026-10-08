@@ -44,9 +44,23 @@ mod window;
 pub use accessibility::{AccessibilityHandler, AxNode};
 #[cfg(target_os = "macos")]
 pub use app::{
-    AppContext, run, run_on_main, system_increase_contrast, system_reduce_motion,
+    AppContext, run, run_on_main, system_hour12, system_increase_contrast, system_reduce_motion,
     system_reduce_transparency,
 };
+
+/// Whether a date pattern (Unicode TR35) shows hours on a 12-hour clock: an `h` or `K` field
+/// outside quoted literals (`HH 'Uhr'` is 24-hour, `h a` is 12-hour).
+pub fn hour_pattern_is_12h(pattern: &str) -> bool {
+    let mut quoted = false;
+    for c in pattern.chars() {
+        match c {
+            '\'' => quoted = !quoted,
+            'h' | 'K' if !quoted => return true,
+            _ => {}
+        }
+    }
+    false
+}
 #[cfg(target_os = "macos")]
 pub use clipboard::Clipboard;
 #[cfg(target_os = "macos")]
@@ -75,6 +89,10 @@ pub enum Event {
     /// The window became (true) or stopped being the key window.
     Focus(bool),
     Appearance(Appearance),
+    /// A system setting a window reads changed: the locale (its 12-hour clock, [`system_hour12`])
+    /// or the accessibility display options (Reduce Motion, Increase Contrast, Reduce
+    /// Transparency). Sent to every window.
+    SystemSettings,
     /// The display is ready for a frame: draw now. Sent on the display's refresh while frames
     /// are requested ([`Window::request_frame`]).
     Frame,
@@ -303,4 +321,19 @@ impl Default for WindowAttributes {
 #[cfg(target_os = "macos")]
 pub trait WindowHandler {
     fn event(&mut self, window: &Window, event: Event);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hour_pattern_is_12h;
+
+    #[test]
+    fn hour_patterns_tell_12_from_24_hours() {
+        for p in ["h a", "h:mm a", "a h", "ah", "K a", "B h", "h 'Uhr'"] {
+            assert!(hour_pattern_is_12h(p), "{p}");
+        }
+        for p in ["HH", "H", "HH 'Uhr'", "HH 'h'", "k", "H'h'", ""] {
+            assert!(!hour_pattern_is_12h(p), "{p}");
+        }
+    }
 }

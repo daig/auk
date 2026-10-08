@@ -577,3 +577,65 @@ fn the_toggle_action_folds_sections_tools_and_agents_and_reports_toggle() {
     }
     assert!(shown(&h, "fixed.body"));
 }
+
+/// §7.8: "A link click opens the link instead of running click", for a link span inside a node
+/// with a `click` action: ⌘-click on the link opens it; a plain click runs click, until
+/// `links_plain_click` makes the plain click a link gesture too (after a settings change, which
+/// re-renders every node).
+#[test]
+fn a_link_inside_a_clickable_node_opens_instead_of_running_click() {
+    let mut h = Harness::new();
+    h.hello(&[]);
+    h.surface(
+        "s1",
+        "inline",
+        json!([{"id": "go", "k": "text", "p": {
+            "spans": [{"t": "run me "}, {"t": "or the docs", "href": "https://example.com/l"}],
+            "actions": {"click": "run"}
+        }}]),
+    );
+    h.frame();
+    let go = h.el("s1", "go");
+    let link = h.find_class(go, "sf-link")[0];
+    let meta = Mods {
+        meta: true,
+        ..Mods::NONE
+    };
+    assert_eq!(
+        click_el(&mut h, link, 1, meta),
+        vec![Outcome::Open("https://example.com/l".into())]
+    );
+    let out = click_el(&mut h, link, 1, Mods::NONE);
+    assert_eq!(
+        deliver(&mut h, out),
+        vec![json!({"ev": "action", "sf": "s1", "id": "go", "act": "run"})]
+    );
+    let settings = auk_views::ViewSettings {
+        links_plain_click: true,
+        ..h.view.settings().clone()
+    };
+    h.view.set_settings(&mut h.doc, &h.pane, settings);
+    h.frame();
+    let go = h.el("s1", "go");
+    let link = h.find_class(go, "sf-link")[0];
+    assert_eq!(
+        click_el(&mut h, link, 1, Mods::NONE),
+        vec![Outcome::Open("https://example.com/l".into())]
+    );
+    // Off the link, click still runs.
+    let r = h.doc.border_box(go).expect("laid out");
+    let out = h.view.click(
+        &mut h.doc,
+        &h.pane,
+        PointerEvent {
+            x: r.x + 2.0,
+            y: r.y + r.h / 2.0,
+            clicks: 1,
+            ..Default::default()
+        },
+    );
+    assert_eq!(
+        deliver(&mut h, out),
+        vec![json!({"ev": "action", "sf": "s1", "id": "go", "act": "run"})]
+    );
+}

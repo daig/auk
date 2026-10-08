@@ -283,6 +283,12 @@ impl WinState {
                 self.send_facts();
                 window.request_frame();
             }
+            Event::SystemSettings => {
+                // The 12-hour clock or Reduce Motion may have changed (§4.5, §7.13).
+                self.ui_dirty = true;
+                self.send_facts();
+                window.request_frame();
+            }
             Event::Wake => self.wake(window),
             Event::Frame => self.frame(window),
             Event::Key(key) => self.key(window, key),
@@ -642,7 +648,7 @@ impl WinState {
             cell_px: [m.cell_width as u16, m.cell_height as u16],
             dark: self.dark,
             reduce_motion: self.reduce_motion(),
-            hour12: false,
+            hour12: auk_platform_macos::system_hour12(),
         };
         if self.facts_sent.as_ref() != Some(&facts) {
             let _ = self.conn.send(&ClientMsg::Facts(facts.clone()));
@@ -1008,6 +1014,7 @@ impl WinState {
             dividers: self.tab_layout.dividers.clone(),
             focus: self.focused_pane().and_then(|p| self.tab_layout.rect(p)),
             tab_apps,
+            tab_agents: self.chrome_tab_agents_in(sessions),
             pane_app,
             hover_link: self.hover_link.clone(),
             tooltip: self.hover_title.clone(),

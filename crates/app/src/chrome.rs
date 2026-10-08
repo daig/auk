@@ -96,6 +96,8 @@ pub struct ChromeModel {
     /// The program a tab's focused pane reports (`app` of its hello), by tab id: only while a
     /// listening surface is open (§7.2, §12.2).
     pub tab_apps: std::collections::BTreeMap<u64, String>,
+    /// Tabs whose focused pane is an agent pane, shown with the agent icon (§5.1).
+    pub tab_agents: std::collections::BTreeSet<u64>,
     /// The focused pane's reporting program, in the status line.
     pub pane_app: Option<String>,
     /// The target of the link under the pointer (§7.14).
@@ -241,6 +243,11 @@ impl Chrome {
         true
     }
 
+    /// The tabs drawn with the agent icon, by tab id, with the icon's box.
+    pub fn agent_badges(&self) -> Vec<(u64, auk_ui::Rect)> {
+        widgets::agent_badges(&self.doc)
+    }
+
     /// The installed plugin sheet names, in order.
     pub fn plugin_sheets(&self) -> Vec<String> {
         self.sheets.iter().map(|(n, _)| n.clone()).collect()
@@ -288,6 +295,7 @@ impl Chrome {
                 active: *active,
                 zoomed: *zoomed,
                 app: model.tab_apps.get(id).cloned(),
+                agent: model.tab_agents.contains(id),
             })
             .collect();
         widgets::tab_bar(&mut self.doc, self.body, &sessions, &tabs);

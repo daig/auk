@@ -62,6 +62,29 @@ impl WinState {
             .collect()
     }
 
+    /// The shown tabs whose focused pane is an agent pane (§5.1: drawn with the agent icon).
+    pub(super) fn chrome_tab_agents_in(
+        &self,
+        sessions: &Sessions,
+    ) -> std::collections::BTreeSet<u64> {
+        let Some(session) = self.session(sessions) else {
+            return Default::default();
+        };
+        session
+            .tabs
+            .iter()
+            .filter(|t| {
+                self.tab_focus
+                    .get(&t.id)
+                    .copied()
+                    .filter(|p| t.root.contains(*p))
+                    .or_else(|| t.root.panes().first().copied())
+                    .is_some_and(|pane| sessions.kind(pane) == auk_mirror::layout::PaneTag::Agent)
+            })
+            .map(|t| t.id)
+            .collect()
+    }
+
     /// The link under a window point: an OSC 8 link on the grid, or a surface link (an element
     /// with `data-href`). Links show their target on hover and open only on an explicit gesture
     /// (§7.14, §12.2).

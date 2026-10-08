@@ -86,8 +86,9 @@ _auk_preexec() {
   builtin local REPLY expanded
   _auk_urlencode "${3:-$1}"
   expanded=$REPLY
-  _auk_urlencode "$1"
-  builtin print -rn -- $'\e]2;'"${1//[[:cntrl:]]/ }"$'\a'
+  # $1 is the line as typed (empty when zsh doesn't keep it): fall back to the expansion.
+  _auk_urlencode "${1:-${3:-$2}}"
+  builtin print -rn -- $'\e]2;'"${${1:-$2}//[[:cntrl:]]/ }"$'\a'
   builtin print -rn -- $'\e]133;C;cmdline_url='"$expanded;typed_url=$REPLY"$'\a'
 }
 
@@ -178,6 +179,26 @@ mod tests {
         assert_eq!(
             String::from_utf8_lossy(&out.stdout).trim(),
             "a%20b/%C3%BC%25%3B%1B"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn preexec_reports_the_expanded_and_the_typed_line() {
+        let root = temp("preexec");
+        let ours = install(&root.join("ours")).unwrap();
+        let script = format!(
+            "source {}/auk-integration.zsh; _auk_preexec 'll x' 'ls -la x' 'ls -la x'; _auk_preexec '' 'ls -la y' 'ls -la y'",
+            ours.display()
+        );
+        let out = Command::new("/bin/zsh")
+            .args(["-f", "-c", &script])
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout),
+            "\x1b]2;ll x\x07\x1b]133;C;cmdline_url=ls%20-la%20x;typed_url=ll%20x\x07\
+             \x1b]2;ls -la y\x07\x1b]133;C;cmdline_url=ls%20-la%20y;typed_url=ls%20-la%20y\x07"
         );
         let _ = fs::remove_dir_all(&root);
     }

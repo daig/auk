@@ -224,18 +224,25 @@ impl Shared {
 
     /// Applies early lens views whose block has appeared; drops those older than 5 s.
     fn retry_views(&mut self) {
+        self.retry_views_at(Instant::now());
+    }
+
+    fn retry_views_at(&mut self, now: Instant) {
         if self.early_views.is_empty() {
             return;
         }
         for (pane, block, node, at) in std::mem::take(&mut self.early_views) {
             if !self.set_lens_view(pane, block, node.clone())
-                && at.elapsed() < std::time::Duration::from_secs(5)
+                && now.saturating_duration_since(at) < EARLY_VIEW_WAIT
             {
                 self.early_views.push((pane, block, node, at));
             }
         }
     }
 }
+
+/// How long a lens view that arrived before its block waits for it (§9.6).
+const EARLY_VIEW_WAIT: Duration = Duration::from_secs(5);
 
 /// A window's connection: an `auk-remote` link to the local daemon, which reconnects and
 /// resyncs after the daemon upgrades in place (§15.7).
@@ -412,4 +419,94 @@ impl Connection {
 
 fn lock(shared: &Mutex<Shared>) -> MutexGuard<'_, Shared> {
     shared.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use auk_mirror::DaemonMsg;
+    use auk_replica::{Item, Replica, Role, Settings};
+
+    use super::*;
+
+    /// A daemon-side replica whose catalog has a lens claiming `tf`.
+    fn lensed_daemon() -> Replica {
+        use auk_plugins::catalog::{LensRule, PluginEntry};
+        let catalog = auk_plugins::Catalog {
+            plugins: vec![PluginEntry {
+                id: "tf".into(),
+                name: "TF".into(),
+                version: "1".into(),
+                description: String::new(),
+                icon: "stack".into(),
+                css: String::new(),
+                blocks: Vec::new(),
+                lenses: vec![LensRule {
+                    id: "plan".into(),
+                    patterns: vec!["tf".into()],
+                }],
+                host: true,
+                window: false,
+                status: auk_plugins::Status::Ready,
+            }],
+            problems: Vec::new(),
+            jit: false,
+        };
+        let mut daemon = Replica::new(40, 10, Settings::default(), Role::Authoritative);
+        let record = auk_replica::Record::Catalog {
+            catalog: auk_replica::claim_catalog(&catalog),
+        };
+        daemon.push(Item::Record(&record));
+        daemon
+    }
+
+    /// §9.6: a lens view that outruns its block's output waits in the window's replica and
+    /// lands once the block appears; one whose block never comes is dropped after 5 s.
+    #[test]
+    fn early_lens_views_wait_for_their_block_up_to_5_s() {
+        let mut s = Shared::default();
+        let mut daemon = lensed_daemon();
+        s.on_message(DaemonMsg::Snapshot {
+            pane: 2,
+            snapshot: daemon.snapshot(),
+        });
+        let view = serde_json::json!({"k": "text", "p": {"text": "1 to add"}});
+        let lens_view = |block: &str, node: serde_json::Value| DaemonMsg::LensView {
+            pane: 2,
+            block: block.into(),
+            node,
+        };
+        s.on_message(lens_view("0", view.clone()));
+        assert_eq!(s.early_views.len(), 1);
+        assert!(s.panes[&2].replica.lens_blocks().is_empty());
+        let generation = s.panes[&2].generation;
+        for bytes in [
+            &b"$ tf\r\n\x1b]133;C;cmdline_url=tf\x07"[..],
+            b"out\r\n\x1b]133;D;0\x07",
+        ] {
+            let (seq, _) = daemon.push(Item::Output(bytes));
+            s.on_message(DaemonMsg::Output {
+                pane: 2,
+                seq,
+                bytes: bytes.to_vec(),
+            });
+        }
+        assert!(s.errors.is_empty(), "{:?}", s.errors);
+        assert!(s.early_views.is_empty());
+        let blocks = s.panes[&2].replica.lens_blocks();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].view.as_ref(), Some(&view));
+        assert!(
+            s.panes[&2].generation > generation,
+            "the window redraws the pane"
+        );
+
+        // A view for a block that never comes: kept under 5 s, dropped after.
+        s.on_message(lens_view("9", view));
+        assert_eq!(s.early_views.len(), 1);
+        let at = s.early_views[0].3;
+        s.retry_views_at(at + Duration::from_millis(4900));
+        assert_eq!(s.early_views.len(), 1);
+        s.retry_views_at(at + Duration::from_millis(5100));
+        assert!(s.early_views.is_empty());
+    }
 }

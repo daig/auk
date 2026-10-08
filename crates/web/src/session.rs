@@ -111,6 +111,8 @@ pub struct Session {
     early_views: Vec<(PaneId, u64, Option<serde_json::Value>, f64)>,
     /// The clock, in seconds ([`Session::set_time`]).
     now: f64,
+    /// Facts that changed before the welcome, sent once it comes.
+    pending_facts: Option<ClientFacts>,
 }
 
 /// How long an early lens view waits for its block (§9.6).
@@ -135,6 +137,7 @@ impl Session {
             focused: None,
             early_views: Vec::new(),
             now: 0.0,
+            pending_facts: None,
         };
         s.send(&ClientMsg::Hello(Hello::new(ClientKind::Web, facts)));
         s
@@ -275,6 +278,9 @@ impl Session {
                 self.client_id = Some(client);
                 self.set_catalog(catalog);
                 self.status = Status::Attached;
+                if let Some(facts) = self.pending_facts.take() {
+                    self.send(&ClientMsg::Facts(facts));
+                }
                 self.send(&ClientMsg::Attach {
                     window_key: self.window_key.clone(),
                 });
@@ -438,6 +444,10 @@ impl Session {
                     title,
                     active: active == Some(t.id),
                     pane: t.zoom.or(first),
+                    agent: t
+                        .zoom
+                        .or(first)
+                        .is_some_and(|p| self.window.kind(p) == auk_mirror::layout::PaneTag::Agent),
                 }
             })
             .collect()
@@ -500,6 +510,8 @@ impl Session {
     pub fn facts(&mut self, facts: ClientFacts) {
         if self.status == Status::Attached {
             self.send(&ClientMsg::Facts(facts));
+        } else {
+            self.pending_facts = Some(facts);
         }
     }
 
@@ -541,6 +553,8 @@ pub struct TabEntry {
     pub active: bool,
     /// The pane a click on the tab shows and focuses.
     pub pane: Option<PaneId>,
+    /// That pane is an agent pane: the tab shows the agent icon (§5.1).
+    pub agent: bool,
 }
 
 /// A rectangle in physical pixels.
@@ -627,6 +641,34 @@ mod tests {
             client: 7,
         }
         .to_bytes()
+    }
+
+    /// §4.5: facts that change while the hello is out (the page's clock or look) reach the
+    /// daemon once it welcomes the client; later changes go at once.
+    #[test]
+    fn facts_changed_before_the_welcome_are_sent_with_it() {
+        let mut s = Session::new("main", ClientFacts::default());
+        s.take_outbox();
+        let twelve = ClientFacts {
+            hour12: true,
+            ..ClientFacts::default()
+        };
+        s.facts(twelve.clone());
+        assert!(s.take_outbox().is_empty());
+        s.on_message(&welcome());
+        let out: Vec<ClientMsg> = decode_all(&s.take_outbox().concat()).unwrap();
+        assert_eq!(
+            out,
+            vec![
+                ClientMsg::Facts(twelve),
+                ClientMsg::Attach {
+                    window_key: "main".into()
+                }
+            ]
+        );
+        s.facts(ClientFacts::default());
+        let out: Vec<ClientMsg> = decode_all(&s.take_outbox().concat()).unwrap();
+        assert_eq!(out, vec![ClientMsg::Facts(ClientFacts::default())]);
     }
 
     #[test]
@@ -928,6 +970,8 @@ mod tests {
             Some("logs"),
         )
         .unwrap();
+        // Pane 2 is an agent pane: its tab shows the agent icon (§5.1).
+        assert!(l.set_kind(2, auk_mirror::layout::PaneTag::Agent));
         s.on_message(
             &DaemonMsg::Layout {
                 window_key: "main".into(),
@@ -936,6 +980,7 @@ mod tests {
             .to_bytes(),
         );
         let bar = s.tab_bar(Some(2));
+        assert_eq!((bar[0].agent, bar[1].agent), (false, true));
         assert_eq!(bar.len(), 2);
         assert_eq!((bar[0].active, bar[0].pane), (false, Some(1)));
         assert_eq!(bar[0].title, l.window("main").unwrap().sessions[0].name);
