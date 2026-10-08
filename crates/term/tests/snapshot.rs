@@ -332,3 +332,13 @@ fn prompt_rows_survive_snapshots_and_go_with_their_row() {
     t.feed(b"\x1b[?1049l");
     assert_eq!(t.prompt_lines(), vec![0, 2, 5]);
 }
+
+/// Found by the cut proptest: two DECID requests with the snapshot taken between them. The live
+/// terminal still holds the first answer, the rebuilt one doesn't (answers aren't replicated
+/// state), and both must report the second answer the same way.
+#[test]
+fn a_snapshot_between_two_answered_requests_reports_the_second_alike() {
+    for cut in 0..=4 {
+        check_cut(2, 1, b"\x1bZ\x1bZ", cut).unwrap();
+    }
+}

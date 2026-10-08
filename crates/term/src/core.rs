@@ -188,9 +188,9 @@ impl Core {
     }
 
     pub(crate) fn reply(&mut self, bytes: &[u8]) {
-        if self.replies.is_empty() {
-            self.events.push_back(Event::Replies);
-        }
+        // One event per answer, whatever the queue held before: the queue isn't replicated
+        // state, so a replica rebuilt from a snapshot must see the same events as the live one.
+        self.events.push_back(Event::Replies);
         self.replies.extend_from_slice(bytes);
     }
 

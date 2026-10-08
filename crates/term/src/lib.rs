@@ -102,7 +102,7 @@ pub enum Event {
     /// An anchor row ended: erased, scrolled out of a scroll region or out of the scrollback,
     /// cleared with the scrollback, or dropped by RIS (§7.4).
     AnchorGone(AnchorKey),
-    /// The tty's mode-dependent answer queue (`take_replies`) became non-empty.
+    /// An answer was added to the queue that `take_replies` drains (one event per answer).
     Replies,
 }
 
