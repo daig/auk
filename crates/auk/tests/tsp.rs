@@ -45,6 +45,16 @@ fn setup_window(name: &str) -> (TestEnv, Headless, Probe) {
     (env, window, probe)
 }
 
+/// Waits until the window's replica has applied everything the daemon's has, so keys and pastes
+/// the window encodes see the modes the program just set.
+fn caught_up(env: &TestEnv, window: &Headless, probe: &Probe) {
+    let target = env.daemon(&format!("state-hash {}", probe.pane))["seq"].as_u64().expect("a seq");
+    wait_for("the window to catch up with the daemon", || {
+        let seq = window.request(&format!("state-hash {}", probe.pane))["seq"].as_u64()?;
+        (seq >= target).then_some(())
+    });
+}
+
 /// The daemon's view of the pane's TSP state.
 fn state(env: &TestEnv, probe: &Probe) -> Value {
     env.daemon(&format!("tsp {}", probe.pane))
@@ -2705,12 +2715,16 @@ fn h2_after_the_program_is_gone_surfaces_come_back_closed_and_read_only() {
 
 #[test]
 fn i1_bracketed_paste() {
-    let (_env, window, probe) = setup_window("i1");
+    let (env, window, probe) = setup_window("i1");
     probe.write(b"\x1b[?2004h");
+    probe.fence();
+    caught_up(&env, &window, &probe);
     window.request(&format!("send {} paste pasted text", probe.pane));
     let input = probe.read_until("the paste", |b| b.ends_with(b"\x1b[201~"));
     assert_eq!(input, b"\x1b[200~pasted text\x1b[201~");
     probe.write(b"\x1b[?2004l");
+    probe.fence();
+    caught_up(&env, &window, &probe);
     window.request(&format!("send {} paste plain", probe.pane));
     assert_eq!(
         probe.read_until("plain", |b| b.ends_with(b"plain")),
@@ -2720,9 +2734,10 @@ fn i1_bracketed_paste() {
 
 #[test]
 fn i2_kitty_keyboard_flag_1_push_and_pop() {
-    let (_env, window, probe) = setup_window("i2");
+    let (env, window, probe) = setup_window("i2");
     probe.write(b"\x1b[>1u");
     probe.fence();
+    caught_up(&env, &window, &probe);
     window.request(&format!("send {} keys Esc", probe.pane));
     assert_eq!(
         probe.read_until("CSI 27 u", |b| b.ends_with(b"u")),
@@ -2736,6 +2751,7 @@ fn i2_kitty_keyboard_flag_1_push_and_pop() {
     );
     probe.write(b"\x1b[<u");
     probe.fence();
+    caught_up(&env, &window, &probe);
     window.request(&format!("send {} keys Esc", probe.pane));
     assert_eq!(
         probe.read_until("a plain Escape", |b| !b.is_empty()),
