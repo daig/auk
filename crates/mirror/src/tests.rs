@@ -71,6 +71,7 @@ fn daemon_messages() -> Vec<DaemonMsg> {
                 settings: Settings::default(),
                 exit: None,
                 bytes: b"\x1b[2J\x1b[Hhello".to_vec(),
+                lens: Default::default(),
             },
         },
         DaemonMsg::Output {

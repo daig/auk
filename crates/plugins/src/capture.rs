@@ -441,7 +441,7 @@ mod tests {
         assert_eq!((step.abort, step.consumed), (Some(Abort::AltScreen), 13));
         assert_eq!(c.raw(), b"x\x1b[?1049hmore");
         let step = Capture::new(20).feed_stream(b"a\x1b[cb");
-        assert_eq!(step.replies.is_empty(), false, "DA1 is answered");
+        assert!(!step.replies.is_empty(), "DA1 is answered");
         assert_eq!(step.abort, None);
         let step = Capture::new(20).feed_stream(b"a\x1b[6nb");
         assert_eq!(step.abort, Some(Abort::CursorQuery));

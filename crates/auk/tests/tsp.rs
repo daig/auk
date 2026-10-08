@@ -3082,7 +3082,7 @@ fn effects_reach_the_windows_showing_a_window_key() {
         let e = window.request("effects");
         (e.as_array()?.len() == 1).then_some(e)
     });
-    assert_eq!(got, json!([{"effect": "toast", "text": "build finished"}]));
+    assert_eq!(got, json!([{"effect": "toast", "level": "info", "text": "build finished"}]));
     let got = wait_for("the copy", || {
         let e = other.request("effects");
         (e.as_array()?.len() == 1).then_some(e)
