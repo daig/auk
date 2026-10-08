@@ -74,7 +74,9 @@ pub struct Chrome {
 
 impl std::fmt::Debug for Chrome {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Chrome").field("model", &self.model).finish()
+        f.debug_struct("Chrome")
+            .field("model", &self.model)
+            .finish()
     }
 }
 
@@ -100,7 +102,8 @@ impl Chrome {
         if self.model.as_ref() == Some(model) {
             return false;
         }
-        self.doc.set_viewport(model.width as f32, model.height as f32);
+        self.doc
+            .set_viewport(model.width as f32, model.height as f32);
         let root = self.doc.root();
         self.doc
             .set_attribute(root, "class", if model.dark { "dark" } else { "light" });
@@ -115,7 +118,8 @@ impl Chrome {
         for (id, name, active) in &model.sessions {
             let class = if *active { "session active" } else { "session" };
             let s = self.child(sessions, "div", class, Some(name));
-            self.doc.set_attribute(s, "data-action", &format!("session:{id}"));
+            self.doc
+                .set_attribute(s, "data-action", &format!("session:{id}"));
             self.doc.set_attribute(s, "role", "tab");
             if *active {
                 self.doc.set_attribute(s, "aria-selected", "true");
@@ -137,7 +141,8 @@ impl Chrome {
                 (false, false) => "tab",
             };
             let t = self.child(tabs, "div", class, Some(title));
-            self.doc.set_attribute(t, "data-action", &format!("tab:{id}"));
+            self.doc
+                .set_attribute(t, "data-action", &format!("tab:{id}"));
             self.doc.set_attribute(t, "role", "tab");
             if *active {
                 self.doc.set_attribute(t, "aria-selected", "true");

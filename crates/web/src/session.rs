@@ -48,6 +48,35 @@ pub struct PaneState {
     pub asked: Option<(u16, u16)>,
     /// The last frame acked per surface.
     pub acked: BTreeMap<String, u64>,
+    /// TSP changes the client hasn't drawn yet, in order ([`Session::take_changes`]).
+    pub changes: Vec<auk_tsp::Changes>,
+    /// A snapshot replaced the replica: the client's view of its surfaces starts over.
+    pub reset: bool,
+    /// Blobs already asked for (§7.12).
+    pub blobs_asked: BTreeSet<String>,
+}
+
+impl PaneState {
+    /// Keeps the replica's TSP changes for the client to draw, bounded: past 256 batches they
+    /// merge into one, in order.
+    fn keep_changes(&mut self) {
+        let changes = self.replica.take_tsp_changes();
+        if changes.is_empty() {
+            return;
+        }
+        self.changes.push(changes);
+        if self.changes.len() > 256 {
+            let mut merged = auk_tsp::Changes::default();
+            for c in self.changes.drain(..) {
+                merged.surfaces.retain(|s| !c.removed.contains(&s.key));
+                merged.surfaces.extend(c.surfaces);
+                merged.removed.extend(c.removed);
+                merged.blobs.extend(c.blobs);
+                merged.pane |= c.pane;
+            }
+            self.changes.push(merged);
+        }
+    }
 }
 
 /// The client's state.
@@ -170,19 +199,29 @@ impl Session {
                 ));
             }
             DaemonMsg::Snapshot { pane, snapshot } => {
-                let replica = Replica::from_snapshot(&snapshot, Role::Follower, None);
+                // The views' sheet checker, as a drawing window's replica has (§8.4).
+                let tsp = auk_tsp::TspPane::with(
+                    auk_replica::tsp_config(&snapshot.settings),
+                    auk_views::sheet_checker(),
+                    Box::new(auk_tsp::MemoryBlobs::default()),
+                );
+                let replica = Replica::from_snapshot(&snapshot, Role::Follower, Some(tsp));
                 let exit = snapshot.exit;
                 let old = self.panes.remove(&pane);
-                self.panes.insert(
-                    pane,
-                    PaneState {
-                        replica,
-                        primary: old.as_ref().is_some_and(|p| p.primary),
-                        exit,
-                        asked: None,
-                        acked: BTreeMap::new(),
-                    },
-                );
+                // The daemon sends the blobs the snapshot names right after it.
+                let blobs_asked = replica.tsp().missing_blobs().into_iter().collect();
+                let mut p = PaneState {
+                    replica,
+                    primary: old.as_ref().is_some_and(|p| p.primary),
+                    exit,
+                    asked: None,
+                    acked: BTreeMap::new(),
+                    changes: Vec::new(),
+                    reset: true,
+                    blobs_asked,
+                };
+                p.keep_changes();
+                self.panes.insert(pane, p);
             }
             DaemonMsg::Output { pane, seq, bytes } => self.apply(pane, seq, Item::Output(&bytes)),
             DaemonMsg::Record { pane, seq, record } => self.apply(pane, seq, Item::Record(&record)),
@@ -210,9 +249,9 @@ impl Session {
                 mime,
                 bytes,
             } => {
-                // The browser draws grids only; the replica keeps blobs like any other.
                 if let Some(p) = self.panes.get_mut(&pane) {
                     p.replica.deliver_blob(&id, mime.as_deref(), bytes);
+                    p.keep_changes();
                 }
             }
             DaemonMsg::LensView { .. } | DaemonMsg::Effect(_) | DaemonMsg::Presence { .. } => {}
@@ -228,8 +267,27 @@ impl Session {
         if let Err(err) = p.replica.apply(seq, item) {
             self.errors.push(format!("pane {pane}: {err}"));
         }
-        // The browser draws the grid; surface changes are drained so they don't pile up.
-        let _ = p.replica.take_tsp_changes();
+        p.keep_changes();
+        // Blobs a document names that this client lacks.
+        let ask: Vec<String> = p
+            .replica
+            .tsp()
+            .missing_blobs()
+            .into_iter()
+            .filter(|id| p.blobs_asked.insert(id.clone()))
+            .collect();
+        if !ask.is_empty() {
+            self.send(&ClientMsg::Blobs { pane, ids: ask });
+        }
+    }
+
+    /// A pane's undrawn TSP changes, and whether its surfaces start over (a snapshot replaced the
+    /// replica since the last call).
+    pub fn take_changes(&mut self, pane: PaneId) -> (bool, Vec<auk_tsp::Changes>) {
+        match self.panes.get_mut(&pane) {
+            Some(p) => (std::mem::take(&mut p.reset), std::mem::take(&mut p.changes)),
+            None => (false, Vec::new()),
+        }
     }
 
     /// The tab to show: the one holding `pane`, else the first session's first tab.

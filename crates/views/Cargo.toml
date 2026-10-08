@@ -16,6 +16,8 @@ syntect = { version = "5", default-features = false, features = ["default-fancy"
 two-face = { version = "0.4", default-features = false, features = ["syntect-fancy"] }
 imara-diff = "0.2"
 vello = "0.11"
+# Making a supplied font every generic family, where there are no system fonts (the browser).
+parley = "0.11"
 # `image` (§8.5, §18.4): PNG (and APNG), JPEG, GIF and WebP, animated frames included.
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 # Sanitized SVG: parsed and filtered to the allowlist (usvg's roxmltree), drawn by resvg.

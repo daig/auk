@@ -26,9 +26,9 @@
 pub mod keys;
 
 #[cfg(target_os = "macos")]
-mod app;
-#[cfg(target_os = "macos")]
 mod accessibility;
+#[cfg(target_os = "macos")]
+mod app;
 #[cfg(target_os = "macos")]
 mod clipboard;
 #[cfg(target_os = "macos")]
@@ -41,9 +41,9 @@ mod view;
 mod window;
 
 #[cfg(target_os = "macos")]
-pub use app::{AppContext, run, run_on_main};
-#[cfg(target_os = "macos")]
 pub use accessibility::{AccessibilityHandler, AxNode};
+#[cfg(target_os = "macos")]
+pub use app::{AppContext, run, run_on_main};
 #[cfg(target_os = "macos")]
 pub use clipboard::Clipboard;
 #[cfg(target_os = "macos")]
@@ -266,7 +266,9 @@ pub enum MenuItem {
         mods: KeyMods,
     },
     /// The system's Services submenu.
-    Services { title: String },
+    Services {
+        title: String,
+    },
     Separator,
     Submenu(Menu),
 }

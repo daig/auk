@@ -4,9 +4,9 @@
 //! calls an assistive app makes.
 
 use accesskit::{ActionHandler, ActionRequest, ActivationHandler, TreeUpdate};
+use objc2::msg_send;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
-use objc2::msg_send;
 use objc2_foundation::{NSArray, NSString};
 
 /// Supplies a window's accessibility tree and performs actions on it. Called on the main thread,

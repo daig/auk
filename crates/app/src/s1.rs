@@ -23,6 +23,14 @@ pub struct GhosttyOptions {
     pub option_as_alt: Option<String>,
 }
 
+/// Parses stroke names (`a`, `shift+a`, `opt+f`, …).
+pub fn strokes(names: &[&str]) -> Result<Vec<Stroke>, String> {
+    names
+        .iter()
+        .map(|n| Stroke::parse(n).ok_or_else(|| format!("bad stroke `{n}`")))
+        .collect()
+}
+
 /// Records what Ghostty sends for each stroke: one byte string per stroke.
 pub fn record_ghostty(strokes: &[Stroke], opts: &GhosttyOptions) -> Result<Vec<Vec<u8>>, String> {
     if !can_post_events() {
@@ -41,11 +49,19 @@ fn nanos() -> u128 {
         .map_or(0, |d| d.as_nanos())
 }
 
-fn record_in(dir: &Path, strokes: &[Stroke], opts: &GhosttyOptions) -> Result<Vec<Vec<u8>>, String> {
+fn record_in(
+    dir: &Path,
+    strokes: &[Stroke],
+    opts: &GhosttyOptions,
+) -> Result<Vec<Vec<u8>>, String> {
     let out = dir.join("bytes");
     let ready = dir.join("ready");
     let script = dir.join("record.sh");
-    let push = if opts.kitty { "printf '\\033[>1u'; " } else { "" };
+    let push = if opts.kitty {
+        "printf '\\033[>1u'; "
+    } else {
+        ""
+    };
     std::fs::write(
         &script,
         format!(
@@ -77,9 +93,11 @@ fn record_in(dir: &Path, strokes: &[Stroke], opts: &GhosttyOptions) -> Result<Ve
     let started = Instant::now();
     while !ready.exists() {
         if started.elapsed() > Duration::from_secs(15) {
-            return Err("Ghostty didn't run the recorder; open Ghostty once from Finder to clear \
+            return Err(
+                "Ghostty didn't run the recorder; open Ghostty once from Finder to clear \
                  Gatekeeper's first-launch prompt"
-                .into());
+                    .into(),
+            );
         }
         std::thread::sleep(Duration::from_millis(100));
     }

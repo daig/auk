@@ -17,9 +17,12 @@ shlex = "2.0.1"
 [target.'cfg(target_os = "macos")'.dependencies]
 accesskit = "0.25.1"
 auk-platform-macos = { path = "../platform-macos" }
+auk-remote = { path = "../remote" }
 auk-render = { path = "../render" }
 auk-text = { path = "../text" }
+auk-tsp = { path = "../tsp" }
 auk-ui = { path = "../ui" }
+auk-views = { path = "../views" }
 base64 = "0.23.1"
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]

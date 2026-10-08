@@ -10,7 +10,9 @@
 //! - [`conn`]: the daemon connection and the replicas it feeds.
 //! - [`window`]: one window: focus, sessions UI, input routing, scrolling, selection, drawing,
 //!   acks (§15.5).
-//! - [`compose`]: the pane compositor for the mixed layout (§6.2).
+//! - Panes composite through `auk_views::compose` and `auk_views::PaneSurfaces` (§6.2): grid rows
+//!   and surface blocks, docks, layers and screen surfaces, as the headless window and the web
+//!   client do.
 //! - [`geometry`]: split trees laid out in a window.
 //! - [`chrome`]: the tab bar and dividers as a UI document.
 //! - [`commands`]: the command registry the menu bar is generated from.
@@ -29,8 +31,6 @@ mod app;
 pub mod chrome;
 #[cfg(target_os = "macos")]
 pub mod commands;
-#[cfg(target_os = "macos")]
-pub mod compose;
 #[cfg(target_os = "macos")]
 pub mod conn;
 #[cfg(target_os = "macos")]
@@ -129,10 +129,11 @@ pub fn run(opts: Options) -> ExitCode {
     };
     auk_platform_macos::run(move |ctx| {
         ctx.set_main_menu(&commands::menu_bar());
-        ctx.set_command_handler(|_, id| {
-            if commands::by_id(id) == Some(commands::Cmd::NewWindow) {
-                app::new_window();
-            }
+        // Menu commands no key window took (the app isn't active): the window used last.
+        ctx.set_command_handler(|_, id| match commands::by_id(id) {
+            Some(commands::Cmd::NewWindow) => app::new_window(),
+            Some(cmd) => app::command_to_current(cmd),
+            None => {}
         });
         let clock = gfx::FrameClock::new(&gpu);
         app::install(app::App {

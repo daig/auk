@@ -12,8 +12,12 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use auk_mirror::{ClientFacts, PaneId};
-use auk_render::{Acquired, Gpu, GridRenderer, GridSnapshot, Theme, View, WindowSurface, wgpu};
+use auk_render::{
+    Acquired, Gpu, GridRenderer, GridSnapshot, RowSlot, Theme, UiLayer, View, WindowSurface, wgpu,
+};
 use auk_text::{Backend, FontConfig, GridFonts};
+use auk_views::compose::Scroll;
+use auk_views::{Arranged, PaneSurfaces, Place, ViewSettings};
 use raw_window_handle::{
     RawDisplayHandle, RawWindowHandle, WebCanvasWindowHandle, WebDisplayHandle,
 };
@@ -46,10 +50,14 @@ fn families() -> Vec<String> {
         .collect()
 }
 
+/// A pane as this client shows it: its surfaces (kept for every pane, shown or not), the grid
+/// renderer once shown, and the view state (never replicated).
 struct PaneView {
-    renderer: GridRenderer,
-    /// Rows scrolled back (view state, never replicated).
-    scroll: usize,
+    renderer: Option<GridRenderer>,
+    surfaces: PaneSurfaces,
+    scroll: Scroll,
+    /// The pane as last drawn.
+    arranged: Arranged,
 }
 
 struct App {
@@ -63,6 +71,10 @@ struct App {
     cell: (u32, u32),
     dark: bool,
     views: BTreeMap<PaneId, PaneView>,
+    /// Surfaces, drawn with Vello over the grids (§6.2, §18.1).
+    ui: UiLayer,
+    /// The UI layer holds surfaces from the last frame.
+    ui_painted: bool,
     canvas: HtmlCanvasElement,
     input: HtmlTextAreaElement,
     status: HtmlElement,
@@ -73,6 +85,8 @@ struct App {
     /// Where each shown pane was drawn last, in physical pixels.
     rects: Vec<(PaneId, Rect)>,
     frame_requested: bool,
+    /// A surface is animating: draw again next frame.
+    animating: bool,
     frames: u64,
     composing: bool,
     /// Text a composition just committed: an `input` event repeating it is the same text.
@@ -190,6 +204,7 @@ async fn start_inner() -> Result<(), String> {
         )
     }
     .map_err(|e| format!("WebGPU canvas: {e}"))?;
+    let ui = UiLayer::new(&gpu, surface.format()).map_err(|e| e.to_string())?;
     let metrics = grid_fonts(&font, scale)?.metrics();
     let cell = (metrics.cell_width, metrics.cell_height);
     let dark = prefers_dark();
@@ -213,6 +228,8 @@ async fn start_inner() -> Result<(), String> {
         cell,
         dark,
         views: BTreeMap::new(),
+        ui,
+        ui_painted: false,
         canvas: canvas.clone(),
         input: input.clone(),
         status,
@@ -220,6 +237,7 @@ async fn start_inner() -> Result<(), String> {
         focused: None,
         rects: Vec::new(),
         frame_requested: false,
+        animating: false,
         frames: 0,
         composing: false,
         composed: None,
@@ -414,11 +432,16 @@ impl App {
         }
         self.frame_requested = true;
         let app = app.clone();
+        let app2 = app.clone();
         let closure = Closure::once_into_js(move |_: f64| {
             let mut a = app.borrow_mut();
             a.frame_requested = false;
             a.frame();
             a.flush();
+            if a.animating {
+                let app = app2.clone();
+                a.request_frame(&app);
+            }
         });
         let _ = window().request_animation_frame(closure.unchecked_ref());
     }
@@ -448,7 +471,7 @@ impl App {
             KeyAction::Send(ev) => {
                 e.prevent_default();
                 if let Some(v) = self.views.get_mut(&pane) {
-                    v.scroll = 0;
+                    v.scroll = Scroll::default();
                 }
                 self.session.key(pane, &ev);
                 self.flush();
@@ -470,19 +493,15 @@ impl App {
         let Some(pane) = self.focused else {
             return;
         };
-        let lines = match e.delta_mode() {
-            WheelEvent::DOM_DELTA_LINE => e.delta_y(),
-            WheelEvent::DOM_DELTA_PAGE => e.delta_y() * 20.0,
-            _ => e.delta_y() * f64::from(self.scale) / f64::from(self.cell.1.max(1)),
+        // Pixels, in the flow's pixel scrolling (§6.2).
+        let cell = f64::from(self.cell.1.max(1));
+        let px = match e.delta_mode() {
+            WheelEvent::DOM_DELTA_LINE => e.delta_y() * cell,
+            WheelEvent::DOM_DELTA_PAGE => e.delta_y() * 20.0 * cell,
+            _ => e.delta_y() * f64::from(self.scale),
         };
-        let history = self
-            .session
-            .panes
-            .get(&pane)
-            .map_or(0, |p| p.replica.terminal().history_len());
         if let Some(v) = self.views.get_mut(&pane) {
-            let next = v.scroll as f64 - lines.round();
-            v.scroll = next.clamp(0.0, history as f64) as usize;
+            v.scroll = Scroll::by(&v.arranged.composed, -px as f32);
         }
     }
 
@@ -497,7 +516,10 @@ impl App {
         let scale = window().device_pixel_ratio() as f32;
         if scale != self.scale {
             self.scale = scale;
-            self.views.clear();
+            // New glyphs at the new scale; the surfaces keep their state.
+            for v in self.views.values_mut() {
+                v.renderer = None;
+            }
             if let Ok(fonts) = grid_fonts(&self.font, scale) {
                 let m = fonts.metrics();
                 self.cell = (m.cell_width, m.cell_height);
@@ -581,43 +603,133 @@ impl App {
         let doc_focused = window()
             .document()
             .is_some_and(|d| d.has_focus().unwrap_or(false));
+        let now = js_sys::Date::now() / 1000.0;
+        let settings = ViewSettings {
+            font_px: FONT_PT,
+            cell: (self.cell.0 as f32 / scale, self.cell.1 as f32 / scale),
+            dark: self.dark,
+            ..ViewSettings::default()
+        };
+        // Every pane's surfaces take their changes, shown or not.
+        let ids: Vec<PaneId> = self.session.panes.keys().copied().collect();
+        self.views.retain(|id, _| ids.contains(id));
+        for pane in ids {
+            let (reset, changes) = self.session.take_changes(pane);
+            if reset {
+                self.views.remove(&pane);
+            }
+            let tsp = self.session.panes[&pane].replica.tsp();
+            let font = &self.font;
+            let view = self.views.entry(pane).or_insert_with(|| {
+                let mut surfaces = PaneSurfaces::new(settings.clone(), scale);
+                // The browser has no system fonts: surfaces draw in the server's font.
+                surfaces.use_font(font.to_vec());
+                PaneView {
+                    renderer: None,
+                    surfaces,
+                    scroll: Scroll::default(),
+                    arranged: Arranged::default(),
+                }
+            });
+            for c in &changes {
+                view.surfaces.sync(tsp, c, now);
+            }
+            view.surfaces.configure(tsp, settings.clone(), scale);
+        }
+        let mut scene = auk_render::vello::Scene::new();
+        let mut painted = false;
+        let mut animating = false;
         let mut drawn = Vec::new();
         for &(pane, rect) in &self.rects {
             let Some(p) = self.session.panes.get(&pane) else {
                 continue;
             };
-            if !self.views.contains_key(&pane) {
+            let Some(view) = self.views.get_mut(&pane) else {
+                continue;
+            };
+            if view.renderer.is_none() {
                 let Ok(fonts) = grid_fonts(&self.font, scale) else {
                     continue;
                 };
-                self.views.insert(
-                    pane,
-                    PaneView {
-                        renderer: GridRenderer::new(&self.gpu, self.surface.format(), fonts),
-                        scroll: 0,
-                    },
-                );
+                view.renderer = Some(GridRenderer::new(&self.gpu, self.surface.format(), fonts));
             }
-            let view = self.views.get_mut(&pane).expect("inserted");
-            let (cols, rows) =
-                view.renderer
-                    .grid_size_for(rect.w as u32, rect.h as u32, pad as u32);
+            let renderer = view.renderer.as_mut().expect("made above");
+            let (cols, rows) = renderer.grid_size_for(rect.w as u32, rect.h as u32, pad as u32);
             let term = p.replica.terminal();
-            let snap = GridSnapshot::from_terminal(
+            let tsp = p.replica.tsp();
+            let content_w = (rect.w - 2.0 * pad).max(0.0);
+            let content_h = (rect.h - 2.0 * pad).max(0.0);
+            let pane_focused = doc_focused && self.focused == Some(pane);
+            // The pane's flow (§6.2): grid rows, and surface blocks at their anchor rows.
+            if view
+                .surfaces
+                .layout(
+                    term,
+                    tsp,
+                    (content_w / scale, content_h / scale),
+                    pane_focused,
+                    now,
+                )
+                .is_some()
+            {
+                animating = true;
+            }
+            let arranged =
+                view.surfaces
+                    .arrange(term, tsp, self.cell.1 as f32, content_h, scale, view.scroll);
+            view.scroll = arranged.composed.scroll;
+            if view.surfaces.paint(
+                &arranged,
+                &mut scene,
+                Place {
+                    x: f64::from(rect.x + pad),
+                    y: f64::from(rect.y + pad),
+                    w: f64::from(content_w),
+                    h: f64::from(content_h),
+                    scale: f64::from(scale),
+                },
+            ) {
+                painted = true;
+            }
+            let composed = &arranged.composed;
+            let lines = composed.slots.len().clamp(1, usize::from(u16::MAX)) as u16;
+            let snap = GridSnapshot::from_lines(
                 term,
                 &theme.with_overrides(term.color_overrides()),
                 &View {
-                    scroll: view.scroll,
+                    scroll: 0,
                     selection: None,
-                    focused: doc_focused && self.focused == Some(pane),
+                    focused: pane_focused,
                     cursor_on: true,
                 },
+                composed.first,
+                lines,
             );
-            view.renderer.set_origin(rect.x + pad, rect.y + pad);
-            view.renderer.prepare(&self.gpu, &snap, (w, h));
-            drawn.push((pane, rect, cols, rows));
+            let slots = (!composed.is_uniform(self.cell.1 as f32)).then(|| {
+                composed
+                    .slots
+                    .iter()
+                    .map(|s| RowSlot {
+                        top: s.top,
+                        height: s.height,
+                    })
+                    .collect()
+            });
+            renderer.set_origin(rect.x + pad, rect.y + pad);
+            renderer.set_row_slots(slots);
+            renderer.prepare(&self.gpu, &snap, (w, h));
+            let grid_shown = arranged.grid_shown();
+            view.arranged = arranged;
+            drawn.push((pane, rect, cols, rows, grid_shown));
         }
-        for &(pane, _, cols, rows) in &drawn {
+        if (painted || self.ui_painted)
+            && let Err(err) = self.ui.render(&self.gpu, &scene, w, h)
+        {
+            self.session.errors.push(err.to_string());
+        }
+        self.ui_painted = painted;
+        self.animating = animating;
+        for &(pane, _, cols, rows, _) in &drawn {
             self.session.resize(pane, cols, rows);
         }
 
@@ -646,7 +758,10 @@ impl App {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            for &(pane, rect, _, _) in &drawn {
+            for &(pane, rect, _, _, grid_shown) in &drawn {
+                if !grid_shown {
+                    continue;
+                }
                 let x = rect.x.max(0.0) as u32;
                 let y = rect.y.max(0.0) as u32;
                 let rw = (rect.w as u32).min(w.saturating_sub(x));
@@ -655,8 +770,12 @@ impl App {
                     continue;
                 }
                 pass.set_scissor_rect(x, y, rw, rh);
-                self.views[&pane].renderer.draw(&mut pass);
+                if let Some(r) = &self.views[&pane].renderer {
+                    r.draw(&mut pass);
+                }
             }
+            pass.set_scissor_rect(0, 0, w, h);
+            self.ui.draw(&mut pass);
         }
         self.gpu.queue.submit([encoder.finish()]);
         self.gpu.queue.present(frame);

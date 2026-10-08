@@ -26,6 +26,7 @@
 //! | `scroll LINES X Y` | a scroll-wheel event |
 //! | `focus PANE` | focuses a pane (its session and tab come forward) |
 //! | `selection` | the focused pane's selected text |
+//! | `pane-layout PANE` | the pane's flow as last drawn (§6.2): first line, blocks, dock, screen |
 //! | `frame-stats [--reset]` | frame times: start of work to GPU done; CPU work |
 //! | `input-source [ID]` | the keyboard input source, or selects one |
 //! | `option-as-alt none|left|right|both` | the Option-as-Alt setting |
@@ -52,7 +53,7 @@ pub fn serve(path: &Path) -> std::io::Result<()> {
     let listener = control::bind(path)?;
     std::thread::Builder::new()
         .name("auk app control".into())
-        .spawn(move || control::serve_listener_with(listener, Arc::new(|line| handle(line))))?;
+        .spawn(move || control::serve_listener_with(listener, Arc::new(handle)))?;
     Ok(())
 }
 
@@ -99,7 +100,8 @@ fn handle(line: &str) -> Value {
     let result = match cmd.as_str() {
         "ping" | "version" => return control::handle(&cmd),
         "can-post" => Ok(json!(synth::can_post_events())),
-        "input-source" => match args.first() {
+        // Text Input Sources are main-thread API.
+        "input-source" => on_main(move || match args.first() {
             None => Ok(json!(synth::input_source::current())),
             Some(id) => {
                 let previous = synth::input_source::current();
@@ -109,7 +111,8 @@ fn handle(line: &str) -> Value {
                     Err(format!("input source {id} is not installed"))
                 }
             }
-        },
+        })
+        .and_then(|r| r),
         "post-key" => post_keys(&args),
         _ => on_main(move || main_command(&cmd, args, win)).and_then(|r| r),
     };
@@ -380,6 +383,38 @@ fn main_command(cmd: &str, mut args: Vec<String>, win: usize) -> Result<Value, S
             }
         }
         "selection" => Ok(json!(state.borrow().selection_text())),
+        "pane-layout" => {
+            let pane = pane_arg(&args)?;
+            let s = state.borrow();
+            let scale = s.size.map_or(2.0, |z| z.scale) as f32;
+            let view = s
+                .views
+                .get(&pane)
+                .ok_or_else(|| format!("pane {pane} hasn't been drawn"))?;
+            let a = &view.arranged;
+            let r = |v: f32| (f64::from(v / scale) * 100.0).round() / 100.0;
+            let blocks: Vec<Value> = a
+                .composed
+                .blocks
+                .iter()
+                .map(|&(i, y)| {
+                    let b = &a.blocks[i];
+                    json!({"sf": b.sf, "line": b.line, "top": r(y), "height": r(b.height)})
+                })
+                .collect();
+            Ok(json!({
+                "origin": [view.grid_origin.0, view.grid_origin.1],
+                "first_line": a.composed.first,
+                "lines_drawn": a.composed.slots.len(),
+                "following": a.composed.scroll.following(),
+                "from_bottom": r(a.composed.scroll.from_bottom),
+                "max_scroll": r(a.composed.max_scroll),
+                "blocks": blocks,
+                "dock": a.dock.map(|(_, b)| json!({"height": b.h})),
+                "screen": a.screen.is_some(),
+                "layers": a.layers,
+            }))
+        }
         "frame-stats" => {
             let s = state.borrow();
             let reset = args.iter().any(|a| a == "--reset");

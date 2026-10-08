@@ -21,3 +21,8 @@ slow-timeout = { period = "60s", terminate-after = 15 }
 [[profile.default.overrides]]
 filter = 'binary_id(auk::web)'
 test-group = 'screen'
+
+# The app suite opens app windows, takes focus and selects input sources.
+[[profile.default.overrides]]
+filter = 'binary_id(auk::app)'
+test-group = 'screen'

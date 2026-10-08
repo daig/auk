@@ -10,7 +10,9 @@ use std::time::{Duration, Instant};
 
 use auk_mirror::PaneId;
 use auk_platform_macos::Window;
-use auk_render::{Acquired, Gpu, GridRenderer, GridSnapshot, Rgba, RowSlot, UiLayer, WindowSurface};
+use auk_render::{
+    Acquired, Gpu, GridRenderer, GridSnapshot, Rgba, RowSlot, UiLayer, WindowSurface,
+};
 use auk_text::{FontConfig, GridFonts};
 
 /// The grid's font size, in points.
@@ -75,8 +77,9 @@ impl Gfx {
     pub fn new(gpu: Rc<Gpu>, window: &Window, width: u32, height: u32, scale: f64) -> Gfx {
         // SAFETY: the layer belongs to the window, which outlives this (the window state that
         // owns it is dropped when the window closes).
-        let surface = unsafe { WindowSurface::from_metal_layer(&gpu, window.metal_layer(), width, height) }
-            .expect("a surface on the window's layer");
+        let surface =
+            unsafe { WindowSurface::from_metal_layer(&gpu, window.metal_layer(), width, height) }
+                .expect("a surface on the window's layer");
         let ui = UiLayer::new(&gpu, surface.format()).expect("the UI layer's pipelines");
         let spare = GridRenderer::new(&gpu, surface.format(), grid_fonts(scale));
         Gfx {
@@ -157,7 +160,9 @@ impl Gfx {
             if !self.renderers.contains_key(&p.pane) {
                 let mut r = match self.spare.take() {
                     Some(r) => r,
-                    None => GridRenderer::new(&self.gpu, self.surface.format(), grid_fonts(self.scale)),
+                    None => {
+                        GridRenderer::new(&self.gpu, self.surface.format(), grid_fonts(self.scale))
+                    }
                 };
                 r.invalidate();
                 self.renderers.insert(p.pane, r);

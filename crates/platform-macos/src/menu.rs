@@ -4,10 +4,10 @@
 
 use std::cell::RefCell;
 
-use objc2::{MainThreadMarker, MainThreadOnly};
 use objc2::rc::Retained;
 use objc2::runtime::Sel;
 use objc2::sel;
+use objc2::{MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{NSApplication, NSEventModifierFlags, NSMenu, NSMenuItem};
 use objc2_foundation::NSString;
 
@@ -89,7 +89,14 @@ fn build(mtm: MainThreadMarker, menu: &Menu) -> Retained<NSMenu> {
                 key,
                 mods,
             } => {
-                add(mtm, &ns, title, Some(standard_selector(*action)), key, *mods);
+                add(
+                    mtm,
+                    &ns,
+                    title,
+                    Some(standard_selector(*action)),
+                    key,
+                    *mods,
+                );
             }
             MenuItem::Services { title } => {
                 let services = NSMenu::new(mtm);
@@ -164,8 +171,7 @@ pub(crate) fn perform(mtm: MainThreadMarker, path: &[&str]) -> bool {
     for title in parents {
         let found = menu.itemArray().iter().find_map(|item| {
             let sub = item.submenu()?;
-            (sub.title().to_string() == *title || item.title().to_string() == *title)
-                .then_some(sub)
+            (sub.title().to_string() == *title || item.title().to_string() == *title).then_some(sub)
         });
         match found {
             Some(sub) => menu = sub,

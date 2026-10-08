@@ -108,7 +108,15 @@ impl Window {
     /// Delivers a left- or right-button mouse event at (`x`, `y`) points from the view's
     /// top-left corner, as an `NSEvent` through the window (`sendEvent:`), as AppKit delivers a
     /// real one. `flags` are modifier flags ([`crate::keys::flags`]).
-    pub fn send_mouse(&self, action: MouseAction, right: bool, x: f64, y: f64, clicks: u32, flags: u64) -> bool {
+    pub fn send_mouse(
+        &self,
+        action: MouseAction,
+        right: bool,
+        x: f64,
+        y: f64,
+        clicks: u32,
+        flags: u64,
+    ) -> bool {
         use objc2_app_kit::{NSEventModifierFlags, NSEventType};
         let Some(window) = self.ns_window() else {
             return false;
@@ -155,7 +163,8 @@ impl Window {
         let Some(window) = self.ns_window() else {
             return false;
         };
-        let Some(event) = CGEvent::new_scroll_wheel_event2(None, CGScrollEventUnit::Line, 1, lines, 0, 0)
+        let Some(event) =
+            CGEvent::new_scroll_wheel_event2(None, CGScrollEventUnit::Line, 1, lines, 0, 0)
         else {
             return false;
         };

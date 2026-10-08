@@ -3,6 +3,7 @@
 //! M0 provides the recording format and fixture validation. The TSP checklist
 //! (`research/sdk-wire.md` §10) and the SDK and omp runs build on these in M3 and M5.
 
+pub mod app;
 pub mod fuzz;
 pub mod goldens;
 pub mod harness;

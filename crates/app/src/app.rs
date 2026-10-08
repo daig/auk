@@ -9,10 +9,10 @@ use auk_mirror::ClientFacts;
 use auk_platform_macos::{AppContext, WindowAttributes, run_on_main};
 use auk_render::Gpu;
 
-use crate::{OptionAsAltSetting, Options};
 use crate::conn::Connection;
 use crate::gfx::FrameClock;
 use crate::window::{Handler, WinState};
+use crate::{OptionAsAltSetting, Options};
 
 pub struct App {
     pub opts: Options,
@@ -66,7 +66,7 @@ pub fn open_window(conn: Connection) {
         option_as_alt,
         ..WindowAttributes::default()
     };
-    let window = ctx.create_window(attrs, Box::new(Handler(state.clone())));
+    let window = ctx.create_window(attrs, Box::new(Handler::new(state.clone())));
     if let Ok(mut s) = state.try_borrow_mut() {
         s.window = Some(window.clone());
     }
@@ -100,6 +100,30 @@ fn fresh_window_key() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis());
     format!("w{ms}-{}", N.fetch_add(1, Ordering::Relaxed))
+}
+
+/// The window commands go to without a key window: the one focused last, else the first.
+pub fn current_window() -> Option<Rc<RefCell<WinState>>> {
+    let windows = windows();
+    windows
+        .iter()
+        .filter_map(|w| Some((w.try_borrow().ok()?.focus_serial, w)))
+        .max_by_key(|(serial, _)| *serial)
+        .map(|(_, w)| w.clone())
+        .or_else(|| windows.first().cloned())
+}
+
+/// Runs a registry command in the current window.
+pub fn command_to_current(cmd: crate::commands::Cmd) {
+    let Some(state) = current_window() else {
+        return;
+    };
+    let Ok(mut s) = state.try_borrow_mut() else {
+        return;
+    };
+    if let Some(window) = s.window.clone() {
+        s.command(&window, cmd);
+    }
 }
 
 /// A window closed: forget it.

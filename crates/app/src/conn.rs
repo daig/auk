@@ -7,16 +7,13 @@
 
 use std::collections::BTreeMap;
 use std::io;
-use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 
 use auk_mirror::layout::Window as Sessions;
-use auk_mirror::{
-    Client, ClientFacts, ClientKind, ClientMsg, DaemonMsg, Effect, Hello, PaneId, Welcome,
-    write_msg,
-};
+use auk_mirror::{ClientFacts, ClientKind, ClientMsg, DaemonMsg, Effect, Hello, PaneId, Welcome};
+use auk_remote::{Link, LinkReader, Target};
 use auk_replica::{Item, Replica, Role};
 
 /// One pane as this window follows it.
@@ -31,6 +28,10 @@ pub struct PaneData {
     pub generation: u64,
     /// The terminal rang the bell since the window last looked.
     pub bell: bool,
+    /// A snapshot replaced the replica: the window's view of its surfaces starts over.
+    pub reset: bool,
+    /// Blobs already asked for (§7.12).
+    pub asked: std::collections::BTreeSet<String>,
 }
 
 /// What the reader thread and the main thread share.
@@ -72,7 +73,15 @@ impl Shared {
     fn on_message(&mut self, msg: DaemonMsg) {
         match msg {
             DaemonMsg::Snapshot { pane, snapshot } => {
-                let replica = Replica::from_snapshot(&snapshot, Role::Follower, None);
+                // The views' sheet checker, as a drawing window's replica has (§8.4).
+                let tsp = auk_tsp::TspPane::with(
+                    auk_replica::tsp_config(&snapshot.settings),
+                    auk_views::sheet_checker(),
+                    Box::new(auk_tsp::MemoryBlobs::default()),
+                );
+                let replica = Replica::from_snapshot(&snapshot, Role::Follower, Some(tsp));
+                // The daemon sends the blobs the snapshot names right after it.
+                let asked = replica.tsp().missing_blobs().into_iter().collect();
                 let exit = snapshot.exit;
                 let previous = self.panes.remove(&pane);
                 self.panes.insert(
@@ -83,13 +92,13 @@ impl Shared {
                         primary: previous.as_ref().is_some_and(|p| p.primary),
                         generation: previous.map_or(0, |p| p.generation + 1),
                         bell: false,
+                        reset: true,
+                        asked,
                     },
                 );
             }
             DaemonMsg::Output { pane, seq, bytes } => self.apply(pane, seq, Item::Output(&bytes)),
-            DaemonMsg::Record { pane, seq, record } => {
-                self.apply(pane, seq, Item::Record(&record))
-            }
+            DaemonMsg::Record { pane, seq, record } => self.apply(pane, seq, Item::Record(&record)),
             DaemonMsg::Layout { window, .. } => {
                 // Panes that left the layout are no longer shown here.
                 let shown = window.panes();
@@ -134,33 +143,31 @@ impl Shared {
     }
 }
 
-/// A window's connection.
+/// A window's connection: an `auk-remote` link to the local daemon, which reconnects and
+/// resyncs after the daemon upgrades in place (§15.7).
 #[derive(Debug)]
 pub struct Connection {
     pub window_key: String,
     pub client_id: u64,
     shared: Arc<Mutex<Shared>>,
-    out: Mutex<UnixStream>,
-    reader: Mutex<Option<Client<UnixStream>>>,
+    link: Link,
+    reader: Mutex<Option<LinkReader>>,
 }
 
 impl Connection {
     /// Connects and says hello. The welcome lists every window key's sessions; then
     /// [`Connection::attach`] picks one. Nothing is read until [`Connection::start`].
     pub fn open(socket: &Path, facts: ClientFacts) -> io::Result<(Connection, Welcome)> {
-        let stream = UnixStream::connect(socket)
-            .map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", socket.display())))?;
         let hello = Hello::new(ClientKind::App, facts);
-        let (client, welcome) =
-            Client::handshake(stream, &hello).map_err(|e| io::Error::other(e.to_string()))?;
-        let out = client.get_ref().try_clone()?;
+        let (link, welcome, reader) = Link::connect(Target::Local(socket.to_owned()), hello)
+            .map_err(|e| io::Error::other(format!("{}: {e}", socket.display())))?;
         Ok((
             Connection {
                 window_key: String::new(),
                 client_id: welcome.client,
                 shared: Arc::new(Mutex::new(Shared::default())),
-                out: Mutex::new(out),
-                reader: Mutex::new(Some(client)),
+                link,
+                reader: Mutex::new(Some(reader)),
             },
             welcome,
         ))
@@ -177,12 +184,7 @@ impl Connection {
 
     /// Starts the reader thread. `wake` runs after each batch of messages (from that thread).
     pub fn start(&self, wake: impl Fn() + Send + 'static) {
-        let Some(mut client) = self
-            .reader
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take()
-        else {
+        let Some(mut reader) = self.reader.lock().unwrap_or_else(|e| e.into_inner()).take() else {
             return;
         };
         let shared = self.shared.clone();
@@ -190,12 +192,12 @@ impl Connection {
             .name(format!("auk window {}", self.window_key))
             .spawn(move || {
                 let reason = loop {
-                    match client.recv() {
+                    match reader.recv() {
                         Ok(Some(msg)) => {
                             lock(&shared).on_message(msg);
                             wake();
                         }
-                        Ok(None) => break "the daemon closed the connection".to_owned(),
+                        Ok(None) => break "the window detached".to_owned(),
                         Err(err) => break err.to_string(),
                     }
                 };
@@ -211,8 +213,14 @@ impl Connection {
         lock(&self.shared)
     }
 
+    /// Sends a message; while the link resyncs after a reconnect it holds input and drops acks.
     pub fn send(&self, msg: &ClientMsg) -> io::Result<()> {
-        write_msg(&mut *self.out.lock().unwrap_or_else(|e| e.into_inner()), msg)
+        self.link.send(msg).map(|_| ())
+    }
+
+    /// The link's state (`connected`, `reconnecting(n)`, …).
+    pub fn link_state(&self) -> String {
+        self.link.state().to_string()
     }
 
     /// Sends input for a pane. A failure means the connection is gone, which the reader
@@ -226,11 +234,6 @@ impl Connection {
     /// Says goodbye; the daemon drops this client.
     pub fn detach(&self) {
         let _ = self.send(&ClientMsg::Detach);
-        let _ = self
-            .out
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .shutdown(std::net::Shutdown::Both);
     }
 }
 

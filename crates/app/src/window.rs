@@ -13,16 +13,17 @@ use auk_platform_macos::{
     Appearance, Command, Event, KeyInput, MouseButton, MouseEvent, MouseKind, OptionAsAlt, Preedit,
     ScrollEvent, Size, Window, WindowHandler,
 };
-use auk_render::{Attrs, Gpu, GridSnapshot, Theme, View};
+use auk_render::{Attrs, Gpu, GridSnapshot, RowSlot, Theme, View};
 use auk_term::input::{
     self, Key, KeyEvent, Mods, MouseAction, MouseButton as TermButton, encode_focus, encode_key,
     encode_mouse, encode_paste,
 };
 use auk_term::{Line, Modes, MouseMode};
+use auk_views::compose::{Hit, Scroll};
+use auk_views::{Arranged, Outcome, PaneSurfaces, Place, ViewSettings};
 
 use crate::chrome::{BAR_HEIGHT, Chrome, ChromeAction, ChromeModel, DIVIDER};
 use crate::commands::{self, Cmd};
-use crate::compose::{self, Composed, Scroll};
 use crate::conn::{Connection, Shared};
 use crate::geometry::{self, Rect, TabLayout};
 use crate::gfx::{FrameClock, FrameCost, Gfx, PaneDraw};
@@ -44,8 +45,10 @@ enum Pending {
 pub struct PaneView {
     pub scroll: Scroll,
     pub selection: Option<Selection>,
-    /// The composition last drawn, for mapping points to lines.
-    pub composed: Composed,
+    /// The pane as last drawn (rows, blocks, dock), for mapping points to lines and surfaces.
+    pub arranged: Arranged,
+    /// The content area's height last drawn, in pixels.
+    pub content_px: f32,
     /// The grid's origin last drawn, in points from the window's top-left.
     pub grid_origin: (f64, f64),
     /// Wheel movement not yet sent as whole lines (mouse reports, alternate scroll), in pixels.
@@ -84,6 +87,12 @@ pub struct WinState {
     pub active_tab: BTreeMap<SessionId, TabId>,
     pub tab_focus: BTreeMap<TabId, PaneId>,
     pub views: BTreeMap<PaneId, PaneView>,
+    /// Each pane's surfaces (§6.2), kept for every pane the window follows, shown or not.
+    pub surfaces: BTreeMap<PaneId, PaneSurfaces>,
+    /// The surfaces painted something last frame, so the UI layer has them to clear.
+    surfaces_painted: bool,
+    /// The views' clock starts here.
+    epoch: Instant,
     layout_generation: u64,
     known_sessions: BTreeSet<SessionId>,
     known_tabs: BTreeSet<TabId>,
@@ -93,6 +102,8 @@ pub struct WinState {
     had_panes: bool,
     pub preedit: Option<Preedit>,
     pub key_window: bool,
+    /// When the window last became key (larger is later), for commands without a key window.
+    pub focus_serial: u64,
     press: Option<Press>,
     /// Where a single-click press went down: a drag from it starts a selection.
     press_anchor: Option<(PaneId, Line, u16, bool)>,
@@ -123,28 +134,53 @@ impl std::fmt::Debug for WinState {
 }
 
 /// The window's handler: forwards to the shared state, which the automation endpoint also
-/// reaches.
+/// reaches. AppKit sometimes calls back while the state is busy with an event (closing or
+/// resizing a window from inside a handler); those events wait in `queue` and run right after.
 #[derive(Debug)]
-pub struct Handler(pub Rc<std::cell::RefCell<WinState>>);
+pub struct Handler {
+    pub state: Rc<std::cell::RefCell<WinState>>,
+    queue: Rc<std::cell::RefCell<std::collections::VecDeque<Event>>>,
+}
+
+impl Handler {
+    pub fn new(state: Rc<std::cell::RefCell<WinState>>) -> Handler {
+        Handler {
+            state,
+            queue: Rc::default(),
+        }
+    }
+}
 
 impl WindowHandler for Handler {
     fn event(&mut self, window: &Window, event: Event) {
-        let closed = matches!(event, Event::Closed);
-        {
-            let mut state = self.0.borrow_mut();
-            if state.window.is_none() {
-                state.window = Some(window.clone());
-            }
-            state.event(window, event);
+        let Ok(mut state) = self.state.try_borrow_mut() else {
+            self.queue.borrow_mut().push_back(event);
+            return;
+        };
+        if state.window.is_none() {
+            state.window = Some(window.clone());
         }
+        let mut closed = false;
+        let mut next = Some(event);
+        while let Some(event) = next {
+            closed |= matches!(event, Event::Closed);
+            state.event(window, event);
+            next = self.queue.borrow_mut().pop_front();
+        }
+        drop(state);
         if closed {
-            crate::app::window_closed(&self.0);
+            crate::app::window_closed(&self.state);
         }
     }
 }
 
 impl WinState {
-    pub fn new(conn: Arc<Connection>, gpu: Rc<Gpu>, clock: FrameClock, option_as_alt: OptionAsAlt) -> WinState {
+    pub fn new(
+        conn: Arc<Connection>,
+        gpu: Rc<Gpu>,
+        clock: FrameClock,
+        option_as_alt: OptionAsAlt,
+    ) -> WinState {
         WinState {
             window: None,
             conn,
@@ -160,6 +196,9 @@ impl WinState {
             active_tab: BTreeMap::new(),
             tab_focus: BTreeMap::new(),
             views: BTreeMap::new(),
+            surfaces: BTreeMap::new(),
+            surfaces_painted: false,
+            epoch: Instant::now(),
             layout_generation: 0,
             known_sessions: BTreeSet::new(),
             known_tabs: BTreeSet::new(),
@@ -169,6 +208,7 @@ impl WinState {
             had_panes: false,
             preedit: None,
             key_window: false,
+            focus_serial: 0,
             press: None,
             press_anchor: None,
             last_motion: None,
@@ -192,7 +232,11 @@ impl WinState {
             Event::Resized(size) => self.resized(window, size),
             Event::Appearance(appearance) => {
                 self.dark = appearance == Appearance::Dark;
-                self.theme = if self.dark { Theme::dark() } else { Theme::light() };
+                self.theme = if self.dark {
+                    Theme::dark()
+                } else {
+                    Theme::light()
+                };
                 self.ui_dirty = true;
                 self.send_facts();
                 window.request_frame();
@@ -201,7 +245,9 @@ impl WinState {
             Event::Frame => self.frame(window),
             Event::Key(key) => self.key(window, key),
             Event::Text(text) => {
-                if let Some(pane) = self.focused_pane() {
+                if let Some(pane) = self.focused_pane()
+                    && !self.surface_text(window, pane, &text)
+                {
                     self.typed(window, pane, text.into_bytes());
                 }
             }
@@ -214,6 +260,9 @@ impl WinState {
             Event::Scroll(s) => self.scroll(window, s),
             Event::Focus(focused) => {
                 self.key_window = focused;
+                if focused {
+                    self.focus_serial = next_focus_serial();
+                }
                 if let Some(pane) = self.focused_pane() {
                     let modes = self.modes(pane);
                     self.conn.input(pane, encode_focus(focused, &modes));
@@ -311,10 +360,11 @@ impl WinState {
                 }
             }
             Some(Pending::Split(from)) => {
-                if let Some((tab, pane)) = new_panes
-                    .iter()
-                    .find(|(t, _)| all_tabs.iter().any(|(_, x)| x.id == *t && x.root.contains(from)))
-                {
+                if let Some((tab, pane)) = new_panes.iter().find(|(t, _)| {
+                    all_tabs
+                        .iter()
+                        .any(|(_, x)| x.id == *t && x.root.contains(from))
+                }) {
                     self.tab_focus.insert(*tab, *pane);
                     self.pending = None;
                 }
@@ -339,7 +389,10 @@ impl WinState {
                 self.active_tab.insert(s.id, first.id);
             }
             for t in &s.tabs {
-                let focus_ok = self.tab_focus.get(&t.id).is_some_and(|p| t.root.contains(*p));
+                let focus_ok = self
+                    .tab_focus
+                    .get(&t.id)
+                    .is_some_and(|p| t.root.contains(*p));
                 if !focus_ok {
                     let panes = t.root.panes();
                     let pick = t.zoom.or_else(|| panes.first().copied());
@@ -352,11 +405,13 @@ impl WinState {
         self.known_sessions = sessions.sessions.iter().map(|s| s.id).collect();
         self.known_tabs = all_tabs.iter().map(|(_, t)| t.id).collect();
         self.known_panes = sessions.panes().into_iter().collect();
-        self.active_tab.retain(|s, _| self.known_sessions.contains(s));
+        self.active_tab
+            .retain(|s, _| self.known_sessions.contains(s));
         let tabs = self.known_tabs.clone();
         self.tab_focus.retain(|t, _| tabs.contains(t));
         let panes = self.known_panes.clone();
         self.views.retain(|p, _| panes.contains(p));
+        self.surfaces.retain(|p, _| panes.contains(p));
         self.sent_sizes.retain(|p, _| panes.contains(p));
         self.ui_dirty = true;
     }
@@ -373,10 +428,7 @@ impl WinState {
             )
         };
         if let Some(reason) = closed {
-            eprintln!(
-                "auk: window {}: {reason}",
-                self.conn.window_key
-            );
+            eprintln!("auk: window {}: {reason}", self.conn.window_key);
             self.closing = true;
             window.close();
             return;
@@ -483,7 +535,12 @@ impl WinState {
             height: 800.0,
             scale: 2.0,
         });
-        Rect::new(0.0, BAR_HEIGHT, size.width, (size.height - BAR_HEIGHT).max(0.0))
+        Rect::new(
+            0.0,
+            BAR_HEIGHT,
+            size.width,
+            (size.height - BAR_HEIGHT).max(0.0),
+        )
     }
 
     /// Recomputes the shown tab's layout and asks the daemon for each pane's size.
@@ -546,7 +603,10 @@ impl WinState {
         let size = self.size.expect("checked");
         let scale = size.scale;
         let metrics = self.gfx.as_ref().expect("checked").metrics();
-        let (cw, ch) = (f64::from(metrics.cell_width), f64::from(metrics.cell_height));
+        let (cw, ch) = (
+            f64::from(metrics.cell_width),
+            f64::from(metrics.cell_height),
+        );
         let sessions = self.sessions();
         let focused = self.focused_pane();
         let mut draws = Vec::new();
@@ -554,8 +614,49 @@ impl WinState {
         let mut titles: BTreeMap<PaneId, String> = BTreeMap::new();
         let mut a11y_text_gen = 0;
         let mut to_ack: Vec<(PaneId, String, u64)> = Vec::new();
+        let now = self.epoch.elapsed().as_secs_f64();
+        let settings = ViewSettings {
+            font_px: crate::gfx::FONT_SIZE,
+            cell: ((cw / scale) as f32, (ch / scale) as f32),
+            dark: self.dark,
+            ..ViewSettings::default()
+        };
+        // Surfaces paint into the UI layer's scene, under the chrome.
+        let mut scene = auk_render::vello::Scene::new();
+        let mut painted = false;
+        let mut animating = false;
         {
-            let mut shared = self.conn.shared();
+            let conn = self.conn.clone();
+            let mut shared = conn.shared();
+            // Every pane's surfaces take their changes, shown or not.
+            for (pane, data) in shared.panes.iter_mut() {
+                if std::mem::take(&mut data.reset) {
+                    self.surfaces.remove(pane);
+                }
+                let missing: Vec<String> = data
+                    .replica
+                    .tsp()
+                    .missing_blobs()
+                    .into_iter()
+                    .filter(|id| data.asked.insert(id.clone()))
+                    .collect();
+                if !missing.is_empty() {
+                    let _ = conn.send(&ClientMsg::Blobs {
+                        pane: *pane,
+                        ids: missing,
+                    });
+                }
+                let changes = data.replica.take_tsp_changes();
+                let tsp = data.replica.tsp();
+                let sf = self
+                    .surfaces
+                    .entry(*pane)
+                    .or_insert_with(|| PaneSurfaces::new(settings.clone(), scale as f32));
+                if !changes.is_empty() {
+                    sf.sync(tsp, &changes, now);
+                }
+                sf.configure(tsp, settings.clone(), scale as f32);
+            }
             for (pane, title) in titles_of(&shared, &sessions) {
                 titles.insert(pane, title);
             }
@@ -567,29 +668,55 @@ impl WinState {
                     a11y_text_gen = data.generation;
                 }
                 let term = data.replica.terminal();
+                let tsp = data.replica.tsp();
                 let view = self.views.entry(pane).or_default();
-                let area_h = ((rect.h - 2.0 * PADDING) * scale).max(0.0) as f32;
-                let grid_h = (f32::from(term.rows()) * ch as f32).min(area_h.max(ch as f32));
-                let blocks: Vec<compose::Block> = Vec::new();
-                let input = compose::Input {
-                    lines: term.history_len() + usize::from(term.rows()),
-                    cell: ch as f32,
-                    view: grid_h,
-                    blocks: &blocks,
-                    hide_from: None,
-                };
-                let composed = compose::compose(&input, view.scroll);
-                view.scroll = composed.scroll;
+                let content_w = (rect.w - 2.0 * PADDING).max(0.0);
+                let content_h = (rect.h - 2.0 * PADDING).max(0.0);
+                let area_h = (content_h * scale) as f32;
+                let origin = (rect.x + PADDING, rect.y + PADDING);
+                view.grid_origin = origin;
+                let px = |v: f64| (v * scale).round();
+
+                // The pane's flow (§6.2): grid rows, and surface blocks at their anchor rows.
+                let sf = self.surfaces.get_mut(&pane).expect("synced above");
+                let pane_focused = self.key_window && Some(pane) == focused;
+                if sf
+                    .layout(
+                        term,
+                        tsp,
+                        (content_w as f32, content_h as f32),
+                        pane_focused,
+                        now,
+                    )
+                    .is_some()
+                {
+                    animating = true;
+                }
+                let arranged = sf.arrange(term, tsp, ch as f32, area_h, scale as f32, view.scroll);
+                view.scroll = arranged.composed.scroll;
+                if sf.paint(
+                    &arranged,
+                    &mut scene,
+                    Place {
+                        x: px(origin.0),
+                        y: px(origin.1),
+                        w: content_w * scale,
+                        h: content_h * scale,
+                        scale,
+                    },
+                ) {
+                    painted = true;
+                }
+                let composed = &arranged.composed;
                 let render_view = View {
                     scroll: 0,
                     selection: view.selection.map(|s| s.for_render(term)),
-                    focused: self.key_window && Some(pane) == focused,
+                    focused: pane_focused,
                     cursor_on: true,
                 };
                 let rows = composed.slots.len().clamp(1, usize::from(u16::MAX)) as u16;
-                let mut snap = GridSnapshot::from_lines(term, &self.theme, &render_view, composed.first, rows);
-                let origin = (rect.x + PADDING, rect.y + PADDING);
-                view.grid_origin = origin;
+                let mut snap =
+                    GridSnapshot::from_lines(term, &self.theme, &render_view, composed.first, rows);
                 // The input method's composition draws over the cursor's cells (§19).
                 let cursor = term.cursor();
                 let cursor_line = term.history_len() + usize::from(cursor.row);
@@ -613,22 +740,34 @@ impl WinState {
                         snap.cursor = None;
                     }
                 }
-                let slots = (!composed.is_uniform(ch as f32)).then(|| composed.slots.clone());
-                view.composed = composed;
-                let px = |v: f64| (v * scale).round();
-                draws.push(PaneDraw {
-                    pane,
-                    origin: (px(origin.0) as f32, px(origin.1) as f32),
-                    clip: (
-                        px(rect.x) as u32,
-                        px(rect.y) as u32,
-                        px(rect.w) as u32,
-                        px(rect.h) as u32,
-                    ),
-                    snapshot: snap,
-                    slots,
+                let slots = (!composed.is_uniform(ch as f32)).then(|| {
+                    composed
+                        .slots
+                        .iter()
+                        .map(|s| RowSlot {
+                            top: s.top,
+                            height: s.height,
+                        })
+                        .collect()
                 });
-                // Acks (§15.5): surfaces this frame drew, only as the pane's primary.
+                let grid_shown = arranged.grid_shown();
+                view.arranged = arranged;
+                view.content_px = area_h;
+                if grid_shown {
+                    draws.push(PaneDraw {
+                        pane,
+                        origin: (px(origin.0) as f32, px(origin.1) as f32),
+                        clip: (
+                            px(rect.x) as u32,
+                            px(rect.y) as u32,
+                            px(rect.w) as u32,
+                            px(rect.h) as u32,
+                        ),
+                        snapshot: snap,
+                        slots,
+                    });
+                }
+                // Acks (§7.10, §15.5): the surfaces this frame draws, only as the pane's primary.
                 if data.primary {
                     for s in data.replica.tsp().surfaces() {
                         if s.listens()
@@ -645,14 +784,13 @@ impl WinState {
             window.set_ime_cursor_area(x, y, w, h);
         }
 
-        // The chrome.
+        // The chrome, over the surfaces.
         let model = self.chrome_model(&sessions, &titles, size);
         if self.chrome.update(&model, scale as f32) {
             self.ui_dirty = true;
         }
         let gfx = self.gfx.as_mut().expect("checked");
-        if self.ui_dirty || gfx.ui_stale() {
-            let mut scene = auk_render::vello::Scene::new();
+        if self.ui_dirty || painted || self.surfaces_painted || gfx.ui_stale() {
             auk_ui::paint::paint_with_transform(
                 &self.chrome.doc,
                 &mut scene,
@@ -660,6 +798,10 @@ impl WinState {
             );
             gfx.render_ui(&scene);
             self.ui_dirty = false;
+        }
+        self.surfaces_painted = painted;
+        if animating {
+            window.request_frame();
         }
         let background = self.theme.background;
         let cost: FrameCost = gfx.draw(background, &draws, self.clock.done_callback(start));
@@ -675,7 +817,10 @@ impl WinState {
         } else {
             window.request_frame();
         }
-        let a11y_key = (a11y_text_gen ^ focused.unwrap_or(0).rotate_left(32), self.chrome_generation());
+        let a11y_key = (
+            a11y_text_gen ^ focused.unwrap_or(0).rotate_left(32),
+            self.chrome_generation(),
+        );
         if self.a11y_seen != Some(a11y_key) {
             self.a11y_seen = Some(a11y_key);
             self.a11y_generation += 1;
@@ -698,7 +843,12 @@ impl WinState {
         h.finish()
     }
 
-    fn chrome_model(&self, sessions: &Sessions, titles: &BTreeMap<PaneId, String>, size: Size) -> ChromeModel {
+    fn chrome_model(
+        &self,
+        sessions: &Sessions,
+        titles: &BTreeMap<PaneId, String>,
+        size: Size,
+    ) -> ChromeModel {
         let active_tab = self.active_tab_id();
         let tabs = self
             .session(sessions)
@@ -731,9 +881,7 @@ impl WinState {
                 .collect(),
             tabs,
             dividers: self.tab_layout.dividers.clone(),
-            focus: self
-                .focused_pane()
-                .and_then(|p| self.tab_layout.rect(p)),
+            focus: self.focused_pane().and_then(|p| self.tab_layout.rect(p)),
         }
     }
 
@@ -780,6 +928,7 @@ impl WinState {
         let focused = self.focused_pane();
         match cmd {
             Cmd::NewWindow => crate::app::new_window(),
+            Cmd::ToggleFullScreen => window.toggle_full_screen(),
             Cmd::NewSession => {
                 self.pending = Some(Pending::Session);
                 self.edit(LayoutEdit::NewSession { name: None });
@@ -812,7 +961,10 @@ impl WinState {
             Cmd::ToggleZoom => {
                 if let (Some(tab), Some(pane)) = (self.tab(&sessions), focused) {
                     let zoom = if tab.zoom.is_some() { None } else { Some(pane) };
-                    self.edit(LayoutEdit::Zoom { tab: tab.id, pane: zoom });
+                    self.edit(LayoutEdit::Zoom {
+                        tab: tab.id,
+                        pane: zoom,
+                    });
                 }
             }
             Cmd::NextTab | Cmd::PreviousTab => {
@@ -891,10 +1043,7 @@ impl WinState {
                     && let Some(v) = self.views.get_mut(&pane)
                 {
                     v.scroll = if cmd == Cmd::ScrollToTop {
-                        Scroll {
-                            from_bottom: f32::MAX,
-                            anchor: None,
-                        }
+                        Scroll::top()
                     } else {
                         Scroll::default()
                     };
@@ -921,9 +1070,9 @@ impl WinState {
         let m = self.gfx.as_ref()?.metrics();
         let gy = ((y - view.grid_origin.1) * scale) as f32;
         let gx = (x - view.grid_origin.0) * scale;
-        let line = match view.composed.hit(gy.max(0.0), &[])? {
-            compose::Hit::Line(line, _) => line,
-            compose::Hit::Block(..) => return None,
+        let line = match view.arranged.hit(gy.max(0.0))? {
+            Hit::Line(line, _) => line,
+            Hit::Block(..) => return None,
         };
         let col = (gx.max(0.0) / f64::from(m.cell_width)) as u16;
         Some((pane, line, col))
@@ -948,11 +1097,13 @@ impl WinState {
                 } else {
                     let _ = self.conn.send(&ClientMsg::Focus { pane });
                 }
+                if matches!(button, MouseButton::Left | MouseButton::Right)
+                    && self.surface_click(window, pane, &m, button)
+                {
+                    return;
+                }
                 let reported = self.report_mouse(pane, &m, button, MouseAction::Press);
-                self.press = Some(Press {
-                    pane,
-                    reported,
-                });
+                self.press = Some(Press { pane, reported });
                 if !reported
                     && button == MouseButton::Left
                     && let Some((p, line, col)) = self.cell_at(m.x, m.y)
@@ -1023,6 +1174,111 @@ impl WinState {
         }
     }
 
+    /// A press over a surface (a block, the dock, a screen surface or a layer) goes to the pane's
+    /// view (§7.8): local flips apply at once and events go to the daemon. Returns whether a
+    /// surface took it.
+    fn surface_click(
+        &mut self,
+        window: &Window,
+        pane: PaneId,
+        m: &MouseEvent,
+        button: MouseButton,
+    ) -> bool {
+        let scale = self.size.map_or(2.0, |s| s.scale);
+        let Some(view) = self.views.get(&pane) else {
+            return false;
+        };
+        let x = ((m.x - view.grid_origin.0) * scale) as f32;
+        let y = ((m.y - view.grid_origin.1) * scale) as f32;
+        if x < 0.0 || y < 0.0 {
+            return false;
+        }
+        let Some(sf) = self.surfaces.get_mut(&pane) else {
+            return false;
+        };
+        let Some((dx, dy)) = sf.doc_point(&view.arranged, x, y, view.content_px, scale as f32)
+        else {
+            return false;
+        };
+        let ev = auk_views::PointerEvent {
+            x: dx,
+            y: dy,
+            clicks: m.clicks.clamp(1, 2) as u8,
+            mods: auk_tsp::Mods {
+                shift: m.mods.shift,
+                ctrl: m.mods.ctrl,
+                alt: m.mods.alt,
+                meta: m.mods.meta,
+            },
+            button: if button == MouseButton::Right {
+                auk_views::Button::Secondary
+            } else {
+                auk_views::Button::Primary
+            },
+        };
+        let outcomes = {
+            let conn = self.conn.clone();
+            let shared = conn.shared();
+            let Some(data) = shared.panes.get(&pane) else {
+                return false;
+            };
+            let (doc, pv) = sf.parts();
+            pv.click(doc, data.replica.tsp(), ev)
+        };
+        let took = !outcomes.iter().all(|o| matches!(o, Outcome::Keys));
+        self.outcomes(window, pane, outcomes);
+        took
+    }
+
+    /// Text typed while a program field has focus and a native selection goes into the field as an
+    /// `edit` (§7.9); otherwise it is keys.
+    fn surface_text(&mut self, window: &Window, pane: PaneId, text: &str) -> bool {
+        let Some(sf) = self.surfaces.get_mut(&pane) else {
+            return false;
+        };
+        let outcome = {
+            let conn = self.conn.clone();
+            let shared = conn.shared();
+            let Some(data) = shared.panes.get(&pane) else {
+                return false;
+            };
+            let (doc, pv) = sf.parts();
+            pv.type_text(doc, data.replica.tsp(), text)
+        };
+        let took = !matches!(outcome, Outcome::Keys);
+        self.outcomes(window, pane, vec![outcome]);
+        took
+    }
+
+    /// Carries out what the view asked for after input.
+    fn outcomes(&mut self, window: &Window, pane: PaneId, outcomes: Vec<Outcome>) {
+        for outcome in outcomes {
+            match outcome {
+                Outcome::Event { sf, event, .. } => {
+                    let mut body = event.body("");
+                    if let Some(obj) = body.as_object_mut() {
+                        obj.remove("sf");
+                    }
+                    let _ = self.conn.send(&ClientMsg::ViewEvent {
+                        pane,
+                        sf,
+                        event: body,
+                    });
+                }
+                Outcome::Copy(text) => {
+                    crate::app::clipboard_set(&text);
+                }
+                Outcome::Open(target) => {
+                    let _ = std::process::Command::new("/usr/bin/open")
+                        .arg(target)
+                        .spawn();
+                }
+                Outcome::Zoom(_) | Outcome::Keys | Outcome::Redraw => {}
+            }
+        }
+        window.request_frame();
+    }
+
     fn report_motion(&mut self, pane: PaneId, m: &MouseEvent) {
         let Some((p, line, col)) = self.cell_at(m.x, m.y) else {
             return;
@@ -1038,7 +1294,14 @@ impl WinState {
         }
         self.last_motion = Some((pane, col, row));
         let modes = self.modes(pane);
-        let bytes = encode_mouse(TermButton::None, MouseAction::Motion, m.mods, col, row, &modes);
+        let bytes = encode_mouse(
+            TermButton::None,
+            MouseAction::Motion,
+            m.mods,
+            col,
+            row,
+            &modes,
+        );
         self.conn.input(pane, bytes);
     }
 
@@ -1052,7 +1315,13 @@ impl WinState {
 
     /// Sends a mouse report when the program asked for mouse events (and Shift isn't held, which
     /// keeps selection available). Returns whether the event went to the program.
-    fn report_mouse(&mut self, pane: PaneId, m: &MouseEvent, button: MouseButton, action: MouseAction) -> bool {
+    fn report_mouse(
+        &mut self,
+        pane: PaneId,
+        m: &MouseEvent,
+        button: MouseButton,
+        action: MouseAction,
+    ) -> bool {
         let modes = self.modes(pane);
         if modes.mouse == MouseMode::Off || m.mods.shift {
             return false;
@@ -1100,12 +1369,27 @@ impl WinState {
             view.wheel += dy;
             let lines = (view.wheel / ch).trunc();
             view.wheel -= lines * ch;
-            let Some((_, line, col)) = self.cell_at(s.x, s.y) else { return };
-            let Some(row) = self.screen_row(pane, line) else { return };
-            let button = if lines > 0.0 { TermButton::WheelUp } else { TermButton::WheelDown };
+            let Some((_, line, col)) = self.cell_at(s.x, s.y) else {
+                return;
+            };
+            let Some(row) = self.screen_row(pane, line) else {
+                return;
+            };
+            let button = if lines > 0.0 {
+                TermButton::WheelUp
+            } else {
+                TermButton::WheelDown
+            };
             let mut bytes = Vec::new();
             for _ in 0..(lines.abs() as usize).min(20) {
-                bytes.extend(encode_mouse(button, MouseAction::Press, s.mods, col, row, &modes));
+                bytes.extend(encode_mouse(
+                    button,
+                    MouseAction::Press,
+                    s.mods,
+                    col,
+                    row,
+                    &modes,
+                ));
             }
             self.conn.input(pane, bytes);
             return;
@@ -1130,12 +1414,7 @@ impl WinState {
             return;
         }
         let view = self.views.entry(pane).or_default();
-        let from_bottom = (f64::from(view.composed.scroll.from_bottom) + dy)
-            .clamp(0.0, f64::from(view.composed.max_scroll));
-        view.scroll = Scroll {
-            from_bottom: from_bottom as f32,
-            anchor: None,
-        };
+        view.scroll = Scroll::by(&view.arranged.composed, dy as f32);
         window.request_frame();
     }
 
@@ -1164,6 +1443,12 @@ impl WinState {
     }
 }
 
+fn next_focus_serial() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(1);
+    N.fetch_add(1, Ordering::Relaxed)
+}
+
 fn push_capped(v: &mut Vec<Duration>, d: Duration) {
     if v.len() >= 4096 {
         v.remove(0);
@@ -1176,9 +1461,17 @@ fn cycle<T: Copy + PartialEq>(ids: &[T], current: Option<T>, forward: bool) -> O
     if ids.is_empty() {
         return None;
     }
-    let i = current.and_then(|c| ids.iter().position(|x| *x == c)).unwrap_or(0);
+    let i = current
+        .and_then(|c| ids.iter().position(|x| *x == c))
+        .unwrap_or(0);
     let n = ids.len();
-    Some(ids[if forward { (i + 1) % n } else { (i + n - 1) % n }])
+    Some(
+        ids[if forward {
+            (i + 1) % n
+        } else {
+            (i + n - 1) % n
+        }],
+    )
 }
 
 /// A pane's title: the program's (OSC 0/2), else its cwd's last component.
@@ -1192,7 +1485,12 @@ fn titles_of(shared: &Shared, sessions: &Sessions) -> Vec<(PaneId, String)> {
             let title = if title.is_empty() {
                 data.replica
                     .cwd()
-                    .and_then(|c| c.trim_end_matches('/').rsplit('/').next().map(str::to_owned))
+                    .and_then(|c| {
+                        c.trim_end_matches('/')
+                            .rsplit('/')
+                            .next()
+                            .map(str::to_owned)
+                    })
                     .filter(|s| !s.is_empty())
                     .unwrap_or_else(|| "shell".to_owned())
             } else {

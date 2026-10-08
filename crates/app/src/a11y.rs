@@ -1,12 +1,14 @@
 //! The accessibility tree (§8.3, §19), fed to AccessKit's macOS adapter: the window, the UI
 //! engine's roles (the chrome's tab lists and buttons; surfaces' progress bars, meters, trees,
-//! list boxes, dialogs and timers as views add them), and each visible pane as a terminal whose
-//! value is its screen text.
+//! list boxes, dialogs and timers from `auk-views`), and each visible pane as a terminal whose
+//! value is its screen text, with its surfaces' nodes as children.
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
-use accesskit::{Action, ActionRequest, Node, NodeId, Rect as AxRect, Role, TreeId, TreeInfo, TreeUpdate};
+use accesskit::{
+    Action, ActionRequest, Node, NodeId, Rect as AxRect, Role, TreeId, TreeInfo, TreeUpdate,
+};
 use auk_platform_macos::{AccessibilityHandler, Window};
 use auk_ui::Document;
 
@@ -17,6 +19,8 @@ const ROOT: NodeId = NodeId(1);
 const CHROME_BASE: u64 = 1 << 32;
 /// Panes: this plus the pane id.
 const PANE_BASE: u64 = 2 << 32;
+/// A pane's surfaces: this plus the pane id shifted by 20, plus the node's walk index.
+const SURFACE_BASE: u64 = 3 << 32;
 
 /// Hands the window's accessibility to AccessKit.
 pub fn enable(state: &Rc<RefCell<WinState>>, window: &Window) {
@@ -42,7 +46,9 @@ impl AccessibilityHandler for Handler {
     }
 
     fn action(&mut self, request: ActionRequest) {
-        let Some(state) = self.0.upgrade() else { return };
+        let Some(state) = self.0.upgrade() else {
+            return;
+        };
         let Ok(mut state) = state.try_borrow_mut() else {
             return;
         };
@@ -95,6 +101,19 @@ pub fn tree(state: &WinState) -> TreeUpdate {
                 (rect.y + rect.h) * scale,
             ));
             node.add_action(Action::Focus);
+            // The pane's surfaces, through the views' roles.
+            if let Some(sf) = state.surfaces.get(pane) {
+                let ax = sf.view().accessibility(sf.doc());
+                let mut next = SURFACE_BASE + (pane << 20);
+                let kids: Vec<NodeId> = ax
+                    .children
+                    .iter()
+                    .map(|c| surface_node(c, &mut next, &mut nodes))
+                    .collect();
+                if !kids.is_empty() {
+                    node.set_children(kids);
+                }
+            }
             if Some(*pane) == focused {
                 focus = id;
             }
@@ -110,6 +129,49 @@ pub fn tree(state: &WinState) -> TreeUpdate {
         tree_id: TreeId::ROOT,
         focus,
     }
+}
+
+/// A surfaces accessibility node and its subtree, as AccessKit nodes.
+fn surface_node(ax: &auk_views::AxNode, next: &mut u64, out: &mut Vec<(NodeId, Node)>) -> NodeId {
+    let id = NodeId(*next);
+    *next += 1;
+    let role = match ax.role.as_str() {
+        "text" => Role::Label,
+        other => role_of(other).unwrap_or(Role::Group),
+    };
+    let mut node = Node::new(role);
+    if let Some(name) = &ax.name {
+        node.set_label(name.clone());
+    }
+    if let Some(value) = &ax.value {
+        match value.parse::<f64>() {
+            Ok(v) if matches!(role, Role::ProgressIndicator | Role::Meter | Role::Slider) => {
+                node.set_numeric_value(v)
+            }
+            _ => node.set_value(value.clone()),
+        }
+    }
+    if let Some(e) = ax.expanded {
+        node.set_expanded(e);
+    }
+    if let Some(sel) = ax.selected {
+        node.set_selected(sel);
+    }
+    if let Some(c) = ax.checked {
+        node.set_toggled(if c {
+            accesskit::Toggled::True
+        } else {
+            accesskit::Toggled::False
+        });
+    }
+    let kids: Vec<NodeId> = ax
+        .children
+        .iter()
+        .map(|c| surface_node(c, next, out))
+        .collect();
+    node.set_children(kids);
+    out.push((id, node));
+    id
 }
 
 /// The ARIA role names the UI engine's elements carry (§8.3), as AccessKit roles.
@@ -159,7 +221,12 @@ pub fn role_of(name: &str) -> Option<Role> {
 
 /// Nodes for the elements of `doc` that carry a known `role`, nested by the nearest such
 /// ancestor. Returns the top-level ones.
-pub fn ui_nodes(doc: &Document, base: u64, scale: f64, out: &mut Vec<(NodeId, Node)>) -> Vec<NodeId> {
+pub fn ui_nodes(
+    doc: &Document,
+    base: u64,
+    scale: f64,
+    out: &mut Vec<(NodeId, Node)>,
+) -> Vec<NodeId> {
     let mut top = Vec::new();
     walk(doc, doc.root(), base, scale, out, &mut top);
     top
@@ -173,9 +240,7 @@ fn walk(
     out: &mut Vec<(NodeId, Node)>,
     siblings: &mut Vec<NodeId>,
 ) {
-    let role = doc
-        .attribute(id, "role")
-        .and_then(role_of);
+    let role = doc.attribute(id, "role").and_then(role_of);
     match role {
         Some(role) => {
             let ax = NodeId(base + id.index() as u64);
@@ -187,13 +252,22 @@ fn walk(
             if !label.is_empty() {
                 node.set_label(label);
             }
-            if let Some(value) = doc.attribute(id, "aria-valuenow").and_then(|v| v.parse::<f64>().ok()) {
+            if let Some(value) = doc
+                .attribute(id, "aria-valuenow")
+                .and_then(|v| v.parse::<f64>().ok())
+            {
                 node.set_numeric_value(value);
             }
-            if let Some(v) = doc.attribute(id, "aria-valuemin").and_then(|v| v.parse::<f64>().ok()) {
+            if let Some(v) = doc
+                .attribute(id, "aria-valuemin")
+                .and_then(|v| v.parse::<f64>().ok())
+            {
                 node.set_min_numeric_value(v);
             }
-            if let Some(v) = doc.attribute(id, "aria-valuemax").and_then(|v| v.parse::<f64>().ok()) {
+            if let Some(v) = doc
+                .attribute(id, "aria-valuemax")
+                .and_then(|v| v.parse::<f64>().ok())
+            {
                 node.set_max_numeric_value(v);
             }
             if doc.attribute(id, "aria-selected") == Some("true") {

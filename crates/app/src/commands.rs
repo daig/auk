@@ -27,6 +27,7 @@ pub enum Cmd {
     ClearScrollback,
     ScrollToTop,
     ScrollToBottom,
+    ToggleFullScreen,
 }
 
 /// One registry entry: where the command sits in the menu bar and its key equivalent.
@@ -55,7 +56,13 @@ const CMD_SHIFT: KeyMods = mods(true, true, false, false);
 const CMD_OPT: KeyMods = mods(true, false, true, false);
 const NONE: KeyMods = mods(false, false, false, false);
 
-const fn entry(cmd: Cmd, menu: &'static str, title: &'static str, key: &'static str, mods: KeyMods) -> Entry {
+const fn entry(
+    cmd: Cmd,
+    menu: &'static str,
+    title: &'static str,
+    key: &'static str,
+    mods: KeyMods,
+) -> Entry {
     Entry {
         cmd,
         menu,
@@ -81,18 +88,85 @@ pub const REGISTRY: &[Entry] = &[
     entry(Cmd::Copy, "Edit", "Copy", "c", CMD),
     entry(Cmd::Paste, "Edit", "Paste", "v", CMD),
     entry(Cmd::SelectAll, "Edit", "Select All", "a", CMD),
-    grouped(entry(Cmd::ClearScrollback, "Edit", "Clear Scrollback", "k", CMD)),
+    grouped(entry(
+        Cmd::ClearScrollback,
+        "Edit",
+        "Clear Scrollback",
+        "k",
+        CMD,
+    )),
     entry(Cmd::ToggleZoom, "View", "Zoom Pane", "\r", CMD_SHIFT),
-    grouped(entry(Cmd::ScrollToTop, "View", "Scroll to Top", "\u{F729}", CMD)),
-    entry(Cmd::ScrollToBottom, "View", "Scroll to Bottom", "\u{F72B}", CMD),
+    grouped(entry(
+        Cmd::ScrollToTop,
+        "View",
+        "Scroll to Top",
+        "\u{F729}",
+        CMD,
+    )),
+    entry(
+        Cmd::ScrollToBottom,
+        "View",
+        "Scroll to Bottom",
+        "\u{F72B}",
+        CMD,
+    ),
+    grouped(entry(
+        Cmd::ToggleFullScreen,
+        "View",
+        "Toggle Full Screen",
+        "f",
+        mods(true, false, false, true),
+    )),
     entry(Cmd::NextTab, "Window", "Show Next Tab", "]", CMD_SHIFT),
-    entry(Cmd::PreviousTab, "Window", "Show Previous Tab", "[", CMD_SHIFT),
-    entry(Cmd::NextSession, "Window", "Show Next Session", "]", CMD_OPT),
-    entry(Cmd::PreviousSession, "Window", "Show Previous Session", "[", CMD_OPT),
-    grouped(entry(Cmd::Focus(Direction::Left), "Window", "Focus Pane Left", "\u{F702}", CMD_OPT)),
-    entry(Cmd::Focus(Direction::Right), "Window", "Focus Pane Right", "\u{F703}", CMD_OPT),
-    entry(Cmd::Focus(Direction::Up), "Window", "Focus Pane Above", "\u{F700}", CMD_OPT),
-    entry(Cmd::Focus(Direction::Down), "Window", "Focus Pane Below", "\u{F701}", CMD_OPT),
+    entry(
+        Cmd::PreviousTab,
+        "Window",
+        "Show Previous Tab",
+        "[",
+        CMD_SHIFT,
+    ),
+    entry(
+        Cmd::NextSession,
+        "Window",
+        "Show Next Session",
+        "]",
+        CMD_OPT,
+    ),
+    entry(
+        Cmd::PreviousSession,
+        "Window",
+        "Show Previous Session",
+        "[",
+        CMD_OPT,
+    ),
+    grouped(entry(
+        Cmd::Focus(Direction::Left),
+        "Window",
+        "Focus Pane Left",
+        "\u{F702}",
+        CMD_OPT,
+    )),
+    entry(
+        Cmd::Focus(Direction::Right),
+        "Window",
+        "Focus Pane Right",
+        "\u{F703}",
+        CMD_OPT,
+    ),
+    entry(
+        Cmd::Focus(Direction::Up),
+        "Window",
+        "Focus Pane Above",
+        "\u{F700}",
+        CMD_OPT,
+    ),
+    entry(
+        Cmd::Focus(Direction::Down),
+        "Window",
+        "Focus Pane Below",
+        "\u{F701}",
+        CMD_OPT,
+    ),
     grouped(entry(Cmd::SelectTab(1), "Window", "Tab 1", "1", CMD)),
     entry(Cmd::SelectTab(2), "Window", "Tab 2", "2", CMD),
     entry(Cmd::SelectTab(3), "Window", "Tab 3", "3", CMD),
@@ -168,29 +242,17 @@ pub fn menu_bar() -> Menu {
                 mods: e.mods,
             });
         }
-        match name {
-            "View" => {
-                items.push(MenuItem::Separator);
-                items.push(standard(
-                    "Enter Full Screen",
-                    StandardAction::ToggleFullScreen,
-                    "f",
-                    mods(true, false, false, true),
-                ));
-            }
-            "Window" => {
-                items.insert(0, standard("Minimize", StandardAction::Minimize, "m", CMD));
-                items.insert(1, standard("Zoom", StandardAction::Zoom, "", NONE));
-                items.insert(2, MenuItem::Separator);
-                items.push(MenuItem::Separator);
-                items.push(standard(
-                    "Bring All to Front",
-                    StandardAction::BringAllToFront,
-                    "",
-                    NONE,
-                ));
-            }
-            _ => {}
+        if name == "Window" {
+            items.insert(0, standard("Minimize", StandardAction::Minimize, "m", CMD));
+            items.insert(1, standard("Zoom", StandardAction::Zoom, "", NONE));
+            items.insert(2, MenuItem::Separator);
+            items.push(MenuItem::Separator);
+            items.push(standard(
+                "Bring All to Front",
+                StandardAction::BringAllToFront,
+                "",
+                NONE,
+            ));
         }
         menus.push(Menu {
             title: name.into(),

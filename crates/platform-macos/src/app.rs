@@ -129,6 +129,11 @@ pub fn run(init: impl FnOnce(&AppContext) + 'static) {
         MainThreadMarker::new().expect("auk_platform_macos::run must be called on the main thread");
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
+    // The menu bar is ours: AppKit doesn't add its own full-screen item to the View menu.
+    objc2_foundation::NSUserDefaults::standardUserDefaults().setBool_forKey(
+        false,
+        &objc2_foundation::NSString::from_str("NSFullScreenMenuItemEverywhere"),
+    );
     let delegate: Retained<AppDelegate> = {
         let this = AppDelegate::alloc(mtm).set_ivars(RefCell::new(Some(Box::new(init) as Init)));
         // SAFETY: NSObject's initializer.
@@ -138,4 +143,3 @@ pub fn run(init: impl FnOnce(&AppContext) + 'static) {
     menu::install(mtm, &menu::default_menu());
     app.run();
 }
-

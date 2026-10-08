@@ -58,7 +58,10 @@ impl Selection {
         for line in start.0..=end.0 {
             let Some(row) = term.line(line) else { break };
             let (c0, c1) = if self.block {
-                (self.anchor.1.min(self.head.1), self.anchor.1.max(self.head.1))
+                (
+                    self.anchor.1.min(self.head.1),
+                    self.anchor.1.max(self.head.1),
+                )
             } else {
                 (
                     if line == start.0 { start.1 } else { 0 },

@@ -161,6 +161,17 @@ impl Window {
         }
     }
 
+    /// Enters or leaves full-screen mode, as the window's green button does. Runs from the event
+    /// loop, since AppKit resizes the window (and calls its handler) while it toggles.
+    pub fn toggle_full_screen(&self) {
+        let id = self.id();
+        crate::run_on_main(move || {
+            if let Some(w) = registry::get(id).and_then(|view| view.window()) {
+                w.toggleFullScreen(None);
+            }
+        });
+    }
+
     /// Whether the window fills the screen (full-screen mode).
     pub fn is_full_screen(&self) -> bool {
         self.ns_window().is_some_and(|w| {

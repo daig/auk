@@ -13,6 +13,8 @@ crate-type = ["cdylib", "rlib"]
 auk-mirror = { path = "../mirror" }
 auk-replica = { path = "../replica" }
 auk-term = { path = "../term" }
+auk-tsp = { path = "../tsp" }
+auk-views = { path = "../views" }
 serde = { workspace = true }
 serde_json.workspace = true
 
