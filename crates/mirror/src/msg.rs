@@ -52,15 +52,20 @@ pub struct Hello {
     pub kind: ClientKind,
     #[serde(default)]
     pub facts: ClientFacts,
+    /// The client's own binary. A daemon of an older release execs it to upgrade in place
+    /// (§15.7); `None` where there is none (the browser).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exe: Option<std::path::PathBuf>,
 }
 
 impl Hello {
-    /// A hello carrying this build's versions.
+    /// A hello carrying this build's versions and, where there is one, its binary.
     pub fn new(kind: ClientKind, facts: ClientFacts) -> Self {
         Hello {
             versions: Versions::current(),
             kind,
             facts,
+            exe: std::env::current_exe().ok(),
         }
     }
 }
@@ -71,6 +76,9 @@ pub struct Refusal {
     pub reason: String,
     /// The daemon's versions, so the client can say what to upgrade to.
     pub daemon: Versions,
+    /// The daemon is upgrading itself to this client's release (§15.7): connect again shortly.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub upgrading: bool,
 }
 
 /// A layout edit a window asks for (§4.3). M4 completes the multi-window editing.

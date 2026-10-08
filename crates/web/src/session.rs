@@ -490,6 +490,7 @@ mod tests {
             &DaemonMsg::Refused(Refusal {
                 reason: "parser x differs from the daemon's y".into(),
                 daemon: Versions::current(),
+                upgrading: false,
             })
             .to_bytes(),
         );

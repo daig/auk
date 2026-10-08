@@ -61,6 +61,7 @@ fn daemon_messages() -> Vec<DaemonMsg> {
         DaemonMsg::Refused(Refusal {
             reason: "old".into(),
             daemon: Versions::current(),
+            upgrading: false,
         }),
         DaemonMsg::Snapshot {
             pane: 7,
@@ -281,6 +282,7 @@ fn blocking_client_handshake_and_refusal() {
                 DaemonMsg::Refused(Refusal {
                     reason: "parser".into(),
                     daemon: Versions::current(),
+                    upgrading: false,
                 })
             };
             write_msg(&mut s, &answer).unwrap();

@@ -59,7 +59,30 @@ pub async fn serve(daemon: Arc<Daemon>, stream: UnixStream) {
         Ok(Some(Ok(ClientMsg::Hello(hello)))) => hello,
         _ => return,
     };
-    if let Err(refusal) = daemon.versions.admit(&hello.versions) {
+    if let Err(mut refusal) = daemon.versions.admit(&hello.versions) {
+        // A newer client upgrades the daemon to its own binary (§15.7); the client connects
+        // again once the new daemon serves.
+        if crate::upgrade::under_way() {
+            refusal.upgrading = true;
+            refusal.reason = "the daemon is upgrading".into();
+        } else if let Some(exe) = hello.exe.clone()
+            && crate::upgrade::is_newer(&hello.versions.auk, &daemon.versions.auk)
+        {
+            let (d, want) = (daemon.clone(), hello.versions.auk.clone());
+            let started = tokio::task::spawn_blocking(move || {
+                crate::upgrade::check_exe(&exe, Some(&want))?;
+                d.start_upgrade(exe)
+            })
+            .await
+            .unwrap_or_else(|e| Err(e.to_string()));
+            match started {
+                Ok(()) => {
+                    refusal.upgrading = true;
+                    refusal.reason = format!("upgrading the daemon to Auk {}", hello.versions.auk);
+                }
+                Err(err) => eprintln!("auk daemon: no upgrade for a newer client: {err}"),
+            }
+        }
         eprintln!(
             "auk daemon: refused a {:?} client: {}",
             hello.kind, refusal.reason

@@ -145,6 +145,11 @@ fn cwd_and_user_vars_are_replicated_state() {
     assert_eq!(copy.cwd(), r.cwd());
     assert_eq!(copy.user_vars(), r.user_vars());
 
+    // `SetUserVar=<name>` with no value (omp clearing its session) unsets the variable.
+    let mut unset = Replica::from_snapshot(&r.snapshot(), Role::Follower, None);
+    unset.push(Item::Output(b"\x1b]1337;SetUserVar=resume\x07"));
+    assert_eq!(unset.user_vars().get("resume"), None);
+
     let mut other = follower();
     other.push(Item::Output(b"\x1b]7;file://host/elsewhere\x07"));
     let mut same = follower();
@@ -309,6 +314,33 @@ fn tsp_records_apply_on_every_replica() {
     b.apply(seq, Item::Record(&Record::Settings { settings: off }))
         .unwrap();
     assert!(!a.tsp().config().enabled);
+    assert_eq!(a.state_hash(), b.state_hash());
+}
+
+#[test]
+fn restored_surfaces_are_closed_read_only_and_survive_snapshots_and_prompts() {
+    // A daemon restart rebuilds the replica from its saved snapshot, then sequences `Restore`.
+    let mut before = Replica::new(80, 24, Settings::default(), Role::Authoritative);
+    before.push(Item::Output(&surface_session()));
+    let mut a = Replica::from_snapshot(&before.snapshot(), Role::Authoritative, None);
+    let (seq, _) = a.push(Item::Record(&Record::Restore));
+    assert!(
+        a.tsp()
+            .surfaces()
+            .iter()
+            .all(|s| !s.is_live() && s.restored())
+    );
+    let mut b = Replica::from_snapshot(&before.snapshot(), Role::Follower, None);
+    b.apply(seq, Item::Record(&Record::Restore)).unwrap();
+    assert_eq!(a.state_hash(), b.state_hash());
+    // A window attaching after the restore gets the same state from a snapshot.
+    let late = Replica::from_snapshot(&a.snapshot(), Role::Follower, None);
+    assert_eq!(late.state_hash(), a.state_hash());
+    assert!(late.tsp().surfaces().iter().all(|s| s.restored()));
+    // The new shell's prompt keeps the restored inline surface (§5.4, ours).
+    let (seq, _) = a.push(Item::Output(b"\x1b]133;A\x07$ "));
+    b.apply(seq, Item::Output(b"\x1b]133;A\x07$ ")).unwrap();
+    assert_eq!(a.tsp().surfaces().len(), 2);
     assert_eq!(a.state_hash(), b.state_hash());
 }
 

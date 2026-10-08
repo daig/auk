@@ -9,7 +9,7 @@
 //! | `split TARGET right\|down [--cwd DIR] [-- CMD…]` | splits a pane |
 //! | `run TARGET WORD…` | types the words and Enter |
 //! | `send TARGET text\|paste WORD…`, `send TARGET keys KEY…` | sends input |
-//! | `capture TARGET [--scrollback]` | the pane's text |
+//! | `capture TARGET [--ansi\|--html] [--scrollback] [--surfaces]` | the pane's content (`capture.rs`) |
 //! | `wait TARGET --until prompt\|exit\|idle=MS [--timeout S]` | waits (`"timeout":true` on timeout) |
 //! | `state-hash TARGET` | the authoritative replica's hash and sequence number |
 //! | `marks TARGET` | the shell's command marks (§5.3) |
@@ -21,10 +21,16 @@
 //! | `settings [--native-surfaces on\|off] [--command-lenses on\|off] [--scrollback N] [--retention BYTES]` | host settings (§15.2); changes reach every pane as a record |
 //! | `surface-play [--pane TARGET] FILE [from N] [until N] [paced [TIMES]]` | plays a TSP recording into a pane (§7.15) |
 //! | `effect [--window K] toast\|open\|copy TEXT` | asks the windows showing a window key to perform an effect |
-//! | `kill TARGET` | hangs up and closes a pane |
-//! | `shutdown` | stops the daemon |
+//! | `kill TARGET`, `close TARGET` | hangs up and closes a pane |
+//! | `open PATH [--window K]` | asks the windows showing the window key to open a file (their `route.open`, then their opener); `delivered` 0 means no window took it |
+//! | `events [--filter k,…]` | turns the connection into an event stream (`events.rs`) |
+//! | `checkpoint` | writes the state file now (§16) |
+//! | `state` | the state file, its last checkpoint, and the in-place upgrades so far |
+//! | `upgrade [--exe PATH]` | hands the daemon to a new build in place (§15.7) |
+//! | `shutdown` | writes the state file and stops the daemon |
 //!
-//! Targets: `@focused`, a pane id, an exact title, a title in any case, or a program name.
+//! Targets: `@focused`, a pane id, an exact title, a title in any case, or a program name. Among
+//! several matches, one in the focused pane's tab wins.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -37,6 +43,7 @@ use auk_term::input::{Key, KeyEvent, Mods, encode_key, encode_paste};
 use serde_json::{Value, json};
 
 use crate::control::{self, error, ok};
+use crate::events::{Actor, as_actor};
 use crate::pane::{Pane, PaneKind};
 use crate::server::{Daemon, NewPane, Place, lock};
 
@@ -55,8 +62,9 @@ impl Daemon {
             "ping" => return control::handle("ping"),
             "version" => Ok(json!(self.versions)),
             "ls" => Ok(self.ls()),
-            "new" => self.cmd_new(args),
-            "split" => self.cmd_split(args),
+            "new" => as_actor(Actor::Cli, || self.cmd_new(args)),
+            "split" => as_actor(Actor::Cli, || self.cmd_split(args)),
+            "open" => self.cmd_open(args),
             "run" => self.cmd_run(args),
             "send" => self.cmd_send(args),
             "capture" => self.cmd_capture(args),
@@ -93,8 +101,13 @@ impl Daemon {
             }),
             "surface-play" => return self.cmd_play(args).await,
             "effect" => self.cmd_effect(args),
-            "kill" => self.target(args.first()).and_then(|id| self.kill(id)).map(|()| Value::Null),
-            "plugin" | "block" | "blocks" | "pane-list" => self.plugin_command(cmd, args),
+            "kill" | "close" => as_actor(Actor::Cli, || {
+                self.target(args.first()).and_then(|id| self.kill(id))
+            })
+            .map(|()| Value::Null),
+            "plugin" | "block" | "blocks" | "pane-list" => {
+                as_actor(Actor::Cli, || self.plugin_command(cmd, args))
+            }
             "lens" => self.with_pane(args, |p| {
                 let blocks: Vec<Value> = p
                     .replica
@@ -109,6 +122,9 @@ impl Daemon {
                     .collect();
                 Ok(json!({"blocks": blocks, "running": p.replica.lens_running(), "catalog": p.replica.lens_catalog()}))
             }),
+            "checkpoint" => self.checkpoint().map_err(|e| format!("checkpoint: {e}")),
+            "state" => Ok(self.persist_info()),
+            "upgrade" => self.cmd_upgrade(args),
             "shutdown" => {
                 self.stop();
                 Ok(Value::Null)
@@ -152,6 +168,7 @@ impl Daemon {
             "layout": st.layout.windows,
             "focused": st.focused,
             "daemon_pid": std::process::id(),
+            "event_subscribers": crate::events::subscribers(),
         })
     }
 
@@ -217,8 +234,18 @@ impl Daemon {
                 }
             })
             .collect();
-        let find =
-            |pred: &dyn Fn(&Candidate) -> bool| candidates.iter().find(|c| pred(c)).map(|c| c.id);
+        // Ties go to the active tab: the focused pane's.
+        let active: Vec<PaneId> = st
+            .focused
+            .and_then(|f| tab_panes(&st.layout, f))
+            .unwrap_or_default();
+        let find = |pred: &dyn Fn(&Candidate) -> bool| {
+            candidates
+                .iter()
+                .filter(|c| pred(c))
+                .min_by_key(|c| !active.contains(&c.id))
+                .map(|c| c.id)
+        };
         find(&|c| c.title == *word)
             .or_else(|| find(&|c| c.title.eq_ignore_ascii_case(word)))
             .or_else(|| find(&|c| c.program.as_deref() == Some(word.as_str())))
@@ -332,15 +359,39 @@ impl Daemon {
     }
 
     fn cmd_capture(&self, args: &[String]) -> Reply {
-        let scrollback = args.iter().skip(1).any(|a| a == "--scrollback");
+        let opts = crate::capture::Options::parse(args.get(1..).unwrap_or_default())?;
         self.with_pane(args, |p| {
-            let text = if scrollback {
-                p.replica.text()
-            } else {
-                p.replica.screen_text()
-            };
-            Ok(json!({"text": text, "seq": p.replica.seq()}))
+            let text = crate::capture::capture(p.replica.terminal(), p.replica.tsp(), opts);
+            let term = p.replica.terminal();
+            Ok(json!({
+                "pane": p.id,
+                "text": text,
+                "seq": p.replica.seq(),
+                "cols": term.cols(),
+                "rows": term.rows(),
+                "title": term.title(),
+                "cursor": {"row": term.cursor().row, "col": term.cursor().col},
+            }))
         })
+    }
+
+    /// `open PATH [--window K]`: the windows showing the window key route it (`route.open`,
+    /// then their opener). Returns how many windows it went to.
+    fn cmd_open(&self, args: &[String]) -> Reply {
+        let mut opts = Opts::parse(args)?;
+        let key = opts
+            .take("window")
+            .unwrap_or_else(|| crate::server::DEFAULT_WINDOW_KEY.to_owned());
+        let [path] = opts.positional.as_slice() else {
+            return Err("open: expected one path".into());
+        };
+        let delivered = self.send_effect(
+            &key,
+            auk_mirror::Effect::Open {
+                target: path.clone(),
+            },
+        );
+        Ok(json!({"delivered": delivered, "window": key}))
     }
 
     fn cmd_settings(&self, args: &[String]) -> Reply {
@@ -520,6 +571,17 @@ impl Daemon {
             None => Some(wait.await),
         })
     }
+}
+
+/// The panes of the tab that holds `pane`.
+fn tab_panes(layout: &auk_mirror::layout::Layout, pane: PaneId) -> Option<Vec<PaneId>> {
+    layout
+        .windows
+        .values()
+        .flat_map(|w| &w.sessions)
+        .flat_map(|s| &s.tabs)
+        .find(|t| t.root.contains(pane))
+        .map(|t| t.root.panes())
 }
 
 #[derive(Clone, Copy)]

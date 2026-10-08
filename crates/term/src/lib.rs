@@ -87,7 +87,7 @@ pub enum Event {
     Cwd(String),
     /// OSC 0 or 2.
     Title(String),
-    /// OSC 1337 `SetUserVar=<name>=<base64>`, decoded.
+    /// OSC 1337 `SetUserVar=<name>=<base64>`, decoded; empty for `SetUserVar=<name>` (unset).
     UserVar {
         name: String,
         value: Vec<u8>,

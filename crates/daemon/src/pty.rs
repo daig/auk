@@ -120,6 +120,11 @@ impl Master {
     pub fn into_fd(self) -> OwnedFd {
         self.fd
     }
+
+    /// A master handed over by an in-place upgrade (§15.7).
+    pub fn from_fd(fd: OwnedFd) -> Self {
+        Master { fd }
+    }
 }
 
 impl AsRawFd for Master {

@@ -367,6 +367,7 @@ pub fn state_json(pane: &TspPane, term: &auk_term::Terminal) -> Value {
                 "state": match s.state() { State::Live => "live", State::Closed => "closed" },
                 "listen": s.listens(),
                 "interactive": s.interactive(),
+                "restored": s.restored(),
                 "covered": pane.covered(s.key()),
                 "title": s.title(),
                 "role": s.role(),

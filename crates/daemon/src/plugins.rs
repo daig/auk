@@ -456,6 +456,11 @@ impl Daemon {
             .collect();
         self.broadcast_layout_of(&st, &window_key);
         drop(st);
+        crate::events::emit(
+            "pane_spawned",
+            serde_json::json!({"pane": id, "window": window_key, "kind": "block"}),
+        );
+        crate::events::emit("layout_changed", serde_json::json!({"window": window_key}));
         let started = self.plugins.start_block(BlockLaunch {
             pane: id,
             kind: req.kind,

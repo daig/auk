@@ -10,19 +10,23 @@
 //! The pane table is built for the state file (§16, M6): [`pane::Pane::record`] gives each
 //! pane's kind, cwd and window with its snapshot, and the layout serializes as it is.
 
+pub mod capture;
 pub mod client;
 pub mod commands;
 pub mod control;
+pub mod events;
 pub mod login;
 pub mod pane;
 pub mod pane_socket;
 pub mod paths;
+pub mod persist;
 pub mod play;
 pub mod plugins;
 pub mod pty;
 pub mod server;
 pub mod spawn;
 pub mod tsp;
+pub mod upgrade;
 pub mod zsh;
 
 pub use server::{Config, Daemon, NewPane, Place, run, serve};

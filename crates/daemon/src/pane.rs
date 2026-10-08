@@ -225,6 +225,8 @@ pub struct Pane {
     pub stand_in: bool,
     /// The plugin host: host events, lens captures, and a block pane's worker (§9).
     pub plugin: Option<crate::plugins::PaneLink>,
+    /// The resume variables set since the last prompt (§5.4, D19), for the state file.
+    pub resume: crate::persist::ResumeVars,
 }
 
 impl Pane {
@@ -256,6 +258,7 @@ impl Pane {
             generation: 0,
             stand_in: false,
             plugin: None,
+            resume: Default::default(),
         };
         // No client shows the pane yet.
         pane.apply_primary_facts();
@@ -384,7 +387,9 @@ impl Pane {
     }
 
     fn on_events(&mut self, events: &[Event]) {
+        crate::events::pane_events(self.id, events);
         for event in events {
+            self.resume.on_event(event);
             if let Event::Mark(mark) = event {
                 let term = self.replica.terminal();
                 let line = term.history_len() + usize::from(term.cursor().row);

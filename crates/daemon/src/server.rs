@@ -34,7 +34,7 @@ pub const DEFAULT_SIZE: (u16, u16) = (80, 24);
 const KEEP_EXITED: usize = 32;
 
 /// How long a pane's output may keep draining after its process exits.
-const EXIT_DRAIN: Duration = Duration::from_secs(1);
+pub(crate) const EXIT_DRAIN: Duration = Duration::from_secs(1);
 
 /// Where the daemon listens and keeps its files.
 #[derive(Clone, Debug)]
@@ -107,6 +107,8 @@ pub struct Daemon {
     pub(crate) shutdown: CancellationToken,
     /// The plugin host (§9, §20); loaded before panes are restored.
     pub(crate) plugins: crate::plugins::Plugins,
+    /// The state file's checkpoints and an upgrade's sockets (§16, §15.7).
+    pub(crate) persist: crate::persist::Persist,
 }
 
 /// Locks a mutex, recovering from a panic in another holder: daemon state stays usable.
@@ -123,6 +125,8 @@ fn private_dir(path: &Path) -> io::Result<()> {
 
 /// Runs a daemon until it is told to stop (`shutdown`, SIGTERM or SIGINT).
 pub fn run(config: Config) -> io::Result<()> {
+    // An in-place upgrade's handoff (§15.7), read while this is the only thread.
+    crate::upgrade::take_from_env()?;
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?
@@ -136,9 +140,16 @@ pub async fn serve(config: Config) -> io::Result<()> {
     private_dir(socket_dir)?;
     let _lock = acquire_lock(&config.socket)?;
 
-    let listener = listen(&config.socket)?;
+    let handoff = crate::upgrade::take_inherited();
     let control_path = paths::control_socket(&config.socket);
-    let control_listener = listen(&control_path)?;
+    let (listener, control_listener) = match &handoff {
+        // An upgrade keeps listening on the old daemon's sockets.
+        Some(h) => (
+            inherit_listener(h.socket_fd)?,
+            inherit_listener(h.control_fd)?,
+        ),
+        None => (listen(&config.socket)?, listen(&control_path)?),
+    };
     private_dir(&paths::pane_socket_dir(&config.socket))?;
 
     let blob_dir = config.state_dir.join("blobs");
@@ -161,12 +172,24 @@ pub async fn serve(config: Config) -> io::Result<()> {
         login,
         zdotdir,
         settings: Mutex::new(Settings::default()),
-        versions: Versions::current(),
+        versions: crate::upgrade::reported_versions(),
         state: Mutex::new(State::default()),
         shutdown: CancellationToken::new(),
         plugins,
+        persist: Default::default(),
     });
     crate::plugins::Plugins::run(&daemon);
+    {
+        use std::os::fd::AsRawFd;
+        let fds = (listener.as_raw_fd(), control_listener.as_raw_fd());
+        daemon.persist.set_listeners(fds.0, fds.1);
+    }
+    // Then the saved panes (§5.4), or the panes an upgrade hands over (§15.7).
+    match handoff {
+        Some(h) => daemon.adopt(h.state),
+        None => daemon.restore(),
+    }
+    let checkpointer = daemon.spawn_checkpointer();
     eprintln!(
         "auk daemon {} (pid {}) on {}",
         daemon.versions.auk,
@@ -184,10 +207,7 @@ pub async fn serve(config: Config) -> io::Result<()> {
     };
     let control = {
         let daemon = daemon.clone();
-        tokio::spawn(control::serve_async(control_listener, move |line| {
-            let daemon = daemon.clone();
-            async move { daemon.command(&line).await }
-        }))
+        tokio::spawn(crate::events::serve_control(control_listener, daemon))
     };
 
     let ticker = {
@@ -212,6 +232,8 @@ pub async fn serve(config: Config) -> io::Result<()> {
     accept.abort();
     control.abort();
     ticker.abort();
+    checkpointer.abort();
+    daemon.save_on_stop();
     let _ = fs::remove_file(&config.socket);
     let _ = fs::remove_file(&control_path);
     daemon.hang_up_all();
@@ -237,6 +259,13 @@ fn acquire_lock(socket: &Path) -> io::Result<fs::File> {
         },
     )?;
     Ok(file)
+}
+
+/// A listening socket an upgrade handed over.
+fn inherit_listener(fd: i32) -> io::Result<UnixListener> {
+    let listener = std::os::unix::net::UnixListener::from(crate::upgrade::own_fd(fd)?);
+    listener.set_nonblocking(true)?;
+    UnixListener::from_std(listener)
 }
 
 fn listen(path: &Path) -> io::Result<UnixListener> {
@@ -342,6 +371,11 @@ impl Daemon {
             .map(|(id, c)| (*id, c.tx.clone(), c.facts.clone()))
             .collect();
         broadcast_layout(&st, &window_key);
+        crate::events::emit(
+            "pane_spawned",
+            serde_json::json!({"pane": id, "window": window_key, "kind": lock(&pane).kind}),
+        );
+        crate::events::emit("layout_changed", serde_json::json!({"window": window_key}));
         {
             let mut p = lock(&pane);
             for (client, tx, facts) in viewers {
@@ -526,11 +560,19 @@ impl Daemon {
             p.on_exit(status);
             p.clear_viewers();
         }
+        crate::events::emit(
+            "pane_exited",
+            serde_json::json!({"pane": id, "status": status, "by": null}),
+        );
         let window = st.layout.window_of(id).map(str::to_owned);
         if st.layout.remove_pane(id)
             && let Some(key) = window
         {
             broadcast_layout(&st, &key);
+            crate::events::emit(
+                "layout_changed",
+                serde_json::json!({"window": key, "by": null}),
+            );
         }
         st.exited.push_back(id);
         while st.exited.len() > KEEP_EXITED {
@@ -552,6 +594,7 @@ impl Daemon {
             .cloned()
             .ok_or_else(|| format!("no pane {id}"))?;
         let p = lock(&pane);
+        crate::events::emit("pane_closed", serde_json::json!({"pane": id}));
         match (p.pid, p.exit) {
             (Some(pid), None) => hang_up(pid),
             _ => {
@@ -593,6 +636,10 @@ impl Daemon {
             }
             .to_bytes(),
         ));
+        crate::events::emit(
+            "client_connected",
+            serde_json::json!({"client": id, "kind": kind, "by": id}),
+        );
         st.clients.insert(
             id,
             ClientEntry {
@@ -608,6 +655,7 @@ impl Daemon {
     pub(crate) fn remove_client(&self, id: ClientId) {
         let mut st = self.state();
         st.clients.remove(&id);
+        crate::events::emit("client_left", serde_json::json!({"client": id, "by": id}));
         for pane in st.panes.values() {
             lock(pane).remove_viewer(id);
         }
@@ -624,6 +672,10 @@ impl Daemon {
             return;
         };
         client.window_key = Some(window_key.clone());
+        crate::events::emit(
+            "client_attached",
+            serde_json::json!({"client": id, "window": window_key, "by": id}),
+        );
         let (tx, facts) = (client.tx.clone(), client.facts.clone());
         let window = st.layout.window(&window_key).cloned().unwrap_or_default();
         tx.send(Bytes::from(
@@ -672,7 +724,10 @@ impl Daemon {
     pub(crate) fn client_focus(&self, id: ClientId, pane: PaneId) {
         let Some(p) = self.pane(pane) else { return };
         if lock(&p).has_viewer(id) {
-            self.state().focused = Some(pane);
+            let before = self.state().focused.replace(pane);
+            if before != Some(pane) {
+                crate::events::emit("focus_changed", serde_json::json!({"pane": pane, "by": id}));
+            }
             lock(&p).touch(id);
         }
     }
@@ -698,6 +753,12 @@ impl Daemon {
         id: ClientId,
         edit: LayoutEdit,
     ) -> Result<(), String> {
+        crate::events::as_actor(crate::events::Actor::Client(id), || {
+            self.layout_edit_by(id, edit)
+        })
+    }
+
+    fn layout_edit_by(self: &Arc<Self>, id: ClientId, edit: LayoutEdit) -> Result<(), String> {
         let window_key = self
             .state()
             .clients
@@ -745,6 +806,7 @@ impl Daemon {
         let keys: Vec<String> = st.layout.windows.keys().cloned().collect();
         for key in keys {
             broadcast_layout(&st, &key);
+            crate::events::emit("layout_changed", serde_json::json!({"window": key}));
         }
         Ok(())
     }
@@ -794,7 +856,7 @@ pub(crate) fn hang_up(pid: u32) {
     }
 }
 
-fn spawn_thread(name: String, f: impl FnOnce() + Send + 'static) -> Result<(), String> {
+pub(crate) fn spawn_thread(name: String, f: impl FnOnce() + Send + 'static) -> Result<(), String> {
     std::thread::Builder::new()
         .name(name)
         .spawn(f)
@@ -804,9 +866,12 @@ fn spawn_thread(name: String, f: impl FnOnce() + Send + 'static) -> Result<(), S
 
 /// Feeds PTY output to the pane until every slave descriptor is closed, or the pane's process
 /// was replaced.
-fn read_pty(pane: &Mutex<Pane>, master: &pty::Master, generation: u64) {
+pub(crate) fn read_pty(pane: &Mutex<Pane>, master: &pty::Master, generation: u64) {
     let mut buf = vec![0u8; 64 * 1024];
+    // Readers wait in poll, never in read, so an upgrade can stop them between reads (§15.7).
+    let _reader = crate::upgrade::reader();
     loop {
+        crate::upgrade::wait_readable(std::os::fd::AsFd::as_fd(master));
         match rustix::io::read(master, &mut buf) {
             Ok(0) => return,
             Ok(n) => {
@@ -829,7 +894,11 @@ fn read_pty(pane: &Mutex<Pane>, master: &pty::Master, generation: u64) {
 /// non-canonical with echo off, read with `tcgetattr` on the master right before the write, and
 /// dropped otherwise. While client input has opened a bracketed paste the program sees, TSP waits
 /// until the paste ends.
-fn write_pty(master: &pty::Master, mut input: mpsc::UnboundedReceiver<PtyWrite>, gate: &GateStats) {
+pub(crate) fn write_pty(
+    master: &pty::Master,
+    mut input: mpsc::UnboundedReceiver<PtyWrite>,
+    gate: &GateStats,
+) {
     let mut paste = PasteTracker::default();
     let mut held: Vec<Vec<u8>> = Vec::new();
     while let Some(write) = input.blocking_recv() {

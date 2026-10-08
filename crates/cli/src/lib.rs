@@ -4,6 +4,7 @@
 pub mod control;
 pub mod headless;
 pub mod plugin;
+pub mod scenario;
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -26,23 +27,33 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub socket: Option<PathBuf>,
 
+    /// The window key a verb acts in (§11.1): where `new` opens panes, which windows `open`
+    /// asks. Default: `main`.
+    #[arg(long, global = true, value_name = "KEY")]
+    pub window: Option<String>,
+
+    /// Print the verb's result as JSON.
+    #[arg(long, global = true)]
+    pub json: bool,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Run the session daemon in the foreground.
-    Daemon,
+    /// Run the session daemon in the foreground; `auk daemon upgrade` hands the running one to
+    /// a new build in place (§15.7).
+    Daemon {
+        #[command(subcommand)]
+        action: Option<DaemonAction>,
+    },
     /// Run a headless window: attach, keep replicas, serve a control endpoint.
     Headless {
         /// The headless window's control endpoint (default: headless-<pid>.ctl beside the
         /// daemon socket).
         #[arg(long)]
         control: Option<PathBuf>,
-        /// The window key whose sessions to show.
-        #[arg(long, default_value = auk_daemon::server::DEFAULT_WINDOW_KEY)]
-        window: String,
         /// The size to ask for each pane, as COLSxROWS.
         #[arg(long, value_parser = parse_size)]
         size: Option<(u16, u16)>,
@@ -64,17 +75,12 @@ pub enum Command {
         stdio: bool,
     },
     /// List sessions, tabs and panes.
-    Ls {
-        #[arg(long)]
-        json: bool,
-    },
+    Ls,
     /// Open a session or a tab; prints the new pane's id. Starts the daemon if none answers.
     New {
         /// `session` or `tab`.
         #[arg(default_value = "session", value_parser = ["session", "tab"])]
         what: String,
-        #[arg(long)]
-        window: Option<String>,
         /// The session for a new tab (default: the window's last session).
         #[arg(long)]
         session: Option<u64>,
@@ -87,6 +93,72 @@ pub enum Command {
         size: Option<(u16, u16)>,
         /// A command to run instead of a login shell.
         #[arg(last = true)]
+        command: Vec<String>,
+    },
+    /// Split a pane: the new pane goes right of it or below it; prints the new pane's id.
+    Split {
+        target: String,
+        #[arg(value_parser = ["right", "down"])]
+        dir: String,
+        /// The new pane's directory (default: the split pane's).
+        #[arg(long)]
+        cwd: Option<PathBuf>,
+        /// A command to run instead of a login shell.
+        #[arg(last = true)]
+        command: Vec<String>,
+    },
+    /// Close a pane: hang up its process and take it out of the layout.
+    Close { target: String },
+    /// Stream daemon events as JSON lines, such as
+    /// `{"event":"pane_spawned","pane":3,"window":"main","by":"cli"}`.
+    Events {
+        /// Only these kinds, comma-separated (`pane_spawned,layout_changed`).
+        #[arg(long, value_delimiter = ',')]
+        filter: Vec<String>,
+    },
+    /// Open a file: a connected window showing the window key routes it (its `route.open`
+    /// plugins, then its opener); with no window, the system opener ($AUK_OPENER, else `open`).
+    Open { path: PathBuf },
+    /// Run scenario scripts offscreen in a private daemon (§11.3); writes a PNG and a layout
+    /// JSON for every `shot` command into OUT/<scenario>/.
+    Shot {
+        #[arg(required = true)]
+        scenarios: Vec<PathBuf>,
+        /// Where shots go (default: target/shots/auk).
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// The window size in points, with an optional scale: WxH[@S] (default 960x600@1).
+        #[arg(long)]
+        size: Option<String>,
+        /// light or dark (default: dark).
+        #[arg(long, value_parser = ["light", "dark"])]
+        appearance: Option<String>,
+    },
+    /// A deterministic headless window on a private daemon, serving a control endpoint until
+    /// `quit` (§11.3).
+    Serve {
+        /// The control endpoint (default: serve.ctl in the runtime dir).
+        #[arg(long)]
+        control: Option<PathBuf>,
+        /// Where `shot` writes (default: target/shots/auk).
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// WxH[@S] (default 960x600@1).
+        #[arg(long)]
+        size: Option<String>,
+        #[arg(long, value_parser = ["light", "dark"])]
+        appearance: Option<String>,
+    },
+    /// Send commands to a headless window's control endpoint: one command (its words), or a
+    /// scenario script's commands one by one (`--file`). Prints each JSON reply.
+    Ctl {
+        /// The control endpoint (default: serve.ctl in the runtime dir).
+        #[arg(long)]
+        control: Option<PathBuf>,
+        /// A scenario script.
+        #[arg(long, conflicts_with = "command")]
+        file: Option<PathBuf>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,
     },
     /// Type a command line and Enter into a pane; doesn't wait.
@@ -103,14 +175,20 @@ pub enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         input: Vec<String>,
     },
-    /// Print a pane's text.
+    /// Print a pane's content: text, or with --ansi its attributes as SGR, or with --html as
+    /// HTML; with --surfaces, surfaces' text in place of their anchor rows.
     Capture {
         target: String,
+        #[arg(long, conflicts_with = "html")]
+        ansi: bool,
+        #[arg(long)]
+        html: bool,
         /// Include the scrollback.
         #[arg(long)]
         scrollback: bool,
+        /// Include surfaces' text.
         #[arg(long)]
-        json: bool,
+        surfaces: bool,
     },
     /// Play a TSP recording into a pane (§7.15): `surface-play FILE [from N] [until N]
     /// [paced [TIMES]]`. The first play restarts the pane as a stand-in program.
@@ -137,8 +215,6 @@ pub enum Command {
     /// Prints the new pane's id.
     Block {
         kind: String,
-        #[arg(long)]
-        window: Option<String>,
         #[arg(long)]
         cwd: Option<PathBuf>,
         /// COLSxROWS.
@@ -179,8 +255,19 @@ pub fn run(cli: Cli) -> ExitCode {
         );
         return ExitCode::from(2);
     };
+    let globals = Globals {
+        window: cli.window,
+        json: cli.json,
+    };
     match command {
-        Command::Daemon => {
+        Command::Daemon {
+            action: Some(DaemonAction::Upgrade { exe }),
+        } => match upgrade_daemon(&socket, exe) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(VerbError::Timeout) => fail("auk daemon upgrade: timed out".into()),
+            Err(VerbError::Failed(message)) => fail(format!("auk daemon upgrade: {message}")),
+        },
+        Command::Daemon { action: None } => {
             let config = auk_daemon::Config {
                 socket,
                 state_dir: paths::state_dir(),
@@ -192,7 +279,6 @@ pub fn run(cli: Cli) -> ExitCode {
         }
         Command::Headless {
             control,
-            window,
             size,
             host,
             ssh_config,
@@ -209,11 +295,14 @@ pub fn run(cli: Cli) -> ExitCode {
             let opts = headless::Options {
                 control: control.unwrap_or_else(|| headless::default_control(&socket)),
                 socket,
-                window_key: window,
+                window_key: globals
+                    .window
+                    .unwrap_or_else(|| auk_daemon::server::DEFAULT_WINDOW_KEY.to_owned()),
                 size,
                 exe: current_exe(),
                 state_dir: paths::state_dir(),
                 remote,
+                scenario: None,
             };
             match headless::run(&opts) {
                 Ok(()) => ExitCode::SUCCESS,
@@ -226,17 +315,107 @@ pub fn run(cli: Cli) -> ExitCode {
                 Err(err) => fail(format!("auk attach: {err}")),
             }
         }
-        Command::Plugin { args } => plugin::run(&socket, &args),
+        Command::Plugin { mut args } => {
+            if globals.json && !args.iter().any(|a| a == "--json") {
+                args.push("--json".to_owned());
+            }
+            if let Some(window) = globals.window
+                && !args.iter().any(|a| a == "--window")
+            {
+                args.extend(["--window".to_owned(), window]);
+            }
+            plugin::run(&socket, &args)
+        }
         Command::StandIn => match auk_daemon::play::stand_in() {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => fail(format!("auk stand-in: {err}")),
         },
-        verb => match run_verb(&socket, verb) {
+        Command::Shot {
+            scenarios,
+            out,
+            size,
+            appearance,
+        } => scenario::shot(&scenario::ShotOptions {
+            exe: current_exe(),
+            scenarios,
+            out,
+            size,
+            appearance,
+            json: globals.json,
+        }),
+        Command::Serve {
+            control,
+            out,
+            size,
+            appearance,
+        } => scenario::serve(&scenario::ServeOptions {
+            exe: current_exe(),
+            control: control.unwrap_or_else(scenario::default_control),
+            out,
+            size,
+            appearance,
+        }),
+        Command::Ctl {
+            control,
+            file,
+            command,
+        } => scenario::ctl(
+            &control.unwrap_or_else(scenario::default_control),
+            file.as_deref(),
+            &command,
+        ),
+        verb => match run_verb(&socket, &globals, verb) {
             Ok(code) => code,
             Err(VerbError::Timeout) => ExitCode::from(EXIT_TIMEOUT),
             Err(VerbError::Failed(message)) => fail(format!("auk: {message}")),
         },
     }
+}
+
+/// Flags every verb takes.
+#[derive(Debug, Default)]
+struct Globals {
+    window: Option<String>,
+    json: bool,
+}
+
+/// What `auk daemon` can do besides running one.
+#[derive(Debug, Subcommand)]
+pub enum DaemonAction {
+    /// Hand the running daemon to a new build without ending any program (§15.7): the daemon
+    /// execs it, passing its sockets, PTYs and state; windows reconnect.
+    Upgrade {
+        /// The new build (default: this `auk`).
+        #[arg(long)]
+        exe: Option<PathBuf>,
+    },
+}
+
+/// `auk daemon upgrade`: asks the daemon to exec the new build, then waits until the new one
+/// answers and reports it.
+fn upgrade_daemon(socket: &Path, exe: Option<PathBuf>) -> Result<(), VerbError> {
+    let exe = absolute(&exe.unwrap_or_else(current_exe));
+    let words = ["upgrade".to_owned(), "--exe".to_owned(), exe.to_string_lossy().into_owned()];
+    let started = connect(socket, false)?.request(&words)?;
+    let before = started["upgrades"].as_u64().unwrap_or(0);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let state = connect(socket, false).and_then(|mut c| Ok(c.request(&["state"])?));
+        if let Ok(state) = state
+            && state["upgrades"].as_u64().unwrap_or(0) > before
+        {
+            println!(
+                "upgraded the daemon (pid {}) from Auk {} to {}",
+                state["pid"], started["from"].as_str().unwrap_or("?"), state["auk"].as_str().unwrap_or("?")
+            );
+            return Ok(());
+        }
+    }
+    Err(VerbError::Failed(format!(
+        "the daemon didn't come back upgraded; see {}",
+        paths::state_dir().join("daemon.log").display()
+    )))
 }
 
 fn current_exe() -> PathBuf {
@@ -279,12 +458,27 @@ fn connect(socket: &Path, start: bool) -> Result<Control, VerbError> {
     })
 }
 
-fn run_verb(socket: &Path, verb: Command) -> Result<ExitCode, VerbError> {
+/// Prints a verb's result: the JSON value with `--json`, else `text` (if any).
+fn report(out: &mut impl Write, g: &Globals, value: &Value, text: Option<String>) -> io::Result<()> {
+    if g.json {
+        writeln!(out, "{value}")
+    } else if let Some(text) = text {
+        writeln!(out, "{text}")
+    } else {
+        Ok(())
+    }
+}
+
+fn run_verb(socket: &Path, g: &Globals, verb: Command) -> Result<ExitCode, VerbError> {
     let mut out = io::stdout().lock();
     match verb {
-        Command::Ls { json } => {
+        Command::Ls => {
             let value = connect(socket, false)?.request(&["ls"])?;
-            if json {
+            let value = match &g.window {
+                Some(key) => filter_window(value, key),
+                None => value,
+            };
+            if g.json {
                 writeln!(out, "{value:#}")?;
             } else {
                 print_ls(&mut out, &value)?;
@@ -292,7 +486,6 @@ fn run_verb(socket: &Path, verb: Command) -> Result<ExitCode, VerbError> {
         }
         Command::New {
             what,
-            window,
             session,
             name,
             cwd,
@@ -306,7 +499,7 @@ fn run_verb(socket: &Path, verb: Command) -> Result<ExitCode, VerbError> {
                     words.push(value);
                 }
             };
-            flag("window", window);
+            flag("window", g.window.clone());
             flag("session", session.map(|s| s.to_string()));
             flag("name", name);
             flag(
@@ -319,7 +512,71 @@ fn run_verb(socket: &Path, verb: Command) -> Result<ExitCode, VerbError> {
                 words.extend(command);
             }
             let value = connect(socket, true)?.request(&words)?;
-            writeln!(out, "{}", value["pane"])?;
+            report(&mut out, g, &value, Some(value["pane"].to_string()))?;
+        }
+        Command::Split {
+            target,
+            dir,
+            cwd,
+            command,
+        } => {
+            let mut words = vec!["split".to_owned(), target, dir];
+            if let Some(cwd) = cwd {
+                words.extend(["--cwd".to_owned(), absolute(&cwd).to_string_lossy().into_owned()]);
+            }
+            if !command.is_empty() {
+                words.push("--".to_owned());
+                words.extend(command);
+            }
+            let value = connect(socket, false)?.request(&words)?;
+            report(&mut out, g, &value, Some(value["pane"].to_string()))?;
+        }
+        Command::Close { target } => {
+            connect(socket, false)?.request(&["close", &target])?;
+            report(&mut out, g, &serde_json::json!({"closed": target}), None)?;
+        }
+        Command::Events { filter } => {
+            let mut control = connect(socket, false)?;
+            let mut words = vec!["events".to_owned()];
+            if !filter.is_empty() {
+                words.extend(["--filter".to_owned(), filter.join(",")]);
+            }
+            control.request(&words)?;
+            // Events go out as they come, until the daemon stops or the reader goes away.
+            while let Some(line) = control.read_line()? {
+                if writeln!(out, "{}", line.trim_end()).and_then(|()| out.flush()).is_err() {
+                    break;
+                }
+            }
+        }
+        Command::Open { path } => {
+            let path = absolute(&path).to_string_lossy().into_owned();
+            let mut words = vec!["open".to_owned(), path.clone()];
+            if let Some(window) = &g.window {
+                words.extend(["--window".to_owned(), window.clone()]);
+            }
+            // Routes first: a window showing the key takes it; else the system opener.
+            let routed = match connect(socket, false) {
+                Ok(mut control) => control.request(&words)?["delivered"].as_u64().unwrap_or(0),
+                Err(_) => 0,
+            };
+            let value = if routed > 0 {
+                serde_json::json!({"path": path, "routed": "window", "windows": routed})
+            } else {
+                let opener = system_opener();
+                let status = std::process::Command::new(&opener)
+                    .arg(&path)
+                    .status()
+                    .map_err(|e| VerbError::Failed(format!("{}: {e}", opener.display())))?;
+                if !status.success() {
+                    return Err(VerbError::Failed(format!(
+                        "{} {path}: {status}",
+                        opener.display()
+                    )));
+                }
+                serde_json::json!({"path": path, "routed": "system", "opener": opener})
+            };
+            report(&mut out, g, &value, None)?;
         }
         Command::Run { target, command } => {
             let mut words = vec!["run".to_owned(), target];
@@ -337,19 +594,25 @@ fn run_verb(socket: &Path, verb: Command) -> Result<ExitCode, VerbError> {
         }
         Command::Capture {
             target,
+            ansi,
+            html,
             scrollback,
-            json,
+            surfaces,
         } => {
             let mut words = vec!["capture".to_owned(), target];
-            if scrollback {
-                words.push("--scrollback".to_owned());
+            for (on, flag) in [
+                (ansi, "--ansi"),
+                (html, "--html"),
+                (scrollback, "--scrollback"),
+                (surfaces, "--surfaces"),
+            ] {
+                if on {
+                    words.push(flag.to_owned());
+                }
             }
             let value = connect(socket, false)?.request(&words)?;
-            if json {
-                writeln!(out, "{value}")?;
-            } else {
-                writeln!(out, "{}", value["text"].as_str().unwrap_or_default())?;
-            }
+            let text = value["text"].as_str().unwrap_or_default().to_owned();
+            report(&mut out, g, &value, Some(text))?;
         }
         Command::Wait {
             target,
@@ -361,18 +624,18 @@ fn run_verb(socket: &Path, verb: Command) -> Result<ExitCode, VerbError> {
                 words.push("--timeout".to_owned());
                 words.push(t.to_string());
             }
-            connect(socket, false)?.request(&words)?;
+            let value = connect(socket, false)?.request(&words)?;
+            report(&mut out, g, &value, None)?;
         }
         Command::Block {
             kind,
-            window,
             cwd,
             size,
             args,
         } => {
             let mut words = vec!["block".to_owned(), kind];
-            if let Some(window) = window {
-                words.extend(["--window".to_owned(), window]);
+            if let Some(window) = &g.window {
+                words.extend(["--window".to_owned(), window.clone()]);
             }
             if let Some(cwd) = cwd {
                 words.extend(["--cwd".to_owned(), absolute(&cwd).to_string_lossy().into_owned()]);
@@ -385,7 +648,7 @@ fn run_verb(socket: &Path, verb: Command) -> Result<ExitCode, VerbError> {
                 words.extend(args);
             }
             let value = connect(socket, true)?.request(&words)?;
-            writeln!(out, "{}", value["pane"])?;
+            report(&mut out, g, &value, Some(value["pane"].to_string()))?;
         }
         Command::SurfacePlay {
             file,
@@ -402,15 +665,38 @@ fn run_verb(socket: &Path, verb: Command) -> Result<ExitCode, VerbError> {
             let value = connect(socket, false)?.request(&words)?;
             writeln!(out, "{value}")?;
         }
-        Command::Daemon
+        Command::Daemon { .. }
         | Command::Headless { .. }
         | Command::Attach { .. }
         | Command::StandIn
+        | Command::Shot { .. }
+        | Command::Serve { .. }
+        | Command::Ctl { .. }
         | Command::Plugin { .. } => {
             unreachable!("handled by `run`")
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// The system opener: `$AUK_OPENER`, else `open` (macOS) or `xdg-open`.
+fn system_opener() -> PathBuf {
+    match std::env::var_os("AUK_OPENER").filter(|v| !v.is_empty()) {
+        Some(o) => PathBuf::from(o),
+        None if cfg!(target_os = "macos") => PathBuf::from("/usr/bin/open"),
+        None => PathBuf::from("xdg-open"),
+    }
+}
+
+/// `ls --window KEY`: only that window key's panes and layout.
+fn filter_window(mut value: Value, key: &str) -> Value {
+    if let Some(panes) = value["panes"].as_array_mut() {
+        panes.retain(|p| p["window"] == key);
+    }
+    if let Some(layout) = value["layout"].as_object_mut() {
+        layout.retain(|k, _| k == key);
+    }
+    value
 }
 
 fn absolute(path: &Path) -> PathBuf {
@@ -495,6 +781,12 @@ mod tests {
             (what.as_str(), size, command),
             ("tab", Some((90, 20)), vec!["ls".into(), "-l".into()])
         );
+        let cli = Cli::parse_from(["auk", "--json", "split", "@focused", "down", "--window", "w", "--", "htop"]);
+        assert!(cli.json);
+        assert_eq!(cli.window.as_deref(), Some("w"));
+        assert!(matches!(cli.command, Some(Command::Split { ref dir, ref command, .. }) if dir == "down" && command == &["htop"]));
+        let cli = Cli::parse_from(["auk", "events", "--filter", "pane_spawned,layout_changed"]);
+        assert!(matches!(cli.command, Some(Command::Events { ref filter }) if filter.len() == 2));
         let cli = Cli::parse_from(["auk", "run", "1", "echo", "-n", "hi"]);
         let Some(Command::Run { command, .. }) = cli.command else {
             panic!()

@@ -3,7 +3,8 @@
 //!
 //! Order: the hello; each surface, closed ones first, as a synthetic `o` (with the reserved
 //! parameters `key`, `buf`, `seeded` and `at`, its place in pane order, restored at the end of
-//! the replay); its `t` and `s` sheets; one frame with the last `s` that
+//! the replay, plus `restored=1` for a surface that came back after a daemon restart, §5.4);
+//! its `t` and `s` sheets; one frame with the last `s` that
 //! adds the whole document, then `settle`s, `focus` and `suspend`; and `x keep:true` for closed
 //! surfaces. A chunk sequence being joined is replayed last, so the replica keeps joining it.
 //!
@@ -130,6 +131,9 @@ impl TspPane {
         params.push(("buf", s.buffer.as_str()));
         params.push(("seeded", "1"));
         params.push(("at", &at));
+        if s.restored {
+            params.push(("restored", "1"));
+        }
         let mut open = json!({"id": s.id, "mode": s.mode.as_str()});
         if let Some(title) = &s.title {
             open["title"] = title.as_str().into();

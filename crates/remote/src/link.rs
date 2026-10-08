@@ -9,7 +9,13 @@
 //! hands on what the daemon sends: the layout, then a fresh snapshot of every pane (§15.3),
 //! which replaces the window's replica. Until every pane's snapshot has arrived, typing and
 //! other user input is held, then sent in order (§10.1); acks are dropped, since the window
-//! redraws and acks what the snapshots bring. A local link ends with its daemon, as before.
+//! redraws and acks what the snapshots bring.
+//!
+//! A local link reconnects the same way when its daemon was upgraded in place (§15.7): the new
+//! daemon keeps the old one's listening socket, so connecting again succeeds. A local daemon
+//! that went away refuses the connection, and the link fails at once. A daemon upgrading itself
+//! to this client's release refuses the hello with `upgrading` set; the link says hello again
+//! until the new daemon welcomes it.
 //!
 //! Connection states (§10.1): `connecting` (opening, or attaching for the first time),
 //! `connected`, `stalled` (input sent and nothing heard for [`STALL_AFTER`]), `reconnecting(n)`
@@ -216,6 +222,24 @@ impl Write for Duplex {
     }
 }
 
+/// How long a client waits for a daemon that is upgrading itself to this client's release.
+const UPGRADE_WAIT: Duration = Duration::from_secs(20);
+
+/// Opens the transport and says hello. A daemon that answers that it is upgrading to this
+/// client's release (§15.7) is asked again until the new one welcomes the client.
+fn greet(target: &Target, hello: &Hello) -> Result<(Opened, Welcome), LinkError> {
+    let deadline = Instant::now() + UPGRADE_WAIT;
+    loop {
+        let opened = open(target).map_err(|e| LinkError::Open(e.to_string()))?;
+        match handshake(opened, hello) {
+            Err(HandshakeError::Refused(r)) if r.upgrading && Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(100));
+            }
+            result => return result.map_err(LinkError::Handshake),
+        }
+    }
+}
+
 fn handshake(opened: Opened, hello: &Hello) -> Result<(Opened, Welcome), HandshakeError> {
     let Opened {
         reader,
@@ -379,8 +403,7 @@ impl Link {
     /// Opens the transport and says hello. Nothing is attached yet: send
     /// [`ClientMsg::Attach`], then drain the [`LinkReader`].
     pub fn connect(target: Target, hello: Hello) -> Result<(Link, Welcome, LinkReader), LinkError> {
-        let opened = open(&target).map_err(|e| LinkError::Open(e.to_string()))?;
-        let (opened, welcome) = handshake(opened, &hello).map_err(LinkError::Handshake)?;
+        let (opened, welcome) = greet(&target, &hello)?;
         let Opened {
             reader,
             writer,
@@ -542,22 +565,16 @@ impl Link {
     }
 
     /// The stream ended; returns whether the link should reconnect.
-    fn lost(&self, reason: &str) -> bool {
+    fn lost(&self) -> bool {
         let mut st = self.lock();
         st.writer = None;
         st.ssh_pid = None;
         if st.detached {
             return false;
         }
-        match self.inner.target {
-            Target::Local(_) => {
-                st.set_state(State::Failed {
-                    reason: reason.to_owned(),
-                });
-                false
-            }
-            Target::Ssh(_) => true,
-        }
+        // A local daemon that still accepts connections was upgraded in place (§15.7);
+        // reconnecting to one that went away fails at once.
+        true
     }
 
     fn fail(&self, reason: String) -> LinkError {
@@ -622,7 +639,7 @@ impl LinkReader {
                 Err(err) => format!("the daemon sent a bad frame: {err}"),
             };
             self.reap();
-            if !self.link.lost(&reason) {
+            if !self.link.lost() {
                 return if self.link.lock().detached {
                     Ok(None)
                 } else {
@@ -664,6 +681,10 @@ impl LinkReader {
             let hello = self.link.lock().hello.clone();
             let (opened, welcome) = match handshake(opened, &hello) {
                 Ok(done) => done,
+                Err(HandshakeError::Refused(r)) if r.upgrading => {
+                    last = r.reason;
+                    continue;
+                }
                 Err(err @ HandshakeError::Refused(_)) => {
                     return Err(self.link.fail(err.to_string()));
                 }

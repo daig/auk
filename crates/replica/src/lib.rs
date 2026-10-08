@@ -534,6 +534,10 @@ impl Replica {
                 self.collect_replies(replaying);
                 match &event {
                     Event::Cwd(cwd) => self.cwd = Some(cwd.clone()),
+                    // An empty value unsets the variable.
+                    Event::UserVar { name, value } if value.is_empty() => {
+                        self.user_vars.remove(name);
+                    }
                     Event::UserVar { name, value } => {
                         self.user_vars.insert(name.clone(), value.clone());
                     }

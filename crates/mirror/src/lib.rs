@@ -78,6 +78,7 @@ impl Versions {
         Err(Refusal {
             reason,
             daemon: self.clone(),
+            upgrading: false,
         })
     }
 }

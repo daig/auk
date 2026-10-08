@@ -107,13 +107,19 @@ impl Core {
                 }
             }
             b"1337" if params.len() >= 2 => {
-                let var = params[1].strip_prefix(b"SetUserVar=");
-                let eq = var.and_then(|var| var.iter().position(|&b| b == b'='));
-                if let (Some(var), Some(eq)) = (var, eq)
-                    && let Some(value) = decode_base64(&var[eq + 1..])
-                {
-                    let name = String::from_utf8_lossy(&var[..eq]).into_owned();
-                    self.events.push_back(Event::UserVar { name, value });
+                // `SetUserVar=<name>` with no value unsets it (omp does this when its session is
+                // cleared); it arrives as an empty value.
+                if let Some(var) = params[1].strip_prefix(b"SetUserVar=") {
+                    let (name, value) = match var.iter().position(|&b| b == b'=') {
+                        Some(eq) => (&var[..eq], decode_base64(&var[eq + 1..])),
+                        None => (var, Some(Vec::new())),
+                    };
+                    if let Some(value) = value
+                        && !name.is_empty()
+                    {
+                        let name = String::from_utf8_lossy(name).into_owned();
+                        self.events.push_back(Event::UserVar { name, value });
+                    }
                 }
             }
             b"6464" if params.len() >= 2 => self.private_osc(&params[1..]),
