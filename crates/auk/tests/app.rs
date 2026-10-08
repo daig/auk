@@ -301,12 +301,13 @@ fn s1_posted_keys_reach_the_program_as_ghostty_sends_them() {
     use auk_app::s1::{GhosttyOptions, PERMISSION, record_ghostty, strokes};
 
     let env = env("s1");
-    let app = App::start(&env, "a", &["--option-as-alt", "left"]);
-    assert_eq!(
-        app.request("can-post"),
-        true,
+    // One poster for both terminals: this process posts the keys to Ghostty and to Auk, so the
+    // comparison is fair and only this process needs the Accessibility permission.
+    assert!(
+        auk_platform_macos::synth::can_post_events(),
         "prerequisite missing: {PERMISSION}"
     );
+    let app = App::start(&env, "a", &["--option-as-alt", "left"]);
     let probe = focused_probe(&env, &app);
     let _us = InputSource::select(&app, US_LAYOUT);
     let names = [
@@ -351,7 +352,7 @@ fn s1_posted_keys_reach_the_program_as_ghostty_sends_them() {
         app.request("focus-window");
         let mut ours = Vec::new();
         for name in names {
-            app.request(&format!("post-key '{name}'"));
+            auk_platform_macos::synth::post_to_pid(app.pid as i32, strokes[ours.len()]);
             let mut bytes = probe.read_until(&format!("the bytes for {name}"), |b| !b.is_empty());
             bytes.extend(probe.read_for(Duration::from_millis(150)));
             ours.push(bytes);

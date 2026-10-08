@@ -218,6 +218,17 @@ pub fn post_to_pid(pid: i32, stroke: Stroke) -> bool {
     true
 }
 
+/// Activates another process's app (brings its windows forward and makes one key), so keys
+/// posted to it reach a window. Returns whether the process was found.
+pub fn activate_pid(pid: i32) -> bool {
+    use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
+    let Some(app) = NSRunningApplication::runningApplicationWithProcessIdentifier(pid) else {
+        return false;
+    };
+    #[allow(deprecated)]
+    app.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows)
+}
+
 /// Keyboard input sources (layouts and input methods), for driving IME checks: select the
 /// Japanese input method, type romaji strokes, restore the user's source.
 pub mod input_source {

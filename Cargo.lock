@@ -176,6 +176,7 @@ dependencies = [
  "auk-conformance",
  "auk-daemon",
  "auk-mirror",
+ "auk-platform-macos",
  "auk-plugins",
  "auk-replica",
  "auk-term",

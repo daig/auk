@@ -201,6 +201,12 @@ fn legacy_key(ev: &KeyEvent, modes: &Modes) -> Vec<u8> {
             }
         }
         Key::Char(c) => {
+            // Ctrl+Shift+letter has no legacy byte of its own (it would read as Ctrl+letter), so
+            // it goes as `CSI <code>;<mods> u`, as Ghostty sends it.
+            if mods.ctrl && mods.shift && c.is_ascii_alphabetic() {
+                csi(&mut out, &format!("{};{param}u", u32::from(c.to_ascii_lowercase())));
+                return out;
+            }
             if mods.ctrl
                 && let Some(b) = ctrl_byte(c)
             {

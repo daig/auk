@@ -1535,7 +1535,7 @@ fn m9_catalog_drives_plugin_css_and_a_failed_host_contributes_none() {
     let chrome = app.request("plugins")["sheets"].clone();
     assert!(!chrome.to_string().contains("broken"), "{chrome}");
     wait_for("the sheets in the pane's document", || {
-        let s = app.request(&format!("surface-sheets {pane}"));
+        let s = app.try_request(&format!("surface-sheets {pane}"))?;
         s.as_array()?.iter().any(|n| n == "plugin:local:good:styles").then_some(())
     });
 }
@@ -1583,7 +1583,7 @@ fn m9_manifest_style_urls_inline_plugin_files_as_data_in_the_app() {
     assert!(!css.contains("icon.png"), "{css}");
     assert!(css.contains("url(../x.png)") && css.contains("url(https://example.com/x.png)"), "{css}");
     wait_for("the sheet in the pane's document", || {
-        let s = app.request(&format!("surface-sheets {pane}"));
+        let s = app.try_request(&format!("surface-sheets {pane}"))?;
         s.as_array()?.iter().any(|n| n == "plugin:local:pic:styles").then_some(())
     });
 }

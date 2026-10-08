@@ -85,6 +85,13 @@ impl App {
         Control::connect(&self.control).ok(line)
     }
 
+    /// Sends a line and returns its `value`, or `None` when the app answers with an error (for
+    /// polling something that may not exist yet).
+    pub fn try_request(&self, line: &str) -> Option<Value> {
+        let reply = Control::connect(&self.control).send(line);
+        (reply["ok"] == true).then(|| reply.get("value").cloned().unwrap_or(Value::Null))
+    }
+
     /// The window's state: shown session, tab, focus, visible panes.
     pub fn state(&self) -> Value {
         self.request("state")

@@ -7,7 +7,7 @@ use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use auk_platform_macos::synth::{Stroke, can_post_events, post_to_pid};
+use auk_platform_macos::synth::{Stroke, activate_pid, can_post_events, post_to_pid};
 
 /// Why the reference couldn't be recorded.
 pub const PERMISSION: &str = "posting key events to another app needs the Accessibility \
@@ -78,7 +78,19 @@ fn record_in(
         .map_err(|e| format!("chmod: {e}"))?;
     let before = ghostty_pids();
     let mut cmd = Command::new("open");
-    cmd.args(["-na", "Ghostty", "--args"]);
+    // Hermetic, like the perf suite's Ghostty: none of the user's config files or saved windows.
+    cmd.args([
+        "-na",
+        "Ghostty",
+        "--args",
+        "--config-default-files=false",
+        "--window-save-state=never",
+        "--confirm-close-surface=false",
+        "--quit-after-last-window-closed=true",
+        // A raw encoding reference: Ghostty's own shortcuts (ctrl+up and the like) don't
+        // swallow keys.
+        "--keybind=clear",
+    ]);
     if let Some(alt) = &opts.option_as_alt {
         cmd.arg(format!("--macos-option-as-alt={alt}"));
     }
@@ -106,6 +118,9 @@ fn record_in(
     let Some(pid) = ghostty_pids().into_iter().find(|p| !before.contains(p)) else {
         return Err("no new Ghostty process".into());
     };
+    // Keys posted to a process reach its key window only once the app is active.
+    activate_pid(pid);
+    std::thread::sleep(Duration::from_millis(300));
     let mut recorded = Vec::new();
     let mut seen = 0;
     for stroke in strokes {
