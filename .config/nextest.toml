@@ -17,6 +17,12 @@ screen = { max-threads = 1 }
 filter = 'binary_id(auk::remote)'
 slow-timeout = { period = "60s", terminate-after = 15 }
 
+# The signed-bundle test builds Auk.app (release auk, the wasm client, the wasm-bindgen CLI) in a
+# target dir of its own, from cold the first time.
+[[profile.default.overrides]]
+filter = 'binary_id(auk::plugins) & test(=s5_jit_runs_in_the_signed_app_bundle)'
+slow-timeout = { period = "60s", terminate-after = 15 }
+
 # The web suite drives Safari through safaridriver.
 [[profile.default.overrides]]
 filter = 'binary_id(auk::web)'

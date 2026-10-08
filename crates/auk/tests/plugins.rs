@@ -660,6 +660,99 @@ fn s5_runtime_budgets_memory_cap_and_codegen_through_the_daemon() {
     wait_for("the block after the cap", || daemon_doc(&env, pane).contains("still alive").then_some(()));
 }
 
+/// Runs a command to completion; returns its status, stdout and stderr.
+fn output(cmd: &mut std::process::Command) -> (bool, String, String) {
+    let out = cmd.output().unwrap_or_else(|e| panic!("can't run {cmd:?}: {e}"));
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// `auk doctor`'s report from the app bundle at `app`.
+fn doctor(app: &Path) -> Value {
+    let exe = app.join("Contents/MacOS/auk");
+    let (ok, out, err) = output(std::process::Command::new(&exe).arg("doctor"));
+    assert!(ok, "{} doctor failed: {err}", exe.display());
+    serde_json::from_str(&out).unwrap_or_else(|e| panic!("doctor printed no JSON ({e}): {out}"))
+}
+
+/// §19, §20: the app built by `scripts/bundle.sh`, signed ad hoc with the hardened runtime and
+/// `allow-jit`, runs Luau's native code. As a control, the same app re-signed without the
+/// entitlement falls back to the interpreter, which shows the probe tells the two apart.
+#[test]
+fn s5_jit_runs_in_the_signed_app_bundle() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().expect("root");
+    // Its own target dir: building `-p auk` alone can rebuild the target/release/auk that the
+    // suites running beside this one use.
+    let target = Path::new(env!("CARGO_TARGET_TMPDIR")).parent().expect("target dir").join("bundle-suite");
+    let (ok, out, err) = output(
+        std::process::Command::new("/bin/bash")
+            .arg(root.join("scripts/bundle.sh"))
+            .env("CARGO_TARGET_DIR", &target),
+    );
+    assert!(ok, "scripts/bundle.sh failed:\n{out}\n{err}");
+    let app = target.join("Auk.app");
+
+    // The signature: ad hoc, hardened runtime, allow-jit.
+    let (ok, _, err) = output(std::process::Command::new("codesign").args(["--verify", "--strict"]).arg(&app));
+    assert!(ok, "codesign --verify: {err}");
+    let (ok, out, err) = output(
+        std::process::Command::new("codesign").args(["-d", "--entitlements", "-", "--xml"]).arg(&app),
+    );
+    assert!(ok, "codesign -d --entitlements: {err}");
+    assert!(
+        out.contains("<key>com.apple.security.cs.allow-jit</key><true/>"),
+        "no allow-jit entitlement: {out}"
+    );
+    let (ok, _, details) = output(std::process::Command::new("codesign").arg("-dv").arg(&app));
+    assert!(ok, "codesign -dv: {details}");
+    let flags = details.lines().find(|l| l.starts_with("CodeDirectory ")).unwrap_or_default();
+    assert!(flags.contains("(adhoc,runtime)"), "not ad hoc with the hardened runtime: {details}");
+    assert!(details.contains("Signature=adhoc"), "{details}");
+
+    // The app: native code runs, and the kernel sees the hardened runtime.
+    let report = doctor(&app);
+    println!("{report:#}");
+    assert_eq!(report["bundle"], app.to_string_lossy().as_ref(), "{report:#}");
+    assert_eq!(report["code_signature"]["hardened_runtime"], true, "{report:#}");
+    assert_eq!(report["web_assets"]["present"], true, "{report:#}");
+    let jit = &report["jit"];
+    assert_eq!(jit["error"], Value::Null, "{report:#}");
+    assert!(jit["native_functions"].as_u64() >= Some(1), "{report:#}");
+    assert_eq!(jit["native_ran"], true, "{report:#}");
+    // The same bound as auk-plugins' s5_native_codegen_is_on.
+    assert!(jit["speedup"].as_f64() > Some(1.5), "{report:#}");
+
+    // The control: hardened runtime without allow-jit. Luau can't map its code and quietly
+    // interprets instead.
+    let dir = tempfile_dir("s5-no-jit");
+    let control = dir.join("Auk.app");
+    let (ok, _, err) = output(std::process::Command::new("cp").arg("-R").arg(&app).arg(&control));
+    assert!(ok, "cp: {err}");
+    let (ok, _, err) = output(
+        std::process::Command::new("codesign")
+            .args(["--force", "--sign", "-", "--options", "runtime", "--timestamp=none"])
+            .arg(&control),
+    );
+    assert!(ok, "re-signing without entitlements: {err}");
+    let report = doctor(&control);
+    println!("{report:#}");
+    assert_eq!(report["code_signature"]["hardened_runtime"], true, "{report:#}");
+    assert_eq!(report["jit"]["native_functions"], 0, "{report:#}");
+    assert_eq!(report["jit"]["native_ran"], false, "{report:#}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A fresh directory under the test's target tmpdir.
+fn tempfile_dir(name: &str) -> PathBuf {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    dir
+}
+
 // ---------------------------------------------------------------------------------------------
 // Lifecycle
 

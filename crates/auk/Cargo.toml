@@ -11,7 +11,9 @@ auk-app = { path = "../app" }
 auk-cli = { path = "../cli" }
 auk-web = { path = "../web" }
 auk-daemon = { path = "../daemon" }
+auk-plugins = { path = "../plugins" }
 clap = { version = "4.6.7", features = ["derive"] }
+serde_json.workspace = true
 
 [dev-dependencies]
 auk-conformance = { path = "../conformance" }

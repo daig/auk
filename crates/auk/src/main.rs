@@ -1,6 +1,8 @@
 //! The `auk` binary (§19, §22): the macOS app, the session daemon and the CLI, as subcommands
 //! of one binary. `auk` alone is the app (`auk-app`); `auk daemon`, `auk headless` and the CLI
-//! verbs are in `auk-cli`.
+//! verbs are in `auk-cli`; `auk web serve` is in `auk-web`; `auk doctor` is [`doctor`].
+
+mod doctor;
 
 use std::path::PathBuf;
 
@@ -36,6 +38,9 @@ fn main() -> std::process::ExitCode {
     let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
     if args.get(1).is_some_and(|a| a == "web") {
         return auk_web::serve::main(args);
+    }
+    if args.get(1).is_some_and(|a| a == "doctor") {
+        return doctor::main(args);
     }
     let top = Top::parse();
     if top.cli.command.is_some() {

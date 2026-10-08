@@ -15,6 +15,7 @@
 //! - [`WindowPlugins`] runs the window halves of one window on its UI thread, behind the
 //!   [`WindowHost`] trait the app implements.
 //! - [`Watcher`] reloads on change (FSEvents, inotify, or a 2 s poll).
+//! - [`jit::probe`] checks that Luau's native code really runs in this process (`auk doctor`).
 
 pub mod capture;
 pub mod catalog;
@@ -36,6 +37,8 @@ mod blocks;
 mod budget;
 #[cfg(feature = "runtime")]
 mod host;
+#[cfg(feature = "runtime")]
+pub mod jit;
 #[cfg(feature = "runtime")]
 mod lenses;
 #[cfg(feature = "runtime")]

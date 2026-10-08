@@ -143,7 +143,7 @@ fn secret() -> Result<String, String> {
 }
 
 /// Where the client's files are by default.
-fn default_assets() -> PathBuf {
+pub fn default_assets() -> PathBuf {
     if let Some(dir) = std::env::var_os("AUK_WEB_ASSETS").filter(|v| !v.is_empty()) {
         return PathBuf::from(dir);
     }
