@@ -813,7 +813,8 @@ impl App {
         let doc_focused = window()
             .document()
             .is_some_and(|d| d.has_focus().unwrap_or(false));
-        let now = js_sys::Date::now() / 1000.0;
+        // The views' clock, in ms.
+        let now = js_sys::Date::now();
         let settings = ViewSettings {
             font_px: FONT_PT,
             cell: (self.cell.0 as f32 / scale, self.cell.1 as f32 / scale),

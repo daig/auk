@@ -251,6 +251,16 @@ impl NativeWindow {
         }
     }
 
+    /// Applies what the daemon sent, then runs the view's clock and lays out every pane, as a
+    /// window's frame does even when nothing arrived (toasts expire, motion advances).
+    pub fn frame(&mut self) {
+        self.pump();
+        let panes: Vec<PaneId> = self.panes.keys().copied().collect();
+        for pane in panes {
+            self.draw(pane);
+        }
+    }
+
     /// Pumps until `f` returns `Some`, or panics naming `what` after `timeout`.
     pub fn wait<T>(
         &mut self,

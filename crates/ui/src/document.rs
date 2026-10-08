@@ -877,6 +877,64 @@ impl Document {
             .unwrap_or(0)
     }
 
+    /// The font families that draw the text of an element and its descendants, as laid out by
+    /// the last update, without duplicates, in the order the glyph runs come. Font fallback
+    /// shows here: a run in a family other than the computed `font-family`'s first.
+    pub fn text_font_families(&self, id: NodeId) -> Vec<String> {
+        use parley::PositionedLayoutItem;
+        use skrifa::MetadataProvider;
+        let mut out: Vec<String> = Vec::new();
+        for n in self.nodes.iter().flatten() {
+            let Some(il) = n.inline.as_deref() else {
+                continue;
+            };
+            for line in il.layout.lines() {
+                for item in line.items() {
+                    let PositionedLayoutItem::GlyphRun(run) = item else {
+                        continue;
+                    };
+                    let style = run.style();
+                    if style.brush.edge != 0 {
+                        continue;
+                    }
+                    let Some(owner) = il.owners.get(style.brush.owner as usize) else {
+                        continue;
+                    };
+                    if !self.is_inclusive_ancestor(id, owner.node) {
+                        continue;
+                    }
+                    let font = run.run().font();
+                    let Ok(f) = skrifa::FontRef::from_index(font.data.as_ref(), font.index) else {
+                        continue;
+                    };
+                    let family = f
+                        .localized_strings(skrifa::string::StringId::FAMILY_NAME)
+                        .english_or_first()
+                        .map(|s| s.to_string())
+                        .unwrap_or_default();
+                    if !out.contains(&family) {
+                        out.push(family);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Whether `node` is `ancestor` or inside it, following the box tree for anonymous boxes.
+    fn is_inclusive_ancestor(&self, ancestor: NodeId, mut node: NodeId) -> bool {
+        loop {
+            if node == ancestor {
+                return true;
+            }
+            let n = self.node(node);
+            match n.parent.or(n.layout_parent) {
+                Some(p) => node = p,
+                None => return false,
+            }
+        }
+    }
+
     /// The min-content and max-content border-box widths of a laid-out box.
     pub fn intrinsic_widths(&mut self, id: NodeId) -> (f32, f32) {
         use taffy::{

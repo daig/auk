@@ -210,6 +210,8 @@ impl Chrome {
         let errors = doc.set_stylesheet("chrome", SheetKind::BuiltIn, None, CSS);
         debug_assert!(errors.is_empty(), "{errors:?}");
         doc.set_device_scale(scale);
+        // Plugins' chrome styles may set Nerd Font icons (§9.8).
+        auk_views::install_fonts(&mut doc);
         let root = doc.root();
         let body = doc.create_element("body");
         doc.append_child(root, body);

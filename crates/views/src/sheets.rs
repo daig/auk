@@ -31,10 +31,24 @@ pub fn install_sheets(doc: &mut Document, dark: bool) -> Vec<String> {
         }
     }
     set_theme(doc, dark);
+    install_fonts(doc);
     // Plugin sheets' `background-image: url(data:…)` pictures (§9.8 CSS), drawn for a Retina
     // display.
     doc.set_url_loader(Box::new(|url| crate::image::load_data_url(url, 2.0)));
     errors
+}
+
+/// Registers the bundled fonts with a document: the Nerd Fonts symbols face (family
+/// `Symbols Nerd Font Mono`) that icon spans ask for (§7.12, §18.3), so icons draw on hosts
+/// that don't have it installed. [`install_sheets`] does this.
+pub fn install_fonts(doc: &mut Document) {
+    if !doc
+        .fonts_mut()
+        .register_static_font(auk_text::NERD_SYMBOLS)
+        .is_empty()
+    {
+        doc.update();
+    }
 }
 
 /// The appearance: `data-theme` on the root and the engine's `light-dark()` choice.

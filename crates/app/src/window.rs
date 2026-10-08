@@ -99,7 +99,7 @@ pub struct WinState {
     pub surfaces: BTreeMap<PaneId, PaneSurfaces>,
     /// The surfaces painted something last frame, so the UI layer has them to clear.
     surfaces_painted: bool,
-    /// The views' clock starts here.
+    /// The views' clock (ms) starts here.
     epoch: Instant,
     layout_generation: u64,
     known_sessions: BTreeSet<SessionId>,
@@ -694,7 +694,8 @@ impl WinState {
         let mut titles: BTreeMap<PaneId, String> = BTreeMap::new();
         let mut a11y_text_gen = 0;
         let mut to_ack: Vec<(PaneId, String, u64)> = Vec::new();
-        let now = self.epoch.elapsed().as_secs_f64();
+        // The views' clock is in ms (toast durations, spinners, caret blink, `elapsed`).
+        let now = self.epoch.elapsed().as_secs_f64() * 1000.0;
         let settings = ViewSettings {
             font_px: crate::gfx::FONT_SIZE,
             cell: ((cw / scale) as f32, (ch / scale) as f32),

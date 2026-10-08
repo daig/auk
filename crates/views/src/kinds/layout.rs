@@ -403,6 +403,9 @@ pub(crate) struct ToastReq {
     pub sub: Option<String>,
     pub tone: String,
     pub ttl: Option<f64>,
+    /// When the program asked for it (view clock, ms): its duration runs from here, so a toast
+    /// asked for while the pane wasn't drawn doesn't show late or stay longer.
+    pub at: f64,
 }
 
 #[derive(Debug, Default)]
@@ -442,6 +445,7 @@ pub(crate) fn toast(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
             sub,
             tone,
             ttl,
+            at: cx.now,
         });
     }
 }
@@ -468,9 +472,15 @@ impl ToastHost {
         self.queue.retain(|t| t.surface != key);
     }
 
-    /// Show the newest request; it replaces the one showing.
+    /// Show the newest request; it replaces the one showing. One whose time is already over
+    /// (asked for while the pane wasn't drawn) clears the layer instead.
     pub fn show(&mut self, dom: &mut Dom, req: ToastReq, now: f64) {
         dom.clear(self.el);
+        self.showing = None;
+        let start = req.at.min(now);
+        if now >= start + Self::duration(&req) {
+            return;
+        }
         let class = match req.tone.as_str() {
             "error" => "toast err",
             "info" | "accent" => "toast info",
@@ -492,7 +502,7 @@ impl ToastHost {
         if let Some(s) = &req.sub {
             dom.child_text(t, "span", "mono", s);
         }
-        self.showing = Some((req, now));
+        self.showing = Some((req, start));
     }
 
     /// How long the showing toast stays: `ttl`, else 2.2 s, or 5.2 s for errors and long text.

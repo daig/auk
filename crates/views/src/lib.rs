@@ -56,10 +56,10 @@ pub use checker::{UiSheetChecker, sheet_checker};
 pub use dom::Written;
 pub use events::{Button, FieldKey, MenuEntry, Outcome, PointerEvent, Zoom, ZoomImage};
 pub use kinds::KINDS;
-pub use sheets::install_sheets;
+pub use sheets::{install_fonts, install_sheets};
 pub use state::{Preedit, Selection};
 pub use lenses::{LensInput, LensLayer};
-pub use surfaces::{Arranged, PaneSurfaces, Place, SurfaceBlock};
+pub use surfaces::{Arranged, PaneSurfaces, Place, ShownToast, SurfaceBlock};
 pub use view::PaneView;
 
 /// The regions of a surface (§7.5).

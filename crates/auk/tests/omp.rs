@@ -47,9 +47,13 @@ fn real_home() -> PathBuf {
     PathBuf::from(std::env::var("HOME").expect("HOME is set for the test process"))
 }
 
-/// The installed omp, checked to be the recorded version. Fails clearly otherwise.
+/// The installed omp (`~/.local/bin/omp`, or the binary `AUK_OMP` names, for when omp has
+/// updated itself past the recorded version), checked to be the recorded version. Fails clearly
+/// otherwise.
 fn omp() -> PathBuf {
-    let path = real_home().join(".local/bin/omp");
+    let path = std::env::var_os("AUK_OMP")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| real_home().join(".local/bin/omp"));
     assert!(
         path.is_file(),
         "omp is not installed at {} (the omp suite needs omp {OMP_VERSION}, logged in)",
@@ -65,7 +69,8 @@ fn omp() -> PathBuf {
         version,
         format!("omp/{OMP_VERSION}"),
         "the installed omp ({}) must be the recorded {OMP_VERSION}; re-record the omp fixtures \
-         (tools/tsp_record.py) and update this suite before moving to another version",
+         (tools/tsp_record.py) and update this suite before moving to another version, or point \
+         AUK_OMP at an omp {OMP_VERSION} binary",
         path.display()
     );
     path
@@ -246,6 +251,11 @@ impl LiveOmp {
     /// Quits omp (⌃D on an empty composer) and waits for the shell's next prompt.
     fn quit(&mut self) {
         self.window.ctrl(self.pane, 'd');
+        self.quit_done();
+    }
+
+    /// Waits for the shell's next prompt after omp was told to quit.
+    fn quit_done(&mut self) {
         let done = self.env.daemon(&format!(
             "wait {} --until prompt --timeout {}",
             self.pane,
@@ -1037,7 +1047,15 @@ fn ac09_live_transcript_send_and_tool_card() {
             omp.window.class(pane, el).split(' ').any(|c| c == "sf-md"),
             "{nid} drawn as {kind}"
         );
-        let b = omp.window.doc(pane).border_box(el).expect("a box");
+        // The thinking block's body is in a collapsed section when the model thought: drawn,
+        // but not laid out until expanded.
+        let doc = omp.window.doc(pane);
+        let collapsed = std::iter::successors(doc.parent(el), |&a| doc.parent(a))
+            .any(|a| omp.window.class(pane, a).split(' ').any(|c| c == "collapsed"));
+        if collapsed {
+            continue;
+        }
+        let b = doc.border_box(el).expect("a box");
         assert!(b.w > 0.0 && b.h > 0.0, "{nid} has a box: {b:?}");
     }
     assert_eq!(
@@ -1257,4 +1275,68 @@ fn ac09_tsp_off_runs_as_plain_text() {
         "omp still draws in the grid: {cleared}"
     );
     omp.quit();
+}
+
+/// The text of the toast the pane's toast layer shows, if any.
+fn shown_toast(w: &NativeWindow, pane: u64) -> Option<String> {
+    let doc = w.doc(pane);
+    let host = doc
+        .element_children(w.view(pane).element())
+        .into_iter()
+        .find(|&e| w.class(pane, e).split(' ').any(|c| c == "auk-toasts"))
+        .expect("the pane's toast layer");
+    let toast = *doc.element_children(host).first()?;
+    Some(w.text_content(pane, toast))
+}
+
+#[test]
+fn omp_closing_toast_shows_for_its_ttl_then_goes() {
+    // Quitting omp shows its status toast "Closing session…" (ttl 2.4 s) in the burst that
+    // closes its surface with `keep`. The window shows it once and drops it on time, while the
+    // shell takes the pane back.
+    let mut omp = LiveOmp::start("omp-closing", true);
+    omp.ready();
+    let pane = omp.pane;
+    omp.window.ctrl(pane, 'd');
+    let start = std::time::Instant::now();
+    let mut first = None;
+    let mut last = None;
+    while start.elapsed() < Duration::from_secs(8) {
+        omp.window.frame();
+        if let Some(text) = shown_toast(&omp.window, pane) {
+            assert!(text.ends_with("Closing session…"), "{text:?}");
+            first.get_or_insert(start.elapsed());
+            last = Some(start.elapsed());
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let (first, last) = (
+        first.expect("omp's closing toast shows"),
+        last.expect("shown"),
+    );
+    let shown = last - first;
+    assert!(
+        shown >= Duration::from_millis(2000) && shown < Duration::from_millis(2900),
+        "the toast shows for its ttl (2.4 s), not {shown:?}"
+    );
+    // What omp sent: the toast with its ttl, and the close with `keep`, after it.
+    let records = omp.records();
+    let at = |pred: &dyn Fn(&Value) -> bool| records.iter().position(pred);
+    let toast = at(&|r: &Value| {
+        r["dir"] == "out"
+            && r["verb"] == "f"
+            && r["body"]["ops"].as_array().is_some_and(|ops| {
+                ops.iter().any(|op| {
+                    op[0] == "add"
+                        && op[4]["k"] == "toast"
+                        && op[4]["p"]["text"] == "Closing session…"
+                        && op[4]["p"]["ttl"] == 2400
+                })
+            })
+    })
+    .expect("omp sent its closing toast");
+    let close = at(&|r: &Value| r["dir"] == "out" && r["verb"] == "x" && r["body"]["keep"] == true)
+        .expect("omp closed its surface with keep");
+    assert!(toast < close);
+    omp.quit_done();
 }

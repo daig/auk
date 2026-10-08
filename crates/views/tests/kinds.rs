@@ -165,6 +165,13 @@ fn text_and_span_kinds() {
     let icon = h.find_class(tx2, "sf-t-icon");
     assert_eq!(icon.len(), 1);
     assert!(h.class(icon[0]).contains("sf-t-muted"));
+    // The icon run lays out in the bundled Nerd Fonts face (§18.3), not a fallback's box.
+    assert_eq!(
+        h.doc.text_font_families(icon[0]),
+        [auk_text::NERD_SYMBOLS_FAMILY],
+        "{:?}",
+        h.text(icon[0])
+    );
     assert!(h.class(tx2).contains("clamp"));
     // Middle truncation after layout (16 cells).
     let tx1 = h.el("s1", "tx1");

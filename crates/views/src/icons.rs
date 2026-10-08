@@ -1,5 +1,7 @@
 //! Icon names (§7.12) and keycap glyphs.
 
+pub use auk_text::is_private_use;
+
 use crate::icon_table::{ALIASES, ICONS};
 
 /// The glyph for an icon name or alias. Anything up to the last `.` is dropped (`status.error`).
@@ -25,10 +27,6 @@ pub fn names() -> impl Iterator<Item = &'static str> {
     ICONS.iter().map(|(n, _, _)| *n)
 }
 
-/// Whether `c` is a Private Use Area codepoint (Nerd Font icons): U+E000–U+F8FF and planes 15–16.
-pub fn is_private_use(c: char) -> bool {
-    matches!(c as u32, 0xE000..=0xF8FF | 0xF0000..=0x10FFFF)
-}
 
 /// A key name as a keycap glyph, and its spoken name when it has one (the `kbd` table).
 pub fn keycap(key: &str) -> (String, Option<&'static str>) {

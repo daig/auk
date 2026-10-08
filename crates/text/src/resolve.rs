@@ -10,7 +10,10 @@ use fontique::{
 };
 use swash::text::Codepoint as _;
 
-use crate::{CellMetrics, DEFAULT_FAMILIES, FontConfig, FontError, GlyphStyle, is_ignorable};
+use crate::{
+    CellMetrics, DEFAULT_FAMILIES, FontConfig, FontError, GlyphStyle, NERD_SYMBOLS, is_ignorable,
+    is_private_use,
+};
 
 /// Families tried after script fallback, for symbols in the Common script (arrows, box drawing,
 /// math, dingbats) that the grid's family lacks.
@@ -74,6 +77,8 @@ pub(crate) struct Resolver {
     source_cache: SourceCache,
     /// The grid's family, then the configured alternates that exist.
     families: Vec<FamilyId>,
+    /// The bundled Nerd Fonts symbols family.
+    nerd: Option<FamilyId>,
     primary_name: String,
     faces: Vec<Face>,
     /// (blob id, index, style) → face.
@@ -99,6 +104,12 @@ impl Resolver {
                 collection.load_fonts_from_paths([sf_mono]);
             }
         }
+        // The bundled Nerd Fonts symbols face, for icons in the Private Use Area.
+        let nerd = collection
+            .register_fonts(nerd_blob(), None)
+            .into_iter()
+            .map(|(id, _)| id)
+            .next();
         for data in &config.extra_fonts {
             let blob = Blob::new(Arc::clone(data) as Arc<dyn AsRef<[u8]> + Send + Sync>);
             collection.register_fonts(blob, None);
@@ -125,6 +136,7 @@ impl Resolver {
             collection,
             source_cache: SourceCache::default(),
             families,
+            nerd,
             primary_name,
             faces: Vec::new(),
             face_ids: HashMap::new(),
@@ -246,6 +258,14 @@ impl Resolver {
             return primary;
         }
         let covers = |face: &Face| face.covers(text);
+        // Nerd Font icons: the bundled symbols face, before script fallback (whose fonts' PUA
+        // glyphs, such as Last Resort's, aren't the icons).
+        if text.chars().any(is_private_use)
+            && let Some(nerd) = self.nerd
+            && let Some(face) = self.first_match(&[QueryFamily::Id(nerd)], None, style, covers)
+        {
+            return face;
+        }
         if emoji {
             let families = [QueryFamily::Generic(GenericFamily::Emoji)];
             if let Some(face) = self.first_match(&families, None, style, covers) {
@@ -371,6 +391,13 @@ impl Resolver {
         self.face_ids.insert(key, id);
         id
     }
+}
+
+/// The bundled symbols face as a blob, shared by every resolver (fontique caches by blob id).
+fn nerd_blob() -> Blob<u8> {
+    static BLOB: std::sync::OnceLock<Blob<u8>> = std::sync::OnceLock::new();
+    BLOB.get_or_init(|| Blob::new(Arc::new(NERD_SYMBOLS) as Arc<dyn AsRef<[u8]> + Send + Sync>))
+        .clone()
 }
 
 /// swash's normalized variation coordinates for `settings`.

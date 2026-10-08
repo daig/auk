@@ -54,6 +54,20 @@ pub struct FontConfig {
     pub backend: Backend,
 }
 
+/// The bundled Nerd Fonts symbols face (Nerd Fonts v3.4.0, SIL OFL 1.1; see `assets/README.md`).
+/// It draws Nerd Font icons, which live in the Private Use Area: surfaces' icon spans (§7.12)
+/// and the grid's fallback for PUA codepoints the grid's family lacks (§18.3).
+pub static NERD_SYMBOLS: &[u8] = include_bytes!("../assets/SymbolsNerdFontMono-Regular.ttf");
+
+/// The family name of [`NERD_SYMBOLS`].
+pub const NERD_SYMBOLS_FAMILY: &str = "Symbols Nerd Font Mono";
+
+/// Whether `c` is a Private Use Area codepoint (where Nerd Font icons live): U+E000–U+F8FF and
+/// planes 15–16.
+pub fn is_private_use(c: char) -> bool {
+    matches!(c as u32, 0xE000..=0xF8FF | 0xF0000..=0x10FFFF)
+}
+
 /// The monospace families tried when [`FontConfig::families`] is empty.
 pub const DEFAULT_FAMILIES: &[&str] = &["SF Mono", "Menlo", "Monaco", "Courier New", "Courier"];
 

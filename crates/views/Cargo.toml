@@ -10,6 +10,8 @@ publish.workspace = true
 auk-ui = { path = "../ui" }
 auk-tsp = { path = "../tsp" }
 auk-term = { path = "../term" }
+# The bundled Nerd Fonts symbols face that draws icon spans (§18.3).
+auk-text = { path = "../text" }
 serde_json = { workspace = true, features = ["preserve_order"] }
 # `data:` URLs in plugin sheets' `background-image` (§9.8 CSS).
 base64 = "0.23.1"

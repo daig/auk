@@ -64,7 +64,18 @@ impl Fonts {
 
     /// Register font data (a TTF/OTF/TTC file's bytes). Returns the family names registered.
     pub fn register_font(&mut self, data: Vec<u8>) -> Vec<String> {
-        let blob = parley::fontique::Blob::new(Arc::new(data));
+        self.register_blob(parley::fontique::Blob::new(Arc::new(data)))
+    }
+
+    /// Register font data compiled into the program (a bundled face), without copying it.
+    /// Returns the family names registered.
+    pub fn register_static_font(&mut self, data: &'static [u8]) -> Vec<String> {
+        self.register_blob(parley::fontique::Blob::new(
+            Arc::new(data) as Arc<dyn AsRef<[u8]> + Send + Sync>
+        ))
+    }
+
+    fn register_blob(&mut self, blob: parley::fontique::Blob<u8>) -> Vec<String> {
         let families = self.font_cx.collection.register_fonts(blob, None);
         self.metrics.clear();
         families

@@ -307,3 +307,47 @@ fn registered_fonts_work_without_system_fonts() {
     assert_eq!(f.family_name(), "Menlo");
     assert!(f.rasterize("x", GlyphStyle::REGULAR, 1).is_some());
 }
+
+#[test]
+fn private_use_icons_draw_in_the_bundled_symbols_face() {
+    // Nerd Font icons (a folder, a Powerline arrow, a Material Design robot in plane 15) resolve
+    // to the bundled face with a real glyph, in both backends and without system fonts (the
+    // browser client).
+    let no_system = GridFonts::new(&FontConfig {
+        families: vec!["Menlo".into()],
+        system_fonts: false,
+        extra_fonts: vec![Arc::new(
+            std::fs::read("/System/Library/Fonts/Menlo.ttc").expect("Menlo ships with macOS"),
+        )],
+        backend: Backend::Swash,
+        size_pt: 13.0,
+        scale: 2.0,
+    })
+    .unwrap();
+    let mut all: Vec<GridFonts> = backends().into_iter().map(fonts).collect();
+    all.push(no_system);
+    for f in &mut all {
+        for icon in ["\u{F07B}", "\u{E0B0}", "\u{F06A9}"] {
+            for style in [
+                GlyphStyle::REGULAR,
+                GlyphStyle {
+                    bold: true,
+                    italic: true,
+                },
+            ] {
+                let face = f.resolver.resolve(icon, style);
+                let face = f.resolver.face(face);
+                assert_eq!(
+                    face.family, NERD_SYMBOLS_FAMILY,
+                    "{icon:?} in {:?}",
+                    f.backend
+                );
+                let font = face.font_ref().unwrap();
+                let c = icon.chars().next().unwrap();
+                assert_ne!(font.charmap().map(c), 0, "{c:?} has a glyph");
+            }
+            let image = f.rasterize(icon, GlyphStyle::REGULAR, 1).expect("ink");
+            assert!(ink(&image) > 0);
+        }
+    }
+}

@@ -107,6 +107,14 @@ impl Arranged {
     }
 }
 
+/// The toast a pane shows: its element, its icon's element and its text (and `sub`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShownToast {
+    pub el: NodeId,
+    pub icon: NodeId,
+    pub text: String,
+}
+
 /// Where a pane's content area is in the target, in pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Place {
@@ -269,7 +277,7 @@ impl PaneSurfaces {
         (&mut self.doc, &mut self.view)
     }
 
-    /// Takes a batch of the replica's TSP changes.
+    /// Takes a batch of the replica's TSP changes. `now` is the view clock in ms.
     pub fn sync(&mut self, tsp: &TspPane, changes: &Changes, now: f64) {
         self.view.sync(&mut self.doc, tsp, changes, now);
     }
@@ -286,8 +294,9 @@ impl PaneSurfaces {
         self.doc.set_device_scale(scale);
     }
 
-    /// Lays the document out for a content area of `size` points. Returns when the view next
-    /// wants a frame (motion), in the clock's seconds.
+    /// Lays the document out for a content area of `size` points. `now` is the view clock in
+    /// ms, as for [`PaneSurfaces::sync`]. Returns when the view next wants a frame (motion, a
+    /// toast's end), on that clock.
     pub fn layout(
         &mut self,
         term: &Terminal,
@@ -323,6 +332,23 @@ impl PaneSurfaces {
                     .class(el)
                     .is_some_and(|c| c.split_whitespace().next() == Some(class))
             })
+    }
+
+    /// The toast the pane's toast layer shows (§7.12 `toast`), if any.
+    pub fn toast(&self) -> Option<ShownToast> {
+        let host = self.container("auk-toasts")?;
+        let el = *self.doc.element_children(host).first()?;
+        let parts = self.doc.element_children(el);
+        let (&icon, rest) = parts.split_first()?;
+        let text: Vec<String> = rest
+            .iter()
+            .map(|&p| crate::events::text_content(&self.doc, p))
+            .collect();
+        Some(ShownToast {
+            el,
+            icon,
+            text: text.join(" "),
+        })
     }
 
     /// Whether the view hid this element (`sf-hidden`).

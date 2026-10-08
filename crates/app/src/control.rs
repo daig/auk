@@ -631,6 +631,55 @@ fn main_command(cmd: &str, mut args: Vec<String>, win: usize) -> Result<Value, S
                 .ok_or_else(|| format!("node {id} isn't drawn in pane {pane}"))?;
             Ok(json!([b.x, b.y, b.w, b.h]))
         }
+        "toast" => {
+            // The toast a pane's toast layer shows (null: none), with the font families its
+            // icon and its text are drawn in.
+            let pane = pane_arg(&args)?;
+            let s = state.borrow();
+            let sf = s
+                .surfaces
+                .get(&pane)
+                .ok_or_else(|| format!("pane {pane} isn't followed"))?;
+            let doc = sf.doc();
+            Ok(sf.toast().map_or(Value::Null, |t| {
+                let icon: String = doc
+                    .children(t.icon)
+                    .iter()
+                    .filter_map(|&c| doc.node(c).text())
+                    .collect();
+                json!({
+                    "text": t.text,
+                    "icon": icon,
+                    "icon_fonts": doc.text_font_families(t.icon),
+                    "text_fonts": doc.text_font_families(t.el),
+                })
+            }))
+        }
+        "node-fonts" => {
+            // The font families a drawn surface node's text is set in, after fallback.
+            let pane = pane_arg(&args)?;
+            let id = args.get(1).ok_or("node-fonts: expected PANE ID")?;
+            let s = state.borrow();
+            let sf = s
+                .surfaces
+                .get(&pane)
+                .ok_or_else(|| format!("pane {pane} isn't followed"))?;
+            let el = {
+                let shared = s.conn.shared();
+                let tsp = shared
+                    .panes
+                    .get(&pane)
+                    .ok_or_else(|| format!("pane {pane} isn't followed"))?
+                    .replica
+                    .tsp();
+                tsp.surfaces()
+                    .iter()
+                    .rev()
+                    .find_map(|x| sf.view().node_element(x.key(), id))
+                    .ok_or_else(|| format!("node {id} isn't drawn in pane {pane}"))?
+            };
+            Ok(json!(sf.doc().text_font_families(el)))
+        }
         "field-box" => {
             let pane = pane_arg(&args)?;
             let s = state.borrow();

@@ -11,7 +11,9 @@ use std::time::Duration;
 
 use auk_conformance::app::{App, InputSource, US_LAYOUT};
 use auk_conformance::harness::{TestEnv, alive, wait_for};
-use auk_conformance::probe::{Probe, events, hello, open_with, split_input, tsp_bodies};
+use auk_conformance::probe::{
+    Probe, events, frame, hello, open_with, split_input, tsp_bodies, tsp_json,
+};
 use serde_json::{Value, json};
 
 fn env(name: &str) -> TestEnv {
@@ -2948,4 +2950,77 @@ fn the_window_keymap_takes_its_keys_before_a_focused_block() {
     });
     assert!(text.contains("keys: x ctrl+e"), "the bound chord reached the block: {text}");
     assert!(!text.contains("ctrl+k") && !text.contains(" k"), "{text}");
+}
+
+/// omp's toast when it closes its session (omp 18.8.4's own TSP record): the window shows it on
+/// the views' clock, in ms, for its `ttl`, and then it goes, though its surface closed in the
+/// same burst; its icon, and an `icon` node's, draw in the bundled Nerd Fonts face (§18.3).
+#[test]
+fn a_toast_goes_after_its_duration_and_icons_draw_in_the_bundled_nerd_font() {
+    let env = env("toast");
+    let app = App::start(&env, "a", &[]);
+    let probe = focused_probe(&env, &app);
+    let pane = probe.pane;
+    probe.write(&hello(&[]));
+    probe.write(&open_with(
+        "s:1",
+        "inline",
+        json!([
+            {"id": "g", "k": "col"},
+            {"id": "p", "k": "text", "p": {"text": "Working"}},
+            {"id": "folder", "k": "icon", "p": {"name": "folder"}}
+        ]),
+    ));
+    acked(&probe, 1);
+    let fonts = app.request(&format!("node-fonts {pane} folder"));
+    assert_eq!(fonts, json!(["Symbols Nerd Font Mono"]), "the icon node");
+
+    let mut burst = frame(
+        "s:1",
+        2,
+        json!([
+            ["add", "q", "main", null, {"id": "q", "k": "toast",
+                "p": {"text": "Closing session…", "ttl": 2400, "role": "omp.toast.status"}}],
+            ["add", "r", "g", null, {"id": "r", "k": "col"}],
+            ["del", "p"],
+            ["settle", "q"]
+        ]),
+    );
+    burst.extend(tsp_json("x", &json!({"id": "s:1", "keep": true})));
+    let sent = std::time::Instant::now();
+    probe.write(&burst);
+    let shown = wait_for("the toast shown", || {
+        let t = app.request(&format!("toast {pane}"));
+        (!t.is_null()).then_some(t)
+    });
+    assert_eq!(shown["text"], "Closing session…", "{shown}");
+    assert_eq!(
+        shown["icon_fonts"],
+        json!(["Symbols Nerd Font Mono"]),
+        "the toast's icon: {shown}"
+    );
+    // The shell goes on writing (omp exits): the toast goes once its 2.4 s are over.
+    let mut last_seen = sent.elapsed();
+    while sent.elapsed() < Duration::from_secs(6) {
+        if app.request(&format!("toast {pane}")).is_null() {
+            break;
+        }
+        last_seen = sent.elapsed();
+        probe.write(b".");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        app.request(&format!("toast {pane}")).is_null(),
+        "the toast still shows {:?} after it was sent",
+        sent.elapsed()
+    );
+    assert!(
+        last_seen >= Duration::from_millis(2000) && last_seen < Duration::from_millis(3500),
+        "the toast shows for its ttl (2.4 s): last seen at {last_seen:?}"
+    );
+    // And it doesn't come back.
+    std::thread::sleep(Duration::from_millis(500));
+    probe.write(b"\r\nmore output\r\n");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(app.request(&format!("toast {pane}")).is_null());
 }

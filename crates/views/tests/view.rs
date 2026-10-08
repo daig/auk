@@ -1424,3 +1424,119 @@ fn blocks_sit_16px_apart_and_a_cards_parts_8px_at_13px_and_scale_with_the_font()
         assert_eq!(var("--sf-inner-gap").as_deref(), Some("8px"));
     }
 }
+
+/// The toast the pane's toast layer shows, as text without its icon.
+fn shown_toast(h: &Harness) -> Option<String> {
+    let layer = h.find_class(h.view.element(), "toast");
+    let t = *layer.first()?;
+    let parts = h.doc.element_children(t);
+    Some(parts[1..].iter().map(|&p| h.text(p)).collect())
+}
+
+#[test]
+fn a_toast_shows_once_for_its_duration_even_after_its_surface_closes() {
+    // omp 18.8.4's session close, as its own TSP record has it: the status toast is added to
+    // `main` (with `ttl`), the frame settles it, and the surface closes with `keep` in the same
+    // burst. Then omp starts again in the pane and keeps sending frames.
+    let mut h = Harness::new();
+    h.hello(&["edit", "undo", "send"]);
+    h.surface(
+        "s:1",
+        "inline",
+        json!([
+            {"id": "g", "k": "col"},
+            {"id": "p", "k": "text", "p": {"text": "Working"}}
+        ]),
+    );
+    h.frame();
+    let start = h.now;
+    h.frame_ops(
+        "s:1",
+        2,
+        json!([
+            ["add", "q", "main", null, {"id": "q", "k": "toast",
+                "p": {"text": "Closing session…", "ttl": 2400, "role": "omp.toast.status"}}],
+            ["add", "r", "g", null, {"id": "r", "k": "col"}],
+            ["del", "p"],
+            ["settle", "q"]
+        ]),
+    );
+    h.apc("x", &json!({"id": "s:1", "keep": true}).to_string());
+    h.frame();
+    assert_eq!(shown_toast(&h).as_deref(), Some("Closing session…"));
+    // Its icon draws in the bundled Nerd Fonts face.
+    let layer = h.find_class(h.view.element(), "toast");
+    let icon = h.find_class(layer[0], "ico");
+    assert_eq!(
+        h.doc.text_font_families(icon[0]),
+        [auk_text::NERD_SYMBOLS_FAMILY]
+    );
+
+    // omp again, sending frames every 100 ms: the old toast neither stays nor comes back.
+    h.surface(
+        "s:1",
+        "inline",
+        json!([{"id": "w", "k": "text", "p": {"text": "tick 0"}}]),
+    );
+    let mut seen_until = start;
+    for i in 1..60u64 {
+        h.now = start + 100.0 * i as f64;
+        h.frame_ops(
+            "s:1",
+            1 + i,
+            json!([["set", "w", {"text": format!("tick {i}")}]]),
+        );
+        h.frame();
+        if shown_toast(&h).is_some() {
+            seen_until = h.now;
+        }
+    }
+    assert!(
+        (start + 2300.0..start + 2400.0).contains(&seen_until),
+        "the toast shows for its ttl (2.4 s), then goes: last seen {} ms in",
+        seen_until - start
+    );
+}
+
+#[test]
+fn a_toast_resets_only_when_it_changes_and_one_asked_for_unseen_doesnt_show_late() {
+    let mut h = Harness::new();
+    h.hello(&[]);
+    let start = h.now;
+    h.surface(
+        "s1",
+        "inline",
+        json!([{"id": "t", "k": "toast", "p": {"text": "Saved"}}]),
+    );
+    h.frame();
+    assert_eq!(shown_toast(&h).as_deref(), Some("Saved"));
+    // The same props again (a program re-sending its tree) doesn't restart the 2.2 s.
+    h.now = start + 1500.0;
+    h.frame_ops("s1", 2, json!([["set", "t", {"text": "Saved"}]]));
+    h.frame();
+    assert_eq!(shown_toast(&h).as_deref(), Some("Saved"));
+    h.now = start + 2200.0;
+    h.frame();
+    assert_eq!(shown_toast(&h), None, "2.2 s from when it was asked for");
+    // A change shows it again, for the error duration (5.2 s).
+    h.frame_ops(
+        "s1",
+        3,
+        json!([["set", "t", {"text": "Failed", "tone": "error"}]]),
+    );
+    h.frame();
+    assert_eq!(shown_toast(&h).as_deref(), Some("Failed"));
+    h.now += 5100.0;
+    h.frame();
+    assert_eq!(shown_toast(&h).as_deref(), Some("Failed"));
+    h.now += 100.0;
+    h.frame();
+    assert_eq!(shown_toast(&h), None);
+    // Asked for while the view's clock didn't run (a pane not drawn), then drawn 6 s later:
+    // its time (5.2 s: `set` merges, so the tone is still `error`) is over; it never shows.
+    let asked = h.now;
+    h.frame_ops("s1", 4, json!([["set", "t", {"text": "Copied"}]]));
+    h.now = asked + 6000.0;
+    h.frame();
+    assert_eq!(shown_toast(&h), None);
+}

@@ -423,6 +423,7 @@ version = "0.0.0"
 dependencies = [
  "auk-conformance",
  "auk-term",
+ "auk-text",
  "auk-tsp",
  "auk-ui",
  "base64 0.23.1",
