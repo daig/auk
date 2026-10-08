@@ -158,7 +158,14 @@ pub enum Effect {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sub: Option<String>,
     },
-    Open { target: String },
+    /// Open a path or URL. `origin` is absent for `auk open` (the windows route it with origin
+    /// `cli`), and `link` for a host plugin's `cx:open` (`route.link`, then `route.open` with
+    /// origin `link`, §9.7).
+    Open {
+        target: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        origin: Option<String>,
+    },
     Copy { text: String },
 }
 

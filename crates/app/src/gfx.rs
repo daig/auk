@@ -1,7 +1,7 @@
 //! A window's GPU side (§18.1): its swap chain on the view's `CAMetalLayer`, a grid renderer per
 //! visible pane, and the UI layer (chrome and surfaces through Vello) composited over the grids
 //! in the same frame. Also the frame clock: how long each frame took from the start of its work
-//! to the GPU finishing it.
+//! to the GPU finishing it, without the wait for a drawable.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::rc::Rc;
@@ -133,12 +133,14 @@ impl Gfx {
     }
 
     /// Draws a frame: the background, each pane's grid clipped to its rectangle, then the UI
-    /// layer over them. `on_done` runs once the GPU finishes the frame's work.
+    /// layer over them. `on_done` runs once the GPU finishes the frame's work (this frame's
+    /// submissions and every earlier one, the UI layer's included), with the time this frame
+    /// waited for its drawable.
     pub fn draw(
         &mut self,
         background: Rgba,
         panes: &[PaneDraw],
-        on_done: impl FnOnce() + Send + 'static,
+        on_done: impl FnOnce(Duration) + Send + 'static,
     ) -> FrameCost {
         let start = Instant::now();
         let mut cost = FrameCost::default();
@@ -229,7 +231,8 @@ impl Gfx {
             self.ui.draw(&mut pass);
         }
         self.gpu.queue.submit([encoder.finish()]);
-        self.gpu.queue.on_submitted_work_done(on_done);
+        let wait = cost.drawable_wait;
+        self.gpu.queue.on_submitted_work_done(move || on_done(wait));
         self.gpu.queue.present(frame);
         cost.presented = true;
         cost.encode = start.elapsed() - cost.drawable_wait;
@@ -237,8 +240,11 @@ impl Gfx {
     }
 }
 
-/// Frame times from the start of a frame's work to the GPU finishing it, kept for the last
-/// frames. A thread waits on the GPU so completions are timed as they happen.
+/// Frame times, kept for the last frames. A frame's time runs from the start of its work (the
+/// window's `frame` entry) to the later of the GPU finishing it (wgpu's submitted-work-done
+/// callback, which a thread blocked in `device.poll` runs as the Metal command buffer completes)
+/// and the CPU finishing its own part (encoding, acks, the accessibility update), minus the time
+/// spent waiting for a drawable, which is pacing, not work.
 #[derive(Debug, Clone)]
 pub struct FrameClock {
     inner: Arc<ClockInner>,
@@ -247,17 +253,63 @@ pub struct FrameClock {
 #[derive(Debug)]
 struct ClockInner {
     times: Mutex<VecDeque<Duration>>,
+    /// Frames still waiting for one of their two ends, by ticket.
+    open: Mutex<BTreeMap<u64, Partial>>,
+    next: std::sync::atomic::AtomicU64,
     pending: Mutex<u64>,
     wake: Condvar,
 }
 
+/// A frame whose GPU or CPU side hasn't finished yet.
+#[derive(Debug, Clone, Copy)]
+struct Partial {
+    start: Instant,
+    /// The GPU's completion and the drawable wait, once known.
+    gpu: Option<(Instant, Duration)>,
+    cpu: Option<Instant>,
+}
+
+/// A frame in flight on the clock.
+#[derive(Debug, Clone, Copy)]
+pub struct FrameTicket(u64);
+
 /// How many frame times the clock keeps.
 const KEEP: usize = 4096;
+
+impl ClockInner {
+    /// Records one end of frame `id`; the second end completes it.
+    fn end(&self, id: u64, set: impl FnOnce(&mut Partial)) {
+        let mut open = self.open.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(p) = open.get_mut(&id) else {
+            return;
+        };
+        set(p);
+        let (Some((gpu, wait)), Some(cpu)) = (p.gpu, p.cpu) else {
+            return;
+        };
+        let p = open.remove(&id).expect("present");
+        // Frames that never reach the GPU (no drawable) are dropped by `abandon`; keep the map
+        // small even so.
+        while open.len() > 64 {
+            let first = *open.keys().next().expect("non-empty");
+            open.remove(&first);
+        }
+        drop(open);
+        let elapsed = gpu.max(cpu).duration_since(p.start).saturating_sub(wait);
+        let mut times = self.times.lock().unwrap_or_else(|e| e.into_inner());
+        times.push_back(elapsed);
+        if times.len() > KEEP {
+            times.pop_front();
+        }
+    }
+}
 
 impl FrameClock {
     pub fn new(gpu: &Gpu) -> FrameClock {
         let inner = Arc::new(ClockInner {
             times: Mutex::new(VecDeque::new()),
+            open: Mutex::new(BTreeMap::new()),
+            next: std::sync::atomic::AtomicU64::new(0),
             pending: Mutex::new(0),
             wake: Condvar::new(),
         });
@@ -283,23 +335,52 @@ impl FrameClock {
         FrameClock { inner }
     }
 
-    /// A callback for [`Gfx::draw`]'s `on_done`: records the time since `start`.
-    pub fn done_callback(&self, start: Instant) -> impl FnOnce() + Send + 'static {
+    /// Starts timing a frame whose work began at `start`. Returns its ticket and the callback
+    /// for [`Gfx::draw`]'s `on_done`.
+    pub fn begin(&self, start: Instant) -> (FrameTicket, impl FnOnce(Duration) + Send + 'static) {
+        let id = self
+            .inner
+            .next
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.inner
+            .open
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(
+                id,
+                Partial {
+                    start,
+                    gpu: None,
+                    cpu: None,
+                },
+            );
         let inner = self.inner.clone();
-        move || {
-            let elapsed = start.elapsed();
-            let mut times = inner.times.lock().unwrap_or_else(|e| e.into_inner());
-            times.push_back(elapsed);
-            if times.len() > KEEP {
-                times.pop_front();
-            }
-        }
+        let on_done = move |wait: Duration| {
+            let now = Instant::now();
+            inner.end(id, |p| p.gpu = Some((now, wait)));
+        };
+        (FrameTicket(id), on_done)
     }
 
     /// Tells the waiter thread a frame was submitted.
     pub fn submitted(&self) {
         *self.inner.pending.lock().unwrap_or_else(|e| e.into_inner()) += 1;
         self.inner.wake.notify_one();
+    }
+
+    /// The frame's CPU side is done.
+    pub fn cpu_done(&self, ticket: FrameTicket) {
+        let now = Instant::now();
+        self.inner.end(ticket.0, |p| p.cpu = Some(now));
+    }
+
+    /// The frame never reached the GPU (no drawable): it isn't timed.
+    pub fn abandon(&self, ticket: FrameTicket) {
+        self.inner
+            .open
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&ticket.0);
     }
 
     pub fn times(&self) -> Vec<Duration> {

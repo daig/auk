@@ -96,6 +96,8 @@ pub struct KeyInput {
     pub repeat: bool,
     /// The macOS virtual key code (`kVK_*`).
     pub keycode: u16,
+    /// Option is held, whether or not it acts as Alt (keymap chords name it as `alt`).
+    pub option: bool,
 }
 
 /// Marked text from an input method.

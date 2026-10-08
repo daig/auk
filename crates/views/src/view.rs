@@ -183,6 +183,9 @@ pub struct PaneView {
     /// scrolls); `None` means the document viewport.
     pub(crate) view_rect: Option<auk_ui::Rect>,
     pub(crate) fit_viewport: (f32, f32),
+    /// What the last measure loop settled on: the document's generation and the inputs the
+    /// measure pass reads besides it (viewport, view rect, cell size).
+    pub(crate) measured: Option<(u64, crate::measure::MeasureInputs)>,
 }
 
 impl PaneView {
@@ -223,6 +226,7 @@ impl PaneView {
             pane_reveal: None,
             view_rect: None,
             fit_viewport: (0.0, 0.0),
+            measured: None,
         }
     }
 

@@ -31,6 +31,11 @@ pub struct Document {
     pub inline_style_restrictions: Restrictions,
     pub(crate) layout_dirty: bool,
     pub(crate) stats: UpdateStats,
+    /// Counts the updates that restyled or laid anything out.
+    generation: u64,
+    /// Paint's index of where the children of boxes with many children reach, by box.
+    pub(crate) child_extents:
+        std::sync::Mutex<std::collections::HashMap<NodeId, crate::paint::ChildExtents>>,
     /// Scroll containers with a nonzero offset (for scroll anchoring).
     pub(crate) scrolled: std::collections::BTreeSet<NodeId>,
 }
@@ -81,6 +86,8 @@ impl Document {
             inline_style_restrictions: Restrictions::NONE,
             layout_dirty: true,
             stats: UpdateStats::default(),
+            generation: 0,
+            child_extents: Default::default(),
             scrolled: Default::default(),
         };
         doc.root = doc.create_element("html");
@@ -791,8 +798,18 @@ impl Document {
     /// Restyle and lay out whatever changed.
     pub fn update(&mut self) {
         self.stats = UpdateStats::default();
+        let rn = self.node(self.root);
+        if rn.flags & (flags::STYLE_DIRTY | flags::STYLE_DESC) != 0 || self.layout_dirty {
+            self.generation += 1;
+        }
         self.restyle();
         self.layout();
+    }
+
+    /// Changes whenever an update restyles or lays out anything: while it stays the same, the
+    /// styles and the layout read since are the same.
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     /// A measure-then-layout loop (§8.3): update, then let `adjust` read the layout and change

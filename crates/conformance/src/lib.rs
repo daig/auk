@@ -9,6 +9,7 @@ pub mod goldens;
 pub mod harness;
 pub mod layout;
 pub mod native;
+pub mod perf;
 pub mod probe;
 pub mod remote;
 pub mod surfaces;

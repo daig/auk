@@ -196,6 +196,7 @@ dependencies = [
  "auk-daemon",
  "auk-mirror",
  "auk-platform-macos",
+ "auk-plugins",
  "auk-remote",
  "auk-render",
  "auk-replica",

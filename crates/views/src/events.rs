@@ -1022,3 +1022,197 @@ fn zoom(surface: &Surface, node: NodeRef) -> Option<Zoom> {
         index,
     })
 }
+
+/// A key in the focused program field that native editing may take (§7.9; `research/sdk-wire.md`
+/// §2.5): selecting keys, caret moves between drawn lines, Home and End, deletes with a selection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FieldKey {
+    Left,
+    Right,
+    Up,
+    Down,
+    /// Home, or ⌘←.
+    LineStart,
+    /// End, or ⌘→.
+    LineEnd,
+    Backspace,
+    Delete,
+    /// ⌘A.
+    SelectAll,
+}
+
+/// A field's lines as `(start, end)` UTF-16 offsets (end before the newline).
+fn field_lines(text: &str) -> Vec<(u64, u64)> {
+    let mut out = Vec::new();
+    let mut start = 0u64;
+    for line in text.split('\n') {
+        let n = line.encode_utf16().count() as u64;
+        out.push((start, start + n));
+        start += n + 1;
+    }
+    out
+}
+
+/// The UTF-16 offset one character before or after `at`.
+fn char_step(text: &str, at: u64, forward: bool) -> u64 {
+    let byte = input::utf16_to_byte(text, at);
+    let next = if forward {
+        text[byte..]
+            .chars()
+            .next()
+            .map_or(byte, |c| byte + c.len_utf8())
+    } else {
+        text[..byte]
+            .chars()
+            .next_back()
+            .map_or(byte, |c| byte - c.len_utf8())
+    };
+    input::byte_to_utf16(text, next)
+}
+
+/// Characters between two UTF-16 offsets of a line.
+fn chars_between(text: &str, from: u64, to: u64) -> usize {
+    let (a, b) = (input::utf16_to_byte(text, from), input::utf16_to_byte(text, to));
+    text[a.min(b)..a.max(b)].chars().count()
+}
+
+/// The offset `n` characters into the line starting at `start`, clamped to its end.
+fn chars_into(text: &str, start: u64, end: u64, n: usize) -> u64 {
+    let (a, b) = (input::utf16_to_byte(text, start), input::utf16_to_byte(text, end));
+    let byte = text[a..b].char_indices().nth(n).map_or(b, |(i, _)| a + i);
+    input::byte_to_utf16(text, byte)
+}
+
+impl PaneView {
+    /// The elements under the pointer, innermost first (`:hover`).
+    pub fn hovered(&self) -> &[NodeId] {
+        &self.hover
+    }
+
+    /// The focused field's native selection, as text.
+    pub fn field_selection(&self, pane: &TspPane) -> Option<String> {
+        let (surface, node) = self.focused_field(pane)?;
+        let sel = self
+            .surfaces
+            .iter()
+            .find(|s| s.key == surface.key())?
+            .st
+            .selection
+            .get(node.id())
+            .copied()
+            .filter(|s| !s.is_empty())?;
+        let text = input::field_text(node);
+        let (a, b) = sel.range();
+        let (a, b) = (input::utf16_to_byte(&text, a), input::utf16_to_byte(&text, b));
+        Some(text[a..b].to_owned())
+    }
+
+    /// Whether a program field has the focus (keys and IME composition belong to it).
+    pub fn field_focused(&self, pane: &TspPane) -> bool {
+        self.focused_field(pane).is_some()
+    }
+
+    /// A key in the focused field (§7.9). With native editing it moves the local selection
+    /// (`shift`), moves the caret between drawn lines and to their ends, or deletes the
+    /// selection, as `edit` events; otherwise the key is the program's ([`Outcome::Keys`]).
+    pub fn field_key(
+        &mut self,
+        doc: &mut Document,
+        pane: &TspPane,
+        key: FieldKey,
+        shift: bool,
+    ) -> Outcome {
+        let Some((surface, node)) = self.focused_field(pane) else {
+            return Outcome::Keys;
+        };
+        if !self.native_ok(pane, node) {
+            return Outcome::Keys;
+        }
+        let text = input::field_text(node);
+        let len = input::byte_to_utf16(&text, text.len());
+        let local = self
+            .surfaces
+            .iter()
+            .find(|s| s.key == surface.key())
+            .and_then(|s| s.st.selection.get(node.id()).copied());
+        let caret = local
+            .map(|s| s.cursor)
+            .unwrap_or_else(|| input::field_cursor(node))
+            .min(len);
+        let anchor = local.map_or(caret, |s| s.anchor.min(len));
+        let selected = local.filter(|s| !s.is_empty());
+        let prompt = crate::spans::spans_text(&crate::spans::parse_spans(node.prop("prompt")))
+            .chars()
+            .count();
+        let lines = field_lines(&text);
+        let line_of = |at: u64| {
+            lines
+                .iter()
+                .position(|&(s, e)| at >= s && at <= e)
+                .unwrap_or(lines.len().saturating_sub(1))
+        };
+        // The same drawn column on the line above or below (the prompt sits before line 0).
+        let vertical = |at: u64, down: bool| -> Option<u64> {
+            let i = line_of(at);
+            let j = if down { i + 1 } else { i.checked_sub(1)? };
+            let &(s, _) = lines.get(i)?;
+            let &(ts, te) = lines.get(j)?;
+            let col = chars_between(&text, s, at) + if i == 0 { prompt } else { 0 };
+            let col = col.saturating_sub(if j == 0 { prompt } else { 0 });
+            Some(chars_into(&text, ts, te, col))
+        };
+        let (start, end) = lines[line_of(caret)];
+        match key {
+            FieldKey::SelectAll => self.select_all(doc, pane),
+            FieldKey::Backspace | FieldKey::Delete => match selected {
+                Some(_) => self.delete_selection(doc, pane),
+                None => Outcome::Keys,
+            },
+            FieldKey::Left | FieldKey::Right => {
+                let forward = key == FieldKey::Right;
+                if shift {
+                    let to = char_step(&text, caret, forward);
+                    self.select(doc, pane, anchor, to)
+                } else if let Some(s) = selected {
+                    let (a, b) = s.range();
+                    self.move_caret(doc, pane, if forward { b } else { a })
+                } else {
+                    Outcome::Keys
+                }
+            }
+            FieldKey::Up | FieldKey::Down => {
+                let down = key == FieldKey::Down;
+                match (vertical(caret, down), shift) {
+                    (Some(to), false) => self.move_caret(doc, pane, to),
+                    (Some(to), true) => self.select(doc, pane, anchor, to),
+                    (None, true) => self.select(doc, pane, anchor, if down { len } else { 0 }),
+                    // Past the first or last drawn line the key is the program's (history).
+                    (None, false) => Outcome::Keys,
+                }
+            }
+            FieldKey::LineStart | FieldKey::LineEnd => {
+                let to = if key == FieldKey::LineStart { start } else { end };
+                if shift {
+                    self.select(doc, pane, anchor, to)
+                } else {
+                    self.move_caret(doc, pane, to)
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod field_key_tests {
+    use super::*;
+
+    #[test]
+    fn lines_steps_and_columns() {
+        let text = "ab\ncdé\n";
+        assert_eq!(field_lines(text), vec![(0, 2), (3, 6), (7, 7)]);
+        assert_eq!(char_step(text, 5, true), 6);
+        assert_eq!(char_step(text, 6, false), 5);
+        assert_eq!(chars_between(text, 3, 6), 3);
+        assert_eq!(chars_into(text, 0, 2, 5), 2);
+    }
+}

@@ -36,6 +36,11 @@ impl App {
     /// Starts the app named `name` on the test's daemon with `extra` flags, and waits until its
     /// endpoint answers and its first window is up.
     pub fn start(env: &TestEnv, name: &str, extra: &[&str]) -> App {
+        App::start_with(env, name, extra, &[])
+    }
+
+    /// [`App::start`] with extra environment variables (a stand-in `AUK_OPENER`, say).
+    pub fn start_with(env: &TestEnv, name: &str, extra: &[&str], vars: &[(&str, &str)]) -> App {
         let control = env.root.join(format!("{name}.ctl"));
         let log = std::fs::File::create(env.root.join(format!("{name}.log"))).expect("a log");
         let board = format!(
@@ -49,6 +54,7 @@ impl App {
             .arg(&control)
             .args(extra)
             .env("AUK_PASTEBOARD", board)
+            .envs(vars.iter().copied())
             .stdout(log.try_clone().expect("clone a log"))
             .stderr(log)
             .stdin(Stdio::null())

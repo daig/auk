@@ -7,6 +7,14 @@ use crate::view::{Extra, PaneView};
 use auk_tsp::{RevealAt, ScrollBy};
 use auk_ui::{Document, NodeId};
 
+/// What a measure pass reads besides the document.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct MeasureInputs {
+    viewport: (f32, f32),
+    view_rect: Option<(f32, f32, f32, f32)>,
+    cell: (f32, f32),
+}
+
 impl PaneView {
     /// Lay the document out, running the measure loops until they settle. Call after
     /// [`PaneView::sync`] or [`PaneView::tick`], before painting.
@@ -39,7 +47,29 @@ impl PaneView {
                 }
             }
         }
-        let passes = doc.update_with(8, |doc| self.measure(doc));
+        // The measure loop (as `Document::update_with(8, …)`), skipped when nothing it reads
+        // changed since it last settled: a long transcript costs a pass over every mount.
+        doc.update();
+        let inputs = MeasureInputs {
+            viewport: doc.viewport(),
+            view_rect: self.view_rect.map(|r| (r.x, r.y, r.w, r.h)),
+            cell: self.settings.cell,
+        };
+        let mut passes = 1;
+        if self.measured != Some((doc.generation(), inputs)) {
+            self.measured = None;
+            loop {
+                if passes >= 8 {
+                    break;
+                }
+                if !self.measure(doc) {
+                    self.measured = Some((doc.generation(), inputs));
+                    break;
+                }
+                doc.update();
+                passes += 1;
+            }
+        }
         self.apply_scrolls(doc);
         passes
     }

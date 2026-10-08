@@ -52,7 +52,7 @@ mod view;
 pub use a11y::AxNode;
 pub use checker::{UiSheetChecker, sheet_checker};
 pub use dom::Written;
-pub use events::{Button, MenuEntry, Outcome, PointerEvent, Zoom, ZoomImage};
+pub use events::{Button, FieldKey, MenuEntry, Outcome, PointerEvent, Zoom, ZoomImage};
 pub use kinds::KINDS;
 pub use sheets::install_sheets;
 pub use state::{Preedit, Selection};

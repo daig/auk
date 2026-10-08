@@ -32,6 +32,21 @@ pub struct PaneData {
     pub reset: bool,
     /// Blobs already asked for (§7.12).
     pub asked: std::collections::BTreeSet<String>,
+    /// Shell integration news since the window last looked, for window plugin events (§9.8).
+    pub notes: Vec<PaneNote>,
+}
+
+/// Something the pane's stream reported that window plugins hear about (§9.8 "Window events").
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PaneNote {
+    /// A command started: the line as typed, else as the shell reported it.
+    CommandStarted(String),
+    /// The running command finished.
+    CommandFinished(i32),
+    /// OSC 7, as sent.
+    Cwd(String),
+    /// OSC 0 or 2.
+    Title(String),
 }
 
 /// What the reader thread and the main thread share.
@@ -50,6 +65,10 @@ pub struct Shared {
     pub closed: Option<String>,
     /// Effects the daemon asked this window to perform, oldest first.
     pub effects: Vec<Effect>,
+    /// The host's plugin catalog (§9.4), as last sent; `null` before plugins.
+    pub catalog: serde_json::Value,
+    /// Bumped whenever the catalog arrives.
+    pub catalog_generation: u64,
 }
 
 impl Shared {
@@ -62,8 +81,25 @@ impl Shared {
         match data.replica.apply(seq, item) {
             Ok(events) => {
                 data.generation += 1;
-                if events.iter().any(|e| matches!(e, auk_replica::Event::Bell)) {
-                    data.bell = true;
+                for e in &events {
+                    use auk_replica::Event;
+                    match e {
+                        Event::Bell => data.bell = true,
+                        Event::Mark(auk_term::Mark::CommandStart { cmdline, typed }) => {
+                            let line = typed
+                                .clone()
+                                .or_else(|| cmdline.clone())
+                                .unwrap_or_default();
+                            data.notes.push(PaneNote::CommandStarted(line));
+                        }
+                        Event::Mark(auk_term::Mark::CommandEnd { status }) => {
+                            data.notes
+                                .push(PaneNote::CommandFinished(status.unwrap_or(0)));
+                        }
+                        Event::Cwd(cwd) => data.notes.push(PaneNote::Cwd(cwd.clone())),
+                        Event::Title(t) => data.notes.push(PaneNote::Title(t.clone())),
+                        _ => {}
+                    }
                 }
             }
             Err(err) => self.errors.push(format!("pane {pane}: {err}")),
@@ -94,6 +130,7 @@ impl Shared {
                         bell: false,
                         reset: true,
                         asked,
+                        notes: Vec::new(),
                     },
                 );
             }
@@ -134,10 +171,13 @@ impl Shared {
                     p.generation += 1;
                 }
             }
+            DaemonMsg::Catalog { catalog } => {
+                self.catalog = catalog;
+                self.catalog_generation += 1;
+            }
             DaemonMsg::Welcome { .. }
             | DaemonMsg::Refused(_)
             | DaemonMsg::LensView { .. }
-            | DaemonMsg::Catalog { .. }
             | DaemonMsg::Presence { .. } => {}
         }
     }
@@ -161,11 +201,16 @@ impl Connection {
         let hello = Hello::new(ClientKind::App, facts);
         let (link, welcome, reader) = Link::connect(Target::Local(socket.to_owned()), hello)
             .map_err(|e| io::Error::other(format!("{}: {e}", socket.display())))?;
+        let shared = Shared {
+            catalog: welcome.catalog.clone(),
+            catalog_generation: 1,
+            ..Shared::default()
+        };
         Ok((
             Connection {
                 window_key: String::new(),
                 client_id: welcome.client,
-                shared: Arc::new(Mutex::new(Shared::default())),
+                shared: Arc::new(Mutex::new(shared)),
                 link,
                 reader: Mutex::new(Some(reader)),
             },

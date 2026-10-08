@@ -144,7 +144,72 @@ fn paint_decorations(scene: &mut Scene, xf: Affine, s: &ComputedStyle, r: Rect, 
 struct Painter<'a> {
     doc: &'a Document,
     scene: &'a mut Scene,
+    /// Subtrees left out of this paint.
+    skip: &'a [NodeId],
+    /// The part of the document that can show, in document coordinates: boxes whose border box
+    /// and content overflow both miss it are left out. `None` below a transformed box.
+    cull: Option<Rect>,
 }
+
+/// Boxes with at least this many children find the ones a cull rectangle reaches by binary
+/// search ([`ChildExtents`]).
+const INDEXED_CHILDREN: usize = 64;
+
+/// Where a box's children reach on the block axis, relative to where the box places them: for
+/// each index, the furthest end of the children up to it and the earliest start of the children
+/// from it (both non-decreasing). Children that can move or paint anywhere (sticky, transformed)
+/// reach everything.
+#[derive(Debug, Default)]
+pub(crate) struct ChildExtents {
+    generation: u64,
+    ends: Vec<f32>,
+    starts: Vec<f32>,
+}
+
+impl ChildExtents {
+    fn build(doc: &Document, kids: &[NodeId], generation: u64) -> ChildExtents {
+        let reach: Vec<(f32, f32)> = kids
+            .iter()
+            .map(|&k| {
+                let n = doc.node(k);
+                let l = &n.layout;
+                let moves = n.style.as_deref().is_some_and(|s| {
+                    s.position == Position::Sticky
+                        || box_transform(s, Rect::new(0.0, 0.0, l.size.width, l.size.height))
+                            .is_some()
+                });
+                if moves {
+                    return (f32::NEG_INFINITY, f32::INFINITY);
+                }
+                let o = &l.scrollable_overflow_rect;
+                let y = l.location.y;
+                let py = y + l.border.top;
+                (y.min(py + o.top), (y + l.size.height).max(py + o.bottom))
+            })
+            .collect();
+        let mut ends = Vec::with_capacity(reach.len());
+        let mut furthest = f32::NEG_INFINITY;
+        for &(_, end) in &reach {
+            furthest = furthest.max(end);
+            ends.push(furthest);
+        }
+        let mut starts = vec![0.0; reach.len()];
+        let mut earliest = f32::INFINITY;
+        for (i, &(start, _)) in reach.iter().enumerate().rev() {
+            earliest = earliest.min(start);
+            starts[i] = earliest;
+        }
+        ChildExtents {
+            generation,
+            ends,
+            starts,
+        }
+    }
+}
+
+/// How far past the cull rectangle a box may reach and still be painted: room for ink that
+/// layout's overflow doesn't count (outlines, borders drawn outside).
+const CULL_MARGIN: f32 = 64.0;
 
 impl Painter<'_> {
     /// Paint a box whose layout parent's border box is at `origin`.
@@ -152,6 +217,7 @@ impl Painter<'_> {
         let doc = self.doc;
         let n = doc.node(id);
         if n.skipped
+            || self.skip.contains(&id)
             || matches!(
                 n.inner,
                 Inner::None | Inner::Contents | Inner::Text | Inner::InlineBox
@@ -168,7 +234,62 @@ impl Painter<'_> {
             l.size.width,
             l.size.height,
         );
-        let xf = match box_transform(s, r) {
+        if let Some(c) = self.cull {
+            // The box with its scrollable overflow (its descendants' border boxes and their
+            // unclipped overflow, measured from the padding box's corner).
+            let o = &l.scrollable_overflow_rect;
+            let (px, py) = (r.x + l.border.left, r.y + l.border.top);
+            let x0 = r.x.min(px + o.left);
+            let y0 = r.y.min(py + o.top);
+            let x1 = (r.x + r.w).max(px + o.right);
+            let y1 = (r.y + r.h).max(py + o.bottom);
+            if x1 < c.x - CULL_MARGIN
+                || y1 < c.y - CULL_MARGIN
+                || x0 > c.x + c.w + CULL_MARGIN
+                || y0 > c.y + c.h + CULL_MARGIN
+            {
+                return;
+            }
+        }
+        let transform = box_transform(s, r);
+        let cull = self.cull;
+        if transform.is_some() {
+            self.cull = None;
+        }
+        self.paint_box_at(id, r, xf, transform);
+        self.cull = cull;
+    }
+
+    /// The range of `id`'s layout children that can reach the cull rectangle `c`, its children
+    /// placed from `origin_y`. Boxes with few children are walked whole; for the others the
+    /// document keeps where each child and its overflow reach on the block axis (rebuilt after
+    /// each layout), and two binary searches find the range: past its end every child starts
+    /// below `c`, before its start every child ends above it.
+    fn reaching(&self, id: NodeId, origin_y: f32, c: Rect) -> std::ops::Range<usize> {
+        let doc = self.doc;
+        let kids = &doc.node(id).layout_children;
+        if kids.len() < INDEXED_CHILDREN {
+            return 0..kids.len();
+        }
+        let mut index = doc.child_extents.lock().unwrap_or_else(|e| e.into_inner());
+        let generation = doc.generation();
+        let ext = index.entry(id).or_default();
+        if ext.generation != generation || ext.ends.len() != kids.len() {
+            *ext = ChildExtents::build(doc, kids, generation);
+        }
+        let top = c.y - CULL_MARGIN - origin_y;
+        let bottom = c.y + c.h + CULL_MARGIN - origin_y;
+        let start = ext.ends.partition_point(|&e| e < top);
+        let end = ext.starts.partition_point(|&s| s <= bottom).max(start);
+        start..end
+    }
+
+    fn paint_box_at(&mut self, id: NodeId, r: Rect, xf: Affine, transform: Option<Affine>) {
+        let doc = self.doc;
+        let n = doc.node(id);
+        let Some(s) = n.style.as_deref() else { return };
+        let l = &n.layout;
+        let xf = match transform {
             Some(t) => xf * t,
             None => xf,
         };
@@ -204,9 +325,15 @@ impl Painter<'_> {
                 .push_clip_layer(Fill::NonZero, xf, &RoundedRect::from_rect(kr(pad), rr));
         }
         let child_origin = (r.x - n.scroll.0, r.y - n.scroll.1);
+        // Only the children that can reach the cull rectangle (all of them inline).
+        let range = match self.cull {
+            Some(c) if n.inner != Inner::Ifc => self.reaching(id, child_origin.1, c),
+            _ => 0..n.layout_children.len(),
+        };
+        let kids = &n.layout_children[range.clone()];
         // Negative z-index, in-flow content, then positioned boxes by z-index.
         let mut positioned: Vec<(i32, usize, NodeId)> = Vec::new();
-        for (k, &c) in n.layout_children.iter().enumerate() {
+        for (k, &c) in kids.iter().enumerate() {
             let cs = doc.node(c).style.as_deref();
             if let Some(cs) = cs
                 && (cs.position != Position::Static || cs.z_index.is_some())
@@ -225,7 +352,7 @@ impl Painter<'_> {
                 self.paint_inline(il, child_origin, xf, &positioned);
             }
         } else {
-            for &c in &n.layout_children {
+            for &c in kids {
                 if positioned.iter().any(|p| p.2 == c) {
                     continue;
                 }
@@ -448,6 +575,19 @@ pub fn paint(doc: &Document, scene: &mut Scene) {
 
 /// Paint with a transform (for example the window's scale factor).
 pub fn paint_with_transform(doc: &Document, scene: &mut Scene, xf: Affine) {
+    paint_except(doc, scene, xf, &[], None);
+}
+
+/// [`paint_with_transform`], leaving out the boxes rooted at `skip`, as `visibility: hidden` on
+/// them would, but without restyling or laying out the document again; and, given `cull` (the
+/// part of the document that can show, in document coordinates), the boxes that can't reach it.
+pub fn paint_except(
+    doc: &Document,
+    scene: &mut Scene,
+    xf: Affine,
+    skip: &[NodeId],
+    cull: Option<Rect>,
+) {
     let root = doc.root();
     // The canvas takes the root's background, or the body's if the root has none (CSS 2.1 §14.2).
     let mut bg = doc
@@ -480,7 +620,12 @@ pub fn paint_with_transform(doc: &Document, scene: &mut Scene, xf: Affine) {
             &vello::kurbo::Rect::new(0.0, 0.0, w as f64, h as f64),
         );
     }
-    let mut p = Painter { doc, scene };
+    let mut p = Painter {
+        doc,
+        scene,
+        skip,
+        cull,
+    };
     p.paint_box(root, (0.0, 0.0), xf);
 }
 

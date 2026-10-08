@@ -38,6 +38,8 @@ pub mod control;
 #[cfg(target_os = "macos")]
 pub mod gfx;
 #[cfg(target_os = "macos")]
+pub mod palette;
+#[cfg(target_os = "macos")]
 pub mod s1;
 #[cfg(target_os = "macos")]
 pub mod select;

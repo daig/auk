@@ -226,19 +226,13 @@ impl PaneSurfaces {
             .is_some_and(|c| c.split_whitespace().any(|w| w == "sf-hidden"))
     }
 
-    /// Hides every container but `keep` (`""` shows them all again), for a paint pass.
-    fn only(&mut self, keep: &str) {
-        for class in CONTAINERS {
-            if let Some(el) = self.container(class) {
-                let css = if keep.is_empty() || keep == class {
-                    ""
-                } else {
-                    "visibility: hidden"
-                };
-                self.doc.set_inline_style(el, css);
-            }
-        }
-        self.doc.update();
+    /// The containers a paint pass for `keep` leaves out: every other one.
+    fn others(&self, keep: &str) -> Vec<NodeId> {
+        CONTAINERS
+            .iter()
+            .filter(|&&class| class != keep)
+            .filter_map(|class| self.container(class))
+            .collect()
     }
 
     /// Arranges the pane after [`PaneSurfaces::layout`]: the flow for a content area `content_px`
@@ -373,16 +367,24 @@ impl PaneSurfaces {
             if ops.is_empty() {
                 continue;
             }
-            self.only(keep);
+            // Each pass paints its container alone; the others are left out of the paint (not
+            // hidden through styles, which would restyle and lay the document out twice a frame).
+            let skip = self.others(keep);
             for (el_top, at, clip) in ops {
                 scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &clip);
                 let xf =
                     Affine::translate((place.x, at - f64::from(el_top) * s)) * Affine::scale(s);
-                auk_ui::paint::paint_with_transform(&self.doc, scene, xf);
+                // The clip in document coordinates: only what can show there is painted.
+                let cull = Rect::new(
+                    ((clip.x0 - place.x) / s) as f32,
+                    el_top + ((clip.y0 - at) / s) as f32,
+                    (clip.width() / s) as f32,
+                    (clip.height() / s) as f32,
+                );
+                auk_ui::paint::paint_except(&self.doc, scene, xf, &skip, Some(cull));
                 scene.pop_layer();
             }
         }
-        self.only("");
         true
     }
 

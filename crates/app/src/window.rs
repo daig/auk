@@ -29,6 +29,11 @@ use crate::geometry::{self, Rect, TabLayout};
 use crate::gfx::{FrameClock, FrameCost, Gfx, PaneDraw};
 use crate::select::{Selection, Unit};
 
+mod overlays;
+mod plugins;
+
+pub use plugins::osc7_path;
+
 /// Space around a pane's grid, in points.
 pub const PADDING: f64 = 6.0;
 
@@ -122,6 +127,14 @@ pub struct WinState {
     /// The focused pane's text and the chrome, as the accessibility tree last saw them.
     a11y_seen: Option<(u64, u64)>,
     pub a11y_generation: u64,
+    /// The window half of every plugin (§9.8), and what it shows.
+    pub plugins: plugins::PluginState,
+    /// The palette, context menu and image viewer.
+    pub overlays: overlays::Overlays,
+    /// The viewer's picture size, in CSS px.
+    viewer_size: (f64, f64),
+    /// Bumped whenever the chrome document is rebuilt, for the accessibility tree.
+    chrome_updates: u64,
 }
 
 impl std::fmt::Debug for WinState {
@@ -221,6 +234,10 @@ impl WinState {
             acked: BTreeMap::new(),
             a11y_seen: None,
             a11y_generation: 0,
+            plugins: plugins::PluginState::default(),
+            overlays: overlays::Overlays::default(),
+            viewer_size: (1.0, 1.0),
+            chrome_updates: 0,
         }
     }
 
@@ -245,6 +262,9 @@ impl WinState {
             Event::Frame => self.frame(window),
             Event::Key(key) => self.key(window, key),
             Event::Text(text) => {
+                if self.palette_text(&text) {
+                    return;
+                }
                 if let Some(pane) = self.focused_pane()
                     && !self.surface_text(window, pane, &text)
                 {
@@ -252,10 +272,17 @@ impl WinState {
                 }
             }
             Event::Preedit(preedit) => {
-                self.preedit = preedit;
+                // A focused program field draws the composition at its caret (§7.9).
+                let in_field = self.focused_pane().is_some_and(|pane| {
+                    let (text, cursor) = preedit.as_ref().map_or((String::new(), 0), |p| {
+                        (p.text.clone(), p.text[..p.selection.start.min(p.text.len())].chars().count())
+                    });
+                    self.field_preedit(pane, &text, cursor)
+                });
+                self.preedit = if in_field { None } else { preedit };
                 window.request_frame();
             }
-            Event::ModifiersChanged(_) => {}
+            Event::ModifiersChanged(mods) => self.plugin_modifiers(mods),
             Event::Mouse(m) => self.mouse(window, m),
             Event::Scroll(s) => self.scroll(window, s),
             Event::Focus(focused) => {
@@ -455,6 +482,10 @@ impl WinState {
             self.reconcile(&sessions);
             self.relayout();
         }
+        if layout_seen && !empty {
+            self.plugins_settled(window);
+        }
+        self.plugins_wake(window);
         window.request_frame();
     }
 
@@ -539,7 +570,7 @@ impl WinState {
             0.0,
             BAR_HEIGHT,
             size.width,
-            (size.height - BAR_HEIGHT).max(0.0),
+            (size.height - BAR_HEIGHT - crate::chrome::STATUS_HEIGHT).max(0.0),
         )
     }
 
@@ -785,9 +816,11 @@ impl WinState {
         }
 
         // The chrome, over the surfaces.
-        let model = self.chrome_model(&sessions, &titles, size);
+        let mut model = self.chrome_model(&sessions, &titles, size);
+        self.decorate_chrome(&mut model);
         if self.chrome.update(&model, scale as f32) {
             self.ui_dirty = true;
+            self.chrome_updates += 1;
         }
         let gfx = self.gfx.as_mut().expect("checked");
         if self.ui_dirty || painted || self.surfaces_painted || gfx.ui_stale() {
@@ -804,7 +837,8 @@ impl WinState {
             window.request_frame();
         }
         let background = self.theme.background;
-        let cost: FrameCost = gfx.draw(background, &draws, self.clock.done_callback(start));
+        let (ticket, on_done) = self.clock.begin(start);
+        let cost: FrameCost = gfx.draw(background, &draws, on_done);
         if cost.presented {
             self.clock.submitted();
             for (pane, sf, s) in to_ack {
@@ -826,10 +860,17 @@ impl WinState {
             self.a11y_generation += 1;
             crate::a11y::update(self, window);
         }
+        if cost.presented {
+            self.clock.cpu_done(ticket);
+        } else {
+            self.clock.abandon(ticket);
+        }
         self.stats.frames += 1;
         let cpu = start.elapsed().saturating_sub(cost.drawable_wait);
         push_capped(&mut self.stats.cpu, cpu);
         push_capped(&mut self.stats.drawable_wait, cost.drawable_wait);
+        // Window events go to plugins after each render (§9.8).
+        self.plugins_after_frame();
     }
 
     fn chrome_generation(&self) -> u64 {
@@ -839,6 +880,8 @@ impl WinState {
         format!("{:?}", self.chrome.doc.viewport()).hash(&mut h);
         self.active_session.hash(&mut h);
         self.active_tab_id().hash(&mut h);
+        // Toasts, the status line and overlays change the chrome's tree too.
+        self.chrome_updates.hash(&mut h);
         self.known_tabs.hash(&mut h);
         h.finish()
     }
@@ -882,6 +925,7 @@ impl WinState {
             tabs,
             dividers: self.tab_layout.dividers.clone(),
             focus: self.focused_pane().and_then(|p| self.tab_layout.rect(p)),
+            ..ChromeModel::default()
         }
     }
 
@@ -903,27 +947,52 @@ impl WinState {
             return;
         }
         self.conn.input(pane, bytes);
-        if let Some(v) = self.views.get_mut(&pane) {
+        // Typing scrolls to the bottom and clears the selection. When neither changes anything,
+        // the frame waits for the program's echo, so that frame can be drawn the moment it comes
+        // (the first frame after a pause draws at once).
+        if let Some(v) = self.views.get_mut(&pane)
+            && (v.scroll != Scroll::default() || v.selection.is_some())
+        {
             v.scroll = Scroll::default();
             v.selection = None;
+            window.request_frame();
         }
-        window.request_frame();
     }
 
     fn key(&mut self, window: &Window, key: KeyInput) {
-        // ⌘ keys belong to the app: the menu took the ones it binds.
-        if key.event.mods.meta {
+        // Overlays first, then the plugin keymap layer (§9.8 "Binds").
+        if self.overlay_key(window, &key) || self.plugin_key(&key) {
+            window.request_frame();
             return;
         }
         let Some(pane) = self.focused_pane() else {
             return;
         };
+        // Native editing in a program field (§7.9).
+        if self.field_key_input(window, pane, &key) {
+            return;
+        }
+        // ⌘ keys belong to the app: the menu took the ones it binds.
+        if key.event.mods.meta {
+            return;
+        }
         let modes = self.modes(pane);
         let bytes = encode_key(&key.event, &modes);
         self.typed(window, pane, bytes);
     }
 
+    /// Runs a command however it was started (menu, key, palette, status line, plugin):
+    /// plugin overrides first, which may skip the built-in (§9.8 "Overrides").
     pub fn command(&mut self, window: &Window, cmd: Cmd) {
+        if self.run_override(cmd) {
+            window.request_frame();
+            return;
+        }
+        self.run_builtin(window, cmd);
+    }
+
+    /// A built-in command, without overrides (`cx:command`).
+    fn run_builtin(&mut self, window: &Window, cmd: Cmd) {
         let sessions = self.sessions();
         let focused = self.focused_pane();
         match cmd {
@@ -1012,7 +1081,28 @@ impl WinState {
                 }
             }
             Cmd::SelectAll => {
-                if let Some(pane) = focused {
+                let field = |s: &mut Self, pane| {
+                    s.field_key_input(
+                        window,
+                        pane,
+                        &KeyInput {
+                            event: KeyEvent {
+                                key: Key::Char('a'),
+                                mods: Mods {
+                                    meta: true,
+                                    ..Mods::default()
+                                },
+                                text: None,
+                            },
+                            repeat: false,
+                            keycode: 0,
+                            option: false,
+                        },
+                    )
+                };
+                if let Some(pane) = focused
+                    && !field(self, pane)
+                {
                     let lines = {
                         let shared = self.conn.shared();
                         shared.panes.get(&pane).map(|p| {
@@ -1038,6 +1128,8 @@ impl WinState {
                     self.typed(window, pane, b"\x0c".to_vec());
                 }
             }
+            Cmd::CommandPalette => self.open_palette(),
+            Cmd::ReloadPlugins => self.plugins_reload(),
             Cmd::ScrollToTop | Cmd::ScrollToBottom => {
                 if let Some(pane) = focused
                     && let Some(v) = self.views.get_mut(&pane)
@@ -1081,17 +1173,17 @@ impl WinState {
     fn mouse(&mut self, window: &Window, m: MouseEvent) {
         match m.kind {
             MouseKind::Down(button) => {
-                if m.y < BAR_HEIGHT {
-                    if button == MouseButton::Left
-                        && let Some(action) = self.chrome.action_at(m.x, m.y)
-                    {
-                        self.chrome_action(action);
-                    }
+                if self.chrome_press(window, &m, button) {
                     return;
                 }
                 let Some(pane) = self.tab_layout.pane_at(m.x, m.y) else {
                     return;
                 };
+                // A secondary press over a surface opens its context menu (§7.8).
+                if button == MouseButton::Right && self.context_menu_at(pane, &m) {
+                    window.request_frame();
+                    return;
+                }
                 if self.focused_pane() != Some(pane) {
                     self.focus_pane(pane);
                 } else {
@@ -1099,6 +1191,15 @@ impl WinState {
                 }
                 if matches!(button, MouseButton::Left | MouseButton::Right)
                     && self.surface_click(window, pane, &m, button)
+                {
+                    return;
+                }
+                // ⌘-click opens a link or a printed path (routes first).
+                if button == MouseButton::Left
+                    && m.mods.meta
+                    && let Some((p, line, col)) = self.cell_at(m.x, m.y)
+                    && p == pane
+                    && self.grid_link_click(pane, line, col)
                 {
                     return;
                 }
@@ -1164,6 +1265,9 @@ impl WinState {
                 self.press_anchor = None;
             }
             MouseKind::Moved => {
+                if self.hover_at(m.x, m.y) {
+                    window.request_frame();
+                }
                 if let Some(pane) = self.tab_layout.pane_at(m.x, m.y)
                     && self.modes(pane).mouse == MouseMode::AnyMotion
                 {
@@ -1268,12 +1372,10 @@ impl WinState {
                 Outcome::Copy(text) => {
                     crate::app::clipboard_set(&text);
                 }
-                Outcome::Open(target) => {
-                    let _ = std::process::Command::new("/usr/bin/open")
-                        .arg(target)
-                        .spawn();
-                }
-                Outcome::Zoom(_) | Outcome::Keys | Outcome::Redraw => {}
+                // Paths and links a surface opens go through the routes (§9.8).
+                Outcome::Open(target) => self.open_from_surface(pane, &target),
+                Outcome::Zoom(zoom) => self.show_viewer(pane, *zoom),
+                Outcome::Keys | Outcome::Redraw => {}
             }
         }
         window.request_frame();
@@ -1419,19 +1521,21 @@ impl WinState {
     }
 
     fn chrome_action(&mut self, action: ChromeAction) {
-        match action {
+        match action.clone() {
             ChromeAction::Session(id) => self.select_session(id),
             ChromeAction::Tab(id) => self.select_tab(id),
-            ChromeAction::NewSession => {
-                self.pending = Some(Pending::Session);
-                self.edit(LayoutEdit::NewSession { name: None });
-            }
-            ChromeAction::NewTab => {
-                if let Some(session) = self.active_session {
-                    self.pending = Some(Pending::Tab(session));
-                    self.edit(LayoutEdit::NewTab { session });
+            // The bar's buttons run the commands, overrides first.
+            ChromeAction::NewSession | ChromeAction::NewTab => {
+                if let Some(window) = self.window.clone() {
+                    let cmd = if action == ChromeAction::NewTab {
+                        Cmd::NewTab
+                    } else {
+                        Cmd::NewSession
+                    };
+                    self.command(&window, cmd);
                 }
             }
+            other => self.overlay_action(other),
         }
     }
 

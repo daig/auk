@@ -367,6 +367,8 @@ fn serve_host(
 #[derive(Clone, Debug)]
 pub enum BlockPlace {
     NewSession { window_key: Option<String> },
+    /// A new tab in a session.
+    NewTab { session: auk_mirror::layout::SessionId },
     Split { pane: PaneId, dir: SplitDir },
 }
 
@@ -419,6 +421,13 @@ impl Daemon {
             BlockPlace::NewSession { window_key } => window_key
                 .clone()
                 .unwrap_or_else(|| DEFAULT_WINDOW_KEY.to_owned()),
+            BlockPlace::NewTab { session } => st
+                .layout
+                .windows
+                .iter()
+                .find(|(_, w)| w.sessions.iter().any(|s| s.id == *session))
+                .map(|(k, _)| k.clone())
+                .ok_or_else(|| format!("no session {session}"))?,
         };
         let id = st.next_pane + 1;
         let kind = PaneKind::Block {
@@ -441,6 +450,9 @@ impl Daemon {
         match req.place {
             BlockPlace::NewSession { .. } => {
                 st.layout.new_session(&window_key, None, id);
+            }
+            BlockPlace::NewTab { session } => {
+                st.layout.new_tab(session, id).map_err(|e| e.to_string())?;
             }
             BlockPlace::Split { pane: at, dir } => {
                 st.layout.split(at, dir, id).map_err(|e| e.to_string())?;
@@ -640,7 +652,10 @@ impl Daemon {
                         text,
                         sub,
                     },
-                    auk_plugins::Effect::Open(target) => Effect::Open { target },
+                    auk_plugins::Effect::Open(target) => Effect::Open {
+                        target,
+                        origin: Some("link".to_owned()),
+                    },
                     auk_plugins::Effect::Copy(text) => Effect::Copy { text },
                 };
                 match e.target {
@@ -748,7 +763,7 @@ impl Daemon {
     /// | --- | --- |
     /// | `plugin list` | the catalog (JSON form) |
     /// | `plugin reload` | reloads every host half and answers with the new catalog |
-    /// | `block KIND [--window K] [--split TARGET right\|down] [--cwd DIR] [--size CxR] [-- ARG…]` | opens a block pane |
+    /// | `block KIND [--window K] [--tab SESSION] [--split TARGET right\|down] [--cwd DIR] [--size CxR] [-- ARG…]` | opens a block pane |
     /// | `blocks` | the running blocks: kind, args, last save, size |
     /// | `lens TARGET` | the pane's command blocks and their views |
     /// | `pane-list` | what `tern.pane.list` returns |
@@ -797,6 +812,7 @@ impl Daemon {
         let mut kind = None;
         let mut window = None;
         let mut split = None;
+        let mut tab = None;
         let mut cwd = None;
         let mut size = None;
         let mut it = words.iter();
@@ -804,6 +820,10 @@ impl Daemon {
             let mut value = |name: &str| it.next().cloned().ok_or_else(|| format!("{name} needs a value"));
             match w.as_str() {
                 "--window" => window = Some(value("--window")?),
+                "--tab" => {
+                    let s = value("--tab")?;
+                    tab = Some(s.parse().map_err(|_| format!("bad session `{s}`"))?);
+                }
                 "--cwd" => cwd = Some(PathBuf::from(value("--cwd")?)),
                 "--size" => {
                     let s = value("--size")?;
@@ -830,9 +850,10 @@ impl Daemon {
             }
         }
         let kind = kind.ok_or("block: expected a block kind (<plugin>.<block>)")?;
-        let place = match split {
-            Some((pane, dir)) => BlockPlace::Split { pane, dir },
-            None => BlockPlace::NewSession { window_key: window },
+        let place = match (split, tab) {
+            (Some((pane, dir)), _) => BlockPlace::Split { pane, dir },
+            (None, Some(session)) => BlockPlace::NewTab { session },
+            (None, None) => BlockPlace::NewSession { window_key: window },
         };
         let id = self.new_block_pane(NewBlock {
             kind,

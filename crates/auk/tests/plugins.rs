@@ -2,9 +2,9 @@
 //! purpose-built ones, loaded by the real daemon from a temporary config dir, with headless
 //! windows as clients.
 //!
-//! The window-half examples (`longrun`, `workspaces`, `jsonx`, M9) need the app's window host
-//! and are tested with the app; so is the window side of AC14 and the 4 ms and 50 ms budgets,
-//! which only window halves have.
+//! The window-half examples (`longrun`, `workspaces` except Edit, `jsonx`; M9) and the window
+//! side of AC14 run in the real app (`m9_…`, `ac14_window_…`), driven through its automation
+//! endpoint; they share the `screen` test group with the app suite.
 
 use std::path::{Path, PathBuf};
 use std::process::Child;
@@ -738,4 +738,576 @@ fn lifecycle_plugin_verbs_and_reload_on_change() {
     assert_eq!(ids(&catalog()), Vec::<String>::new());
     let (code, out, _) = auk(&env, &["plugin", "reload"]);
     assert_eq!((code, out.as_str()), (0, "no plugins\n"));
+}
+
+// ---------------------------------------------------------------------------------------------
+// M9: window halves in the real app
+
+#[cfg(target_os = "macos")]
+mod window_half {
+    use super::*;
+    use auk_conformance::app::{App, InputSource, US_LAYOUT};
+
+    /// A test env with these examples installed, its daemon, and an app window on it, typing
+    /// with the US layout (the strokes name ANSI keys).
+    pub fn app_with(
+        name: &str,
+        examples: &[&str],
+        vars: &[(&str, &str)],
+    ) -> (TestEnv, App, InputSource) {
+        let env = TestEnv::new(EXE, name);
+        for e in examples {
+            example(&env, e);
+        }
+        env.start_daemon();
+        let app = App::start_with(&env, "app", &[], vars);
+        let layout = InputSource::select(&app, US_LAYOUT);
+        (env, app, layout)
+    }
+
+    /// The focused pane, once its shell is at a prompt.
+    pub fn shell(env: &TestEnv, app: &App) -> u64 {
+        let pane = app.state()["focused"].as_u64().expect("a focused pane");
+        env.wait(pane, "prompt");
+        pane
+    }
+
+    /// Types a line into the focused pane through the window, and waits for the next prompt.
+    pub fn type_line(env: &TestEnv, app: &App, pane: u64, line: &str) {
+        app.request(&format!("text {}", quote(line)));
+        app.request("type return");
+        env.wait(pane, "prompt");
+    }
+
+    pub fn loaded(app: &App, plugins: &[&str]) -> Value {
+        wait_for("the window halves to load", || {
+            let v = app.request("plugins");
+            let ids: Vec<&str> = v["loaded"].as_array()?.iter().filter_map(Value::as_str).collect();
+            plugins.iter().all(|p| ids.contains(p)).then_some(v)
+        })
+    }
+
+    pub fn toasts(app: &App) -> Vec<Value> {
+        app.request("toasts").as_array().cloned().unwrap_or_default()
+    }
+
+    pub fn wait_toast(app: &App, text: &str) -> Value {
+        wait_for(&format!("the toast {text:?}"), || {
+            toasts(app).into_iter().find(|t| t["text"] == text)
+        })
+    }
+
+    /// Opens the palette, types `query` and runs the selected row with Return.
+    pub fn palette_run(app: &App, query: &str, expect_action: &str) {
+        app.request("menu View 'Command Palette…'");
+        wait_for("the palette", || (app.request("palette")["open"] == true).then_some(()));
+        app.request(&format!("text {}", quote(query)));
+        let rows = wait_for("the palette's rows", || {
+            let p = app.request("palette");
+            (p["query"] == query).then(|| p["rows"].clone())
+        });
+        assert_eq!(rows[0]["action"], expect_action, "{rows}");
+        app.request("type return");
+        wait_for("the palette to close", || (app.request("palette")["open"] == false).then_some(()));
+    }
+
+    /// The panes of the window key's layout, by tab name (`""` for unnamed tabs).
+    pub fn tab_panes(app: &App) -> Vec<(String, Vec<u64>)> {
+        let layout = app.layout();
+        let mut out = Vec::new();
+        for s in layout["sessions"].as_array().into_iter().flatten() {
+            for t in s["tabs"].as_array().into_iter().flatten() {
+                let mut panes = Vec::new();
+                fn walk(n: &Value, out: &mut Vec<u64>) {
+                    if let Some(p) = n["pane"].as_u64() {
+                        out.push(p);
+                    }
+                    for k in ["first", "second"] {
+                        if n[k].is_object() {
+                            walk(&n[k], out);
+                        }
+                    }
+                }
+                walk(&t["root"], &mut panes);
+                out.push((t["title"].as_str().unwrap_or_default().to_owned(), panes));
+            }
+        }
+        out
+    }
+
+    /// Clicks the middle of a chrome element by its action.
+    pub fn click_chrome(app: &App, action: &str) {
+        let rect = wait_for(&format!("the chrome's {action}"), || {
+            app.request("chrome")["actions"]
+                .as_array()?
+                .iter()
+                .find(|a| a["action"] == action)
+                .map(|a| a["rect"].clone())
+        });
+        let x = rect[0].as_f64().unwrap() + rect[2].as_f64().unwrap() / 2.0;
+        let y = rect[1].as_f64().unwrap() + rect[3].as_f64().unwrap() / 2.0;
+        app.request(&format!("mouse down {x} {y}"));
+        app.request(&format!("mouse up {x} {y}"));
+    }
+
+    /// The daemon's pane kinds: pane → block kind.
+    pub fn blocks(env: &TestEnv) -> Vec<(u64, String)> {
+        env.daemon("ls")["panes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|p| p["exit"].is_null())
+            .filter_map(|p| Some((p["id"].as_u64()?, p["kind"]["block"].as_str()?.to_owned())))
+            .collect()
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn m9_longrun_command_bind_status_segment_and_block_through_the_app() {
+    use window_half::*;
+    let (env, app, _us) = app_with("m9-longrun", &["longrun"], &[]);
+    let pane = shell(&env, &app);
+    let plugins = loaded(&app, &["longrun"]);
+    assert!(plugins["failures"].as_array().unwrap().is_empty(), "{plugins}");
+    assert_eq!(plugins["commands"][0]["action"], "plugin.longrun.show", "{plugins}");
+    // The bind joins the keymap: no default takes cmd+alt+shift+l.
+    assert_eq!(plugins["keymap"][0]["action"], "plugin.longrun.show", "{plugins}");
+
+    // The palette lists the command, and running it opens the Slow Commands block in a tab.
+    palette_run(&app, "slow commands", "plugin.longrun.show");
+    let block = wait_for("the Slow Commands block", || {
+        blocks(&env).into_iter().find(|(_, k)| k == "longrun.slow").map(|(p, _)| p)
+    });
+    wait_for("the block's tab, focused", || {
+        let tabs = tab_panes(&app);
+        (tabs.len() == 2 && app.state()["focused"] == block).then_some(())
+    });
+    wait_for("the block's title", || title(&env, block).starts_with("Slow Commands").then_some(()));
+
+    // Back in the shell, the bind finds the open block instead of opening another.
+    app.request(&format!("focus {pane}"));
+    wait_for("the window to know the block's title", || {
+        app.request("panes")["panes"]
+            .as_array()?
+            .iter()
+            .any(|p| p["id"] == block && p["title"].as_str().is_some_and(|t| t.starts_with("Slow Commands")))
+            .then_some(())
+    });
+    app.request("type cmd+opt+shift+l");
+    wait_for("the bind to focus the block", || (app.state()["focused"] == block).then_some(()));
+    assert_eq!(blocks(&env).len(), 1, "no second block");
+    assert_eq!(tab_panes(&app).len(), 2);
+
+    // A command running in the focused pane shows in the status line once it passes a second,
+    // ticking, and goes when it finishes.
+    app.request(&format!("focus {pane}"));
+    app.request(&format!("text {}", quote("sleep 3")));
+    app.request("type return");
+    let seg = wait_for("the running command's status segment", || {
+        app.request("chrome")["status"]
+            .as_array()?
+            .iter()
+            .find(|s| s["plugin"] == "longrun" && s["text"].as_str().is_some_and(|t| t.starts_with("sleep · ")))
+            .cloned()
+    });
+    assert_eq!(seg["command"], "plugin.longrun.show", "{seg}");
+    assert_eq!(seg["tone"], "muted", "{seg}");
+    wait_for("the segment to tick", || {
+        app.request("chrome")["status"]
+            .as_array()?
+            .iter()
+            .any(|s| s["text"] == "sleep · 2s")
+            .then_some(())
+    });
+    // A click on the segment runs its command.
+    click_chrome(&app, "run:plugin.longrun.show");
+    wait_for("the click to focus the block", || (app.state()["focused"] == block).then_some(()));
+    env.wait(pane, "prompt");
+    app.request(&format!("focus {pane}"));
+    wait_for("the segment to go", || {
+        app.request("chrome")["status"]
+            .as_array()?
+            .iter()
+            .all(|s| s["plugin"] != "longrun")
+            .then_some(())
+    });
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn m9_workspaces_open_override_status_and_css_through_the_app() {
+    use window_half::*;
+    let (env, app, _us) = app_with("m9-workspaces", &["workspaces", "longrun"], &[]);
+    // A project whose tabs run programs that stay up (the sample's nvim and npm aren't here).
+    let root = env.root.join("webapp");
+    for d in ["web", "api", "infra", ".tern"] {
+        std::fs::create_dir_all(root.join(d)).expect("mkdir");
+    }
+    std::fs::write(
+        root.join(".tern/workspace.json"),
+        json!({
+            "name": "webapp",
+            "tabs": [
+                {"name": "code", "split": "right", "panes": [
+                    {"command": "cat"},
+                    {"split": "down", "panes": [
+                        {"cwd": "web", "command": "cat"},
+                        {"cwd": "api", "command": "cat"}
+                    ]}
+                ]},
+                {"name": "shell", "panes": [{}, {"block": "longrun.slow"}]},
+                {"name": "infra", "cwd": "infra"}
+            ]
+        })
+        .to_string(),
+    )
+    .expect("write workspace.json");
+    let root = std::fs::canonicalize(&root).expect("canonical root");
+    let root_s = root.to_string_lossy().into_owned();
+    let pane = shell(&env, &app);
+    let plugins = loaded(&app, &["workspaces", "longrun"]);
+    // Manifest styles install into the chrome document.
+    assert!(
+        plugins["sheets"].as_array().unwrap().iter().any(|s| s == "plugin:local:workspaces:styles"),
+        "{plugins}"
+    );
+    type_line(&env, &app, pane, &format!("cd {}", quote(&format!("{root_s}/web"))));
+
+    palette_run(&app, "open workspace", "plugin.workspaces.open");
+    let toast = wait_toast(&app, "Opened webapp");
+    assert_eq!(toast["level"], "success");
+    assert_eq!(toast["sub"], format!("3 tabs · {root_s}"));
+    let tabs = wait_for("the workspace's tabs", || {
+        let t = tab_panes(&app);
+        let names: Vec<&str> = t.iter().map(|(n, _)| n.as_str()).collect();
+        (names == ["", "code", "shell", "infra"] && t[1].1.len() == 3 && t[2].1.len() == 2).then_some(t)
+    });
+    let info = |p: u64| env.pane_info(p);
+    let code = &tabs[1].1;
+    assert_eq!(info(code[0])["kind"]["line"], "cat");
+    assert_eq!(info(code[1])["cwd"], format!("{root_s}/web"));
+    assert_eq!(info(code[2])["cwd"], format!("{root_s}/api"));
+    let shell_tab = &tabs[2].1;
+    assert_eq!(info(shell_tab[1])["kind"]["block"], "longrun.slow");
+    assert_eq!(info(tabs[3].1[0])["cwd"], format!("{root_s}/infra"));
+
+    // The status line names the workspace for a pane inside it, in the plugin's own style.
+    app.request(&format!("focus {pane}"));
+    let seg = wait_for("the workspace's status segment", || {
+        app.request("chrome")["status"]
+            .as_array()?
+            .iter()
+            .find(|s| s["plugin"] == "workspaces")
+            .cloned()
+    });
+    assert_eq!(seg["text"], "webapp");
+    assert_eq!(seg["command"], "plugin.workspaces.edit");
+    // The segment is drawn with the manifest sheet's rule (`font-weight: 600`).
+    let style = wait_for("the drawn segment", || {
+        let r = app.send("chrome-style workspaces");
+        (r["ok"] == true).then(|| r["value"].clone())
+    });
+    assert!(style["font_weight"].to_string().contains("600"), "{style}");
+
+    // New Tab from inside the workspace starts at its root: the override replaces the built-in.
+    menu_new_tab(&app);
+    let new = wait_for("the override's tab", || {
+        let t = tab_panes(&app);
+        (t.len() == 5).then(|| t[4].1[0])
+    });
+    wait_for("the new tab at the root", || (info(new)["cwd"] == root_s.as_str()).then_some(()));
+
+    // The bind opens it again, which says so.
+    app.request(&format!("focus {pane}"));
+    app.request("type cmd+opt+shift+o");
+    wait_toast(&app, "webapp is already open");
+
+    // Closing every workspace tab forgets it: the segment goes and New Tab is the built-in again.
+    for (_, panes) in &tabs[1..] {
+        for p in panes {
+            env.daemon(&format!("close {p}"));
+        }
+    }
+    wait_for("the workspace tabs to close", || (tab_panes(&app).len() == 2).then_some(()));
+    app.request(&format!("focus {pane}"));
+    wait_for("the segment to go", || {
+        app.request("chrome")["status"]
+            .as_array()?
+            .iter()
+            .all(|s| s["plugin"] != "workspaces")
+            .then_some(())
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn menu_new_tab(app: &auk_conformance::app::App) {
+    app.request("menu Shell 'New Tab'");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn m9_jsonx_route_open_through_auk_open_and_the_palette() {
+    use window_half::*;
+    let opened = |env: &TestEnv| env.root.join("opened.txt");
+    let (env, app, _us) = {
+        let env = TestEnv::new(EXE, "m9-jsonx");
+        example(&env, "jsonx");
+        let opener = env.root.join("opener.sh");
+        executable(
+            &opener,
+            &format!("#!/bin/sh\nprintf '%s\\n' \"$1\" >> {}\n", quote(&opened(&env).to_string_lossy())),
+        );
+        env.start_daemon();
+        let app = auk_conformance::app::App::start_with(
+            &env,
+            "app",
+            &[],
+            &[("AUK_OPENER", &opener.to_string_lossy())],
+        );
+        let us = auk_conformance::app::InputSource::select(&app, auk_conformance::app::US_LAYOUT);
+        (env, app, us)
+    };
+    let pane = shell(&env, &app);
+    loaded(&app, &["jsonx"]);
+    let data = env.root.join("data.json");
+    std::fs::write(&data, r#"{"name": "auk", "tags": ["terminal", "plugins"]}"#).expect("write");
+    let data = std::fs::canonicalize(&data).expect("canonical");
+    let data_s = data.to_string_lossy().into_owned();
+    let opened_lines = |env: &TestEnv| {
+        std::fs::read_to_string(opened(env))
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+
+    // `auk open` reaches the window, whose route.open sees origin `cli`: jsonx leaves those to
+    // the built-in open (the system opener, here a stand-in).
+    let out = env.cli(&["--json", "open", &data_s]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let v: Value = serde_json::from_slice(&out.stdout).expect("json");
+    assert_eq!(v["routed"], "window", "{v}");
+    wait_for("the window's built-in open", || (opened_lines(&env) == [data_s.clone()]).then_some(()));
+    let opens = app.request("opens");
+    assert_eq!(opens["opened"][0]["origin"], "cli", "{opens}");
+    assert!(opens["routed"].as_array().unwrap().is_empty(), "{opens}");
+    assert!(blocks(&env).is_empty());
+
+    // A path printed in the terminal and ⌘-clicked is origin `link`: jsonx leaves it too.
+    type_line(&env, &app, pane, &format!("echo {}", quote(&data_s)));
+    let (row, col) = wait_for("the printed path", || {
+        let text = app.request(&format!("capture {pane}"))["text"].as_str()?.to_owned();
+        text.lines().enumerate().find_map(|(i, l)| (l.trim_end() == data_s).then_some((i, 3usize)))
+    });
+    let layout = app.request(&format!("pane-layout {pane}"));
+    let rect = app.state()["visible"][0]["rect"].clone();
+    let info = app.request("panes")["panes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == pane)
+        .cloned()
+        .unwrap();
+    let cw = (rect[2].as_f64().unwrap() - 12.0) / info["cols"].as_f64().unwrap();
+    let ch = (rect[3].as_f64().unwrap() - 12.0) / info["rows"].as_f64().unwrap();
+    let first = layout["first_line"].as_u64().unwrap() as f64;
+    let x = layout["origin"][0].as_f64().unwrap() + (col as f64 + 0.5) * cw;
+    let y = layout["origin"][1].as_f64().unwrap() + (row as f64 - first + 0.5) * ch.floor();
+    app.request(&format!("mouse down {x} {y} --cmd"));
+    app.request(&format!("mouse up {x} {y} --cmd"));
+    wait_for("the clicked path's built-in open", || (opened_lines(&env).len() == 2).then_some(()));
+    let opens = app.request("opens");
+    assert_eq!(opens["opened"][1]["origin"], "link", "{opens}");
+    assert_eq!(opens["opened"][1]["target"], data_s.as_str(), "{opens}");
+    assert!(blocks(&env).is_empty());
+
+    // "Open file…" in the palette is origin `palette`: jsonx claims .json and the JSON Explorer
+    // block opens beside the pane, on the file.
+    palette_run(&app, &data_s, &format!("open:{data_s}"));
+    let block = wait_for("the JSON Explorer block", || {
+        blocks(&env).into_iter().find(|(_, k)| k == "jsonx.explorer").map(|(p, _)| p)
+    });
+    assert_eq!(env.daemon("blocks")[block.to_string()]["args"], json!([data_s]));
+    let opens = app.request("opens");
+    assert_eq!(opens["routed"][0]["block"], "jsonx.explorer", "{opens}");
+    assert_eq!(opens["routed"][0]["origin"], "palette", "{opens}");
+    wait_for("the block beside the shell, focused", || {
+        let tabs = tab_panes(&app);
+        (tabs[0].1 == [pane, block] && app.state()["focused"] == block).then_some(())
+    });
+    wait_for("the explorer's tree", || daemon_doc(&env, block).contains("tags").then_some(()));
+    wait_for("the block's title", || (title(&env, block) == "data.json").then_some(()));
+
+    // The toggle (in kv.json, shared by every VM) hands .json opens back to the editor.
+    app.request(&format!("focus {pane}"));
+    palette_run(&app, "toggle json", "plugin.jsonx.toggle_route");
+    wait_toast(&app, ".json files open in the editor");
+    palette_run(&app, &data_s, &format!("open:{data_s}"));
+    wait_for("the built-in open from the palette", || (opened_lines(&env).len() == 3).then_some(()));
+    assert_eq!(app.request("opens")["opened"][2]["origin"], "palette");
+    assert_eq!(blocks(&env).len(), 1, "no second block");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn ac14_window_code_cannot_write_block_frames() {
+    use window_half::*;
+    let env = TestEnv::new(EXE, "ac14-window");
+    let host = r#"
+        tern.block.define("b", {
+            init = function(cx) return {} end,
+            view = function() return { main = tern.ui.text("block body") } end,
+            title = function() return "Probe Block" end,
+        })
+    "#;
+    let window = r#"
+        local function probe(t, names)
+            local out = {}
+            for _, name in names do
+                local ok, v = pcall(function() return (t :: any)[name] end)
+                out[name] = if ok then type(v) else "error"
+            end
+            return out
+        end
+        local WRITE = { "frame", "render", "save", "exit", "blob" }
+        tern.command({
+            id = "probe",
+            title = "Probe block writing",
+            run = function(cx)
+                tern.kv.set("context", tern.context)
+                tern.kv.set("tern", probe(tern, { "block", "lens", "frame", "render" }))
+                tern.kv.set("cx", probe(cx, WRITE))
+                local ok_pane, pane_t = pcall(function() return (tern :: any).pane end)
+                tern.kv.set("pane", if ok_pane and type(pane_t) == "table" then probe(pane_t, { "write" }) else {})
+                -- Raw TSP bytes typed into the block pane are keys for its handler, never frames.
+                local block = cx.session:resolve("Probe Block")
+                tern.kv.set("block", block)
+                local ok = pcall(function()
+                    cx:run(block, "\27_tsp;f;sf=injected;s=1\27\\")
+                end)
+                tern.kv.set("ran", ok)
+            end,
+        })
+    "#;
+    package(
+        &env,
+        "probe",
+        "schema = 1\nid = \"probe\"\nname = \"Probe\"\nversion = \"1\"\nhost = \"host.luau\"\nwindow = \"window.luau\"\n[[blocks]]\nid = \"b\"\ntitle = \"B\"\n",
+        &[("host.luau", host), ("window.luau", window)],
+    );
+    env.start_daemon();
+    let app = auk_conformance::app::App::start(&env, "app", &[]);
+    let _us = auk_conformance::app::InputSource::select(&app, auk_conformance::app::US_LAYOUT);
+    let pane = shell(&env, &app);
+    loaded(&app, &["probe"]);
+    let block = env.daemon(&format!("block probe.b --split {pane} right"))["pane"]
+        .as_u64()
+        .expect("a block pane");
+    wait_for("the block's view", || daemon_doc(&env, block).contains("block body").then_some(()));
+    wait_for("the window to know the block's title", || {
+        app.request("panes")["panes"]
+            .as_array()?
+            .iter()
+            .any(|p| p["id"] == block && p["title"] == "Probe Block")
+            .then_some(())
+    });
+    let before = env.daemon(&format!("tsp {block}"))["surfaces"].clone();
+    palette_run(&app, "probe block", "plugin.probe.probe");
+    let got = wait_for("the window probes", || {
+        let v = kv(&env, "probe");
+        (!v["ran"].is_null()).then_some(v)
+    });
+    assert_eq!(got["context"], "window");
+    assert_eq!(got["block"], block, "{got}");
+    for table in ["tern", "cx", "pane"] {
+        for (name, ty) in got[table].as_object().expect("a probe") {
+            assert!(
+                ty == "nil" || ty == "error",
+                "window code reaches {table}.{name} ({ty}): {got}"
+            );
+        }
+    }
+    // The bytes went to the block as keys: its surfaces are the same, with no `injected` one.
+    std::thread::sleep(Duration::from_millis(500));
+    let after = env.daemon(&format!("tsp {block}"))["surfaces"].clone();
+    assert_eq!(before, after);
+    assert!(!after.to_string().contains("injected"));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn m9_window_budgets_trip_in_the_app_and_reload_on_change_restores_the_hook() {
+    use window_half::*;
+    let env = TestEnv::new(EXE, "m9-budgets");
+    let manifest = |id: &str, name: &str| {
+        format!("schema = 1\nid = \"{id}\"\nname = \"{name}\"\nversion = \"1\"\nwindow = \"window.luau\"\n")
+    };
+    let spinning = r#"
+        tern.command({ id = "spin", title = "Spin forever", run = function(cx) while true do end end })
+        tern.command({ id = "ok", title = "Still fine", run = function(cx) cx:toast("info", "still fine") end })
+        tern.chrome.status(function(p)
+            local t = tern.now()
+            while tern.now() - t < 100 do end
+            return { { text = "never shown" } }
+        end)
+    "#;
+    package(&env, "slow", &manifest("slow", "Slow"), &[("window.luau", spinning)]);
+    package(
+        &env,
+        "steady",
+        &manifest("steady", "Steady"),
+        &[("window.luau", r#"tern.chrome.status(function(p) return { { text = "steady segment" } } end)"#)],
+    );
+    env.start_daemon();
+    let app = auk_conformance::app::App::start(&env, "app", &[]);
+    shell(&env, &app);
+    loaded(&app, &["slow", "steady"]);
+
+    // The status formatter passes 4 ms: it trips, toasts once, and the other plugin's segment
+    // still shows.
+    let trip = wait_for("the formatter's trip", || {
+        toasts(&app).into_iter().find(|t| t["sub"].as_str().is_some_and(|s| s.contains("exceeded 4 ms")))
+    });
+    assert!(trip["text"].as_str().unwrap().starts_with("Plugin Slow"), "{trip}");
+    wait_for("the steady segment", || {
+        let status = app.request("chrome")["status"].clone();
+        let texts: Vec<&str> = status.as_array()?.iter().filter_map(|s| s["text"].as_str()).collect();
+        (texts == ["steady segment"]).then_some(())
+    });
+
+    // A command that never returns is cut at 50 ms; the window carries on.
+    let started = Instant::now();
+    palette_run(&app, "spin forever", "plugin.slow.spin");
+    let trip = wait_for("the command's trip", || {
+        toasts(&app).into_iter().find(|t| t["sub"].as_str().is_some_and(|s| s.contains("exceeded 50 ms")))
+    });
+    assert!(trip["text"].as_str().unwrap().starts_with("Plugin Slow"), "{trip}");
+    assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+    palette_run(&app, "still fine", "plugin.slow.ok");
+    wait_toast(&app, "still fine");
+    // Tripped hooks stay off until reload: spinning again does nothing, and toasts nothing.
+    let before = toasts(&app).len();
+    palette_run(&app, "spin forever", "plugin.slow.spin");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(toasts(&app).len(), before);
+    assert_eq!(
+        toasts(&app).iter().filter(|t| t["sub"].as_str().is_some_and(|s| s.contains("exceeded 4 ms"))).count(),
+        1,
+        "the formatter toasted once"
+    );
+
+    // Editing the plugin reloads the window halves: the hook is back.
+    std::fs::write(
+        plugins_dir(&env).join("slow/window.luau"),
+        r#"tern.command({ id = "spin", title = "Spin forever", run = function(cx) cx:toast("info", "spun") end })"#,
+    )
+    .expect("rewrite the plugin");
+    wait_for("the reload", || {
+        let commands = app.request("plugins")["commands"].clone();
+        (commands.as_array()?.iter().filter(|c| c["action"].as_str().is_some_and(|a| a.starts_with("plugin.slow."))).count() == 1)
+            .then_some(())
+    });
+    palette_run(&app, "spin forever", "plugin.slow.spin");
+    wait_toast(&app, "spun");
 }

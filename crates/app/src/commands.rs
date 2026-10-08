@@ -28,6 +28,8 @@ pub enum Cmd {
     ScrollToTop,
     ScrollToBottom,
     ToggleFullScreen,
+    CommandPalette,
+    ReloadPlugins,
 }
 
 /// One registry entry: where the command sits in the menu bar and its key equivalent.
@@ -111,6 +113,14 @@ pub const REGISTRY: &[Entry] = &[
         CMD,
     ),
     grouped(entry(
+        Cmd::CommandPalette,
+        "View",
+        "Command Palette…",
+        "p",
+        CMD_SHIFT,
+    )),
+    entry(Cmd::ReloadPlugins, "View", "Reload Plugins", "", NONE),
+    grouped(entry(
         Cmd::ToggleFullScreen,
         "View",
         "Toggle Full Screen",
@@ -189,6 +199,89 @@ pub fn id_of(cmd: Cmd) -> u32 {
 /// The command a menu id names.
 pub fn by_id(id: u32) -> Option<Cmd> {
     REGISTRY.get(id as usize).map(|e| e.cmd)
+}
+
+/// A command's built-in id: the action name plugins and the palette use (`cx:command`,
+/// `tern.override`, status segment `command`s).
+pub fn builtin_id(cmd: Cmd) -> String {
+    match cmd {
+        Cmd::NewWindow => "new_window".into(),
+        Cmd::NewSession => "new_session".into(),
+        Cmd::NextSession => "next_session".into(),
+        Cmd::PreviousSession => "previous_session".into(),
+        Cmd::NewTab => "new_tab".into(),
+        Cmd::NextTab => "next_tab".into(),
+        Cmd::PreviousTab => "previous_tab".into(),
+        Cmd::SelectTab(9) => "last_tab".into(),
+        Cmd::SelectTab(n) => format!("tab_{n}"),
+        Cmd::SplitRight => "split_right".into(),
+        Cmd::SplitDown => "split_down".into(),
+        Cmd::ClosePane => "close_pane".into(),
+        Cmd::ToggleZoom => "toggle_zoom".into(),
+        Cmd::Focus(Direction::Left) => "focus_left".into(),
+        Cmd::Focus(Direction::Right) => "focus_right".into(),
+        Cmd::Focus(Direction::Up) => "focus_up".into(),
+        Cmd::Focus(Direction::Down) => "focus_down".into(),
+        Cmd::Copy => "copy".into(),
+        Cmd::Paste => "paste".into(),
+        Cmd::SelectAll => "select_all".into(),
+        Cmd::ClearScrollback => "clear_scrollback".into(),
+        Cmd::ScrollToTop => "scroll_to_top".into(),
+        Cmd::ScrollToBottom => "scroll_to_bottom".into(),
+        Cmd::ToggleFullScreen => "toggle_full_screen".into(),
+        Cmd::CommandPalette => "command_palette".into(),
+        Cmd::ReloadPlugins => "reload_plugins".into(),
+    }
+}
+
+/// The command a built-in id names.
+pub fn by_builtin_id(id: &str) -> Option<Cmd> {
+    REGISTRY
+        .iter()
+        .map(|e| e.cmd)
+        .find(|c| builtin_id(*c) == id)
+}
+
+/// Every built-in id, in registry order.
+pub fn builtin_ids() -> Vec<String> {
+    REGISTRY.iter().map(|e| builtin_id(e.cmd)).collect()
+}
+
+/// The key equivalents the menu binds, as chords (`cmd+shift+p`): the default keymap layer a
+/// plugin bind may not take (§9.8 "Binds").
+pub fn default_chords() -> Vec<String> {
+    REGISTRY
+        .iter()
+        .filter(|e| !e.key.is_empty())
+        .filter_map(|e| {
+            let key = match e.key {
+                "\r" => "enter".to_owned(),
+                "\u{F729}" => "home".to_owned(),
+                "\u{F72B}" => "end".to_owned(),
+                "\u{F702}" => "left".to_owned(),
+                "\u{F703}" => "right".to_owned(),
+                "\u{F700}" => "up".to_owned(),
+                "\u{F701}" => "down".to_owned(),
+                k if k.chars().count() == 1 => k.to_owned(),
+                _ => return None,
+            };
+            let m = e.mods;
+            let mut parts = Vec::new();
+            if m.ctrl {
+                parts.push("ctrl");
+            }
+            if m.opt {
+                parts.push("alt");
+            }
+            if m.shift {
+                parts.push("shift");
+            }
+            if m.cmd {
+                parts.push("cmd");
+            }
+            Some(format!("{}+{key}", parts.join("+")))
+        })
+        .collect()
 }
 
 /// The command a menu title names (for the automation endpoint).

@@ -26,3 +26,13 @@ test-group = 'screen'
 [[profile.default.overrides]]
 filter = 'binary_id(auk::app)'
 test-group = 'screen'
+
+# The perf suite opens app windows, launches Ghostty and watches the screen.
+[[profile.default.overrides]]
+filter = 'binary_id(auk::perf)'
+test-group = 'screen'
+
+# The plugins suite's window-half tests run in the app.
+[[profile.default.overrides]]
+filter = 'binary_id(auk::plugins) & (test(/^m9_/) | test(/^ac14_window_/))'
+test-group = 'screen'

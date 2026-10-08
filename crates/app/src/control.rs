@@ -22,14 +22,20 @@
 //! | `text TEXT`, `mark TEXT [START LEN]`, `unmark`, `preedit` | `NSTextInputClient` calls |
 //! | `clipboard`, `clipboard-set TEXT` | the general pasteboard |
 //! | `menus`, `menu MENU ITEM` | the menu bar; choosing an item as a click does |
-//! | `mouse down|up|drag|move X Y [--clicks N] [--right] [--shift] [--alt]` | mouse events |
+//! | `mouse down|up|drag|move X Y [--clicks N] [--right] [--shift] [--alt] [--cmd]` | mouse events |
 //! | `scroll LINES X Y` | a scroll-wheel event |
 //! | `focus PANE` | focuses a pane (its session and tab come forward) |
 //! | `selection` | the focused pane's selected text |
 //! | `pane-layout PANE` | the pane's flow as last drawn (§6.2): first line, blocks, dock, screen |
-//! | `frame-stats [--reset]` | frame times: start of work to GPU done; CPU work |
+//! | `frame-stats [--reset]` | frame times: start of work to GPU and CPU done, less the drawable wait; CPU work |
 //! | `input-source [ID]` | the keyboard input source, or selects one |
 //! | `option-as-alt none|left|right|both` | the Option-as-Alt setting |
+//! | `plugins` | the window halves: loaded, failed, commands, binds and the keymap layer, sheets |
+//! | `palette [open]` | the command palette: open, query, rows (opens it first with `open`) |
+//! | `toasts` | every toast the window showed |
+//! | `opens` | built-in opens (the system opener) and route decisions |
+//! | `chrome` | status segments, tab and window titles, clickable chrome boxes, context menu, viewer |
+//! | `chrome-style PLUGIN` | the computed style of a plugin's status segment (plugin sheets) |
 //! | `activate` | brings the app forward |
 //! | `quit` | quits the app |
 
@@ -348,6 +354,9 @@ fn main_command(cmd: &str, mut args: Vec<String>, win: usize) -> Result<Value, S
             if take_switch(&mut args, "--alt") {
                 bits |= flags::OPTION | flags::LEFT_OPTION;
             }
+            if take_switch(&mut args, "--cmd") {
+                bits |= flags::COMMAND;
+            }
             let action = match args.first().map(String::as_str) {
                 Some("down") => MouseAction::Down,
                 Some("up") => MouseAction::Up,
@@ -454,6 +463,86 @@ fn main_command(cmd: &str, mut args: Vec<String>, win: usize) -> Result<Value, S
         "focus-window" => {
             window.focus();
             Ok(Value::Null)
+        }
+        "plugins" => {
+            let s = state.borrow();
+            let rt = s.plugins.rt.as_ref();
+            Ok(json!({
+                "loaded": rt.map(|r| r.plugins()).unwrap_or_default(),
+                "failures": rt.map(|r| r.failures().to_vec()).unwrap_or_default(),
+                "commands": rt.map(|r| r.commands().into_iter().map(|c| json!({
+                    "action": c.action, "title": c.title, "group": c.group, "icon": c.icon,
+                })).collect::<Vec<_>>()).unwrap_or_default(),
+                "keymap": s.plugins.keymap.iter().map(|(c, a)| json!({"steps": c.steps.len(), "action": a})).collect::<Vec<_>>(),
+                "binds": rt.map(|r| r.binds().into_iter().map(|b| json!({"chord": b.chord, "action": b.action})).collect::<Vec<_>>()).unwrap_or_default(),
+                "dropped_binds": s.plugins.dropped_binds,
+                "sheets": s.chrome.plugin_sheets(),
+            }))
+        }
+        "palette" => {
+            if args.first().map(String::as_str) == Some("open") {
+                state.borrow_mut().command(&window, crate::commands::Cmd::CommandPalette);
+                window.request_frame();
+            }
+            let s = state.borrow();
+            Ok(match &s.overlays.palette {
+                Some(p) => json!({
+                    "open": true,
+                    "query": p.query,
+                    "selected": p.selected,
+                    "rows": p.rows().iter().map(|r| json!({"label": r.label, "group": r.group, "action": r.action_name()})).collect::<Vec<_>>(),
+                }),
+                None => json!({"open": false}),
+            })
+        }
+        "toasts" => Ok(json!(state.borrow().plugins.toast_log)),
+        "opens" => {
+            let s = state.borrow();
+            Ok(json!({"opened": s.plugins.opened, "routed": s.plugins.routed}))
+        }
+        "chrome" => {
+            let s = state.borrow();
+            let model_status: Vec<Value> = s
+                .plugins
+                .status
+                .iter()
+                .map(|x| json!({"plugin": x.plugin, "text": x.text, "icon": x.icon, "tone": x.tone, "command": x.command}))
+                .collect();
+            let actions: Vec<Value> = s
+                .chrome
+                .actions()
+                .into_iter()
+                .map(|(a, r)| json!({"action": a, "rect": [r.x, r.y, r.w, r.h]}))
+                .collect();
+            Ok(json!({
+                "status": model_status,
+                "tab_titles": s.plugins.tab_titles,
+                "window_title": s.plugins.window_title,
+                "actions": actions,
+                "menu": s.overlays.menu.as_ref().map(|m| m.entries.iter().map(|e| json!({"label": e.label, "action": e.action})).collect::<Vec<_>>()),
+                "viewer": s.overlays.viewer.as_ref().map(|v| json!({
+                    "pane": v.pane,
+                    "index": v.zoom.index,
+                    "images": v.zoom.images.iter().map(|i| json!({"id": i.id, "blob": i.blob, "title": i.title})).collect::<Vec<_>>(),
+                })),
+            }))
+        }
+        "chrome-style" => {
+            // The computed style of a plugin's status segment, to check plugin sheets restyle
+            // the chrome.
+            let plugin = args.first().ok_or("chrome-style: expected a plugin id")?.clone();
+            let s = state.borrow();
+            let doc = &s.chrome.doc;
+            let mut stack = vec![doc.root()];
+            while let Some(n) = stack.pop() {
+                if doc.attribute(n, "data-plugin") == Some(plugin.as_str())
+                    && let Some(style) = doc.computed_style(n)
+                {
+                    return Ok(json!({"font_weight": format!("{:?}", style.font_weight)}));
+                }
+                stack.extend(doc.children(n).iter().copied());
+            }
+            Err(format!("no status segment of plugin {plugin}"))
         }
         other => Err(format!("unknown command `{other}`")),
     }

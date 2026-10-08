@@ -545,6 +545,262 @@ fn clicks_on_a_surface_go_to_its_program() {
     );
 }
 
+/// The block's first line, in window points: a point inside the surface at `dy` below its top.
+fn block_point(app: &App, pane: u64, dy: f64) -> (f64, f64) {
+    let layout = wait_for("the block in the pane's flow", || {
+        let l = app.request(&format!("pane-layout {pane}"));
+        (l["blocks"].as_array()?.len() == 1).then_some(l)
+    });
+    (
+        layout["origin"][0].as_f64().unwrap() + 10.0,
+        layout["origin"][1].as_f64().unwrap() + layout["blocks"][0]["top"].as_f64().unwrap() + dy,
+    )
+}
+
+/// The program's input over `wait`: TSP event bodies other than acks, and the other bytes.
+fn program_input(probe: &Probe, wait: Duration) -> (Vec<Value>, Vec<u8>) {
+    let items = split_input(&probe.read_for(wait));
+    let bodies = tsp_bodies(&items)
+        .into_iter()
+        .filter(|b| b["ev"] != "ack" && b["ev"] != "resize")
+        .collect();
+    let bytes = items
+        .iter()
+        .filter_map(|i| match i {
+            auk_conformance::probe::Input::Other(b) => Some(b.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    (bodies, bytes)
+}
+
+/// Types a stroke and waits for the program's first event of kind `ev`.
+fn stroke_event(app: &App, probe: &Probe, stroke: &str, ev: &str) -> Value {
+    app.request(&format!("type '{stroke}'"));
+    let input = probe.read_until(&format!("the {ev} event for {stroke}"), |b| {
+        !events(&tsp_bodies(&split_input(b)), ev).is_empty()
+    });
+    let items = split_input(&input);
+    let bodies = tsp_bodies(&items);
+    let other: Vec<&auk_conformance::probe::Input> = items
+        .iter()
+        .filter(|i| matches!(i, auk_conformance::probe::Input::Other(_)))
+        .collect();
+    assert!(other.is_empty(), "{stroke} also reached the program as bytes: {other:?}");
+    events(&bodies, ev)[0].clone()
+}
+
+#[test]
+fn program_field_editing_keys_go_through_the_view_as_edit_events() {
+    let env = env("field-keys");
+    let app = App::start(&env, "a", &[]);
+    let _us = InputSource::select(&app, US_LAYOUT);
+    let probe = focused_probe(&env, &app);
+    probe.write(&hello(&["edit", "undo"]));
+    probe.write(&open_with(
+        "s1",
+        "inline",
+        json!([{"id": "ed", "k": "editor", "p": {"text": "hello world\nsecond line", "cursor": 5}}]),
+    ));
+    probe.write(&auk_conformance::probe::frame("s1", 2, json!([["focus", "ed"]])));
+    probe.read_until("the focus frame's ack", |b| {
+        events(&tsp_bodies(&split_input(b)), "ack")
+            .iter()
+            .any(|a| a["s"] == 2)
+    });
+    caught_up(&env, &app, probe.pane);
+    let len = 23;
+
+    // Selecting keys keep the terminal's own selection: nothing reaches the program.
+    for _ in 0..3 {
+        app.request("type shift+right");
+    }
+    let (bodies, bytes) = program_input(&probe, Duration::from_millis(400));
+    assert!(bodies.is_empty() && bytes.is_empty(), "{bodies:?} {bytes:?}");
+    // Backspace with a selection deletes it as an edit.
+    let edit = stroke_event(&app, &probe, "backspace", "edit");
+    assert_eq!(
+        edit,
+        json!({"ev": "edit", "sf": "s1", "id": "ed", "from": 5, "to": 8, "text": "", "cursor": 5, "len": len})
+    );
+    // ↓ moves the caret to the same column of the next drawn line; End and Home to the ends of
+    // the caret's line (the program kept its cursor at 5).
+    let down = stroke_event(&app, &probe, "down", "edit");
+    assert_eq!((down["from"].clone(), down["to"].clone(), down["text"].clone()), (json!(17), json!(17), json!("")));
+    let end = stroke_event(&app, &probe, "end", "edit");
+    assert_eq!(end["cursor"], 11, "{end}");
+    let home = stroke_event(&app, &probe, "home", "edit");
+    assert_eq!(home["cursor"], 0, "{home}");
+    // ⇧↓ then ⌘X: the selection goes to the clipboard and is deleted as an edit.
+    app.request("type shift+down");
+    let cut = stroke_event(&app, &probe, "cmd+x", "edit");
+    assert_eq!((cut["from"].clone(), cut["to"].clone()), (json!(5), json!(17)), "{cut}");
+    assert_eq!(app.request("clipboard"), " world\nsecon");
+    // ⌘Z is an undo.
+    let undo = stroke_event(&app, &probe, "cmd+z", "undo");
+    assert_eq!(undo["id"], "ed");
+
+    // With no selection, ← is the program's key; so is ↑ on the first drawn line.
+    app.request("type left");
+    let (bodies, bytes) = program_input(&probe, Duration::from_millis(400));
+    assert!(bodies.is_empty(), "{bodies:?}");
+    assert!(bytes == b"\x1b[D" || bytes == b"\x1bOD", "{bytes:?}");
+    app.request("type up");
+    let (bodies, bytes) = program_input(&probe, Duration::from_millis(400));
+    assert!(bodies.is_empty(), "{bodies:?}");
+    assert!(bytes == b"\x1b[A" || bytes == b"\x1bOA", "{bytes:?}");
+
+    // IME composition draws at the field's caret, not over the grid, and reaches no one.
+    app.request("mark にほん");
+    let state = app.state();
+    assert!(state["preedit"].is_null(), "the field took the composition: {state}");
+    let (bodies, bytes) = program_input(&probe, Duration::from_millis(300));
+    assert!(bodies.is_empty() && bytes.is_empty(), "{bodies:?} {bytes:?}");
+    app.request("unmark");
+
+    // Without the edit feature the same keys are the program's.
+    probe.write(&auk_conformance::probe::frame("s1", 3, json!([["set", "ed", {"readonly": true}]])));
+    probe.read_until("the readonly frame's ack", |b| {
+        events(&tsp_bodies(&split_input(b)), "ack")
+            .iter()
+            .any(|a| a["s"] == 3)
+    });
+    caught_up(&env, &app, probe.pane);
+    app.request("type home");
+    let (bodies, bytes) = program_input(&probe, Duration::from_millis(400));
+    assert!(bodies.is_empty(), "{bodies:?}");
+    assert!(!bytes.is_empty(), "Home reached the program as a key");
+}
+
+#[test]
+fn context_menus_run_a_surface_nodes_menu_actions() {
+    let env = env("ctx-menu");
+    let app = App::start(&env, "a", &[]);
+    let probe = focused_probe(&env, &app);
+    probe.write(&hello(&[]));
+    probe.write(&open_with(
+        "s1",
+        "inline",
+        json!([{"id": "row", "k": "text", "p": {"text": "row text", "actions": {"menu": ["retry", "open-log=build"]}}}]),
+    ));
+    probe.read_until("the ack", |b| {
+        !events(&tsp_bodies(&split_input(b)), "ack").is_empty()
+    });
+    let (x, y) = block_point(&app, probe.pane, 5.0);
+
+    // A secondary click opens the node's menu: its actions, then Copy.
+    app.request(&format!("mouse down {x} {y} --right"));
+    app.request(&format!("mouse up {x} {y} --right"));
+    let menu = wait_for("the context menu", || {
+        let m = app.request("chrome")["menu"].clone();
+        m.is_array().then_some(m)
+    });
+    let actions: Vec<&str> = menu.as_array().unwrap().iter().map(|e| e["action"].as_str().unwrap()).collect();
+    let labels: Vec<&str> = menu.as_array().unwrap().iter().map(|e| e["label"].as_str().unwrap()).collect();
+    assert_eq!(actions, ["retry", "open-log=build", "copy"]);
+    assert_eq!(labels, ["Retry", "Open log", "Copy"]);
+    // The right press never reached the program, and the grid has no selection.
+    let (bodies, bytes) = program_input(&probe, Duration::from_millis(200));
+    assert!(bodies.is_empty() && bytes.is_empty(), "{bodies:?} {bytes:?}");
+
+    // Choosing an entry with a click sends its action to the program, with its value.
+    let pick = |i: usize| {
+        let rect = wait_for("the menu entry's box", || {
+            app.request("chrome")["actions"]
+                .as_array()?
+                .iter()
+                .find(|a| a["action"] == format!("menu:{i}"))
+                .map(|a| a["rect"].clone())
+        });
+        let (mx, my) = (
+            rect[0].as_f64().unwrap() + 8.0,
+            rect[1].as_f64().unwrap() + rect[3].as_f64().unwrap() / 2.0,
+        );
+        app.request(&format!("mouse down {mx} {my}"));
+        app.request(&format!("mouse up {mx} {my}"));
+    };
+    pick(1);
+    let input = probe.read_until("the menu's action", |b| {
+        !events(&tsp_bodies(&split_input(b)), "action").is_empty()
+    });
+    let bodies = tsp_bodies(&split_input(&input));
+    assert_eq!(
+        events(&bodies, "action")[0],
+        &json!({"ev": "action", "sf": "s1", "id": "row", "act": "open-log", "value": "build"})
+    );
+    assert!(app.request("chrome")["menu"].is_null(), "the menu closed");
+
+    // Copy copies the node's text; Escape closes a menu without running anything.
+    app.request(&format!("mouse down {x} {y} --right"));
+    app.request(&format!("mouse up {x} {y} --right"));
+    wait_for("the menu again", || app.request("chrome")["menu"].is_array().then_some(()));
+    pick(2);
+    wait_for("the copied text", || (app.request("clipboard") == "row text").then_some(()));
+    app.request(&format!("mouse down {x} {y} --right"));
+    app.request(&format!("mouse up {x} {y} --right"));
+    wait_for("the menu again", || app.request("chrome")["menu"].is_array().then_some(()));
+    app.request("type esc");
+    wait_for("the menu to close", || app.request("chrome")["menu"].is_null().then_some(()));
+    let (bodies, _) = program_input(&probe, Duration::from_millis(300));
+    assert!(bodies.is_empty(), "{bodies:?}");
+}
+
+#[test]
+fn the_zoom_action_opens_the_image_viewer_over_the_window() {
+    use base64::Engine as _;
+    use sha2::Digest as _;
+    let env = env("viewer");
+    let app = App::start(&env, "a", &[]);
+    let probe = focused_probe(&env, &app);
+    probe.write(&hello(&[]));
+    let svg = |w: u32, h: u32, fill: &str| {
+        format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\">\
+             <rect width=\"{w}\" height=\"{h}\" fill=\"{fill}\"/></svg>"
+        )
+    };
+    let (a, b) = (svg(60, 30, "#22aa55"), svg(30, 60, "#aa2255"));
+    let id = |s: &str| -> String {
+        sha2::Sha256::digest(s.as_bytes()).iter().map(|x| format!("{x:02x}")).collect()
+    };
+    let b64 = base64::engine::general_purpose::STANDARD;
+    probe.write(&auk_conformance::probe::tsp("b", &[], &b64.encode(&a)));
+    probe.write(&auk_conformance::probe::tsp("b", &[], &b64.encode(&b)));
+    probe.write(&open_with(
+        "s1",
+        "inline",
+        json!([{"id": "pics", "k": "row", "c": [
+            {"id": "one", "k": "image", "p": {"blob": id(&a), "alt": "Green", "actions": {"click": "zoom"}}},
+            {"id": "two", "k": "image", "p": {"blob": id(&b), "alt": "Red"}}
+        ]}]),
+    ));
+    probe.read_until("the ack", |b| {
+        !events(&tsp_bodies(&split_input(b)), "ack").is_empty()
+    });
+    // The middle of the row: the first picture, whichever way the row aligns it.
+    let (x, y) = block_point(&app, probe.pane, 30.0);
+    app.request(&format!("mouse down {x} {y}"));
+    app.request(&format!("mouse up {x} {y}"));
+    let viewer = wait_for("the viewer", || {
+        let v = app.request("chrome")["viewer"].clone();
+        v.is_object().then_some(v)
+    });
+    assert_eq!(viewer["index"], 0);
+    let titles: Vec<&str> = viewer["images"].as_array().unwrap().iter().map(|i| i["title"].as_str().unwrap()).collect();
+    assert_eq!(titles, ["Green", "Red"]);
+    assert_eq!(viewer["images"][0]["blob"], id(&a));
+    // The picture decoded from the pane's blobs (a failure would toast).
+    assert_eq!(app.request("toasts"), json!([]));
+    // → steps to the next image; Escape closes. Nothing reached the program.
+    app.request("type right");
+    wait_for("the next image", || (app.request("chrome")["viewer"]["index"] == 1).then_some(()));
+    app.request("type esc");
+    wait_for("the viewer to close", || app.request("chrome")["viewer"].is_null().then_some(()));
+    let (bodies, bytes) = program_input(&probe, Duration::from_millis(300));
+    assert!(bodies.is_empty() && bytes.is_empty(), "{bodies:?} {bytes:?}");
+}
+
 #[test]
 fn ac01_the_shell_outlives_the_app_and_a_new_window_shows_its_scrollback() {
     let env = env("ac01");

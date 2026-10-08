@@ -39,6 +39,10 @@ struct KeyDown {
     command: bool,
 }
 
+/// How long without a frame counts as a pause ([`AukView::request_frame`]): a little over one
+/// refresh at 60 Hz.
+const IDLE_AFTER: std::time::Duration = std::time::Duration::from_millis(20);
+
 pub(crate) struct ViewState {
     pub id: WindowId,
     handler: RefCell<Option<Box<dyn WindowHandler>>>,
@@ -51,6 +55,9 @@ pub(crate) struct ViewState {
     pub layer: Retained<CAMetalLayer>,
     display_link: RefCell<Option<Retained<CADisplayLink>>>,
     frame_requested: Cell<bool>,
+    /// When the last frame started, and whether an immediate one is queued ([`request_frame`]).
+    last_frame: Cell<Option<std::time::Instant>>,
+    immediate: Cell<bool>,
     pub option_as_alt: Cell<OptionAsAlt>,
     /// Where the IME's candidate window goes: the cursor's cell, in view points.
     pub ime_rect: Cell<NSRect>,
@@ -124,13 +131,7 @@ define_class!(
 
         #[unsafe(method(displayLinkFired:))]
         fn display_link_fired(&self, _link: &CADisplayLink) {
-            self.ivars().frame_requested.set(false);
-            self.emit(Event::Frame);
-            if !self.ivars().frame_requested.get()
-                && let Some(link) = self.ivars().display_link.borrow().as_ref()
-            {
-                link.setPaused(true);
-            }
+            self.frame_now();
         }
 
         // Keyboard.
@@ -410,6 +411,8 @@ impl AukView {
             layer,
             display_link: RefCell::new(None),
             frame_requested: Cell::new(false),
+            last_frame: Cell::new(None),
+            immediate: Cell::new(false),
             option_as_alt: Cell::new(option_as_alt),
             ime_rect: Cell::new(NSRect::ZERO),
             delegate: RefCell::new(None),
@@ -490,10 +493,43 @@ impl AukView {
         }
     }
 
+    /// Asks for a frame. While frames keep coming they're paced by the display link; the first
+    /// one after a pause draws as soon as the current event is handled instead of at the next
+    /// vsync, since that wait would add to the latency of whatever woke the window (a keystroke's
+    /// echo, say).
     pub(crate) fn request_frame(&self) {
         self.ivars().frame_requested.set(true);
+        let idle = self
+            .ivars()
+            .last_frame
+            .get()
+            .is_none_or(|t| t.elapsed() >= IDLE_AFTER);
+        if idle {
+            if !self.ivars().immediate.replace(true) {
+                let id = self.ivars().id;
+                crate::run_on_main(move || {
+                    if let Some(view) = registry::get(id) {
+                        view.ivars().immediate.set(false);
+                        if view.ivars().frame_requested.get() && !view.ivars().closed.get() {
+                            view.frame_now();
+                        }
+                    }
+                });
+            }
+            return;
+        }
         if let Some(link) = self.ivars().display_link.borrow().as_ref() {
             link.setPaused(false);
+        }
+    }
+
+    /// Draws a frame; the display link runs while more are asked for.
+    fn frame_now(&self) {
+        self.ivars().frame_requested.set(false);
+        self.ivars().last_frame.set(Some(std::time::Instant::now()));
+        self.emit(Event::Frame);
+        if let Some(link) = self.ivars().display_link.borrow().as_ref() {
+            link.setPaused(!self.ivars().frame_requested.get());
         }
     }
 
@@ -602,7 +638,7 @@ impl AukView {
                     .filter(|t| keys::is_text(t))
             };
             if let Some(key) = key {
-                self.emit_key(key, mods, text, repeat, keycode);
+                self.emit_key(key, mods, text, repeat, keycode, flags);
             }
             return;
         }
@@ -622,7 +658,7 @@ impl AukView {
             // An ordinary key: the text it typed.
             Some(text) if !composing && key.is_some() => {
                 let text = keys::is_text(&text).then_some(text);
-                self.emit_key(key.expect("checked"), mods, text, repeat, keycode);
+                self.emit_key(key.expect("checked"), mods, text, repeat, keycode, flags);
             }
             // A composition's commit (dead key, input method).
             Some(text) => {
@@ -650,17 +686,26 @@ impl AukView {
                     if matches!(key, Key::Char(_)) && text.is_none() && !state.command {
                         return;
                     }
-                    self.emit_key(key, mods, text, repeat, keycode);
+                    self.emit_key(key, mods, text, repeat, keycode, flags);
                 }
             }
         }
     }
 
-    fn emit_key(&self, key: Key, mods: Mods, text: Option<String>, repeat: bool, keycode: u16) {
+    fn emit_key(
+        &self,
+        key: Key,
+        mods: Mods,
+        text: Option<String>,
+        repeat: bool,
+        keycode: u16,
+        flags: NSEventModifierFlags,
+    ) {
         self.emit(Event::Key(KeyInput {
             event: KeyEvent { key, mods, text },
             repeat,
             keycode,
+            option: flags.contains(NSEventModifierFlags::Option),
         }));
     }
 }

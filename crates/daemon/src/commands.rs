@@ -389,6 +389,7 @@ impl Daemon {
             &key,
             auk_mirror::Effect::Open {
                 target: path.clone(),
+                origin: None,
             },
         );
         Ok(json!({"delivered": delivered, "window": key}))
@@ -470,7 +471,7 @@ impl Daemon {
                 text,
                 sub: None,
             },
-            "open" => Effect::Open { target: text },
+            "open" => Effect::Open { target: text, origin: None },
             "copy" => Effect::Copy { text },
             other => return Err(format!("effect: unknown effect `{other}`")),
         };
