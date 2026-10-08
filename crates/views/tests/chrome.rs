@@ -70,6 +70,7 @@ fn tab_bar_dividers_status_line_and_palette_lay_out_with_actions_and_roles() {
         &segs,
     );
     let pal = PaletteView {
+        app: Some("omp".into()),
         query: "spl".into(),
         rows: (0..20)
             .map(|i| (format!("Split {i}"), "Layout".to_owned()))

@@ -128,9 +128,12 @@ impl Builds {
         );
         let wasm = target.join("wasm32-unknown-unknown/release/auk_web.wasm");
         let bindgen = self.wasm_bindgen();
-        // Each test process generates its own copy, so parallel tests never see a half-written
-        // file.
-        let out = self.root.join(format!("assets-{}", std::process::id()));
+        // Each call generates its own copy (tests in one process run on parallel threads, and
+        // each copy is removed when its owner drops it), so no test sees a half-written file or
+        // loses its copy to another test.
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let out = self.root.join(format!("assets-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&out);
         run(
             Command::new(bindgen)
@@ -159,7 +162,7 @@ impl Builds {
     }
 }
 
-/// The built client's files (`auk_web.js`, `auk_web_bg.wasm`), one copy per test process.
+/// The built client's files (`auk_web.js`, `auk_web_bg.wasm`), one copy per `web_client` call.
 #[derive(Debug)]
 pub struct ClientAssets {
     pub dir: PathBuf,

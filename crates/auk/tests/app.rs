@@ -1118,6 +1118,66 @@ fn the_chrome_names_the_reporting_app_only_while_a_listening_surface_is_open() {
     assert!(app.request("chrome")["pane_app"].is_null());
 }
 
+/// §7.2: the hello's app names the pane's program in the command palette too, by the same rule
+/// as the tab (§12.2): only while a listening surface is open, and not once the program is gone.
+#[test]
+fn the_palette_names_the_focused_panes_reporting_app() {
+    let env = env("app-palette");
+    let app = App::start(&env, "a", &[]);
+    let probe = focused_probe(&env, &app);
+    probe.write(&hello(&[]));
+    probe.write(&open_with(
+        "s1",
+        "inline",
+        json!([{"id": "t", "k": "text", "p": {"text": "hi"}}]),
+    ));
+    acked(&probe, 1);
+    wait_for("the app in the chrome", || {
+        (app.request("chrome")["pane_app"] == "probe").then_some(())
+    });
+    // Opened as a person would, the palette's header names the program.
+    app.request("menu View 'Command Palette…'");
+    let drawn = wait_for("the palette to name the app", || {
+        let p = app.request("palette");
+        (p["open"] == true && !p["drawn_app"].is_null()).then(|| p["drawn_app"].clone())
+    });
+    assert_eq!(drawn["app"], "probe", "{drawn}");
+    assert_eq!(drawn["text"], "probe \u{2014} Commands", "{drawn}");
+    // The surface closes while the palette is up: the header goes with it.
+    probe.write(&auk_conformance::probe::tsp_json("x", &json!({"id": "s1"})));
+    caught_up(&env, &app, probe.pane);
+    wait_for("the header to leave the palette", || {
+        let p = app.request("palette");
+        (p["open"] == true && p["drawn_app"].is_null()).then_some(())
+    });
+    app.request("type escape");
+    wait_for("the palette to close", || {
+        (app.request("palette")["open"] == false).then_some(())
+    });
+    // Listening again, then the program exits: the palette names nothing.
+    probe.write(&open_with(
+        "s2",
+        "inline",
+        json!([{"id": "t", "k": "text", "p": {"text": "hi"}}]),
+    ));
+    acked(&probe, 1);
+    wait_for("the app back in the chrome", || {
+        (app.request("chrome")["pane_app"] == "probe").then_some(())
+    });
+    probe.exit(0);
+    wait_for("the app to leave the chrome", || {
+        app.request("chrome")["pane_app"].is_null().then_some(())
+    });
+    app.request("menu View 'Command Palette…'");
+    wait_for("the palette", || {
+        (app.request("palette")["open"] == true).then_some(())
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    let p = app.request("palette");
+    assert_eq!(p["open"], true, "{p}");
+    assert!(p["drawn_app"].is_null(), "{p}");
+}
+
 /// The system's 12/24-hour setting, read apart from the app: the hour pattern Foundation gives
 /// the `j` skeleton in the current locale (through JavaScript for Automation), 12-hour when it has
 /// an `h` or `K` field outside quotes.

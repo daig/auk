@@ -88,6 +88,7 @@ impl WinState {
             .unwrap_or_default();
         model.toasts = self.plugins.toasts.iter().map(|t| t.item.clone()).collect();
         model.palette = self.overlays.palette.as_ref().map(|p| PaletteView {
+            app: model.pane_app.clone(),
             query: p.query.clone(),
             rows: p.rows().into_iter().map(|r| (r.label, r.group)).collect(),
             selected: p.selected,

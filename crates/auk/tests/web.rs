@@ -800,6 +800,86 @@ fn ac02_wasm_replicas_reach_the_native_state_hashes_under_fuzzing() {
     }
 }
 
+/// §4.2, §10.3, §10.4: the browser runs no Lua at all. The wasm client's dependency graph has
+/// no Luau (no `mlua`, `mlua-sys` or `luau*` crate) and takes `auk-plugins` without its
+/// `runtime` feature; and the built client, wasm and JS glue, carries no Luau or mlua symbol, so
+/// it hosts no window half.
+#[test]
+fn web_client_builds_without_lua() {
+    let out = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
+        .current_dir(auk_conformance::web::workspace_root())
+        .args([
+            "tree",
+            "-p",
+            "auk-web",
+            "--target",
+            "wasm32-unknown-unknown",
+            "-e",
+            "normal",
+        ])
+        .args(["--prefix", "none", "-f", "{p} [{f}]"])
+        .output()
+        .expect("run cargo tree");
+    assert!(
+        out.status.success(),
+        "cargo tree: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let tree = String::from_utf8(out.stdout).expect("utf-8");
+    let names: Vec<(&str, &str)> = tree
+        .lines()
+        .filter_map(|l| {
+            let name = l.split_whitespace().next()?;
+            let features = l
+                .split_once(" [")
+                .map_or("", |(_, f)| f.split(']').next().unwrap_or(""));
+            Some((name, features))
+        })
+        .collect();
+    assert!(names.iter().any(|(n, _)| *n == "auk-web"), "{tree}");
+    for (name, _) in &names {
+        assert!(
+            !(*name == "mlua" || *name == "mlua-sys" || name.starts_with("luau")),
+            "the wasm client depends on {name}:\n{tree}"
+        );
+    }
+    let plugins: Vec<&str> = names
+        .iter()
+        .filter(|(n, _)| *n == "auk-plugins")
+        .map(|(_, f)| *f)
+        .collect();
+    assert!(
+        !plugins.is_empty(),
+        "the client takes auk-plugins' runtime-free half:\n{tree}"
+    );
+    for features in plugins {
+        assert!(
+            !features.split(',').any(|f| f.trim() == "runtime"),
+            "auk-plugins with its runtime feature ({features}):\n{tree}"
+        );
+    }
+    // The built client: no Luau VM (its C API's `lua_`/`luaL_` symbols, its `Luau` names) and
+    // no mlua bindings in the wasm, nothing of them in the glue. Matched by case and at the start
+    // of a word: the data section runs strings together (the UA style sheet's `html` meets its
+    // `ua` label), so a bare `mlua` is found inside `htmlua`.
+    let assets = builds().web_client();
+    for file in ["auk_web_bg.wasm", "auk_web.js"] {
+        let bytes = std::fs::read(assets.join(file)).expect("read the built client");
+        for needle in ["mlua", "Luau", "luau", "LUAU", "lua_", "luaL_", "luaU_"] {
+            let starts_word = |at: usize| at == 0 || !bytes[at - 1].is_ascii_alphanumeric();
+            if let Some(at) = (0..=bytes.len().saturating_sub(needle.len()))
+                .find(|&at| bytes[at..].starts_with(needle.as_bytes()) && starts_word(at))
+            {
+                let around = &bytes[at.saturating_sub(40)..(at + 40).min(bytes.len())];
+                panic!(
+                    "{file} has {needle:?} at {at}: {:?}",
+                    String::from_utf8_lossy(around)
+                );
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Plugins in the web client (§9.4, §10.3, §10.4): the catalog's manifest styles, plugin blocks,
 // lens views and effects. The client runs no Lua; all of it comes from the serving daemon.

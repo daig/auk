@@ -82,6 +82,7 @@ html.light .tab .tab-agent { background-color: #e4d8f7; color: #4a2d7a; }
 .palette .p-row.selected { background-color: #34507e; color: #ffffff; }
 .palette .p-label { flex: 1 1 auto; }
 .palette .p-group { color: #8d939a; font-size: 11px; }
+.palette .p-app { padding: 2px 8px 4px; color: #8d939a; font-size: 11px; }
 html.light .palette { background-color: #fbfbfa; border-color: #d5d5d2; }
 html.light .palette .p-query { color: #1b1d20; border-bottom-color: #e2e2df; }
 html.light .palette .p-row { color: #2a2d31; }
@@ -128,6 +129,9 @@ pub struct StatusItem {
 /// The palette as drawn: the query and the shown rows `(label, group)`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PaletteView {
+    /// The program the focused pane reports (the hello's `app`, §7.2), named in the palette's
+    /// header while a listening surface is open (§12.2).
+    pub app: Option<String>,
     pub query: String,
     pub rows: Vec<(String, String)>,
     pub selected: usize,
@@ -303,7 +307,21 @@ pub fn palette(doc: &mut Document, parent: NodeId, w: f64, h: f64, p: &PaletteVi
     backdrop(doc, parent, w, h, false);
     let box_ = child(doc, parent, "div", "palette", None);
     doc.set_attribute(box_, "role", "dialog");
-    doc.set_attribute(box_, "aria-label", "Command Palette");
+    match &p.app {
+        Some(app) => {
+            doc.set_attribute(box_, "aria-label", &format!("Command Palette, {app}"));
+            let head = child(
+                doc,
+                box_,
+                "div",
+                "p-app",
+                Some(&format!("{app} \u{2014} Commands")),
+            );
+            doc.set_attribute(head, "id", "palette-app");
+            doc.set_attribute(head, "data-app", app);
+        }
+        None => doc.set_attribute(box_, "aria-label", "Command Palette"),
+    }
     let (class, text) = if p.query.is_empty() {
         ("p-query empty", "Type a command, or a path to open")
     } else {

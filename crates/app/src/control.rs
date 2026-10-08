@@ -553,6 +553,7 @@ fn main_command(cmd: &str, mut args: Vec<String>, win: usize) -> Result<Value, S
             Ok(match &s.overlays.palette {
                 Some(p) => json!({
                     "open": true,
+                    "drawn_app": s.chrome.palette_app().map(|(app, text)| json!({"app": app, "text": text})),
                     "query": p.query,
                     "selected": p.selected,
                     "rows": p.rows().iter().map(|r| json!({"label": r.label, "group": r.group, "action": r.action_name()})).collect::<Vec<_>>(),

@@ -484,6 +484,25 @@ impl Chrome {
         out
     }
 
+    /// The palette's header as drawn: the program it names (`data-app`) and its text.
+    pub fn palette_app(&self) -> Option<(String, String)> {
+        let mut stack = vec![self.doc.root()];
+        while let Some(n) = stack.pop() {
+            if self.doc.attribute(n, "id") == Some("palette-app") {
+                let app = self.doc.attribute(n, "data-app")?.to_owned();
+                let text: String = self
+                    .doc
+                    .children(n)
+                    .iter()
+                    .filter_map(|&c| self.doc.node(c).text())
+                    .collect();
+                return Some((app, text));
+            }
+            stack.extend(self.doc.children(n).iter().copied());
+        }
+        None
+    }
+
     /// Every element with an action and its box, in points (for the automation endpoint).
     pub fn actions(&self) -> Vec<(String, auk_ui::Rect)> {
         let mut out = Vec::new();
