@@ -2771,3 +2771,420 @@ fn the_spawn_filter_never_runs_for_blocks_a_late_answer_is_logged_and_cwd_events
         "{toast}"
     );
 }
+
+/// Through the real daemon (§5.2, §9.7): the spawn filter's `env` is exactly the pane-identity
+/// set under `TERN_` names, without `TERM_PROGRAM`, `TERM_PROGRAM_VERSION` or the login
+/// environment; its answer is the complete set (a key it drops is gone from the pane), while
+/// `TERM_PROGRAM` and its version stay the daemon's. `tern.pane.write` from a host hook types
+/// into the pane's PTY, and a write to an unknown pane is ignored.
+#[test]
+fn the_spawn_filter_sees_only_the_identity_set_and_pane_write_reaches_the_pty() {
+    let env = TestEnv::new(EXE, "spawnenv");
+    package(
+        &env,
+        "spy",
+        "schema = 1\nid = \"spy\"\nname = \"Spy\"\nversion = \"1\"\nhost = \"host.luau\"\n",
+        &[(
+            "host.luau",
+            r#"tern.on("spawn", function(spec)
+                   local seen = {}
+                   for k, v in pairs(spec.env) do seen[k] = v end
+                   tern.kv.set("env", seen)
+                   spec.env.TERN_LENSES = nil
+                   spec.env.TERM_PROGRAM = "spoofed"
+                   spec.env.TERM_PROGRAM_VERSION = "0"
+                   spec.env.SPY_ADDED = "added"
+                   return spec
+               end)
+               tern.on("cwd", function(ev)
+                   if string.sub(ev.path, -11) == "written-dir" then
+                       tern.pane.write(999999, "echo never\r")
+                       tern.pane.write(ev.pane, "echo written-$((6*7))\r")
+                   end
+               end)"#,
+        )],
+    );
+    let _daemon = env.start_daemon();
+    let pane = env.new_pane(&[]);
+    env.wait(pane, "prompt");
+
+    // Exactly the identity set, with the daemon's values.
+    let seen = kv(&env, "spy")["env"].clone();
+    let mut keys: Vec<&str> = seen
+        .as_object()
+        .unwrap_or_else(|| panic!("the filter's env wasn't recorded: {seen}"))
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        [
+            "TERN_BLOB_DIR",
+            "TERN_COMPLETE",
+            "TERN_IDENTITY",
+            "TERN_LENSES",
+            "TERN_PANE",
+            "TERN_PANE_SOCKET",
+            "TERN_WINDOW_KEY",
+            "TERN_WINDOW_SOCKET",
+        ],
+        "{seen}"
+    );
+    assert_eq!(seen["TERN_PANE"], pane.to_string());
+    let pane_socket = env.socket.parent().unwrap().join(format!("panes/{pane}.sock"));
+    assert_eq!(seen["TERN_PANE_SOCKET"], pane_socket.to_string_lossy().as_ref());
+    assert_eq!(seen["TERN_WINDOW_SOCKET"], "", "daemon panes have no window socket");
+    assert_eq!(seen["TERN_COMPLETE"], "0");
+    assert_eq!(seen["TERN_BLOB_DIR"], env.state.join("blobs").to_string_lossy().as_ref());
+    for key in ["TERN_IDENTITY", "TERN_WINDOW_KEY"] {
+        assert!(seen[key].as_str().is_some_and(|v| !v.is_empty()), "{key}: {seen}");
+    }
+
+    // The pane: the dropped key is gone, the added one is set, the rest of the identity set is
+    // what the filter saw, and TERM_PROGRAM is the daemon's.
+    env.run(
+        pane,
+        "print -r -- \"[${AUK_LENSES-unset}|$SPY_ADDED|$AUK_PANE|$AUK_WINDOW_KEY|$AUK_IDENTITY|$TERM_PROGRAM|$TERM_PROGRAM_VERSION]\"",
+    );
+    let want = format!(
+        "[unset|added|{pane}|{}|{}|auk|{}]",
+        seen["TERN_WINDOW_KEY"].as_str().unwrap(),
+        seen["TERN_IDENTITY"].as_str().unwrap(),
+        env!("CARGO_PKG_VERSION")
+    );
+    let text = env.daemon(&format!("capture {pane}"))["text"].as_str().unwrap_or_default().to_owned();
+    assert!(text.lines().any(|l| l.trim_end() == want), "want {want} in:\n{text}");
+
+    // `tern.pane.write` from the `cwd` hook types a line into the shell.
+    std::fs::create_dir_all(env.home.join("written-dir")).expect("mkdir");
+    env.run(pane, "cd written-dir");
+    wait_for("the hook's line to run in the pane", || {
+        let text = env.daemon(&format!("capture {pane}"))["text"].as_str()?.to_owned();
+        text.lines().any(|l| l.trim_end() == "written-42").then_some(())
+    });
+    env.wait(pane, "prompt");
+    let text = env.daemon(&format!("capture {pane}"))["text"].as_str().unwrap_or_default().to_owned();
+    assert!(!text.contains("never"), "{text}");
+    assert_eq!(env.pane_info(pane)["exit"], Value::Null, "the pane survived");
+}
+
+// ---------------------------------------------------------------------------------------------
+// Window half: route decisions, modifier taps and pane/tab events through the app (§9.8)
+
+/// An app on a fresh daemon with one window-half package `probe` (window.luau = `src`), the
+/// system opener replaced by a script logging what it opens, typing with the US layout. Returns
+/// the env, the app, the layout (selected while it lives), the shell pane and the opener's log.
+#[cfg(target_os = "macos")]
+fn window_probe(
+    name: &str,
+    src: &str,
+) -> (
+    TestEnv,
+    auk_conformance::app::App,
+    auk_conformance::app::InputSource,
+    u64,
+    PathBuf,
+) {
+    use window_half::*;
+    let env = TestEnv::new(EXE, name);
+    let log = env.root.join("opened.txt");
+    let opener = env.root.join("opener.sh");
+    executable(
+        &opener,
+        &format!("#!/bin/sh\nprintf '%s\\n' \"$1\" >> {}\n", quote(&log.to_string_lossy())),
+    );
+    package(
+        &env,
+        "probe",
+        "schema = 1\nid = \"probe\"\nname = \"Probe\"\nversion = \"1\"\nwindow = \"window.luau\"\n",
+        &[("window.luau", src)],
+    );
+    env.start_daemon();
+    let app = auk_conformance::app::App::start_with(
+        &env,
+        "app",
+        &[],
+        &[("AUK_OPENER", &opener.to_string_lossy())],
+    );
+    let us = auk_conformance::app::InputSource::select(&app, auk_conformance::app::US_LAYOUT);
+    let pane = shell(&env, &app);
+    let plugins = loaded(&app, &["probe"]);
+    assert!(plugins["failures"].as_array().unwrap().is_empty(), "{plugins}");
+    (env, app, us, pane, log)
+}
+
+#[cfg(target_os = "macos")]
+fn info_toasts(app: &auk_conformance::app::App) -> Vec<String> {
+    window_half::toasts(app)
+        .into_iter()
+        .filter(|t| t["level"] == "info")
+        .filter_map(|t| t["text"].as_str().map(str::to_owned))
+        .collect()
+}
+
+/// ⌘-clicks the first cell of the line of the pane showing `text`.
+#[cfg(target_os = "macos")]
+fn cmd_click_text(app: &auk_conformance::app::App, pane: u64, text: &str) {
+    let line = wait_for(&format!("{text:?} on screen"), || {
+        let t = app.request(&format!("capture {pane}"))["text"].as_str()?.to_owned();
+        t.lines().position(|l| l.starts_with(text))
+    });
+    let (x, y) = wait_for("the line drawn", || {
+        let l = app.request(&format!("pane-layout {pane}"));
+        let first = l["first_line"].as_u64()? as usize;
+        let row = l["rows"]
+            .as_array()?
+            .iter()
+            .find(|r| r[0].as_u64() == Some((first + line) as u64))?
+            .clone();
+        let ox = l["origin"][0].as_f64()?;
+        let oy = l["origin"][1].as_f64()?;
+        let cw = l["cell"][0].as_f64()?;
+        Some((ox + cw * 2.5, oy + row[1].as_f64()? + row[2].as_f64()? / 2.0))
+    });
+    app.request(&format!("mouse down {x} {y} --cmd"));
+    app.request(&format!("mouse up {x} {y} --cmd"));
+}
+
+/// §9.8 routes: `route.open` decisions `{url}` (which `route.link` then sees), `{path, how?}`
+/// and `{handled = true}` are carried out for `auk open`, and a `route.link` decision on a
+/// ⌘-clicked link (`{url}`, `{path}`, `{handled = true}`, or nil for the built-in open).
+#[cfg(target_os = "macos")]
+#[test]
+fn m9_route_open_and_link_decisions_url_path_and_handled_are_applied_in_the_app() {
+    use window_half::*;
+    let (env, app, _us, pane, log) = window_probe(
+        "m9-routes",
+        r##"
+        tern.route.open(function(req, cx)
+            local name = req.path:match("[^/]+$")
+            if name == "to-url.txt" then return {url = "https://example.com/from-open"} end
+            if name == "to-path.txt" then return {path = "/tmp/auk-rewritten.txt", how = "tab"} end
+            if name == "handled.txt" then
+                cx:toast("info", "open handled " .. req.origin)
+                return {handled = true}
+            end
+            return nil
+        end)
+        tern.route.link(function(link, cx)
+            if link.url == "https://example.com/from-open" then
+                cx:toast("info", "link saw the open's url")
+                return nil
+            end
+            if link.url == "https://example.com/rewrite" then return {url = "https://example.com/rewritten"} end
+            if link.url == "https://example.com/to-path" then return {path = "/tmp/auk-linked.txt"} end
+            if link.url == "https://example.com/handled" then
+                cx:toast("info", "link handled " .. link.url)
+                return {handled = true}
+            end
+            return nil
+        end)
+        "##,
+    );
+    let logged = || {
+        std::fs::read_to_string(&log)
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let open = |name: &str| {
+        let path = env.root.join(name);
+        std::fs::write(&path, "x").expect("write");
+        let path = std::fs::canonicalize(&path).expect("canonical");
+        let out = env.cli(&["--json", "open", &path.to_string_lossy()]);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        path.to_string_lossy().into_owned()
+    };
+
+    // {url}: route.link sees the new url (and passes), then the built-in opens it.
+    let to_url = open("to-url.txt");
+    wait_for("the url decision's open", || (logged() == ["https://example.com/from-open"]).then_some(()));
+    let opens = app.request("opens");
+    assert_eq!(
+        opens["routed"][0],
+        json!({"path": to_url, "origin": "cli", "url": "https://example.com/from-open"}),
+        "{opens}"
+    );
+    assert_eq!(opens["opened"][0]["target"], "https://example.com/from-open", "{opens}");
+    wait_toast(&app, "link saw the open's url");
+
+    // {path, how}: the rewritten path opens, the way the decision says.
+    let to_path = open("to-path.txt");
+    wait_for("the path decision's open", || (logged().len() == 2).then_some(()));
+    assert_eq!(logged()[1], "/tmp/auk-rewritten.txt");
+    let opens = app.request("opens");
+    assert_eq!(
+        opens["routed"][1],
+        json!({"path": to_path, "origin": "cli", "rewritten": "/tmp/auk-rewritten.txt"})
+    );
+    assert_eq!(opens["opened"][1]["target"], "/tmp/auk-rewritten.txt");
+    assert_eq!(opens["opened"][1]["how"], "tab", "{opens}");
+
+    // {handled = true}: nothing more opens.
+    let handled = open("handled.txt");
+    wait_toast(&app, "open handled cli");
+    let opens = app.request("opens");
+    assert_eq!(opens["routed"][2], json!({"path": handled, "origin": "cli", "handled": true}));
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(logged().len(), 2, "a handled open opens nothing");
+    assert_eq!(app.request("opens")["opened"].as_array().unwrap().len(), 2);
+
+    // ⌘-clicked links: route.link's decision is carried out.
+    for (label, url) in [
+        ("rewrite-link", "https://example.com/rewrite"),
+        ("to-path-link", "https://example.com/to-path"),
+        ("handled-link", "https://example.com/handled"),
+        ("plain-link", "https://example.com/plain"),
+    ] {
+        type_line(
+            &env,
+            &app,
+            pane,
+            &format!("printf '\\e]8;;{url}\\e\\\\{label}\\e]8;;\\e\\\\\\n'"),
+        );
+    }
+    cmd_click_text(&app, pane, "rewrite-link");
+    wait_for("the rewritten url's open", || (logged().len() == 3).then_some(()));
+    assert_eq!(logged()[2], "https://example.com/rewritten");
+    assert_eq!(
+        app.request("opens")["routed"][3],
+        json!({"url": "https://example.com/rewrite", "rewritten": "https://example.com/rewritten"})
+    );
+    cmd_click_text(&app, pane, "to-path-link");
+    wait_for("the link's path open", || (logged().len() == 4).then_some(()));
+    assert_eq!(logged()[3], "/tmp/auk-linked.txt");
+    let opens = app.request("opens");
+    assert_eq!(opens["routed"][4], json!({"url": "https://example.com/to-path", "path": "/tmp/auk-linked.txt"}));
+    assert_eq!(opens["opened"][3]["origin"], "link", "{opens}");
+    cmd_click_text(&app, pane, "handled-link");
+    wait_toast(&app, "link handled https://example.com/handled");
+    assert_eq!(
+        app.request("opens")["routed"][5],
+        json!({"url": "https://example.com/handled", "handled": true})
+    );
+    // nil: the built-in open, after the handled click opened nothing.
+    cmd_click_text(&app, pane, "plain-link");
+    wait_for("the built-in open of the plain link", || (logged().len() == 5).then_some(()));
+    assert_eq!(logged()[4], "https://example.com/plain");
+    assert_eq!(app.request("opens")["routed"].as_array().unwrap().len(), 6);
+}
+
+/// §9.8 binds: a modifier-tap sequence (`shift>shift`) runs its bind when the taps come within
+/// 0.5 s of each other, not when the second comes later; and a key after a lone tap still
+/// reaches the program.
+#[cfg(target_os = "macos")]
+#[test]
+fn m9_a_modifier_tap_bind_runs_on_taps_within_half_a_second() {
+    use window_half::*;
+    let (env, app, _us, pane, _) = window_probe(
+        "m9-taps",
+        r##"
+        local n = 0
+        tern.bind("shift>shift", function(cx)
+            n = n + 1
+            cx:toast("info", "double shift " .. n)
+        end)
+        "##,
+    );
+    let plugins = app.request("plugins");
+    assert!(
+        plugins["keymap"].as_array().unwrap().iter().any(|k| k["action"] == "plugin.probe.bind.0"),
+        "{plugins}"
+    );
+    app.request(&format!("focus {pane}"));
+    app.request("tap shift shift");
+    wait_toast(&app, "double shift 1");
+    // Two taps 0.7 s apart are two starts, not a sequence.
+    app.request("tap shift");
+    std::thread::sleep(Duration::from_millis(700));
+    app.request("tap shift");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(info_toasts(&app), ["double shift 1"]);
+    // The late tap started a new sequence: one more in time completes it.
+    app.request("tap shift");
+    wait_toast(&app, "double shift 2");
+    // A key after a lone tap is a key: the shell gets it.
+    std::thread::sleep(Duration::from_millis(700));
+    app.request("tap shift");
+    app.request("type e c h o space t a p p e d return");
+    wait_for("the typed line to run", || {
+        let t = env.daemon(&format!("capture {pane}"))["text"].as_str()?.to_owned();
+        t.lines().any(|l| l.trim_end() == "tapped").then_some(())
+    });
+    assert_eq!(info_toasts(&app), ["double shift 1", "double shift 2"]);
+}
+
+/// §9.8 window events: `tab_created` and `pane_created` fire for the tabs and panes this window
+/// adds (a menu's new tab, a split a handler makes through `cx.layout`), after the frame shows
+/// them, in order, with a handler's own changes delivered in the next round and never
+/// re-entered. Panes there before the window half loaded, and panes another window adds, don't
+/// fire them.
+#[cfg(target_os = "macos")]
+#[test]
+fn m9_pane_and_tab_created_fire_for_this_windows_additions_and_never_re_enter() {
+    use window_half::*;
+    let (env, app, _us, pane, _) = window_probe(
+        "m9-events",
+        r##"
+        local depth, split = 0, false
+        tern.on("tab_created", function(ev, cx)
+            cx:toast("info", "tab_created " .. ev.tab)
+        end)
+        tern.on("pane_created", function(ev, cx)
+            depth = depth + 1
+            -- The pane is in the layout the handler sees.
+            local found = false
+            for _, p in ipairs(cx.session:panes()) do
+                if p.pane == ev.pane then found = true end
+            end
+            cx:toast("info", string.format("pane_created %d depth %d found %s", ev.pane, depth, tostring(found)))
+            if not split then
+                split = true
+                cx.layout:split(ev.pane, "right")
+            end
+            depth = depth - 1
+        end)
+        "##,
+    );
+    // The first pane came before the window half: nothing fires for it.
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(info_toasts(&app).is_empty(), "{:?}", info_toasts(&app));
+    let _ = pane;
+
+    // New Tab from the menu: tab_created, then pane_created; the handler's split comes in the
+    // next round, at depth 1 again.
+    app.request("menu Shell 'New Tab'");
+    let toasts = wait_for("the events of the new tab and the handler's split", || {
+        let t = info_toasts(&app);
+        (t.len() >= 3).then_some(t)
+    });
+    let tabs = tab_panes(&app);
+    assert_eq!(tabs.len(), 2, "{tabs:?}");
+    let layout = app.layout();
+    let new_tab = layout["sessions"][0]["tabs"][1]["id"].as_u64().expect("the new tab");
+    let new_panes = &tabs[1].1;
+    assert_eq!(new_panes.len(), 2, "the handler split the new pane: {tabs:?}");
+    assert_eq!(
+        toasts,
+        [
+            format!("tab_created {new_tab}"),
+            format!("pane_created {} depth 1 found true", new_panes[0]),
+            format!("pane_created {} depth 1 found true", new_panes[1]),
+        ]
+    );
+
+    // Another window on the same session adds a tab: this window's plugin hears nothing of it.
+    let other = auk_conformance::app::App::start(&env, "b", &[]);
+    loaded(&other, &["probe"]);
+    other.request("menu Shell 'New Tab'");
+    wait_for("this window to show the other window's tab", || {
+        (tab_panes(&app).len() == 3).then_some(())
+    });
+    wait_for("the other window's own events", || {
+        info_toasts(&other).iter().any(|t| t.starts_with("tab_created")).then_some(())
+    });
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(info_toasts(&app).len(), 3, "{:?}", info_toasts(&app));
+}

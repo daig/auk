@@ -386,6 +386,19 @@ impl Restrictions {
     };
 }
 
+/// Grid properties Tern's engine lacks (program and plugin sheets get "unknown property").
+const TERN_MISSING_GRID: [&str; 9] = [
+    "grid-template-areas",
+    "grid-area",
+    "grid-auto-rows",
+    "grid-auto-columns",
+    "grid-auto-flow",
+    "grid-row-start",
+    "grid-row-end",
+    "grid-column-start",
+    "grid-column-end",
+];
+
 fn contains_ci(hay: &str, needle: &str) -> bool {
     hay.to_ascii_lowercase().contains(needle)
 }
@@ -426,6 +439,11 @@ pub fn parse_declaration(
     }
     if SILENTLY_DROPPED.contains(&name) {
         return Err(DeclError::Silent);
+    }
+    // Grid areas, auto tracks and the line longhands are missing from Tern's engine, and using
+    // them logs "unknown property" (book:10367, 10796). Our own sheets keep them.
+    if r.tern_units && TERN_MISSING_GRID.contains(&name) {
+        return Err(DeclError::UnknownProperty);
     }
     if ACCEPTED_UNUSED.contains(&name) {
         return Ok(Vec::new());
@@ -910,10 +928,12 @@ fn parse_track_list<'i>(p: &mut Parser<'i>) -> PResult<TrackListSpec> {
                     Token::Number {
                         int_value: Some(n), ..
                     } if n > 0 => RepeatCount::Count(n.min(10000) as u16),
-                    Token::Ident(ref s) if s.eq_ignore_ascii_case("auto-fill") => {
+                    // Tern repeats a whole number of times only: no `repeat(auto-fill | auto-fit,
+                    // …)` in program and plugin sheets (book:10367, 10797).
+                    Token::Ident(ref s) if s.eq_ignore_ascii_case("auto-fill") && !tern_rules() => {
                         RepeatCount::AutoFill
                     }
-                    Token::Ident(ref s) if s.eq_ignore_ascii_case("auto-fit") => {
+                    Token::Ident(ref s) if s.eq_ignore_ascii_case("auto-fit") && !tern_rules() => {
                         RepeatCount::AutoFit
                     }
                     _ => return Err(ParseError::unexpected_token()),
@@ -1990,7 +2010,10 @@ fn parse_shorthand<'i>(name: &str, p: &mut Parser<'i>) -> PResult<Vec<(Prop, SV)
                     (GridTemplateAreas, SV::Kw("none")),
                 ]);
             }
-            // Areas form: "a a" 40px "b b" 1fr / cols.
+            // Areas form: "a a" 40px "b b" 1fr / cols. Tern has no areas.
+            if tern_rules() {
+                return Err(ParseError::unexpected_token());
+            }
             let mut row_tracks = Vec::new();
             let mut strings = Vec::new();
             while let Ok(s) = p.try_parse(|p| p.expect_string_cloned()) {

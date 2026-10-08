@@ -602,3 +602,111 @@ fn plugin_and_program_sheets_cascade_in_first_install_order() {
     doc.update();
     assert_eq!(color(&doc, x), RED);
 }
+
+/// §8.4 the engine's feature set: program sheets get Tern's errors for the subsequent-sibling
+/// combinator `~` and `:has` (the whole rule dropped, "unsupported selector"), for grid areas
+/// and the line longhands ("unknown property"), and for `repeat(auto-fill | auto-fit, …)` and
+/// the areas form of `grid-template` ("invalid value"). The rest of each sheet still applies,
+/// `~=` attribute selectors are fine, and the terminal's own sheets keep `~` and the grid features.
+#[test]
+fn program_sheets_refuse_sibling_tilde_has_grid_areas_and_auto_fill_with_terns_errors() {
+    let css = "\
+.a ~ .b { color: red; }
+.a:has(.c) { color: red; }
+.ok { color: green; }
+[data-k~=\"x\"] { color: blue; }
+.g {
+  display: grid;
+  grid-template-areas: \"head head\" \"side main\";
+  grid-area: head;
+  grid-template-columns: repeat(auto-fill, 40px);
+  grid-template-rows: repeat(auto-fit, 20px);
+  grid-template: \"x y\" 10px / 1fr 1fr;
+  grid-auto-flow: column;
+  grid-row-start: 2;
+  grid-column-end: 3;
+  grid-template-columns: repeat(2, 30px);
+  grid-column: 1 / span 2;
+}
+";
+    let mut doc = doc_with("");
+    let root = doc.root();
+    let body = el(&mut doc, root, "body", "", None);
+    let region = el(&mut doc, body, "div", "sf-region sf-main", None);
+    doc.set_attribute(region, "data-scope", "sf1");
+    let a = el(&mut doc, region, "div", "a", None);
+    let b = el(&mut doc, region, "div", "b", Some("b"));
+    el(&mut doc, a, "div", "c", None);
+    let ok = el(&mut doc, region, "div", "ok", Some("ok"));
+    let k = el(&mut doc, region, "div", "", Some("k"));
+    doc.set_attribute(k, "data-k", "w x");
+    let g = el(&mut doc, region, "div", "g", None);
+    let errors = doc.set_stylesheet("app", SheetKind::Program, Some("sf1"), css);
+    let want = [
+        "1:1: unsupported selector in `.a ~ .b`",
+        "2:1: unsupported selector in `.a:has(.c)`",
+        "7:3: unknown property `grid-template-areas` in `grid-template-areas: \"head head\" \"side main\"`",
+        "8:3: unknown property `grid-area` in `grid-area: head`",
+        "9:3: invalid value for `grid-template-columns` in `grid-template-columns: repeat(auto-fill, 40px)`",
+        "10:3: invalid value for `grid-template-rows` in `grid-template-rows: repeat(auto-fit, 20px)`",
+        "11:3: invalid value for `grid-template` in `grid-template: \"x y\" 10px / 1fr 1fr`",
+        "12:3: unknown property `grid-auto-flow` in `grid-auto-flow: column`",
+        "13:3: unknown property `grid-row-start` in `grid-row-start: 2`",
+        "14:3: unknown property `grid-column-end` in `grid-column-end: 3`",
+    ];
+    assert_eq!(errors, want, "{errors:#?}");
+    doc.update();
+    assert_eq!(color(&doc, b), BLACK, "the `~` rule is dropped");
+    assert_eq!(color(&doc, a), BLACK, "the `:has` rule is dropped");
+    assert_eq!(color(&doc, ok), GREEN);
+    assert_eq!(color(&doc, k), BLUE, "`~=` is an attribute selector");
+    // What Tern supports still applies: two 30px columns, the item spans both.
+    let item = el(&mut doc, g, "div", "", Some("x"));
+    doc.set_inline_style(item, "grid-column: 1 / span 2; height: 5px");
+    doc.update();
+    assert_eq!(doc.border_box(item).unwrap().w, 60.0);
+
+    // Plugin sheets follow the same rules; the terminal's own sheets may use `~` and the grid
+    // features.
+    let plugin = doc.set_stylesheet("plug", SheetKind::Plugin, None, ".p ~ .q { color: red } .r { grid-area: x }");
+    assert_eq!(
+        plugin,
+        [
+            "1:1: unsupported selector in `.p ~ .q`",
+            "1:29: unknown property `grid-area` in `grid-area: x`"
+        ]
+    );
+    let own = doc.set_stylesheet(
+        "own",
+        SheetKind::BuiltIn,
+        None,
+        ".p ~ .q { color: red } .t { grid-template-areas: \"a b\"; grid-template-columns: repeat(auto-fill, 10px); grid-area: a; }",
+    );
+    assert!(own.is_empty(), "{own:?}");
+}
+
+/// §8.4 units: `vw` and `vh` are viewport percentages in program sheets, and follow the
+/// viewport when it changes.
+#[test]
+fn vw_and_vh_units_resolve_against_the_viewport_in_program_sheets() {
+    let mut doc = doc_with("");
+    let root = doc.root();
+    let body = el(&mut doc, root, "body", "", None);
+    let region = el(&mut doc, body, "div", "sf-region sf-main", None);
+    doc.set_attribute(region, "data-scope", "sf1");
+    let v = el(&mut doc, region, "div", "v", None);
+    let errors = doc.set_stylesheet(
+        "app",
+        SheetKind::Program,
+        Some("sf1"),
+        ".v { width: 50vw; height: 25vh; margin-left: calc(10vw + 2px); }",
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+    doc.update();
+    let r = doc.border_box(v).unwrap();
+    assert_eq!((r.x, r.w, r.h), (82.0, 400.0, 150.0), "at 800x600");
+    doc.set_viewport(1000.0, 400.0);
+    doc.update();
+    let r = doc.border_box(v).unwrap();
+    assert_eq!((r.x, r.w, r.h), (102.0, 500.0, 100.0), "at 1000x400");
+}

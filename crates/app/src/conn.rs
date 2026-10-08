@@ -372,6 +372,19 @@ impl Connection {
         }
     }
 
+    /// Sends a layout edit as a request without waiting: its answer lands in
+    /// [`Shared::replies`] under the returned id, after the edit's layout (see
+    /// [`take_reply`](Self::take_reply)). `None` when the link is gone.
+    pub fn request_async(&self, edit: LayoutEdit) -> Option<u64> {
+        let id = self.next_request.fetch_add(1, Ordering::Relaxed) + 1;
+        self.send(&ClientMsg::Request { id, edit }).ok().map(|_| id)
+    }
+
+    /// The answer to a request sent with [`request_async`](Self::request_async), once it came.
+    pub fn take_reply(&self, id: u64) -> Option<Result<serde_json::Value, String>> {
+        self.shared().replies.remove(&id)
+    }
+
     /// The host's name in sheet names (`plugin:<host>:<id>:styles`): `local`, or the SSH
     /// destination.
     pub fn host_name(&self) -> String {

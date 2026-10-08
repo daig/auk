@@ -656,3 +656,93 @@ fn diff_mode_absent_or_auto_follows_the_edits_setting() {
         assert_eq!(split(&h), [wide, wide, false, true], "{cols} cols");
     }
 }
+
+/// §8.1 props every node takes: `hidden` hides the node (no box, not painted, not in the
+/// accessibility tree) until it's cleared; `title` becomes the element's tooltip (`title`);
+/// `aria` becomes `aria-label` (the accessible name); `shrink` and a fractional `basis` are flex
+/// sizing written as inline style, and the boxes come out at those sizes.
+#[test]
+fn hidden_title_aria_shrink_and_a_fractional_basis_take_effect() {
+    let mut h = Harness::new();
+    h.hello(&[]);
+    h.surface(
+        "s1",
+        "inline",
+        json!([
+            {"id": "gone", "k": "text", "p": {"text": "secret words", "hidden": true}},
+            {"id": "tip", "k": "text", "p": {"text": "hover me", "title": "the tooltip", "aria": "Hover target"}},
+            {"id": "row", "k": "row", "p": {"gap": "none"}, "c": [
+                {"id": "quarter", "k": "text", "p": {"text": "q", "basis": 0.25, "shrink": 0}},
+                {"id": "rest", "k": "text", "p": {"text": "r", "grow": 1}}
+            ]},
+            {"id": "tight", "k": "row", "p": {"gap": "none"}, "c": [
+                {"id": "stiff", "k": "text", "p": {"text": "s", "basis": 0.75, "shrink": 0}},
+                {"id": "soft", "k": "text", "p": {"text": "t", "basis": 0.75, "shrink": 1}}
+            ]}
+        ]),
+    );
+    h.frame();
+    // hidden
+    let gone = h.el("s1", "gone");
+    assert!(h.class(gone).contains("sf-hidden"));
+    assert_eq!(
+        h.doc.computed_style(gone).unwrap().display,
+        auk_ui::style::Display::None
+    );
+    assert!(h.doc.border_box(gone).is_none_or(|b| b.w == 0.0 && b.h == 0.0));
+    let ax = h.view.accessibility(&h.doc);
+    let mut all = Vec::new();
+    ax.walk(&mut all);
+    assert!(
+        all.iter().all(|n| n.id.as_deref() != Some("gone")),
+        "a hidden node isn't in the accessibility tree"
+    );
+    // It takes no space: the next node sits where it would have been.
+    let tip_y = h.doc.border_box(h.el("s1", "tip")).unwrap().y;
+    h.frame_ops("s1", 2, json!([["set", "gone", {"hidden": false}]]));
+    h.frame();
+    assert!(!h.class(gone).contains("sf-hidden"));
+    let shown = h.doc.border_box(gone).expect("drawn once unhidden");
+    assert!(shown.h > 0.0);
+    let tip_y2 = h.doc.border_box(h.el("s1", "tip")).unwrap().y;
+    // (by its height and the 16px block gap between `main`'s children, §8.3)
+    assert!(
+        (tip_y2 - (tip_y + shown.h + 16.0)).abs() < 0.5,
+        "the next node moves down past it: {tip_y} -> {tip_y2} ({})",
+        shown.h
+    );
+    let ax = h.view.accessibility(&h.doc);
+    assert!(ax.find(&|n| n.id.as_deref() == Some("gone")).is_some());
+
+    // title and aria
+    let tip = h.el("s1", "tip");
+    assert_eq!(h.attr(tip, "title").as_deref(), Some("the tooltip"));
+    assert_eq!(h.attr(tip, "aria-label").as_deref(), Some("Hover target"));
+    let ax = h.view.accessibility(&h.doc);
+    let node = ax
+        .find(&|n| n.id.as_deref() == Some("tip"))
+        .expect("the node in the accessibility tree");
+    assert_eq!(node.name.as_deref(), Some("Hover target"));
+    h.frame_ops("s1", 3, json!([["set", "tip", {"title": null, "aria": null}]]));
+    h.frame();
+    assert_eq!(h.attr(tip, "title"), None);
+    assert_eq!(h.attr(tip, "aria-label"), None);
+
+    // basis as a fraction, shrink
+    let row = h.doc.border_box(h.el("s1", "row")).unwrap();
+    let quarter = h.el("s1", "quarter");
+    assert_eq!(
+        h.view.written().style(quarter),
+        Some("flex-shrink: 0; flex-basis: 25%;")
+    );
+    let q = h.doc.border_box(quarter).unwrap();
+    assert!((q.w - row.w * 0.25).abs() < 0.5, "{} of {}", q.w, row.w);
+    let rest = h.doc.border_box(h.el("s1", "rest")).unwrap();
+    assert!((rest.w - row.w * 0.75).abs() < 0.5, "grow takes the rest");
+    // Both ask for 75%: only the one that may shrink gives way.
+    let tight = h.doc.border_box(h.el("s1", "tight")).unwrap();
+    let stiff = h.doc.border_box(h.el("s1", "stiff")).unwrap();
+    let soft = h.doc.border_box(h.el("s1", "soft")).unwrap();
+    assert!((stiff.w - tight.w * 0.75).abs() < 0.5, "{} of {}", stiff.w, tight.w);
+    assert!((soft.w - tight.w * 0.25).abs() < 0.5, "{} of {}", soft.w, tight.w);
+}

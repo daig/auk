@@ -278,6 +278,11 @@ pub(crate) fn with_unit_mode<R>(mode: UnitMode, f: impl FnOnce() -> R) -> R {
     r
 }
 
+/// Whether the value being parsed is in a program or plugin sheet (Tern's rules), not ours.
+pub(crate) fn tern_rules() -> bool {
+    UNIT_MODE.with(|m| m.get()) == UnitMode::Tern
+}
+
 fn unit_expr(value: f32, unit: &str) -> PResult<Expr> {
     let u = unit.to_ascii_lowercase();
     let tern = UNIT_MODE.with(|m| m.get()) == UnitMode::Tern;

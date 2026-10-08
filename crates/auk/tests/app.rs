@@ -1518,6 +1518,288 @@ fn a_screen_surface_over_an_inline_one_takes_pointer_caret_and_visible() {
     );
 }
 
+/// A text node per line, ids `{prefix}{i}`.
+fn text_lines(prefix: &str, n: usize) -> Value {
+    Value::Array(
+        (0..n)
+            .map(|i| json!({"id": format!("{prefix}{i}"), "k": "text", "p": {"text": format!("{prefix} line {i}")}}))
+            .collect(),
+    )
+}
+
+fn num(v: &Value) -> f64 {
+    v.as_f64().unwrap_or_else(|| panic!("not a number: {v}"))
+}
+
+/// §7.5 `dock`: sticky at the pane bottom while live, `main` laid out above it, and the tail kept
+/// in view until the user scrolls up; checked by where the window drew them.
+#[test]
+fn the_dock_sits_at_the_pane_bottom_with_main_above_it_and_the_tail_in_view() {
+    let env = env("dock");
+    let app = App::start(&env, "a", &[]);
+    let probe = focused_probe(&env, &app);
+    let pane = probe.pane;
+    probe.write(&hello(&["dock"]));
+    let mut out = Vec::new();
+    for i in 0..80 {
+        out.extend(format!("output {i}\r\n").into_bytes());
+    }
+    probe.write(&out);
+    probe.write(&open_with("s1", "inline", text_lines("m", 4)));
+    probe.write(&auk_conformance::probe::frame(
+        "s1",
+        2,
+        json!([["add", "dock", "s1", null, {"id": "dock", "k": "col", "c": [
+            {"id": "d1", "k": "text", "p": {"text": "docked one"}},
+            {"id": "d2", "k": "text", "p": {"text": "docked two"}}
+        ]}]]),
+    ));
+    acked(&probe, 2);
+    // Where the dock, main and the flow are, once both are drawn.
+    let check = |what: &str, main_lines: usize| -> (Value, [f64; 4]) {
+        let l = pane_layout(&app, pane, what, |l| {
+            l["dock"].is_object()
+                && l["blocks"].as_array().is_some_and(|b| b.len() == 1)
+                && node_box(&app, pane, &format!("m{}", main_lines - 1)).is_some()
+        });
+        let (oy, content) = (num(&l["origin"][1]), num(&l["content_height"]));
+        let dock_h = num(&l["dock"]["height"]);
+        let dock = node_box(&app, pane, "dock").expect("the dock drawn");
+        // Sticky at the pane bottom.
+        assert!(
+            (dock[1] + dock[3] - (oy + content)).abs() < 1.0,
+            "{what}: the dock's bottom {} is the pane's {}",
+            dock[1] + dock[3],
+            oy + content
+        );
+        assert!((dock[3] - dock_h).abs() < 1.0, "{what}: {dock:?} vs {dock_h}");
+        for id in ["d1", "d2"] {
+            let d = node_box(&app, pane, id).expect("docked text drawn");
+            assert!(d[1] >= dock[1] - 0.5 && d[1] + d[3] <= dock[1] + dock[3] + 0.5, "{what}: {id}");
+        }
+        // `main` lays out above it, and the tail (the surface's last line) is in view right
+        // above the dock.
+        let flow_bottom = oy + content - dock_h;
+        let last = node_box(&app, pane, &format!("m{}", main_lines - 1)).unwrap();
+        assert!(last[1] + last[3] <= flow_bottom + 0.5, "{what}: main's last line {last:?} is above the dock at {flow_bottom}");
+        assert!(last[1] >= oy, "{what}: and in view");
+        let block = &l["blocks"][0];
+        let block_bottom = oy + num(&block["top"]) + num(&block["height"]);
+        assert!(block_bottom <= flow_bottom + 0.5, "{what}: {block_bottom} > {flow_bottom}");
+        assert!(
+            block_bottom >= flow_bottom - 2.0 * num(&l["cell"][1]),
+            "{what}: the tail is kept at the bottom of the flow: {block_bottom} vs {flow_bottom}"
+        );
+        (l, dock)
+    };
+    let (l, dock) = check("the dock and main", 4);
+    assert_eq!(l["following"], true);
+    // main grows: the tail stays in view above the dock.
+    let more: Vec<Value> = (4..12)
+        .map(|i| json!(["add", format!("m{i}"), "main", null, {"id": format!("m{i}"), "k": "text", "p": {"text": format!("m line {i}")}}]))
+        .collect();
+    probe.write(&auk_conformance::probe::frame("s1", 3, Value::Array(more)));
+    acked(&probe, 3);
+    let (l2, dock2) = check("main grown", 12);
+    assert_eq!(l2["following"], true);
+    assert_eq!(dock2, dock, "the dock didn't move");
+    // The user scrolls up: the dock stays at the bottom, and the flow stops following the tail.
+    let (ox, oy) = (num(&l2["origin"][0]), num(&l2["origin"][1]));
+    let grid_y = oy + num(&l2["blocks"][0]["top"]) / 2.0;
+    app.request(&format!("scroll 5 {} {grid_y}", ox + 40.0));
+    let up = pane_layout(&app, pane, "the flow scrolled up", |l| l["following"] == false);
+    let from_bottom = num(&up["from_bottom"]);
+    assert!(from_bottom > 0.0, "{up}");
+    assert_eq!(node_box(&app, pane, "dock"), Some(dock), "the dock stays put");
+    probe.write(&auk_conformance::probe::frame(
+        "s1",
+        4,
+        json!([["add", "m12", "main", null, {"id": "m12", "k": "text", "p": {"text": "m line 12"}}]]),
+    ));
+    acked(&probe, 4);
+    let after = pane_layout(&app, pane, "the frame drawn while scrolled up", |l| {
+        l["blocks"][0]["height"].as_f64() > l2["blocks"][0]["height"].as_f64()
+    });
+    assert_eq!(after["following"], false, "the tail isn't followed once the user scrolled up");
+    assert_eq!(node_box(&app, pane, "dock"), Some(dock));
+}
+
+/// §7.5 `main` in a screen surface takes the pane's height and scrolls itself: the wheel over it
+/// scrolls its content, not the (hidden) grid.
+#[test]
+fn a_screen_surfaces_main_takes_the_pane_height_and_scrolls_itself() {
+    let env = env("screen-main");
+    let app = App::start(&env, "a", &[]);
+    let probe = focused_probe(&env, &app);
+    let pane = probe.pane;
+    probe.write(&hello(&[]));
+    let mut out = Vec::new();
+    for i in 0..80 {
+        out.extend(format!("output {i}\r\n").into_bytes());
+    }
+    probe.write(&out);
+    probe.write(&open_with("s2", "screen", text_lines("r", 150)));
+    acked(&probe, 1);
+    let l = pane_layout(&app, pane, "the screen surface", |l| l["screen"] == true);
+    let (ox, oy, content) = (num(&l["origin"][0]), num(&l["origin"][1]), num(&l["content_height"]));
+    let main = wait_for("the screen surface's main", || node_box(&app, pane, "main"));
+    assert!((main[1] - oy).abs() < 1.0, "main starts at the pane top: {main:?} vs {oy}");
+    assert!((main[3] - content).abs() < 1.0, "main takes the pane's height: {main:?} vs {content}");
+    let r0 = node_box(&app, pane, "r0").expect("the first line");
+    assert!(r0[1] >= oy && r0[1] < oy + 20.0, "{r0:?}");
+    let grid = (l["from_bottom"].clone(), l["first_line"].clone());
+    // Wheel down over it: main scrolls its content; the grid under it stays where it was.
+    app.request(&format!("scroll -6 {} {}", ox + 40.0, oy + content / 2.0));
+    let moved = wait_for("main to scroll", || {
+        let r = node_box(&app, pane, "r0")?;
+        (r[1] < r0[1] - 20.0).then_some(r)
+    });
+    let l2 = pane_layout(&app, pane, "the pane after the wheel", |l| l["screen"] == true);
+    assert_eq!((l2["from_bottom"].clone(), l2["first_line"].clone()), grid, "the grid didn't scroll");
+    assert_eq!(l2["following"], true);
+    let main2 = node_box(&app, pane, "main").unwrap();
+    assert_eq!(main2, main, "main itself stays put");
+    // And back up to its start.
+    app.request(&format!("scroll 20 {} {}", ox + 40.0, oy + content / 2.0));
+    wait_for("main to scroll back to its start", || {
+        let r = node_box(&app, pane, "r0")?;
+        ((r[1] - r0[1]).abs() < 0.5).then_some(())
+    });
+    assert!(moved[1] < r0[1]);
+}
+
+/// §7.5 `layer` overlays above everything: placed from the pane's top whatever the flow does,
+/// and on top of the surface's `main` where they overlap, so a press there is the layer's.
+#[test]
+fn a_layer_overlays_the_pane_from_its_top_above_main() {
+    let env = env("layer");
+    let app = App::start(&env, "a", &[]);
+    let probe = focused_probe(&env, &app);
+    let pane = probe.pane;
+    probe.write(&hello(&[]));
+    probe.write(&open_with(
+        "s3",
+        "inline",
+        json!([{"id": "in-go", "k": "text", "p": {"text": "inline button\nsecond line\nthird line", "actions": {"click": "inline-act"}}}]),
+    ));
+    probe.write(&auk_conformance::probe::frame(
+        "s3",
+        2,
+        json!([["add", "layer", "s3", null, {"id": "layer", "k": "col", "c": [
+            {"id": "ly", "k": "text", "p": {"text": "layer", "actions": {"click": "layer-act"}}}
+        ]}]]),
+    ));
+    acked(&probe, 2);
+    let l = pane_layout(&app, pane, "the layer up", |l| l["layers"] == true);
+    let (ox, oy) = (num(&l["origin"][0]), num(&l["origin"][1]));
+    let ly = wait_for("the layer's node", || node_box(&app, pane, "ly"));
+    let inline = wait_for("main's node", || node_box(&app, pane, "in-go"));
+    assert!((ly[0] - ox).abs() < 1.0 && (ly[1] - oy).abs() < 1.0, "at the pane's top-left: {ly:?} vs ({ox}, {oy})");
+    // They overlap: the layer is on top.
+    let overlap = (ly[0] + ly[2].min(inline[2]) / 2.0, ly[1].max(inline[1]) + 2.0);
+    assert!(overlap.1 < inline[1] + inline[3] && overlap.1 < ly[1] + ly[3], "{ly:?} {inline:?}");
+    let _ = program_input(&probe, Duration::from_millis(200));
+    click(&app, overlap);
+    assert_eq!(program_event(&probe, "action")["id"], "ly");
+    // Below the layer's node, the layer lets presses through to main.
+    assert!(ly[1] + ly[3] + 4.0 < inline[1] + inline[3], "{ly:?} {inline:?}");
+    let _ = program_input(&probe, Duration::from_millis(200));
+    click(&app, (inline[0] + 10.0, inline[1] + inline[3] - 4.0));
+    assert_eq!(program_event(&probe, "action")["id"], "in-go");
+    // With main far down the flow, a layer is still placed from the pane's top.
+    probe.write(&auk_conformance::probe::tsp_json("x", &json!({"id": "s3", "keep": false})));
+    let mut out = Vec::new();
+    for i in 0..60 {
+        out.extend(format!("pushed {i}\r\n").into_bytes());
+    }
+    probe.write(&out);
+    probe.write(&open_with(
+        "s4",
+        "inline",
+        json!([{"id": "low", "k": "text", "p": {"text": "main at the bottom"}}]),
+    ));
+    probe.write(&auk_conformance::probe::frame(
+        "s4",
+        2,
+        json!([["add", "layer", "s4", null, {"id": "layer", "k": "col", "c": [
+            {"id": "ly4", "k": "text", "p": {"text": "layer again"}}
+        ]}]]),
+    ));
+    acked(&probe, 2);
+    let low = wait_for("main far down the flow", || {
+        let b = node_box(&app, pane, "low")?;
+        (b[1] > oy + 200.0).then_some(b)
+    });
+    let ly4 = wait_for("the second layer", || node_box(&app, pane, "ly4"));
+    assert!((ly4[1] - oy).abs() < 1.0, "the layer at the pane's top: {ly4:?}, main at {low:?}");
+    // Closing the surface removes its layer.
+    probe.write(&auk_conformance::probe::tsp_json("x", &json!({"id": "s4"})));
+    pane_layout(&app, pane, "the layer gone", |l| l["layers"] == false);
+    assert_eq!(node_box(&app, pane, "ly4"), None);
+}
+
+/// §8.1 `title` is the node's tooltip: hovering the node (or anything inside it) shows it by the
+/// pointer, and it goes when the pointer leaves.
+#[test]
+fn hovering_a_node_with_a_title_shows_its_tooltip() {
+    let env = env("tooltip");
+    let app = App::start(&env, "a", &[]);
+    let probe = focused_probe(&env, &app);
+    let pane = probe.pane;
+    probe.write(&hello(&[]));
+    probe.write(b"one\r\ntwo\r\nthree\r\nfour\r\n");
+    probe.write(&open_with(
+        "s1",
+        "inline",
+        json!([
+            {"id": "row", "k": "row", "p": {"title": "Row tip"}, "c": [
+                {"id": "inner", "k": "text", "p": {"text": "inside the row"}}
+            ]},
+            {"id": "tipped", "k": "text", "p": {"text": "has a tooltip", "title": "Saved 3 files"}},
+            {"id": "plain", "k": "text", "p": {"text": "no tooltip"}}
+        ]),
+    ));
+    acked(&probe, 1);
+    // Each check moves the pointer again (a real pointer passing over the window moves it too).
+    let tooltip = |at: (f64, f64)| {
+        app.request(&format!("mouse move {} {}", at.0, at.1));
+        app.request("chrome")
+    };
+    let tipped = wait_for("the node drawn", || node_box(&app, pane, "tipped"));
+    let at = (tipped[0] + 20.0, tipped[1] + tipped[3] / 2.0);
+    let chrome = wait_for("the tooltip drawn", || {
+        let c = tooltip(at);
+        (c["tooltip_drawn"]["text"] == "Saved 3 files").then_some(c)
+    });
+    assert_eq!(chrome["tooltip"]["text"], "Saved 3 files", "{chrome}");
+    assert_eq!(chrome["tooltip"]["at"], json!([at.0, at.1]));
+    // The chrome draws it just below the pointer.
+    let drawn = &chrome["tooltip_drawn"];
+    let r: Vec<f64> = drawn["rect"].as_array().unwrap().iter().map(num).collect();
+    assert!(r[1] > at.1 && r[1] < at.1 + 40.0, "below the pointer: {drawn}");
+    assert!(r[0] >= at.0 && r[0] < at.0 + 20.0 && r[2] > 40.0 && r[3] > 8.0, "{drawn}");
+    // The nearest ancestor with a title gives it.
+    let inner = node_box(&app, pane, "inner").unwrap();
+    let at = (inner[0] + 20.0, inner[1] + inner[3] / 2.0);
+    wait_for("the row's tooltip", || {
+        (tooltip(at)["tooltip_drawn"]["text"] == "Row tip").then_some(())
+    });
+    // No title, no tooltip; nor over the grid.
+    let plain = node_box(&app, pane, "plain").unwrap();
+    let at = (plain[0] + 20.0, plain[1] + plain[3] / 2.0);
+    wait_for("no tooltip over a node without a title", || {
+        let c = tooltip(at);
+        (c["tooltip"].is_null() && c["tooltip_drawn"].is_null()).then_some(())
+    });
+    let l = pane_layout(&app, pane, "the flow", |l| l["rows"].is_array());
+    let (_, line_y) = line_top(&l, 1).expect("line 1 drawn");
+    let at = (plain[0] + 20.0, line_y + 4.0);
+    wait_for("no tooltip over the grid", || {
+        let c = tooltip(at);
+        (c["tooltip"].is_null() && c["tooltip_drawn"].is_null()).then_some(())
+    });
+}
+
 /// §5.5: Edit ▸ Clear Scrollback (⌘K) is the in-band pane operation: the daemon records it, so
 /// every replica's scrollback clears (the other window's and the daemon's too), the screen stays,
 /// and nothing reaches the program.

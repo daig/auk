@@ -88,15 +88,46 @@ impl WinState {
             .flatten()
     }
 
-    /// Updates the hover readout for a pointer at a window point. Returns whether it changed.
+    /// The `title` of the surface node under a window point, or of its nearest ancestor with
+    /// one: the node's tooltip (§8.1).
+    pub(super) fn title_at(&self, x: f64, y: f64) -> Option<String> {
+        let pane = self.tab_layout.pane_at(x, y)?;
+        let (dx, dy) = self.surface_point(pane, x, y)?;
+        let sf = self.surfaces.get(&pane)?;
+        let doc = sf.doc();
+        let top = sf.view().element();
+        let mut cur = auk_ui::hit_test(doc, dx, dy);
+        while let Some(el) = cur {
+            if el == top {
+                break;
+            }
+            if let Some(t) = doc.attribute(el, "title").filter(|t| !t.trim().is_empty()) {
+                return Some(t.to_owned());
+            }
+            cur = doc.parent(el);
+        }
+        None
+    }
+
+    /// Updates the hover readouts (a link's target, a node's tooltip) for a pointer at a window
+    /// point. Returns whether they changed.
     pub(super) fn hover_link_at(&mut self, x: f64, y: f64) -> bool {
         let link = self.link_at(x, y);
+        let title = self.title_at(x, y);
+        let mut changed = false;
         if link != self.hover_link {
             self.hover_link = link;
-            self.ui_dirty = true;
-            return true;
+            changed = true;
         }
-        false
+        // The tooltip stays where it appeared while the pointer stays over the same title.
+        if title.as_deref() != self.hover_title.as_ref().map(|(t, ..)| t.as_str()) {
+            self.hover_title = title.map(|t| (t, x, y));
+            changed = true;
+        }
+        if changed {
+            self.ui_dirty = true;
+        }
+        changed
     }
 
     /// A press that a surface took: when it went into the pane's focused program field with
@@ -187,7 +218,22 @@ impl WinState {
                 .rev()
                 .find_map(|s| sf.view().node_element(s.key(), id))?
         };
-        self.doc_rect_to_window(pane, sf.doc().border_box(el)?)
+        let r = sf.doc().border_box(el)?;
+        // A layer overlays the pane from its top, over everything else (§7.5).
+        if sf.in_layers(el) {
+            let view = self.views.get(&pane)?;
+            if !view.arranged.layers {
+                return None;
+            }
+            let (ox, oy) = view.grid_origin;
+            return Some(WinRect {
+                x: ox + f64::from(r.x),
+                y: oy + f64::from(r.y - sf.pane_top()),
+                w: f64::from(r.w),
+                h: f64::from(r.h),
+            });
+        }
+        self.doc_rect_to_window(pane, r)
     }
 
     /// The focused program field's text box in window points, and the cell size in points.

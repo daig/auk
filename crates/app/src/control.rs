@@ -17,6 +17,7 @@
 //! | `state-hash PANE`, `capture PANE [--scrollback]` | a replica's hash and text |
 //! | `a11y [--depth N]` | the accessibility tree, through `NSAccessibility` |
 //! | `type STROKE…` | keystrokes (`ctrl+c`, `opt+e`, `return`) through `NSEvent` |
+//! | `tap MOD…` | modifier taps (`shift`, `ctrl`, `opt`, `cmd`) as `flagsChanged:` events |
 //! | `post-key STROKE…` | keystrokes posted as `CGEvent`s to this process (needs Accessibility) |
 //! | `can-post` | whether posting is permitted |
 //! | `text TEXT`, `mark TEXT [START LEN]`, `unmark`, `preedit` | `NSTextInputClient` calls |
@@ -329,6 +330,14 @@ fn main_command(cmd: &str, mut args: Vec<String>, win: usize) -> Result<Value, S
             }
             Ok(Value::Null)
         }
+        "tap" => {
+            for name in &args {
+                if !window.tap_modifier(name) {
+                    return Err(format!("bad modifier `{name}`"));
+                }
+            }
+            Ok(Value::Null)
+        }
         "text" => {
             window.insert_text(&args.join(" "));
             Ok(Value::Null)
@@ -574,6 +583,8 @@ fn main_command(cmd: &str, mut args: Vec<String>, win: usize) -> Result<Value, S
                 "pane_app": s.chrome_pane_app(),
                 "tab_apps": s.chrome_tab_apps(),
                 "hover_link": s.hover_link,
+                "tooltip": s.hover_title.as_ref().map(|(t, x, y)| json!({"text": t, "at": [x, y]})),
+                "tooltip_drawn": s.chrome.tooltip().map(|(t, r)| json!({"text": t, "rect": [r.x, r.y, r.w, r.h]})),
                 "find_bar": s.find.as_ref().is_some_and(|f| f.open),
                 "status": model_status,
                 "tab_titles": s.plugins.tab_titles,

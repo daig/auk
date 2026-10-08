@@ -472,7 +472,14 @@ impl PaneView {
         let Some(surface) = pane.surface(key) else {
             return Vec::new();
         };
-        if !matches!(node.kind(), "card" | "section" | "tool" | "agent" | "checklist") {
+        // A collapsible card, section, tool or agent, or a checklist (which always folds): the
+        // others don't fold, so there is nothing to flip or report.
+        let folds = match node.kind() {
+            "card" | "section" | "tool" | "agent" => bool_prop(node.props(), "collapsible"),
+            "checklist" => true,
+            _ => false,
+        };
+        if !folds {
             return Vec::new();
         }
         let Some(sv) = self.surfaces.iter_mut().find(|s| s.key == key) else {
@@ -885,6 +892,35 @@ impl PaneView {
             }
         }
         self.hover = chain;
+    }
+
+    /// A wheel or trackpad scroll at a point: the innermost scroll container under it that can
+    /// still move that way scrolls `up` points toward its start (negative: toward its end). A
+    /// screen surface's `main` takes the height and scrolls itself this way (§7.5); inline and
+    /// flow `main`s aren't scroll containers, so they leave the wheel to the pane. Returns
+    /// whether something scrolled.
+    pub fn wheel(&mut self, doc: &mut Document, x: f32, y: f32, up: f32) -> bool {
+        let mut cur = auk_ui::hit_test(doc, x, y);
+        while let Some(e) = cur {
+            if doc.node(e).is_element()
+                && doc
+                    .computed_style(e)
+                    .is_some_and(|s| s.is_scroll_container())
+            {
+                let (sx, sy) = doc.scroll_offset(e);
+                let (_, my) = doc.max_scroll(e);
+                let to = (sy - up).clamp(0.0, my.max(0.0));
+                if (to - sy).abs() > 0.01 {
+                    doc.set_scroll_offset(e, sx, to);
+                    return true;
+                }
+            }
+            if e == self.element() {
+                break;
+            }
+            cur = doc.parent(e);
+        }
+        false
     }
 
     /// The context menu for the node under a point: its `menu` actions, then Copy unless named.

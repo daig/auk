@@ -95,6 +95,33 @@ impl Window {
     }
 }
 
+impl Window {
+    /// Taps a modifier key (`shift`, `ctrl`, `opt`, `cmd`) alone: its press and its release
+    /// arrive as `flagsChanged:`, as a real tap does.
+    pub fn tap_modifier(&self, name: &str) -> bool {
+        use objc2_core_graphics::CGEventType;
+        let (keycode, bits) = match name {
+            "shift" => (0x38, flags::SHIFT | side::LEFT_SHIFT),
+            "ctrl" => (0x3B, flags::CONTROL | side::LEFT_CONTROL),
+            "opt" | "alt" => (0x3A, flags::OPTION | flags::LEFT_OPTION),
+            "cmd" => (0x37, flags::COMMAND | side::LEFT_COMMAND),
+            _ => return false,
+        };
+        let make = |bits: u64| {
+            let event = CGEvent::new_keyboard_event(None, keycode, bits != 0)?;
+            CGEvent::set_type(Some(&event), CGEventType::FlagsChanged);
+            CGEvent::set_flags(Some(&event), CGEventFlags(bits));
+            NSEvent::eventWithCGEvent(&event)
+        };
+        let (Some(down), Some(up)) = (make(bits), make(0)) else {
+            return false;
+        };
+        self.send_event(&down);
+        self.send_event(&up);
+        true
+    }
+}
+
 /// A synthetic mouse event for [`Window::send_mouse`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MouseAction {

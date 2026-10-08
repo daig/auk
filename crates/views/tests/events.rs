@@ -480,3 +480,100 @@ fn a_fields_program_decor_decorations_are_drawn() {
     assert_eq!(spans.len(), 1, "the decorated run is its own span");
     assert_ne!(style(&h, spans[0]).color, plain.color, "drawn in the token's color");
 }
+
+/// §7.8: "Copy is appended unless the list names it": a menu that names `copy` keeps it where it
+/// put it, once, under the program's place, and running it copies (nothing reaches the program).
+#[test]
+fn a_menu_that_names_copy_keeps_its_own_entry_and_gets_no_second_copy() {
+    let mut h = Harness::new();
+    h.hello(&[]);
+    h.surface(
+        "s1",
+        "inline",
+        json!([
+            {"id": "named", "k": "text", "p": {"text": "named copy", "actions": {"menu": ["copy", "open-file"]}}},
+            {"id": "unnamed", "k": "text", "p": {"text": "unnamed", "actions": {"menu": ["open-file"]}}}
+        ]),
+    );
+    h.frame();
+    let (x, y) = center(&h, h.el("s1", "named"));
+    let menu = h.view.menu(&h.doc, &h.pane, x, y);
+    let entries: Vec<(&str, &str)> = menu
+        .iter()
+        .map(|m| (m.label.as_str(), m.action.as_str()))
+        .collect();
+    assert_eq!(entries, vec![("Copy", "copy"), ("Open file", "open-file")]);
+    let out = h.view.menu_pick(&mut h.doc, &h.pane, x, y, "copy");
+    assert!(
+        out.iter()
+            .any(|o| matches!(o, Outcome::Copy(t) if t == "named copy")),
+        "{out:?}"
+    );
+    assert!(deliver(&mut h, out).is_empty(), "copy runs locally");
+    let (x, y) = center(&h, h.el("s1", "unnamed"));
+    let labels: Vec<String> = h
+        .view
+        .menu(&h.doc, &h.pane, x, y)
+        .into_iter()
+        .map(|m| m.label)
+        .collect();
+    assert_eq!(labels, vec!["Open file", "Copy"], "appended last when not named");
+}
+
+/// §7.8 `toggle` folds or unfolds a collapsible card, section, tool, agent or checklist: the
+/// section, tool and agent fold locally at once (their bodies go), report `toggle`, and unfold
+/// on the next one. A kind that can't fold, or one that isn't collapsible, does nothing.
+#[test]
+fn the_toggle_action_folds_sections_tools_and_agents_and_reports_toggle() {
+    let mut h = Harness::new();
+    h.hello(&[]);
+    let act = json!({"click": "toggle"});
+    h.surface(
+        "s1",
+        "inline",
+        json!([
+            {"id": "sec", "k": "section", "p": {"head": "Section", "collapsible": true, "actions": act}, "c": [
+                {"id": "sec.body", "k": "text", "p": {"text": "section body"}}
+            ]},
+            {"id": "tl", "k": "tool", "p": {"name": "bash", "title": "Run", "target": "ls", "collapsible": true, "actions": act}, "c": [
+                {"id": "tl.body", "k": "text", "p": {"text": "tool body"}}
+            ]},
+            {"id": "ag", "k": "agent", "p": {"name": "worker", "task": "index", "status": "running", "collapsible": true, "actions": act}, "c": [
+                {"id": "ag.body", "k": "text", "p": {"text": "agent body"}}
+            ]},
+            {"id": "fixed", "k": "section", "p": {"head": "Fixed", "actions": act}, "c": [
+                {"id": "fixed.body", "k": "text", "p": {"text": "fixed body"}}
+            ]},
+            {"id": "plain", "k": "text", "p": {"text": "plain", "actions": act}}
+        ]),
+    );
+    h.frame();
+    let shown = |h: &Harness, id: &str| h.doc.border_box(h.el("s1", id)).is_some_and(|b| b.h > 0.0);
+    for (id, body) in [("sec", "sec.body"), ("tl", "tl.body"), ("ag", "ag.body")] {
+        let el = h.el("s1", id);
+        assert!(!h.class(el).contains("collapsed"), "{id} starts open");
+        assert!(shown(&h, body), "{body} drawn while open");
+        let out = click_el(&mut h, el, 1, Mods::NONE);
+        assert!(h.class(el).contains("collapsed"), "{id} folds at once");
+        assert!(!shown(&h, body), "{body} goes when {id} folds");
+        assert_eq!(
+            deliver(&mut h, out),
+            vec![json!({"ev": "toggle", "sf": "s1", "id": id, "collapsed": true})],
+            "{id}"
+        );
+        let out = click_el(&mut h, el, 1, Mods::NONE);
+        assert!(!h.class(el).contains("collapsed"), "{id} unfolds");
+        assert!(shown(&h, body));
+        assert_eq!(
+            deliver(&mut h, out),
+            vec![json!({"ev": "toggle", "sf": "s1", "id": id, "collapsed": false})]
+        );
+    }
+    for id in ["fixed", "plain"] {
+        let el = h.el("s1", id);
+        let out = click_el(&mut h, el, 1, Mods::NONE);
+        assert!(!h.class(el).contains("collapsed"), "{id} can't fold");
+        assert!(deliver(&mut h, out).is_empty(), "{id}: nothing to report");
+    }
+    assert!(shown(&h, "fixed.body"));
+}

@@ -473,3 +473,138 @@ fn attaching_to_a_host_without_auk_fails_clearly() {
         "{stderr}"
     );
 }
+
+/// How many times the remote `deep` plugin's host half has loaded (its kv count).
+fn loads(r: &RemoteEnv) -> u64 {
+    let kv =
+        r.vm.ssh(&format!("cat {}/state/plugin-data/deep/kv.json", r.root));
+    serde_json::from_slice::<Value>(&kv.stdout)
+        .ok()
+        .and_then(|v| v["loads"].as_u64())
+        .unwrap_or(0)
+}
+
+/// §9.3 "Watching" on Linux: the daemon watches the plugins folder with inotify, 8 levels deep.
+/// Editing a file 8 levels below the folder reloads the plugins; editing one 9 levels down
+/// doesn't.
+#[test]
+fn on_linux_inotify_reloads_plugins_on_a_change_8_levels_deep() {
+    let r = env("inotify");
+    let pkg = format!("{}/state/plugins/deep", r.root);
+    // `deep` is level 1; the file in `l7` is level 8, the one in `l8` level 9.
+    let l7 = format!("{pkg}/l2/l3/l4/l5/l6/l7");
+    let eight = format!("{l7}/eight.txt");
+    let nine = format!("{l7}/l8/nine.txt");
+    r.write_file(
+        &format!("{pkg}/plugin.toml"),
+        "schema = 1\nid = \"deep\"\nname = \"Deep\"\nversion = \"1\"\nhost = \"host.luau\"\n",
+    );
+    r.write_file(
+        &format!("{pkg}/host.luau"),
+        "tern.kv.set(\"loads\", (tern.kv.get(\"loads\") or 0) + 1)\n",
+    );
+    r.write_file(&eight, "eight\n");
+    r.write_file(&nine, "nine\n");
+
+    // Starting the daemon loads the plugin once.
+    let _pane = r.new_pane(&[]);
+    wait_for("the plugin's first load", || (loads(&r) == 1).then_some(()));
+
+    // The daemon holds an inotify instance, and it watches the level-8 file's directory.
+    let pid = r.ls()["daemon_pid"].as_u64().expect("the daemon's pid");
+    let inode = r.vm.ssh_ok(&format!("printf '%x' \"$(stat -c %i {l7})\""));
+    let watched = r.vm.ssh_ok(&format!(
+        "for fd in /proc/{pid}/fd/*; do \
+           if [ \"$(readlink $fd)\" = anon_inode:inotify ]; then cat /proc/{pid}/fdinfo/${{fd##*/}}; fi; \
+         done"
+    ));
+    assert!(
+        watched.contains("inotify wd:"),
+        "the daemon has no inotify watches:\n{watched}"
+    );
+    assert!(
+        watched
+            .lines()
+            .any(|l| l.split_whitespace().any(|w| w == format!("ino:{inode}"))),
+        "{l7} (inode {inode}) isn't watched:\n{watched}"
+    );
+
+    // Level 9: past the depth, no reload (a native reload lands in about 300 ms).
+    r.vm.ssh_ok(&format!("echo more >> {nine}"));
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    assert_eq!(loads(&r), 1, "an edit 9 levels deep reloaded the plugins");
+
+    // Level 8: reloads.
+    r.vm.ssh_ok(&format!("echo more >> {eight}"));
+    wait_for("the reload after an edit 8 levels deep", || {
+        (loads(&r) == 2).then_some(())
+    });
+    std::thread::sleep(std::time::Duration::from_millis(700));
+    assert_eq!(loads(&r), 2, "one edit, one reload");
+}
+
+/// The mode gate's counts for a remote pane: (written, dropped).
+fn gate_counts(r: &RemoteEnv, pane: u64) -> (u64, u64) {
+    let st = r.daemon(&format!("tsp {pane}"))["gate_stats"].clone();
+    match (st["written"].as_u64(), st["dropped"].as_u64()) {
+        (Some(w), Some(d)) => (w, d),
+        _ => panic!("no gate counts: {st}"),
+    }
+}
+
+/// §12.1 on Linux, where the gate reads the tty's modes from the PTY master: while the program
+/// has the tty canonical or echoing, the daemon drops its TSP replies; with both off, the reply
+/// reaches the program.
+#[test]
+fn on_linux_the_mode_gate_drops_tsp_replies_while_the_tty_is_canonical_or_echoing() {
+    let r = env("lingate");
+    let pane = r.new_pane(&[]);
+    let hello = r#"printf '\033_tsp;q;{"q":"hello","v":[1],"app":"sh","ver":"1"}\033\\'"#;
+    for (stty, canonical, echo) in [
+        ("icanon -echo", true, false),
+        ("-icanon echo", false, true),
+        ("icanon echo", true, true),
+    ] {
+        let (written, dropped) = gate_counts(&r, pane);
+        r.auk_ok(&[
+            "run",
+            &pane.to_string(),
+            &format!("stty {stty}; {hello}; sleep 3; stty sane"),
+        ]);
+        wait_for(
+            &format!("the gate to drop the reply under `stty {stty}`"),
+            || (gate_counts(&r, pane).1 > dropped).then_some(()),
+        );
+        // The gate's reading while the program runs.
+        let tty = r.daemon(&format!("tty-mode {pane}"));
+        assert_eq!(
+            (&tty["canonical"], &tty["echo"], &tty["tsp_input"]),
+            (
+                &Value::Bool(canonical),
+                &Value::Bool(echo),
+                &Value::Bool(false)
+            ),
+            "{stty}: {tty}"
+        );
+        assert_eq!(
+            gate_counts(&r, pane).0,
+            written,
+            "{stty}: a reply was written"
+        );
+        r.wait(pane, "prompt");
+    }
+
+    // Non-canonical with echo off: the reply is written, and the program reads it.
+    let (written, _) = gate_counts(&r, pane);
+    let reply = format!("{}/reply", r.root);
+    r.run(
+        pane,
+        &format!("stty -icanon -echo min 0 time 20; {hello}; head -c 4096 > {reply}; stty sane"),
+    );
+    assert!(gate_counts(&r, pane).0 > written, "no reply was written");
+    let got = r.vm.ssh_ok(&format!("cat {reply}"));
+    assert!(
+        got.contains("\x1b_tsp;") && got.contains(r#""r":"hello""#),
+        "the program read {got:?}"
+    );
+}

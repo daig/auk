@@ -591,6 +591,19 @@ impl PaneSurfaces {
         }
     }
 
+    /// Whether `el` is in the layers container: it overlays the pane (§7.5).
+    pub fn in_layers(&self, el: NodeId) -> bool {
+        self.container("auk-layers")
+            .is_some_and(|layers| self.inside(el, layers))
+    }
+
+    /// Where the pane container's top is in the document (layers are placed from it).
+    pub fn pane_top(&self) -> f32 {
+        self.doc
+            .border_box(self.view.element())
+            .map_or(0.0, |r| r.y)
+    }
+
     fn inside(&self, mut el: NodeId, ancestor: NodeId) -> bool {
         loop {
             if el == ancestor {

@@ -1269,6 +1269,90 @@ fn c12_suspend_hands_the_pane_back_to_the_grid() {
     assert_eq!(click(&window, &probe, "s1", "b", "")["act"], "go");
 }
 
+/// §7.3 Suspend: a suspended surface keeps its place. The anchor (its key and its row) is the
+/// same in every replica while suspended and after resume, though the grid took output below it.
+#[test]
+fn c12_a_suspended_surface_keeps_its_anchor_row_across_suspend_and_resume() {
+    let (env, window, probe) = setup_window("c12-place");
+    probe.write(b"above one\r\nabove two\r\n");
+    exchange(&probe, &open_with("s1", "inline", text_doc()));
+    let anchored = |what: &str| {
+        let daemon = surface(&env, &probe, "s1")["anchor"].clone();
+        let win = wait_for(what, || {
+            let st = window_state(&window, &probe);
+            let s = st["surfaces"].as_array()?.iter().rev().find(|s| s["id"] == "s1")?.clone();
+            (s["suspended"] == surface(&env, &probe, "s1")["suspended"]).then(|| s["anchor"].clone())
+        });
+        (daemon, win)
+    };
+    let (before, win_before) = anchored("the window's replica of the open surface");
+    assert_eq!(before["line"], 2, "{before}");
+    assert_eq!(before, win_before);
+
+    exchange(&probe, &frame("s1", 2, json!([["suspend"]])));
+    probe.write(b"one\r\ntwo\r\nthree\r\n");
+    wait_for("the grid output while suspended", || {
+        screen_lines(&env, &probe)
+            .iter()
+            .any(|l| l.contains("three"))
+            .then_some(())
+    });
+    let (during, win_during) = anchored("the window's replica of the suspended surface");
+    assert_eq!(during, before, "the anchor stays while suspended");
+    assert_eq!(win_during, before);
+
+    exchange(&probe, &frame("s1", 3, json!([["resume"]])));
+    let (after, win_after) = anchored("the window's replica of the resumed surface");
+    assert_eq!(after, before, "the anchor stays across resume");
+    assert_eq!(win_after, before);
+    // The document is the one it had, and it takes frames where it is.
+    exchange(&probe, &frame("s1", 4, json!([["set", "t", {"text": "after"}]])));
+    assert_eq!(doc_node(&env, &probe, "s1", "t").unwrap()["p"]["text"], "after");
+    assert_eq!(surface(&env, &probe, "s1")["anchor"], before);
+}
+
+/// §7.3: a screen surface over an inline one hides it without changing it, and the inline
+/// surface's frames still apply (in every replica), with no error.
+#[test]
+fn c11_frames_to_an_inline_surface_under_a_screen_surface_still_apply() {
+    let (env, window, probe) = setup_window("c11-covered");
+    exchange(&probe, &hello(&[]));
+    exchange(&probe, &open_with("s1", "inline", text_doc()));
+    exchange(&probe, &open_with("s2", "screen", text_doc()));
+    let s1 = surface(&env, &probe, "s1");
+    assert_eq!((s1["covered"].clone(), s1["state"].clone()), (json!(true), json!("live")));
+    let bodies = exchange(
+        &probe,
+        &frame(
+            "s1",
+            2,
+            json!([
+                ["set", "t", {"text": "changed under cover"}],
+                ["add", "u", "main", null, {"id": "u", "k": "text", "p": {"text": "added"}}]
+            ]),
+        ),
+    );
+    assert!(errors(&bodies).is_empty(), "{bodies:?}");
+    let s1 = surface(&env, &probe, "s1");
+    assert_eq!(s1["last_s"], 2);
+    assert_eq!(s1["covered"], true, "still covered");
+    assert_eq!(node(&s1["doc"], "t").unwrap()["p"]["text"], "changed under cover");
+    assert_eq!(node(&s1["doc"], "u").unwrap()["p"]["text"], "added");
+    // The screen surface is untouched, and the window's replica has the same documents.
+    assert_eq!(doc_node(&env, &probe, "s2", "t").unwrap()["p"]["text"], "hi");
+    let daemon_docs: Vec<Value> = surfaces(&env, &probe).iter().map(|s| s["doc"].clone()).collect();
+    wait_for("the window's replica to apply the covered surface's frame", || {
+        let st = window_state(&window, &probe);
+        let docs: Vec<Value> = st["surfaces"].as_array()?.iter().map(|s| s["doc"].clone()).collect();
+        (docs == daemon_docs).then_some(())
+    });
+    // Once the screen surface goes, the inline surface shows what its frames made it.
+    exchange(&probe, &tsp_json("x", &json!({"id": "s2"})));
+    let s1 = surface(&env, &probe, "s1");
+    assert_eq!(s1["covered"], false);
+    assert_eq!(node(&s1["doc"], "t").unwrap()["p"]["text"], "changed under cover");
+}
+
 #[test]
 fn c13_role_region_role_and_app_reach_every_replica() {
     let (env, window, probe) = setup_window("c13");

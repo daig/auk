@@ -420,8 +420,15 @@ impl PaneView {
                 let Some(m) = sv.mounts.get(&s.id) else {
                     continue;
                 };
-                // An inline surface's `main` ignores it (§7.6).
-                let Some(sc) = scroll_parent_or_self(doc, m.el) else {
+                // An inline surface's `main` ignores it (§7.6): a region steps only itself, and
+                // only a screen surface's `main` is a scroll container. It never reaches into a
+                // scroller inside it.
+                let sc = if m.region {
+                    is_scroller(doc, m.el).then_some(m.el)
+                } else {
+                    scroll_parent_or_self(doc, m.el)
+                };
+                let Some(sc) = sc else {
                     continue;
                 };
                 let page = doc.border_box(sc).map(|r| r.h).unwrap_or(0.0);

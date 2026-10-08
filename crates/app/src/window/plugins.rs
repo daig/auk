@@ -148,6 +148,9 @@ impl Drop for Ticker {
     }
 }
 
+/// How soon each tap of a tap sequence (`shift>shift`) follows the last (§9.8 chords).
+const TAP_WITHIN: Duration = Duration::from_millis(500);
+
 /// The window's plugin state.
 #[derive(Default)]
 pub struct PluginState {
@@ -183,6 +186,8 @@ pub struct PluginState {
     pub dropped_binds: Vec<String>,
     prefix: Vec<Step>,
     tap: Option<chord::Mods>,
+    /// When the last tap of a tap sequence under way ended.
+    last_tap: Option<Instant>,
     pub track: BTreeMap<PaneId, Track>,
     /// Commands finished per pane, for settles.
     finished: BTreeMap<PaneId, u64>,
@@ -190,6 +195,11 @@ pub struct PluginState {
     last_focus: Option<(PaneId, TabId)>,
     seen_panes: BTreeSet<PaneId>,
     seen_tabs: BTreeSet<TabId>,
+    /// Requests this window sent that add a pane, not answered yet.
+    creating: Vec<u64>,
+    /// Panes this window added (from the answers), until the layout shows them: only these fire
+    /// `pane_created`, and their new tabs `tab_created` (book:22076).
+    own_panes: BTreeSet<PaneId>,
     queued: Vec<String>,
     catalog_generation: u64,
     pub catalog: Catalog,
@@ -507,6 +517,15 @@ impl WinState {
     pub(super) fn plugins_settled(&mut self, window: &Window) {
         if !self.plugins.loaded {
             self.plugins.loaded = true;
+            // What exists now came before any window half: those events are dropped (§9.8).
+            let sessions = self.sessions();
+            self.plugins.seen_panes = sessions.panes().into_iter().collect();
+            self.plugins.seen_tabs = sessions
+                .sessions
+                .iter()
+                .flat_map(|s| s.tabs.iter().map(|t| t.id))
+                .collect();
+            self.plugins.own_panes.clear();
             let waker = window.waker();
             let ticker_waker = waker.clone();
             self.plugins.ticker = Some(Ticker::new(ticker_waker));
@@ -734,6 +753,18 @@ impl WinState {
         if count == 0
             && let Some(tapped) = self.plugins.tap.take()
         {
+            // Taps in a sequence come within 0.5 s of each other; a later one starts over.
+            let now = Instant::now();
+            let in_time = self
+                .plugins
+                .last_tap
+                .is_some_and(|t| now.duration_since(t) <= TAP_WITHIN);
+            let taps_pending = !self.plugins.prefix.is_empty()
+                && self.plugins.prefix.iter().all(|s| s.key.is_none());
+            if taps_pending && !in_time {
+                self.plugins.prefix.clear();
+            }
+            self.plugins.last_tap = Some(now);
             let step = Step {
                 mods: tapped,
                 key: None,
@@ -747,6 +778,10 @@ impl WinState {
     /// A key press against the plugin keymap. Returns whether the keymap took it.
     pub(super) fn plugin_key(&mut self, key: &KeyInput) -> bool {
         self.plugins.tap = None;
+        // Taps come only in sequences of taps: a key ends one under way, and goes on as a key.
+        if !self.plugins.prefix.is_empty() && self.plugins.prefix.iter().all(|s| s.key.is_none()) {
+            self.plugins.prefix.clear();
+        }
         if self.plugins.keymap.is_empty()
             && self.plugins.preset.is_empty()
             && self.plugins.user.is_empty()
@@ -1169,11 +1204,14 @@ impl WinState {
 
     /// Opens a pane through the window's host's daemon: its id, once the window's layout shows
     /// it.
-    fn open_pane(&self, place: OpenPlace, launch: auk_mirror::Launch) -> Result<u64, String> {
+    fn open_pane(&mut self, place: OpenPlace, launch: auk_mirror::Launch) -> Result<u64, String> {
         let v = self.conn.request(LayoutEdit::Open { place, launch })?;
-        v["pane"]
+        let pane = v["pane"]
             .as_u64()
-            .ok_or_else(|| format!("the daemon answered without a pane: {v}"))
+            .ok_or_else(|| format!("the daemon answered without a pane: {v}"))?;
+        // This window added it (§9.8 `pane_created`).
+        self.plugins.own_panes.insert(pane);
+        Ok(pane)
     }
 
     // -----------------------------------------------------------------------------------------
@@ -1285,21 +1323,71 @@ impl WinState {
         }
     }
 
-    /// Pane and tab events from a layout change, and the pane kinds behind them.
+    /// A request this window sent that adds a pane ([`WinState::create`]).
+    pub(super) fn plugins_creating(&mut self, id: u64) {
+        self.plugins.creating.push(id);
+    }
+
+    /// Pane and tab events from a layout change, and the pane kinds behind them. `pane_created`
+    /// and `tab_created` fire only for what this window added: panes restored from the daemon
+    /// or added by another window don't (book:22076).
     fn plugins_layout(&mut self, window: &Window) {
+        // The answers that came: the panes this window added.
+        let creating = std::mem::take(&mut self.plugins.creating);
+        for id in creating {
+            match self.conn.take_reply(id) {
+                Some(Ok(v)) => {
+                    if let Some(pane) = v["pane"].as_u64() {
+                        self.plugins.own_panes.insert(pane);
+                    }
+                }
+                Some(Err(_)) => {}
+                None => self.plugins.creating.push(id),
+            }
+        }
         let sessions = self.sessions();
-        let panes: BTreeSet<PaneId> = sessions.panes().into_iter().collect();
-        let tabs: BTreeSet<TabId> = sessions
+        let all: BTreeSet<PaneId> = sessions.panes().into_iter().collect();
+        // A new pane nobody has claimed yet, while this window still waits for an answer, may be
+        // this window's: it counts once the answer says.
+        let waiting = !self.plugins.creating.is_empty();
+        let panes: BTreeSet<PaneId> = all
+            .iter()
+            .copied()
+            .filter(|p| {
+                self.plugins.seen_panes.contains(p) || self.plugins.own_panes.contains(p) || !waiting
+            })
+            .collect();
+        let tab_list: Vec<(TabId, Vec<PaneId>)> = sessions
             .sessions
             .iter()
-            .flat_map(|s| s.tabs.iter().map(|t| t.id))
+            .flat_map(|s| s.tabs.iter().map(|t| (t.id, t.root.panes())))
+            .collect();
+        let tabs: BTreeSet<TabId> = tab_list
+            .iter()
+            .filter(|(_, ps)| ps.iter().all(|p| panes.contains(p)))
+            .map(|(t, _)| *t)
+            .chain(
+                self.plugins
+                    .seen_tabs
+                    .iter()
+                    .copied()
+                    .filter(|t| tab_list.iter().any(|(x, _)| x == t)),
+            )
             .collect();
         if panes != self.plugins.seen_panes || tabs != self.plugins.seen_tabs {
             for &tab in tabs.difference(&self.plugins.seen_tabs) {
-                self.plugins.events.push(WindowEvent::TabCreated { tab });
+                let ours = tab_list
+                    .iter()
+                    .find(|(t, _)| *t == tab)
+                    .is_some_and(|(_, ps)| ps.iter().any(|p| self.plugins.own_panes.contains(p)));
+                if ours {
+                    self.plugins.events.push(WindowEvent::TabCreated { tab });
+                }
             }
             for &pane in panes.difference(&self.plugins.seen_panes) {
-                self.plugins.events.push(WindowEvent::PaneCreated { pane });
+                if self.plugins.own_panes.contains(&pane) {
+                    self.plugins.events.push(WindowEvent::PaneCreated { pane });
+                }
             }
             for &pane in self.plugins.seen_panes.difference(&panes) {
                 self.plugins.events.push(WindowEvent::PaneClosed { pane });
@@ -1308,6 +1396,7 @@ impl WinState {
             for &tab in self.plugins.seen_tabs.difference(&tabs) {
                 self.plugins.events.push(WindowEvent::TabClosed { tab });
             }
+            self.plugins.own_panes.retain(|p| !panes.contains(p));
             self.plugins.seen_panes = panes.clone();
             self.plugins.seen_tabs = tabs;
             self.refresh_kinds();

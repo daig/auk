@@ -1165,3 +1165,169 @@ fn fold_and_overlay_transitions_run_on_the_view_clock() {
     assert_eq!(opacity(&h, body(&h, "c")), 1.0);
     assert!(h.view.tick(&mut h.doc, &h.pane, h.now + 16.0).is_none());
 }
+
+/// Every scroll container under `el` (itself included) and its offset.
+fn scroll_offsets(h: &Harness, el: auk_ui::NodeId) -> Vec<(auk_ui::NodeId, f32)> {
+    let mut out = Vec::new();
+    let mut stack = vec![el];
+    while let Some(n) = stack.pop() {
+        if h.doc.node(n).is_element()
+            && h.doc
+                .computed_style(n)
+                .is_some_and(|s| s.is_scroll_container())
+        {
+            out.push((n, h.doc.scroll_offset(n).1));
+        }
+        stack.extend(h.doc.children(n).iter().copied());
+    }
+    out
+}
+
+/// §7.6 `scroll`: "An inline surface's `main` ignores it." Scrolling `main` leaves every scroll
+/// offset in the surface as it was (a scrollable list inside it included), while the same op on
+/// the list itself, and on a screen surface's `main` (which scrolls itself, §7.5), moves them.
+#[test]
+fn scroll_on_an_inline_surfaces_main_leaves_every_scroll_offset_unchanged() {
+    let mut h = Harness::new();
+    h.hello(&["scroll"]);
+    let items: Vec<_> = (0..40)
+        .map(|i| json!({"id": format!("i{i}"), "k": "item", "p": {"label": format!("item {i}")}}))
+        .collect();
+    h.surface(
+        "s1",
+        "inline",
+        json!([{"id": "ls", "k": "list", "p": {"max": {"lines": 5}}, "c": items}]),
+    );
+    h.frame();
+    let main = h.view.region(key(&h, "s1"), Region::Main).unwrap();
+    let sc = h.find_class(h.el("s1", "ls"), "sf-list-scroll")[0];
+    // Start part way down so neither direction is clamped away.
+    h.frame_ops("s1", 2, json!([["scroll", "ls", "page-down"]]));
+    h.frame();
+    let before = scroll_offsets(&h, main);
+    assert!(before.iter().any(|&(n, y)| n == sc && y > 0.0), "{before:?}");
+    let doc_before = h.doc.scroll_offset(h.view.element());
+    for (s, by) in [(3, "line-down"), (4, "page-down"), (5, "page-up"), (6, "end"), (7, "start")] {
+        h.frame_ops("s1", s, json!([["scroll", "main", by]]));
+        h.frame();
+        assert_eq!(scroll_offsets(&h, main), before, "main ignores {by}");
+        assert_eq!(h.doc.scroll_offset(h.view.element()), doc_before);
+    }
+    assert!(h.errors().is_empty(), "{:?}", h.errors());
+    // The list itself still scrolls.
+    h.frame_ops("s1", 8, json!([["scroll", "ls", "start"]]));
+    h.frame();
+    assert_eq!(h.doc.scroll_offset(sc).1, 0.0);
+
+    // A screen surface's `main` is its own scroll container, and `scroll` steps it.
+    let lines: Vec<_> = (0..200)
+        .map(|i| json!({"id": format!("l{i}"), "k": "text", "p": {"text": format!("line {i}")}}))
+        .collect();
+    h.surface("s2", "screen", serde_json::Value::Array(lines));
+    h.frame();
+    let smain = h.view.region(key(&h, "s2"), Region::Main).unwrap();
+    assert!(h.doc.computed_style(smain).unwrap().is_scroll_container());
+    let (_, max) = h.doc.max_scroll(smain);
+    assert!(max > 0.0, "the screen surface's main overflows and scrolls");
+    h.frame_ops("s2", 2, json!([["scroll", "main", "end"]]));
+    h.frame();
+    assert!((h.doc.scroll_offset(smain).1 - max).abs() < 1.0);
+    h.frame_ops("s2", 3, json!([["scroll", "main", "start"]]));
+    h.frame();
+    assert_eq!(h.doc.scroll_offset(smain).1, 0.0);
+}
+
+/// §8.3 virtualization thresholds, at their limits: a `col` virtualizes over 64 children, `code`
+/// over 400 lines and a `list` over 200 items. At the limit everything lays out (the last row,
+/// far below the view, included); one more and the rows far below the view are only estimated.
+#[test]
+fn virtualization_starts_just_past_64_col_children_400_code_lines_and_200_list_items() {
+    type Make = fn(usize) -> serde_json::Value;
+    let col: Make = |n| {
+        json!({"id": "x", "k": "col", "c": (0..n).map(|i| json!({"id": format!("c{i}"), "k": "text", "p": {"text": format!("child {i}\nsecond line\nthird line")}})).collect::<Vec<_>>()})
+    };
+    let code: Make = |n| {
+        let lines: Vec<String> = (0..n).map(|i| format!("line {i}")).collect();
+        json!({"id": "x", "k": "code", "p": {"text": lines.join("\n"), "lang": "txt"}})
+    };
+    let list: Make = |n| {
+        json!({"id": "x", "k": "list", "c": (0..n).map(|i| json!({"id": format!("i{i}"), "k": "item", "p": {"label": format!("item {i}")}})).collect::<Vec<_>>()})
+    };
+    let cases: [(&str, usize, Make, &str); 3] = [
+        ("col", 64, col, "sf-text"),
+        ("code", 400, code, "sf-ln"),
+        ("list", 200, list, "sf-item"),
+    ];
+    for (name, limit, make, row_class) in cases {
+        for n in [limit, limit + 1] {
+            let mut h = Harness::new();
+            h.hello(&[]);
+            h.surface("s1", "inline", json!([make(n)]));
+            h.frame();
+            let x = h.el("s1", "x");
+            let rows = h.find_class(x, row_class);
+            assert_eq!(rows.len(), n, "{name} {n}: every row is there");
+            let last = *rows.last().unwrap();
+            let pane = h.doc.border_box(h.view.element()).unwrap();
+            // Taller than the view and its overscan (half a view below it).
+            assert!(pane.h > 1600.0, "{name} {n}: {} tall", pane.h);
+            assert!(text_laid_out(&h, rows[0]), "{name} {n}: the first row lays out");
+            if n == limit {
+                assert!(
+                    text_laid_out(&h, last),
+                    "{name} at {n}: not virtualized, the last row lays out"
+                );
+            } else {
+                assert!(
+                    !text_laid_out(&h, last),
+                    "{name} at {n}: virtualized, the last row is only estimated"
+                );
+            }
+            // Copy and Find still see everything.
+            assert!(h.text(x).contains(&format!("{}", n - 1)), "{name} {n}");
+        }
+    }
+}
+
+/// §8.3 Spacing: blocks in `main` are 16px apart (`--sf-block-gap`), and the parts inside a card
+/// 8px apart (`--sf-inner-gap`), in the terminal's design units (the region's zoom scales them
+/// with the font). Programs never send spacing.
+#[test]
+fn blocks_sit_16px_apart_and_a_cards_parts_8px_at_13px_and_scale_with_the_font() {
+    for (font_px, cell) in [(13.0, (8.0, 17.0)), (26.0, (16.0, 34.0))] {
+        let settings = ViewSettings {
+            font_px,
+            cell,
+            ..Default::default()
+        };
+        let mut h = Harness::with(auk_tsp::Config::default(), settings);
+        h.hello(&[]);
+        h.surface(
+            "s1",
+            "inline",
+            json!([
+                {"id": "a", "k": "text", "p": {"text": "first block"}},
+                {"id": "b", "k": "text", "p": {"text": "second block"}},
+                {"id": "card", "k": "card", "p": {"head": "Card"}, "c": [
+                    {"id": "p1", "k": "text", "p": {"text": "part one"}},
+                    {"id": "p2", "k": "text", "p": {"text": "part two"}}
+                ]}
+            ]),
+        );
+        h.frame();
+        let zoom = font_px / 13.0;
+        let bx = |id: &str| h.doc.border_box(h.el("s1", id)).unwrap();
+        let (a, b, card) = (bx("a"), bx("b"), bx("card"));
+        let gap = |top: auk_ui::Rect, below: auk_ui::Rect| (below.y - (top.y + top.h)) / zoom;
+        assert!((gap(a, b) - 16.0).abs() < 0.5, "block gap at {font_px}px: {}", gap(a, b));
+        assert!((gap(b, card) - 16.0).abs() < 0.5, "{}", gap(b, card));
+        let (p1, p2) = (bx("p1"), bx("p2"));
+        assert!((gap(p1, p2) - 8.0).abs() < 0.5, "inner gap at {font_px}px: {}", gap(p1, p2));
+        // The values come from the theme's variables.
+        let main = h.view.region(key(&h, "s1"), Region::Main).unwrap();
+        let style = h.doc.computed_style(main).unwrap();
+        let var = |name: &str| style.custom.get(name).map(|v| v.trim().to_owned());
+        assert_eq!(var("--sf-block-gap").as_deref(), Some("16px"));
+        assert_eq!(var("--sf-inner-gap").as_deref(), Some("8px"));
+    }
+}

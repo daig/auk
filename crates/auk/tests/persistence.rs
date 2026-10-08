@@ -344,6 +344,73 @@ fn without_auk_daemon_socket_the_daemon_listens_in_the_settings_dir() {
     assert_ne!(env.daemon("ls")["daemon_pid"], daemon.0.id());
 }
 
+#[test]
+fn with_xdg_runtime_dir_the_daemon_listens_in_its_auk_dir() {
+    let env = env("xdgsock");
+    // No `$AUK_DAEMON_SOCKET`, but `$XDG_RUNTIME_DIR` is set: `daemon.sock` in
+    // `$XDG_RUNTIME_DIR/auk`, which the daemon creates, and not in the settings dir.
+    let runtime = env.root.join("xdg");
+    std::fs::create_dir_all(&runtime).unwrap();
+    let mut cmd = env.command();
+    cmd.env_remove("AUK_DAEMON_SOCKET")
+        .env("XDG_RUNTIME_DIR", &runtime)
+        .arg("daemon");
+    let daemon = Reap(cmd.spawn().unwrap());
+    let socket = runtime.join("auk/daemon.sock");
+    let control = runtime.join("auk/daemon.ctl");
+    wait_for("the daemon on its runtime-dir socket", || {
+        auk_conformance::harness::ping(&control).then_some(())
+    });
+    assert!(socket.exists());
+    assert!(
+        !env.state.join("daemon.sock").exists(),
+        "the daemon listens in the settings dir too"
+    );
+    assert!(!env.socket.exists(), "nothing listens on the test's own socket");
+    // Clients find it the same way, and its panes point `auk` back at it, with their pane
+    // sockets beside it.
+    let client = || {
+        let mut cmd = env.command();
+        cmd.env_remove("AUK_DAEMON_SOCKET")
+            .env("XDG_RUNTIME_DIR", &runtime);
+        cmd
+    };
+    let out = client().args(["--json", "ls"]).output().unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let ls: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(ls["daemon_pid"], daemon.0.id());
+    let out = client()
+        .args(["new", "--cwd", &env.home.to_string_lossy()])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let pane: u64 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
+    let waited = client()
+        .args(["wait", &pane.to_string(), "--until", "prompt", "--timeout", "20"])
+        .output()
+        .unwrap();
+    assert!(waited.status.success(), "{waited:?}");
+    let ran = client()
+        .args(["run", &pane.to_string(), "print -r -- \"[$AUK_DAEMON_SOCKET|$AUK_PANE_SOCKET]\""])
+        .output()
+        .unwrap();
+    assert!(ran.status.success(), "{ran:?}");
+    let want = format!(
+        "[{}|{}]",
+        socket.display(),
+        runtime.join(format!("auk/panes/{pane}.sock")).display()
+    );
+    wait_for("the pane to print its sockets", || {
+        let out = client()
+            .args(["capture", &pane.to_string()])
+            .output()
+            .ok()?;
+        // Rows joined, as the paths may wrap.
+        let text: String = String::from_utf8_lossy(&out.stdout).lines().collect();
+        text.contains(&want).then_some(())
+    });
+}
+
 /// Runs `line` in a new shell pane and returns the screen.
 fn pane_prints(env: &TestEnv, line: &str) -> String {
     let pane = env.new_pane(&[]);

@@ -563,8 +563,6 @@ impl Daemon {
         };
         set("TERM", "xterm-256color");
         set("COLORTERM", "truecolor");
-        set("TERM_PROGRAM", "auk");
-        set("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
         set("PWD", &cwd.to_string_lossy());
         // The pane-identity set (§5.2, Appendix B).
         set("AUK_IDENTITY", &self.login.identity);
@@ -605,6 +603,14 @@ impl Daemon {
         };
         // Plugin spawn filters run next (§5.2, §9.7); rc files run after them.
         self.plugins.filter_spawn(&mut spec);
+        // `TERM_PROGRAM` and its version are set outside the filter (§5.2): its answer can't
+        // change them.
+        for (k, v) in [
+            ("TERM_PROGRAM", "auk"),
+            ("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION")),
+        ] {
+            spec.env.insert(k.to_owned(), v.to_owned());
+        }
         spec
     }
 
@@ -971,18 +977,23 @@ impl Daemon {
             share: None,
         };
         match edit {
+            // Edits that add a pane answer `{pane}`: the window that asked knows it added it
+            // (§9.8 `pane_created` is for panes this window adds).
             LayoutEdit::NewSession { name } => {
-                self.new_pane(new(Place::NewSession { name }))?;
+                let pane = self.new_pane(new(Place::NewSession { name }))?;
+                return Ok(serde_json::json!({ "pane": pane }));
             }
             LayoutEdit::NewTab { session } => {
-                self.new_pane(new(Place::NewTab { session }))?;
+                let pane = self.new_pane(new(Place::NewTab { session }))?;
+                return Ok(serde_json::json!({ "pane": pane }));
             }
             LayoutEdit::Split { pane, dir } => {
                 let cwd = self.pane(pane).map(|p| lock(&p).cwd());
-                self.new_pane(NewPane {
+                let pane = self.new_pane(NewPane {
                     cwd,
                     ..new(split(pane, dir.into()))
                 })?;
+                return Ok(serde_json::json!({ "pane": pane }));
             }
             LayoutEdit::Close { pane } => {
                 self.close(pane)?;

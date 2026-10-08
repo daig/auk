@@ -59,6 +59,12 @@ html.light .ctxmenu .ctx-item { color: #1b1d20; }
 .findbar .f-query { flex: 1 1 auto; min-width: 0; color: #eceef0; white-space: nowrap; overflow: hidden; }
 .findbar .f-query.empty { color: #6d7177; }
 .findbar .f-count { color: #8d939a; font-size: 11px; white-space: nowrap; }
+.tooltip {
+  position: absolute; max-width: 360px; padding: 3px 8px; box-sizing: border-box;
+  border-radius: 5px; font-size: 11px; white-space: pre-wrap;
+  background-color: #23262a; border: 1px solid #3a3e44; color: #d4d7db;
+}
+html.light .tooltip { background-color: #fbfbfa; border-color: #d5d5d2; color: #2a2d31; }
 html.light .linkhint, html.light .findbar { background-color: #fbfbfa; border-color: #d5d5d2; color: #2a2d31; }
 html.light .findbar .f-query { color: #1b1d20; }
 "#;
@@ -94,6 +100,9 @@ pub struct ChromeModel {
     pub pane_app: Option<String>,
     /// The target of the link under the pointer (§7.14).
     pub hover_link: Option<String>,
+    /// The `title` tooltip of the surface node under the pointer, shown below the pointer at
+    /// that window point (§8.1).
+    pub tooltip: Option<(String, f64, f64)>,
     pub find: Option<FindView>,
     /// A problem card with a retry ("Could not start the block", §9.5).
     pub card: Option<CardView>,
@@ -179,6 +188,8 @@ pub struct Chrome {
     /// Installed plugin sheets `(name, css)`, in order (§9.8 "CSS").
     sheets: Vec<(String, String)>,
     viewer_image: Option<auk_ui::ImageContent>,
+    /// The `title` tooltip element, while one is drawn.
+    tooltip_el: Option<NodeId>,
 }
 
 impl std::fmt::Debug for Chrome {
@@ -206,6 +217,7 @@ impl Chrome {
             body,
             sheets: Vec::new(),
             viewer_image: None,
+            tooltip_el: None,
         }
     }
 
@@ -305,6 +317,17 @@ impl Chrome {
             self.doc.set_attribute(hint, "role", "tooltip");
             self.doc
                 .set_inline_style(hint, &format!("top: {}px", h - STATUS_HEIGHT - 26.0));
+        }
+        self.tooltip_el = None;
+        if let Some((title, x, y)) = &model.tooltip {
+            let tip = self.child(self.body, "div", "tooltip", Some(title));
+            self.tooltip_el = Some(tip);
+            self.doc.set_attribute(tip, "role", "tooltip");
+            // Below and right of the pointer, kept inside the window.
+            let left = (x + 4.0).min(w - 120.0).max(4.0);
+            let top = (y + 18.0).min(h - STATUS_HEIGHT - 24.0).max(4.0);
+            self.doc
+                .set_inline_style(tip, &format!("left: {left}px; top: {top}px"));
         }
         if let Some(f) = &model.find {
             let bar = self.child(self.body, "div", "findbar", None);
@@ -457,6 +480,18 @@ impl Chrome {
         }
         self.doc.append_child(parent, e);
         e
+    }
+
+    /// The tooltip drawn (role `tooltip`, not the link readout): its text and box, in points.
+    pub fn tooltip(&self) -> Option<(String, auk_ui::Rect)> {
+        let el = self.tooltip_el.filter(|&e| self.doc.try_node(e).is_some())?;
+        let text: String = self
+            .doc
+            .children(el)
+            .iter()
+            .filter_map(|&c| self.doc.node(c).text())
+            .collect();
+        Some((text, self.doc.border_box(el)?))
     }
 
     /// The action under a point (in points), if any.

@@ -286,6 +286,39 @@ impl RemoteEnv {
         text(&out.stdout)
     }
 
+    /// Sends one line to the remote daemon's control endpoint (with the VM's `python3`) and
+    /// returns the reply's `value`, panicking unless the reply is ok.
+    pub fn daemon(&self, line: &str) -> Value {
+        const SEND: &str = "import socket, sys\n\
+            s = socket.socket(socket.AF_UNIX)\n\
+            s.connect(sys.argv[1])\n\
+            s.sendall((sys.argv[2] + '\\n').encode())\n\
+            print(s.makefile().readline())\n";
+        let out = self.vm.ssh_ok(&format!(
+            "python3 -c {} {}/run/daemon.ctl {}",
+            quote(SEND),
+            self.root,
+            quote(line)
+        ));
+        let reply: Value = serde_json::from_str(&out)
+            .unwrap_or_else(|e| panic!("remote `{line}`: not JSON ({e}): {out}"));
+        assert_eq!(reply["ok"], true, "remote `{line}` failed: {reply}");
+        reply.get("value").cloned().unwrap_or(Value::Null)
+    }
+
+    /// Writes a file on the VM, creating its directory.
+    pub fn write_file(&self, path: &str, contents: &str) {
+        let out = self.vm.ssh_with_input(
+            &format!("mkdir -p \"$(dirname {0})\" && cat > {0}", quote(path)),
+            contents.as_bytes(),
+        );
+        assert!(
+            out.status.success(),
+            "write {path} on the VM: {}",
+            text(&out.stderr)
+        );
+    }
+
     /// Opens a remote pane in the test's remote home (starting the remote daemon) and waits for
     /// its prompt.
     pub fn new_pane(&self, extra: &[&str]) -> u64 {

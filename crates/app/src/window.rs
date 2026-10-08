@@ -142,6 +142,9 @@ pub struct WinState {
     pub find: Option<find::Find>,
     /// The target of the link under the pointer, shown while hovering (§7.14, §12.2).
     pub hover_link: Option<String>,
+    /// The `title` tooltip of the surface node under the pointer, and where the pointer is, in
+    /// window points (§8.1).
+    pub hover_title: Option<(String, f64, f64)>,
     /// A drag selecting in a program field: the pane and the offset it started at (§7.9).
     field_drag: Option<(PaneId, u64)>,
     /// Where the input method's window was last told the cursor is, in window points.
@@ -255,6 +258,7 @@ impl WinState {
             chrome_updates: 0,
             find: None,
             hover_link: None,
+            hover_title: None,
             field_drag: None,
             ime_area: None,
             lens_seen: BTreeMap::new(),
@@ -500,7 +504,7 @@ impl WinState {
                 if !self.asked_for_session {
                     self.asked_for_session = true;
                     self.pending = Some(Pending::Session);
-                    self.edit(LayoutEdit::NewSession { name: None });
+                    self.create(LayoutEdit::NewSession { name: None });
                 }
             } else {
                 self.had_panes = true;
@@ -518,6 +522,15 @@ impl WinState {
     pub fn edit(&self, edit: LayoutEdit) {
         if let Err(err) = self.conn.send(&ClientMsg::LayoutEdit(edit)) {
             eprintln!("auk: layout edit: {err}");
+        }
+    }
+
+    /// Sends an edit that adds a pane (a session, a tab, a split) as a request, so the pane it
+    /// adds is known to be this window's when the answer comes (§9.8 `pane_created`).
+    pub fn create(&mut self, edit: LayoutEdit) {
+        match self.conn.request_async(edit) {
+            Some(id) => self.plugins_creating(id),
+            None => eprintln!("auk: layout edit: the link to the daemon is gone"),
         }
     }
 
@@ -997,6 +1010,7 @@ impl WinState {
             tab_apps,
             pane_app,
             hover_link: self.hover_link.clone(),
+            tooltip: self.hover_title.clone(),
             find: self.find.as_ref().filter(|f| f.open).map(|f| crate::chrome::FindView {
                 query: f.query.clone(),
                 current: f.current,
@@ -1077,15 +1091,15 @@ impl WinState {
             Cmd::ToggleFullScreen => window.toggle_full_screen(),
             Cmd::NewSession => {
                 self.pending = Some(Pending::Session);
-                self.edit(LayoutEdit::NewSession { name: None });
+                self.create(LayoutEdit::NewSession { name: None });
             }
             Cmd::NewTab => {
                 if let Some(session) = self.active_session {
                     self.pending = Some(Pending::Tab(session));
-                    self.edit(LayoutEdit::NewTab { session });
+                    self.create(LayoutEdit::NewTab { session });
                 } else {
                     self.pending = Some(Pending::Session);
-                    self.edit(LayoutEdit::NewSession { name: None });
+                    self.create(LayoutEdit::NewSession { name: None });
                 }
             }
             Cmd::SplitRight | Cmd::SplitDown => {
@@ -1096,7 +1110,7 @@ impl WinState {
                         SplitDir::Down
                     };
                     self.pending = Some(Pending::Split(pane));
-                    self.edit(LayoutEdit::Split { pane, dir });
+                    self.create(LayoutEdit::Split { pane, dir });
                 }
             }
             Cmd::ClosePane => {
@@ -1579,6 +1593,23 @@ impl WinState {
         let ch = f64::from(m.cell_height);
         // Pixels: trackpads report points, wheels report lines.
         let dy = if s.precise { s.dy * scale } else { s.dy * ch };
+        // Over a surface, its scroll containers take the wheel first: a screen surface's `main`
+        // takes the pane's height and scrolls itself (§7.5), as do lists and fields that scroll.
+        // A screen surface covers the grid, so the wheel never scrolls the hidden grid under it.
+        if let Some((dx, sy)) = self.surface_point(pane, s.x, s.y) {
+            let moved = self.surfaces.get_mut(&pane).is_some_and(|sf| {
+                let (doc, pv) = sf.parts();
+                pv.wheel(doc, dx, sy, (dy / scale) as f32)
+            });
+            if moved {
+                self.ui_dirty = true;
+                window.request_frame();
+                return;
+            }
+            if self.views.get(&pane).is_some_and(|v| v.arranged.screen.is_some()) {
+                return;
+            }
+        }
         let modes = self.modes(pane);
         let following = self.views.get(&pane).is_none_or(|v| v.scroll.following());
         if modes.mouse != MouseMode::Off && !s.mods.shift {

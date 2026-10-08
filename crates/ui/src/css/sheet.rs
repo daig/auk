@@ -123,6 +123,14 @@ impl Stylesheet {
                     .push(format_error(loc, &message_for(&err), slice));
             }
         }
+        // Rule-level errors (selectors, at-rules) come back after the declarations parsed inside
+        // the rules: report them all in source order.
+        top.errors.sort_by_key(|e| {
+            let mut it = e
+                .splitn(3, ':')
+                .map(|n| n.parse::<u32>().unwrap_or(u32::MAX));
+            (it.next().unwrap_or(u32::MAX), it.next().unwrap_or(u32::MAX))
+        });
         sheet.rules = top.out;
         sheet.keyframes = top.keyframes;
         sheet.errors = top.errors;
