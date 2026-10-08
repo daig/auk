@@ -197,3 +197,37 @@ fn layout_says_which_boxes_it_computed_since_a_count() {
     assert!(doc.laid_out_since(other, now));
     assert!(doc.laid_out(other));
 }
+
+/// A window kept on the end (a view following a growing transcript) lays out the end as the
+/// list grows, not where the end was; and a layout that changes nothing near the window
+/// computes nothing, however long the list.
+#[test]
+fn a_window_kept_on_the_end_follows_the_end_as_the_list_grows() {
+    let (mut doc, main, mut entries) = list(2000);
+    // The last 600px, from the end.
+    doc.set_virtual_window_at(main, Some((600.0, 0.0)), true);
+    doc.update();
+    assert!(doc.laid_out(entries[1999]));
+    assert!(!doc.laid_out(entries[0]));
+    assert!(!doc.laid_out(entries[1900]));
+    // Grows by 500: the new end is laid out, the old one goes back to estimates.
+    for i in 2000..2500 {
+        entries.push(el(&mut doc, main, "div", "entry", Some(&format!("entry {i}"))));
+    }
+    doc.update();
+    assert!(doc.laid_out(entries[2499]));
+    assert!(!doc.laid_out(entries[1999]));
+    let b = doc.border_box(entries[2499]).unwrap();
+    assert_eq!(b.y, 2499.0 * 30.0);
+    // Restyling one entry near the top restyles and lays out little.
+    doc.set_attribute(entries[3], "class", "entry red");
+    doc.update();
+    let st = doc.last_update_stats();
+    assert!(st.restyled <= 2 && st.laid_out < 20, "{st:?}");
+    assert_eq!(doc.border_box(entries[2499]).unwrap().y, 2499.0 * 30.0);
+    // Back to a window from the top.
+    doc.set_virtual_window_at(main, Some((0.0, 600.0)), false);
+    doc.update();
+    assert!(doc.laid_out(entries[0]));
+    assert!(!doc.laid_out(entries[2499]));
+}

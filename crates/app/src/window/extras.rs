@@ -264,31 +264,35 @@ impl WinState {
     /// The other clients attached to the host, for the status line (§10.1): `None` when this
     /// window is alone.
     pub fn presence_text(&self) -> Option<String> {
-        let shared = self.conn.shared();
-        let me = self.conn.client_id;
-        let others: Vec<String> = shared
-            .presence
-            .iter()
-            .filter(|c| c.id != me)
-            .map(|c| {
-                let kind = serde_json::to_value(c.kind)
-                    .ok()
-                    .and_then(|v| v.as_str().map(str::to_owned))
-                    .unwrap_or_else(|| "client".to_owned());
-                match c.identity.last() {
-                    Some(h) if h.method != "local" => {
-                        format!(
-                            "{} via {} from {} as {}",
-                            h.principal, h.method, h.origin, h.acting
-                        )
-                    }
-                    Some(h) => format!("{kind} ({})", h.acting),
-                    None => kind,
-                }
-            })
-            .collect();
-        (!others.is_empty()).then(|| format!("Also here: {}", others.join(", ")))
+        presence_of(&self.conn.shared(), self.conn.client_id)
     }
+}
+
+/// The other clients attached to the host besides client `me`, for the status line (§10.1):
+/// `None` when it is alone.
+pub(crate) fn presence_of(shared: &crate::conn::Shared, me: u64) -> Option<String> {
+    let others: Vec<String> = shared
+        .presence
+        .iter()
+        .filter(|c| c.id != me)
+        .map(|c| {
+            let kind = serde_json::to_value(c.kind)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_owned))
+                .unwrap_or_else(|| "client".to_owned());
+            match c.identity.last() {
+                Some(h) if h.method != "local" => {
+                    format!(
+                        "{} via {} from {} as {}",
+                        h.principal, h.method, h.origin, h.acting
+                    )
+                }
+                Some(h) => format!("{kind} ({})", h.acting),
+                None => kind,
+            }
+        })
+        .collect();
+    (!others.is_empty()).then(|| format!("Also here: {}", others.join(", ")))
 }
 
 impl WinState {

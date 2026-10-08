@@ -91,6 +91,10 @@ impl PaneView {
         let cols = self.cols;
         let pass = self.pass;
         let mut any = false;
+        // Highlighting drawn in per frame, at most (the rest next frame).
+        self.hl_budget = crate::highlight::PASS_LINES;
+        self.hl_finish = crate::highlight::FINISH_LINES;
+        let hl_budget = &mut self.hl_budget;
         for sv in &mut self.surfaces {
             let Some(surface) = pane.surface(sv.key) else {
                 continue;
@@ -121,7 +125,8 @@ impl PaneView {
                 // Highlighting the background finished draws in (§8.5), when the node is in
                 // view; out of view, the measure loop draws it in once it's laid out.
                 let drawing_in = !m.hl.is_empty() && cx.dom.doc.laid_out(m.el) && {
-                    m.hl.retain(|d| d.draw_in(&mut cx.dom, false));
+                    m.hl
+                        .retain_mut(|d| d.draw_in(&mut cx.dom, &mut 0, hl_budget));
                     if m.hl.is_empty() {
                         cx.st.hl_waiting.remove(&id);
                     }
@@ -156,8 +161,9 @@ impl PaneView {
         };
         for sv in &mut self.surfaces {
             for m in sv.mounts.values_mut() {
-                for d in std::mem::take(&mut m.hl) {
-                    d.draw_in(&mut dom, true);
+                for mut d in std::mem::take(&mut m.hl) {
+                    let (mut finish, mut all) = (usize::MAX, usize::MAX);
+                    d.draw_in(&mut dom, &mut finish, &mut all);
                 }
             }
         }

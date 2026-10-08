@@ -187,6 +187,9 @@ pub struct WinState {
     field_drag: Option<(PaneId, u64)>,
     /// Where the input method's window was last told the cursor is, in window points.
     pub ime_area: Option<(f64, f64, f64, f64)>,
+    /// The presence item as of the frame's look at the shared state, so the chrome doesn't
+    /// lock it again (the reader thread may hold it, applying a batch).
+    presence_shown: Option<String>,
     /// The replica generation each pane's command blocks were last drawn from.
     lens_seen: BTreeMap<PaneId, u64>,
     /// The settings file, as last read (§7.8, §7.9, §7.12, §7.13, §9.8).
@@ -303,6 +306,7 @@ impl WinState {
             hover_title: None,
             field_drag: None,
             ime_area: None,
+            presence_shown: None,
             lens_seen: BTreeMap::new(),
             settings: crate::settings::Settings::load(),
         }
@@ -774,6 +778,7 @@ impl WinState {
         {
             let conn = self.conn.clone();
             let mut shared = conn.shared();
+            self.presence_shown = extras::presence_of(&shared, conn.client_id);
             // Every pane's surfaces take their changes, shown or not.
             for (pane, data) in shared.panes.iter_mut() {
                 if std::mem::take(&mut data.reset) {

@@ -8,7 +8,7 @@ pub(crate) mod table;
 
 use crate::css::values::CalcNode;
 use crate::document::Document;
-use crate::dom::{Inner, NodeId, NodeKind, Rect};
+use crate::dom::{Inner, NodeId, NodeKind, Rect, VirtRow};
 use taffy::prelude::*;
 use taffy::{
     BlockContext, CacheTree, LayoutBlockContainer, LayoutFlexboxContainer, LayoutGridContainer,
@@ -317,8 +317,25 @@ impl Document {
     /// does), in its content coordinates (`top`, `bottom`): children outside it, plus an overscan
     /// of half a viewport, are not laid out. `None` uses the container's own scroll and height.
     pub fn set_virtual_window(&mut self, id: NodeId, window: Option<(f32, f32)>) {
-        if self.node(id).virtual_window != window {
-            self.node_mut(id).virtual_window = window;
+        self.set_virtual_window_at(id, window, false);
+    }
+
+    /// [`Document::set_virtual_window`], with `from_end`: the window is distances up from the
+    /// end of the container's content (`top`, `bottom`; `bottom` may be negative, past the
+    /// end), so it stays on the end as the container grows (a view following a transcript's
+    /// end lays out the new end, not where the end was).
+    pub fn set_virtual_window_at(
+        &mut self,
+        id: NodeId,
+        window: Option<(f32, f32)>,
+        from_end: bool,
+    ) {
+        let from_end = from_end && window.is_some();
+        let n = self.node(id);
+        if n.virtual_window != window || n.virtual_from_end != from_end {
+            let n = self.node_mut(id);
+            n.virtual_window = window;
+            n.virtual_from_end = from_end;
             if self.node(id).virtual_estimate.is_some() {
                 self.invalidate_layout(id);
             }
@@ -413,13 +430,14 @@ impl Document {
             .unwrap_or(self.viewport.1);
         let overscan = view_h * 0.5;
         let scroll_y = self.node(id).scroll.1;
+        // The views move a window they set once the view is a tenth of a viewport away from
+        // where it was set: that much overscan keeps what's shown laid out. One kept at the end
+        // is distances up from the end (widened the same way), placed once the end is known.
+        let over = self.viewport.1 * 0.1;
+        let from_end = self.node(id).virtual_from_end;
         let window = match self.node(id).virtual_window {
-            // The views move this window once the view is a quarter viewport away from where
-            // it was set: that much overscan keeps what's shown laid out.
-            Some((top, bottom)) => {
-                let over = self.viewport.1 * 0.25;
-                (top - over, bottom + over)
-            }
+            Some((top, bottom)) if from_end => (top + over, bottom - over),
+            Some((top, bottom)) => (top - over, bottom + over),
             None => (scroll_y - overscan, scroll_y + view_h + overscan),
         };
 
@@ -432,6 +450,7 @@ impl Document {
             height.map(f32::to_bits),
             window.0.to_bits(),
             window.1.to_bits(),
+            from_end,
         );
         if run_mode == RunMode::ComputeSize
             && let Some((k, out)) = self.node(id).virt_memo
@@ -440,129 +459,315 @@ impl Document {
             return out;
         }
         let kids: Vec<NodeId> = self.node(id).layout_children.clone();
+        let n = kids.len();
+        let pl = run_mode == RunMode::PerformLayout;
         let mut measured = std::mem::take(&mut self.node_mut(id).measured);
-        measured.resize(kids.len(), None);
+        let mut st = self.node_mut(id).virt.take().unwrap_or_default();
+        measured.resize(n, None);
+        // The measured heights' sum, count and last (kept as heights are measured).
+        if st.mlen != n || n == 0 {
+            if st.mlen > n || st.mlen == 0 {
+                let (sum, count) = measured
+                    .iter()
+                    .flatten()
+                    .fold((0.0f64, 0usize), |(s, c), h| (s + f64::from(*h), c + 1));
+                st.msum = sum;
+                st.mcount = count;
+                st.mlast = measured.iter().rposition(Option::is_some);
+            }
+            st.mlen = n;
+        }
+        // Margins resolve against the content width: another width reads every row again.
+        if st.w != inner_w.to_bits() {
+            st.rows.clear();
+            st.abs.clear();
+            st.w = inner_w.to_bits();
+        }
+        if st.rows.len() > n {
+            for r in st.rows.drain(n..) {
+                if r.abs {
+                    st.abs.retain(|&a| a != r.id);
+                }
+            }
+        }
+        let row_of = |doc: &Document, c: NodeId| {
+            let ts = &doc.node(c).taffy_style;
+            let m = ts.margin.resolve_or_zero(Some(inner_w), resolve_calc);
+            VirtRow {
+                id: c,
+                abs: ts.position == taffy::Position::Absolute,
+                margin: [m.top, m.bottom, m.left, m.right],
+                stored: None,
+                y0: 0.0,
+                h: 0.0,
+            }
+        };
+        // Rows that may not be the children at their index any more: read again.
+        let old_len = st.rows.len();
+        st.pos_valid = st.pos_valid.min(old_len);
+        st.store_valid = st.store_valid.min(old_len);
+        let from = st.check_from.min(old_len);
+        for (i, &c) in kids.iter().enumerate().take(old_len).skip(from) {
+            if st.rows[i].id != c {
+                let old = st.rows[i];
+                if old.abs {
+                    st.abs.retain(|&a| a != old.id);
+                }
+                st.rows[i] = row_of(self, c);
+                if st.rows[i].abs {
+                    st.abs.push(c);
+                }
+                st.pos_valid = st.pos_valid.min(i);
+                st.store_valid = st.store_valid.min(i);
+            }
+        }
+        for &c in &kids[old_len..] {
+            let r = row_of(self, c);
+            if r.abs {
+                st.abs.push(c);
+            }
+            st.rows.push(r);
+        }
+        st.check_from = n;
         // Children past the last one ever laid out (a list that grows at the end: a
         // transcript) are estimated at the mean height of those laid out, so a view following
         // the end finds them about where they land. Earlier ones keep the given estimate: their
         // places don't move as the mean does.
-        let last = measured.iter().rposition(Option::is_some);
-        let (sum, n) = measured
-            .iter()
-            .flatten()
-            .fold((0.0f64, 0usize), |(s, n), h| (s + f64::from(*h), n + 1));
-        let tail_estimate = if n > 0 {
-            (sum / n as f64) as f32
+        let tail_estimate = if st.mcount > 0 {
+            (st.msum / st.mcount as f64) as f32
         } else {
             estimate
         };
-        let mut y = 0.0f32;
-        let mut content_h = 0.0f32;
-        for (i, &c) in kids.iter().enumerate() {
-            if self.node(c).taffy_style.position == taffy::Position::Absolute {
-                continue;
+        let last = st.mlast;
+        let params = (
+            gap.to_bits(),
+            estimate.to_bits(),
+            tail_estimate.to_bits(),
+            last,
+        );
+        if params != st.params {
+            let from = if (params.0, params.1) != (st.params.0, st.params.1) {
+                0
+            } else {
+                match (st.params.3, last) {
+                    (Some(a), Some(b)) => a.min(b) + 1,
+                    (Some(a), None) | (None, Some(a)) => a + 1,
+                    (None, None) => n,
+                }
+            };
+            st.pos_valid = st.pos_valid.min(from);
+            st.store_valid = st.store_valid.min(from);
+            st.params = params;
+        }
+        let end_of = |st: &crate::dom::VirtState, i: usize| {
+            if i == 0 {
+                0.0
+            } else {
+                st.rows[i - 1].end(i - 1, gap)
             }
-            let mut cm = self
-                .node(c)
-                .taffy_style
-                .margin
-                .resolve_or_zero(Some(inner_w), resolve_calc);
-            if i > 0 {
-                y += gap;
-            }
-            y += cm.top;
-            let h = measured[i].unwrap_or(if last.is_some_and(|l| i > l) {
+        };
+        // A window kept at the end (a list the view follows as it grows) goes by where the end
+        // is: estimated from what's known, then, if laying out what's there moved it, again.
+        let h_of = |measured: &[Option<f32>], i: usize| {
+            measured[i].unwrap_or(if last.is_some_and(|l| i > l) {
                 tail_estimate
             } else {
                 estimate
-            });
-            let visible = y + h >= window.0 && y <= window.1;
-            // A child styled only now that it comes into view (restyle leaves the ones out of
-            // view to layout).
-            if visible && self.style_pending(c) {
-                if !self.style_in_view(id, c) {
-                    // It left the flow: the container's boxes are rebuilt next layout.
-                    self.needs_relayout = true;
-                    y -= cm.top;
+            })
+        };
+        let mut end_guess = 0.0f32;
+        if from_end {
+            let mut y = end_of(&st, st.pos_valid);
+            for i in st.pos_valid..n {
+                let r = &st.rows[i];
+                if r.abs {
                     continue;
                 }
-                y -= cm.top;
-                cm = self
-                    .node(c)
-                    .taffy_style
-                    .margin
-                    .resolve_or_zero(Some(inner_w), resolve_calc);
-                y += cm.top;
-            }
-            let cw = (inner_w - cm.left - cm.right).max(0.0);
-            if visible {
-                let out = self.compute_child_layout(
-                    c.taffy(),
-                    LayoutInput {
-                        known_dimensions: Size {
-                            width: Some(cw),
-                            height: None,
-                        },
-                        known_dimensions_are_definite: Size {
-                            width: true,
-                            height: true,
-                        },
-                        parent_size: Size {
-                            width: Some(inner_w),
-                            height,
-                        },
-                        available_space: Size {
-                            width: AvailableSpace::Definite(cw),
-                            height: AvailableSpace::MaxContent,
-                        },
-                        sizing_mode: SizingMode::InherentSize,
-                        axis: taffy::RequestedAxis::Both,
-                        run_mode,
-                        vertical_margins_are_collapsible: taffy::Line::FALSE,
-                    },
-                );
-                measured[i] = Some(out.size.height);
-                if run_mode == RunMode::PerformLayout {
-                    self.store_layout(c, pb.left + cm.left, pb.top + y, out.size, inner_w);
+                if i > 0 {
+                    y += gap;
                 }
-                y += out.size.height;
-            } else {
-                // An estimated box, stored unless it already is (a long list skips most of
-                // its children on every layout).
-                let (x0, y0) = (pb.left + cm.left, pb.top + y);
-                let n = self.node(c);
-                let same = n.skipped
-                    && n.layout.location.x == x0
-                    && n.layout.location.y == y0
-                    && n.layout.size.width == cw
-                    && n.layout.size.height == h;
-                if run_mode == RunMode::PerformLayout && !same {
-                    self.store_layout(
-                        c,
-                        x0,
-                        y0,
-                        Size {
-                            width: cw,
-                            height: h,
-                        },
-                        inner_w,
-                    );
-                    self.node_mut(c).skipped = true;
-                }
-                y += h;
+                y += r.margin[0] + h_of(&measured, i) + r.margin[1];
             }
-            y += cm.bottom;
-            content_h = y;
+            end_guess = y;
         }
-        self.node_mut(id).measured = measured;
+        let mut content_h;
+        let mut attempts = 0;
+        loop {
+            let window = if from_end {
+                (end_guess - window.0, end_guess - window.1)
+            } else {
+                window
+            };
+            // Rows before the first that reaches the window's top are out of view: start there, or
+            // where places or stored boxes need redoing, or (storing boxes) where what was laid out
+            // last time begins.
+            let pos_valid = st.pos_valid;
+            let first = st.rows[..pos_valid].partition_point(|r| r.end(0, gap) < window.0);
+            // (`end` with the gap: rows past the first.)
+            let first = st.rows[..pos_valid]
+                .iter()
+                .enumerate()
+                .skip(first.saturating_sub(1))
+                .find(|(i, r)| r.end(*i, gap) >= window.0)
+                .map_or(pos_valid, |(i, _)| i);
+            let mut start = first.min(pos_valid);
+            if pl {
+                start = start.min(st.store_valid).min(st.vis.0);
+            }
+            let mut y = end_of(&st, start);
+            let mut i = start;
+            let mut shown: Option<(usize, usize)> = None;
+            let mut changed_from = usize::MAX;
+            while i < n {
+                // Past the window and what was laid out last time, rows whose places and stored
+                // boxes hold are as they were: go on from the first that needs work.
+                if y > window.1 && (!pl || i >= st.vis.1) && i < st.pos_valid && st.rows[i].y0 == y
+                {
+                    let j = if pl {
+                        st.pos_valid.min(st.store_valid.max(i))
+                    } else {
+                        st.pos_valid
+                    };
+                    if j > i {
+                        y = end_of(&st, j);
+                        i = j;
+                        continue;
+                    }
+                }
+                let c = kids[i];
+                let row = st.rows[i];
+                if row.abs {
+                    st.rows[i].y0 = y;
+                    i += 1;
+                    continue;
+                }
+                let y0 = y;
+                let mut cm = row.margin;
+                if i > 0 {
+                    y += gap;
+                }
+                y += cm[0];
+                let h = h_of(&measured, i);
+                let visible = y + h >= window.0 && y <= window.1;
+                // A child styled only now that it comes into view (restyle leaves the ones out of
+                // view to layout).
+                if visible && self.style_pending(c) {
+                    if !self.style_in_view(id, c) {
+                        // It left the flow: the container's boxes are rebuilt next layout.
+                        self.needs_relayout = true;
+                        y -= cm[0];
+                        st.rows[i].id = VirtRow::STALE;
+                        st.check_from = st.check_from.min(i);
+                        changed_from = changed_from.min(i);
+                        i += 1;
+                        continue;
+                    }
+                    let fresh = row_of(self, c);
+                    if fresh.abs != row.abs {
+                        self.needs_relayout = true;
+                    }
+                    st.rows[i].margin = fresh.margin;
+                    y -= cm[0];
+                    cm = fresh.margin;
+                    y += cm[0];
+                }
+                let cw = (inner_w - cm[2] - cm[3]).max(0.0);
+                let took;
+                if visible {
+                    let out = self.compute_child_layout(
+                        c.taffy(),
+                        LayoutInput {
+                            known_dimensions: Size {
+                                width: Some(cw),
+                                height: None,
+                            },
+                            known_dimensions_are_definite: Size {
+                                width: true,
+                                height: true,
+                            },
+                            parent_size: Size {
+                                width: Some(inner_w),
+                                height,
+                            },
+                            available_space: Size {
+                                width: AvailableSpace::Definite(cw),
+                                height: AvailableSpace::MaxContent,
+                            },
+                            sizing_mode: SizingMode::InherentSize,
+                            axis: taffy::RequestedAxis::Both,
+                            run_mode,
+                            vertical_margins_are_collapsible: taffy::Line::FALSE,
+                        },
+                    );
+                    let new = out.size.height;
+                    match measured[i] {
+                        Some(old) => st.msum += f64::from(new) - f64::from(old),
+                        None => {
+                            st.msum += f64::from(new);
+                            st.mcount += 1;
+                            st.mlast = st.mlast.max(Some(i));
+                        }
+                    }
+                    measured[i] = Some(new);
+                    if pl {
+                        self.store_layout(c, pb.left + cm[2], pb.top + y, out.size, inner_w);
+                        st.rows[i].stored = None;
+                    }
+                    shown = Some(shown.map_or((i, i + 1), |(a, _)| (a, i + 1)));
+                    took = new;
+                } else {
+                    // An estimated box, stored unless it already is.
+                    let b = [pb.left + cm[2], pb.top + y, cw, h];
+                    if pl && st.rows[i].stored != Some(b) {
+                        self.store_layout(
+                            c,
+                            b[0],
+                            b[1],
+                            Size {
+                                width: cw,
+                                height: h,
+                            },
+                            inner_w,
+                        );
+                        self.node_mut(c).skipped = true;
+                        st.rows[i].stored = Some(b);
+                    }
+                    took = h;
+                }
+                y += took + cm[1];
+                if i >= st.pos_valid || row.y0 != y0 || row.h != took || row.margin != cm {
+                    changed_from = changed_from.min(i);
+                }
+                st.rows[i].y0 = y0;
+                st.rows[i].h = took;
+                i += 1;
+            }
+            content_h = y;
+            st.pos_valid = n;
+            if pl {
+                st.store_valid = n;
+                st.vis = shown.unwrap_or((n, n));
+            } else {
+                st.store_valid = st.store_valid.min(changed_from);
+            }
+            attempts += 1;
+            if !from_end || attempts >= 3 || (content_h - end_guess).abs() <= over * 0.5 {
+                break;
+            }
+            end_guess = content_h;
+        }
+        let abs = st.abs.clone();
+        let n = self.node_mut(id);
+        n.virt = Some(st);
+        n.measured = measured;
         let outer_h = height.unwrap_or(content_h + pb.vertical_axis_sum());
         let size = Size {
             width,
             height: outer_h,
         };
-        if run_mode == RunMode::PerformLayout {
-            for &c in &kids {
-                if self.node(c).taffy_style.position == taffy::Position::Absolute {
+        if pl {
+            for c in abs {
+                if self.try_node(c).is_some() {
                     layout_abspos(self, id, c, size, border);
                 }
             }

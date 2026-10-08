@@ -68,7 +68,7 @@ impl WinState {
             retry: "card:retry".to_owned(),
         });
         // Presence (§10.1): who else is attached to the host.
-        if let Some(text) = self.presence_text() {
+        if let Some(text) = self.presence_shown.clone() {
             model.status.push(crate::chrome::StatusItem {
                 plugin: "auk.presence".to_owned(),
                 text,

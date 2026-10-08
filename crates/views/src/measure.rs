@@ -110,6 +110,27 @@ impl PaneView {
     /// position). Virtualized containers lay out what's near it. `None`: the document viewport.
     pub fn set_view_rect(&mut self, rect: Option<auk_ui::Rect>) {
         self.view_rect = rect;
+        // The next measure pass gives the windows from it, even when it is the same rect.
+        self.windows_from = None;
+        self.measured = None;
+    }
+
+    /// Whether a window kept on a virtualized container's end (the view showed the end) no
+    /// longer has the end in view at the view rect: the list grew under a view that stays
+    /// where it is (scrolled up), so the window goes back to the view
+    /// ([`PaneView::set_view_rect`] again, then lay out).
+    pub fn end_windows_left_view(&self, doc: &Document) -> bool {
+        let Some(view) = self.view_rect else {
+            return false;
+        };
+        self.surfaces.iter().any(|sv| {
+            sv.st.virt_window.iter().any(|(&el, w)| {
+                w.2 && doc.try_node(el).is_some()
+                    && doc
+                        .border_box(el)
+                        .is_some_and(|r| view.y + view.h < r.y + r.h - 0.5)
+            })
+        })
     }
 
     /// The view rect last set ([`PaneView::set_view_rect`]).
@@ -127,6 +148,13 @@ impl PaneView {
         let view = self
             .view_rect
             .unwrap_or(auk_ui::Rect::new(0.0, 0.0, vw, vh));
+        // The view rect the windows were last given from: until the host gives one again, a
+        // window kept on a container's end stays there (the list grew under a view that
+        // follows its end; the host's next view rect says where the view is now). Without a
+        // view rect the view stays at the top: no window is kept on an end.
+        let fresh = self.windows_from != Some(view);
+        self.windows_from = Some(view);
+        let ends = self.view_rect.is_some();
         for sv in &mut self.surfaces {
             for &(el, _) in sv.st.virt.values() {
                 if doc.try_node(el).is_none() {
@@ -146,13 +174,27 @@ impl PaneView {
                 let Some(r) = doc.border_box(el) else {
                     continue;
                 };
-                let want = (view.y - r.y, view.y + view.h - r.y);
+                // With its end in view (a transcript the view follows), the window is kept as
+                // distances up from the end, so as the list grows its layout lays out the new
+                // end, not where the end was.
+                let bottom = r.y + r.h;
+                let at_end = ends && view.y + view.h >= bottom - 0.5;
+                let want = if at_end {
+                    (bottom - view.y, bottom - view.y - view.h, true)
+                } else {
+                    (view.y - r.y, view.y + view.h - r.y, false)
+                };
                 let have = sv.st.virt_window.get(&el).copied();
+                if !fresh && have.is_some_and(|h| h.2) {
+                    continue;
+                }
                 let moved = have.is_none_or(|h| {
-                    (h.0 - want.0).abs() > vh * 0.25 || (h.1 - want.1).abs() > vh * 0.25
+                    h.2 != want.2
+                        || (h.0 - want.0).abs() > vh * 0.1
+                        || (h.1 - want.1).abs() > vh * 0.1
                 });
                 if moved {
-                    doc.set_virtual_window(el, Some(want));
+                    doc.set_virtual_window_at(el, Some((want.0, want.1)), want.2);
                     sv.st.virt_window.insert(el, want);
                     changed = true;
                 }
@@ -169,10 +211,13 @@ impl PaneView {
             doc,
             w: &mut self.written,
         };
+        // Highlighting this frame may still finish on this thread (what the background hasn't
+        // done yet of texts coming into view); the rest draws in on the clock as it finishes.
+        let (hl_finish, hl_budget) = (&mut self.hl_finish, &mut self.hl_budget);
         for sv in &mut self.surfaces {
             visits += sv.st.fit.len() + sv.st.anchored.len();
             // Highlighting that waited out of view draws in as its node comes into view, what
-            // the background hasn't finished yet finished here: what's shown is highlighted.
+            // the background hasn't finished yet finished here within the pass's budget.
             let came: Vec<String> = sv
                 .st
                 .hl_waiting
@@ -186,11 +231,12 @@ impl PaneView {
                     continue;
                 };
                 visits += 1;
-                for d in std::mem::take(&mut m.hl) {
-                    d.draw_in(&mut dom, true);
-                    changed = true;
+                let before = (m.hl.len(), *hl_budget);
+                m.hl.retain_mut(|d| d.draw_in(&mut dom, hl_finish, hl_budget));
+                changed |= (m.hl.len(), *hl_budget) != before;
+                if m.hl.is_empty() {
+                    sv.st.hl_waiting.remove(&id);
                 }
-                sv.st.hl_waiting.remove(&id);
             }
             // Preview clamps.
             for (id, &el) in &sv.st.previews {

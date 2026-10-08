@@ -96,8 +96,9 @@ pub(crate) struct SurfaceState {
     pub caret_follow: HashMap<String, (NodeId, Option<NodeId>)>,
     /// Virtualized containers: (element, estimated child height), by node id.
     pub virt: HashMap<String, (NodeId, f32)>,
-    /// The window last given to each virtualized container.
-    pub virt_window: HashMap<NodeId, (f32, f32)>,
+    /// The window last given to each virtualized container, and whether it's kept from the
+    /// container's end.
+    pub virt_window: HashMap<NodeId, (f32, f32, bool)>,
 }
 
 /// The key local view state is remembered by: the node's `key` under the same parent, or its id

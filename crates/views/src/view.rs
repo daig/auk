@@ -202,6 +202,13 @@ pub struct PaneView {
     /// The document's layout count when the last measure pass ran: the next one revisits only
     /// what layout computed since (`Document::laid_out_since`).
     pub(crate) measure_mark: u64,
+    /// Highlighting lines this frame may still finish or draw in (reset each tick): texts
+    /// coming into view many at once draw in over several frames.
+    pub(crate) hl_budget: usize,
+    /// Of those, lines it may still highlight itself (what the background hasn't yet).
+    pub(crate) hl_finish: usize,
+    /// The view rect the measure loop last gave virtualized containers their windows from.
+    pub(crate) windows_from: Option<auk_ui::Rect>,
 }
 
 impl PaneView {
@@ -252,6 +259,9 @@ impl PaneView {
             work: Default::default(),
             measure_visits: 0,
             measure_mark: 0,
+            hl_budget: crate::highlight::PASS_LINES,
+            hl_finish: crate::highlight::FINISH_LINES,
+            windows_from: None,
         }
     }
 

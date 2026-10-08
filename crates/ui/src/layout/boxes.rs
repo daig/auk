@@ -181,6 +181,36 @@ impl Document {
         n.calc_keep = keep;
         n.taffy_sig = Some(sig);
         n.cache.clear();
+        self.virt_row_stale(parent, child);
+    }
+
+    /// A virtualized container's row for `child` is read again (its box style changed).
+    fn virt_row_stale(&mut self, parent: NodeId, child: NodeId) {
+        let at = self.node(child).index_in_parent as usize;
+        let simple = self.node(parent).virt_kids.is_some();
+        let Some(st) = self.node_mut(parent).virt.as_mut() else {
+            return;
+        };
+        let stale = |st: &mut crate::dom::VirtState, i: usize| {
+            st.rows[i].id = crate::dom::VirtRow::STALE;
+            st.check_from = st.check_from.min(i);
+        };
+        if st.rows.get(at).is_some_and(|r| r.id == child) {
+            stale(st, at);
+        } else if !simple {
+            // Layout children that aren't the DOM children (anonymous boxes, pseudos): look.
+            if let Some(i) = st.rows.iter().position(|r| r.id == child) {
+                stale(st, i);
+            }
+        }
+    }
+
+    /// A virtualized container's layout children changed from index `from` on: its rows are
+    /// checked against them from there.
+    fn virt_children_changed(&mut self, id: NodeId, from: usize) {
+        if let Some(st) = self.node_mut(id).virt.as_mut() {
+            st.check_from = st.check_from.min(from);
+        }
     }
 
     fn free_anons(&mut self, id: NodeId) {
@@ -260,7 +290,11 @@ impl Document {
         let tail = kids[old.len()..].to_vec();
         let inner = self.node(id).inner;
         let item = matches!(inner, Inner::Flex | Inner::Grid);
-        let positioned = self.node(id).style.as_ref().is_some_and(|s| s.is_positioned());
+        let positioned = self
+            .node(id)
+            .style
+            .as_ref()
+            .is_some_and(|s| s.is_positioned());
         let ws = self.style_of(id).white_space;
         for &c in &tail {
             if self.classify_in(id, c, ws) != Class::Block
@@ -291,6 +325,8 @@ impl Document {
                 self.set_virtual_child_box(id, c);
             }
         }
+        let from = self.node(id).layout_children.len();
+        self.virt_children_changed(id, from);
         let n = self.node_mut(id);
         n.layout_children.extend_from_slice(&tail);
         n.virt_kids = Some(kids);
@@ -469,6 +505,7 @@ impl Document {
         let simple = self.node(id).virtual_estimate.is_some()
             && self.node(id).anon_children.is_empty()
             && layout_children == kids;
+        self.virt_children_changed(id, 0);
         let n = self.node_mut(id);
         n.layout_children = layout_children;
         n.virt_kids = simple.then_some(kids);

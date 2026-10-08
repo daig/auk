@@ -495,7 +495,7 @@ impl PaneSurfaces {
             span = Some(span.map_or((a, z), |(p, q)| (p.min(a), q.max(z))));
         }
         let rect = span.map(|(a, z)| Rect::new(0.0, a, self.doc.viewport().0, z - a));
-        if rect == self.view.view_rect() {
+        if rect == self.view.view_rect() && !self.view.end_windows_left_view(&self.doc) {
             return false;
         }
         self.view.set_view_rect(rect);

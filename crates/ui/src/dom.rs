@@ -249,6 +249,8 @@ pub struct Node {
     /// The visible part of a virtualized container in its content coordinates, when an ancestor
     /// scrolls it (see [`crate::Document::set_virtual_window`]).
     pub(crate) virtual_window: Option<(f32, f32)>,
+    /// `virtual_window` is distances up from the container's end (it follows the end).
+    pub(crate) virtual_from_end: bool,
     /// Measured border-box heights of virtualized children, by child index.
     pub(crate) measured: Vec<Option<f32>>,
     /// Whether this child was laid out in the last pass (virtualized lists skip children).
@@ -270,10 +272,75 @@ pub struct Node {
     /// A virtualized container's last size within a layout run, by what it depends on (layout
     /// run, width, height, window).
     pub(crate) virt_memo: Option<(VirtKey, taffy::LayoutOutput)>,
+    /// A virtualized container's layout state across passes ([`VirtState`]).
+    pub(crate) virt: Option<Box<VirtState>>,
+    /// A virtualized container's children marked for restyle since its last restyle
+    /// (`Document::mark_style_dirty`), so restyle visits those, not every child; `None`:
+    /// not tracked (visit every child).
+    pub(crate) style_kids: Option<Vec<NodeId>>,
 }
 
 /// What a virtualized container's size depends on within one layout run.
-pub(crate) type VirtKey = (u64, u32, Option<u32>, u32, u32);
+pub(crate) type VirtKey = (u64, u32, Option<u32>, u32, u32, bool);
+
+/// A virtualized container's layout state across passes: a row per layout child with what
+/// its layout reads of the child and where the child went, so a pass reads one small array
+/// instead of every child's node, and starts where something changed or what's in view begins
+/// rather than at the first child (§7.10 cost: in proportion to what changed and what's shown).
+#[derive(Debug, Default)]
+pub(crate) struct VirtState {
+    pub rows: Vec<VirtRow>,
+    /// The content width the rows' margins were resolved at.
+    pub w: u32,
+    /// Rows from this index on may not be the layout children at their index (the children
+    /// were rebuilt or extended, or a child's box style changed: [`VirtRow::STALE`]).
+    pub check_from: usize,
+    /// Rows before this index have their places (`y0`, `h`) as the inputs give them now.
+    pub pos_valid: usize,
+    /// Rows before this index, outside `vis`, have the estimated box at their place stored.
+    pub store_valid: usize,
+    /// The rows laid out (in view) by the last layout that stored boxes.
+    pub vis: (usize, usize),
+    /// What the places were computed with: gap, estimate, tail estimate, last measured row.
+    pub params: (u32, u32, u32, Option<usize>),
+    /// The absolutely positioned layout children (not in the stack).
+    pub abs: Vec<NodeId>,
+    /// Over the container's measured heights: their sum, count and last index, and how many
+    /// heights that covers.
+    pub msum: f64,
+    pub mcount: usize,
+    pub mlast: Option<usize>,
+    pub mlen: usize,
+}
+
+/// What a virtualized container's layout reads of one layout child, and where it went.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct VirtRow {
+    pub id: NodeId,
+    /// Absolutely positioned: not in the stack.
+    pub abs: bool,
+    /// Its margins (top, bottom, left, right) at the container's content width.
+    pub margin: [f32; 4],
+    /// The estimated box last stored for it while out of view (x, y, width, height); `None`
+    /// once laid out.
+    pub stored: Option<[f32; 4]>,
+    /// Where it starts in the stack (the end of the one before it), and the height it took.
+    pub y0: f32,
+    pub h: f32,
+}
+
+impl VirtRow {
+    pub const STALE: NodeId = NodeId(u32::MAX);
+
+    /// Where the stack goes on after row `i`.
+    pub fn end(&self, i: usize, gap: f32) -> f32 {
+        if self.abs {
+            return self.y0;
+        }
+        let gap = if i > 0 { gap } else { 0.0 };
+        self.y0 + gap + self.margin[0] + self.h + self.margin[1]
+    }
+}
 
 impl Node {
     pub(crate) fn new(kind: NodeKind) -> Node {
@@ -300,6 +367,7 @@ impl Node {
             scroll: (0.0, 0.0),
             virtual_estimate: None,
             virtual_window: None,
+            virtual_from_end: false,
             measured: Vec::new(),
             skipped: false,
             image: None,
@@ -307,6 +375,8 @@ impl Node {
             laid_out_in: 0,
             virt_kids: None,
             virt_memo: None,
+            virt: None,
+            style_kids: None,
         }
     }
 

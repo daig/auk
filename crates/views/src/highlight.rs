@@ -315,6 +315,9 @@ pub const RENDER_LINES: usize = 120;
 /// once (a load, a late attach) pays for about a screenful, not for every block (§7.10 cost,
 /// §18.1); the rest highlights in the background.
 pub const PASS_LINES: usize = 48;
+/// Lines a frame may highlight itself to finish texts coming into view that the background
+/// hasn't finished yet (the rest draws in a frame or so later, as it does).
+pub const FINISH_LINES: usize = 4;
 /// Lines the worker highlights per turn of its lock (the view may wait that long for it, to
 /// finish a text that came into view).
 const WORKER_CHUNK: usize = 32;
@@ -373,16 +376,31 @@ impl Background {
         if cfg!(target_arch = "wasm32") {
             return;
         }
-        static WORKER: OnceLock<
-            std::sync::mpsc::Sender<std::sync::Weak<std::sync::Mutex<Highlighter>>>,
-        > = OnceLock::new();
-        let tx = WORKER.get_or_init(|| {
-            let (tx, rx) =
-                std::sync::mpsc::channel::<std::sync::Weak<std::sync::Mutex<Highlighter>>>();
+        type Job = std::sync::Weak<std::sync::Mutex<Highlighter>>;
+        // The newest text first: what just arrived is what the view shows (a transcript's
+        // end), and a text queued earlier and scrolled away can wait.
+        static WORKER: OnceLock<std::sync::Arc<(std::sync::Mutex<Vec<Job>>, std::sync::Condvar)>> =
+            OnceLock::new();
+        let q = WORKER.get_or_init(|| {
+            let q = std::sync::Arc::new((
+                std::sync::Mutex::new(Vec::<Job>::new()),
+                std::sync::Condvar::new(),
+            ));
+            let worker = q.clone();
             std::thread::Builder::new()
                 .name("auk-highlight".into())
                 .spawn(move || {
-                    for job in rx {
+                    let (jobs, ready) = &*worker;
+                    loop {
+                        let job = {
+                            let mut jobs = jobs.lock().unwrap_or_else(|e| e.into_inner());
+                            loop {
+                                if let Some(j) = jobs.pop() {
+                                    break j;
+                                }
+                                jobs = ready.wait(jobs).unwrap_or_else(|e| e.into_inner());
+                            }
+                        };
                         // A text dropped meanwhile is skipped; each turn holds the lock briefly.
                         while let Some(h) = job.upgrade() {
                             let mut h = h.lock().unwrap_or_else(|e| e.into_inner());
@@ -393,9 +411,13 @@ impl Background {
                     }
                 })
                 .expect("the highlight worker");
-            tx
+            q
         });
-        let _ = tx.send(std::sync::Arc::downgrade(&self.0));
+        let (jobs, ready) = &**q;
+        jobs.lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(std::sync::Arc::downgrade(&self.0));
+        ready.notify_one();
     }
 }
 
@@ -450,6 +472,7 @@ pub(crate) fn later(syntax: &'static SyntaxReference, text: &str) -> Later {
     Later {
         job: bg,
         lines: Vec::new(),
+        drawn: 0,
     }
 }
 
@@ -472,6 +495,8 @@ impl Later {
 pub(crate) struct Later {
     job: Background,
     lines: Vec<DeferredLine>,
+    /// Lines drawn in so far.
+    drawn: usize,
 }
 
 /// A line drawn plain: its element, its index in the text, its text (the element's content
@@ -495,18 +520,42 @@ pub(crate) fn take_deferred() -> Vec<Deferred> {
 }
 
 impl Deferred {
-    /// Draws the highlighting in once the background has finished it; returns whether it's
-    /// still on its way. Lines whose element no longer holds their plain text (re-rendered,
-    /// removed) are left alone. `finish` highlights what's left on this thread first (a host
-    /// that draws deterministically).
-    pub fn draw_in(&self, dom: &mut crate::dom::Dom, finish: bool) -> bool {
-        let l = &self.0;
-        if !finish && l.job.pump() {
+    /// Draws the highlighting in once the background has finished it, at most `budget` lines
+    /// (taken from it); returns whether lines are still waiting. What the background hasn't
+    /// done yet is highlighted on this thread first when it fits in `finish` lines (taken from
+    /// it; unlimited always finishes: a host that draws deterministically). A pass that brings
+    /// many texts into view at once (a load) pays for a little; the view's clock draws the rest
+    /// in over the next frames, as the background finishes them. Lines whose element no longer
+    /// holds their plain text (re-rendered, removed) are left alone.
+    pub fn draw_in(
+        &mut self,
+        dom: &mut crate::dom::Dom,
+        finish: &mut usize,
+        budget: &mut usize,
+    ) -> bool {
+        if *budget == 0 {
             return true;
         }
-        let mut h = l.job.lock();
+        let l = &mut self.0;
+        let mut h = if *finish == usize::MAX || !l.job.pump() {
+            l.job.lock()
+        } else {
+            let h = match l.job.0.try_lock() {
+                Ok(h) => h,
+                Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),
+                // The worker is on it.
+                Err(std::sync::TryLockError::WouldBlock) => return true,
+            };
+            let left = h.pending.len();
+            if left > *finish {
+                return true;
+            }
+            *finish -= left;
+            h
+        };
         h.step(usize::MAX);
-        for line in &l.lines {
+        let end = l.drawn + (l.lines.len() - l.drawn).min(*budget);
+        for line in &l.lines[l.drawn..end] {
             if dom.doc.try_node(line.el).is_none() || line.idx >= h.line_count() {
                 continue;
             }
@@ -524,7 +573,9 @@ impl Deferred {
                 dom.text(line.el, "\n");
             }
         }
-        false
+        *budget = budget.saturating_sub(end - l.drawn);
+        l.drawn = end;
+        l.drawn < l.lines.len()
     }
 }
 

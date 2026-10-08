@@ -515,8 +515,18 @@ impl Document {
         let n = self.node_mut(id);
         n.flags |= flags::STYLE_DIRTY | if subtree { STYLE_SUBTREE } else { 0 };
         let mut cur = n.parent;
+        let mut from = id;
         while let Some(p) = cur {
             let pn = self.node_mut(p);
+            // A virtualized container notes which children to restyle.
+            if let Some(kids) = pn.style_kids.as_mut() {
+                if kids.len() > pn.children.len() {
+                    pn.style_kids = None;
+                } else {
+                    kids.push(from);
+                }
+            }
+            from = p;
             if pn.flags & flags::STYLE_DESC != 0 {
                 break;
             }
@@ -696,10 +706,22 @@ impl Document {
             Some(v) => Some((id, Atom::new(v))),
             None => scope,
         };
-        let children = self.node(id).children.clone();
         // A virtualized container's children out of view wait for layout to bring them into
-        // view (§7.10, §8.3): `style_in_view` styles them then.
+        // view (§7.10, §8.3): `style_in_view` styles them then. Unless all its children
+        // restyle, it visits the ones marked since its last restyle.
         let virtualized = self.node(id).virtual_estimate.is_some();
+        let children = match self.node_mut(id).style_kids.take() {
+            Some(mut kids) if virtualized && !force_children => {
+                kids.retain(|&c| self.try_node(c).is_some_and(|n| n.parent == Some(id)));
+                kids.sort_by_key(|&c| self.node(c).index_in_parent);
+                kids.dedup();
+                kids
+            }
+            _ => self.node(id).children.clone(),
+        };
+        if virtualized {
+            self.node_mut(id).style_kids = Some(Vec::new());
+        }
         for c in children {
             if virtualized && self.style_waits(c) {
                 if force_children {
