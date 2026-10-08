@@ -225,6 +225,31 @@ fn sleep_and_awaitables_queue_as_await_never_inline() {
 }
 
 /// A tiny HTTP/1.1 server answering each connection from `respond(path)`.
+/// Reads one whole HTTP request: the headers, then `Content-Length` bytes of body. A single
+/// `read` can return only part of it when the machine is loaded.
+fn read_request(stream: &mut std::net::TcpStream) -> String {
+    let mut data = Vec::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        if let Some(end) = data.windows(4).position(|w| w == b"\r\n\r\n") {
+            let head = String::from_utf8_lossy(&data[..end]).to_ascii_lowercase();
+            let len = head
+                .lines()
+                .find_map(|l| l.strip_prefix("content-length:"))
+                .and_then(|v| v.trim().parse::<usize>().ok())
+                .unwrap_or(0);
+            if data.len() >= end + 4 + len {
+                break;
+            }
+        }
+        match stream.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => data.extend_from_slice(&buf[..n]),
+        }
+    }
+    String::from_utf8_lossy(&data).into_owned()
+}
+
 fn serve(respond: impl Fn(&str, &str) -> String + Send + 'static) -> (u16, Arc<AtomicUsize>) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().expect("addr").port();
@@ -234,9 +259,7 @@ fn serve(respond: impl Fn(&str, &str) -> String + Send + 'static) -> (u16, Arc<A
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { continue };
             counter.fetch_add(1, Ordering::SeqCst);
-            let mut buf = vec![0u8; 8192];
-            let n = stream.read(&mut buf).unwrap_or(0);
-            let req = String::from_utf8_lossy(&buf[..n]).into_owned();
+            let req = read_request(&mut stream);
             let path = req.split_whitespace().nth(1).unwrap_or("/").to_owned();
             let reply = respond(&path, &req);
             let reply = reply.replacen("\r\n", "\r\nConnection: close\r\n", 1);
