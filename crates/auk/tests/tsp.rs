@@ -1021,12 +1021,16 @@ fn c4_inline_and_flow_surfaces_anchor_below_a_nonempty_cursor_row() {
     probe.write(b"\x1b[2J\x1b[Habc");
     exchange(&probe, &open("s1", "flow"));
     probe.write(b"X");
-    let lines: Vec<String> = env.daemon(&format!("capture {} --scrollback", probe.pane))["text"]
-        .as_str()
-        .unwrap()
-        .lines()
-        .map(str::to_owned)
-        .collect();
+    // The daemon reads the pty on its own schedule: wait for the X before reading positions.
+    let lines: Vec<String> = wait_for("the X on screen", || {
+        let lines: Vec<String> = env.daemon(&format!("capture {} --scrollback", probe.pane))["text"]
+            .as_str()
+            .unwrap()
+            .lines()
+            .map(str::to_owned)
+            .collect();
+        lines.iter().any(|l| l.contains('X')).then_some(lines)
+    });
     let abc = line_of(&lines, "abc");
     let x = line_of(&lines, "X");
     let anchor = surface(&env, &probe, "s1")["anchor"]["line"]
