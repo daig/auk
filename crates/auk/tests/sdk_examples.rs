@@ -14,7 +14,7 @@ use std::process::Command;
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use auk_conformance::harness::{Headless, TestEnv, quote, wait_for, wait_for_or};
+use auk_conformance::harness::{Headless, TestEnv, quote, wait_for_or};
 use auk_conformance::probe::{repo_root, require_program};
 use auk_replica::{Item, Record, Replica, Role, Settings};
 use serde_json::{Value, json};

@@ -439,7 +439,7 @@ fn b5_apc_and_credits_are_usable() {
 }
 
 #[test]
-fn b6_advertises_exactly_t0_and_t1() {
+fn b6_advertises_exactly_what_is_drawn() {
     let reply = Harness::new().hello(&[]);
     let mut kinds: Vec<&str> = reply["kinds"]
         .as_array()
@@ -453,22 +453,45 @@ fn b6_advertises_exactly_t0_and_t1() {
     assert_eq!(kinds, want);
     // `image` joined T1 (D24).
     assert!(kinds.contains(&"image"));
-    // T2 kinds are advertised once drawn (A23).
+    // Every T2 kind is drawn and advertised (A23, D26).
     for t2 in ["math", "chart", "picker", "prefs", "effort", "block"] {
-        assert_eq!(kinds.contains(&t2), T2_KINDS.contains(&t2), "{t2} is T2");
+        assert!(kinds.contains(&t2), "{t2} is advertised");
     }
     for f in reply["features"].as_array().unwrap() {
         assert!(ALL_FEATURES.contains(&f.as_str().unwrap()));
     }
     assert!(
-        !reply["features"]
+        reply["features"]
             .as_array()
             .unwrap()
             .contains(&json!("aside")),
-        "no prefs, so no aside"
+        "prefs, so aside"
     );
     // And `add` takes only advertised kinds.
     let mut h = Harness::new();
+    h.send_json("o", json!({"id": "s1"}));
+    h.frame("s1", 1, json!([["add", "main", "s1", null, {"id": "main", "k": "col", "c": [{"id": "i", "k": "sparkle"}]}]]));
+    assert_eq!(h.out()[0]["msg"], "i: unknown kind sparkle");
+}
+
+#[test]
+fn b6_a_t0_t1_hello_has_no_t2_and_no_aside() {
+    let config = Config {
+        kinds: T0_KINDS.iter().chain(&T1_KINDS).map(|k| (*k).to_owned()).collect(),
+        features: ALL_FEATURES
+            .iter()
+            .filter(|f| **f != "aside")
+            .map(|f| (*f).to_owned())
+            .collect(),
+        ..Config::default()
+    };
+    let reply = Harness::with(config.clone()).hello(&[]);
+    let kinds = reply["kinds"].as_array().unwrap();
+    for t2 in T2_KINDS {
+        assert!(!kinds.contains(&json!(t2)), "{t2} not advertised");
+    }
+    assert!(!reply["features"].as_array().unwrap().contains(&json!("aside")));
+    let mut h = Harness::with(config);
     h.send_json("o", json!({"id": "s1"}));
     h.frame("s1", 1, json!([["add", "main", "s1", null, {"id": "main", "k": "col", "c": [{"id": "i", "k": "math"}]}]]));
     assert_eq!(h.out()[0]["msg"], "i: unknown kind math");
@@ -1271,7 +1294,7 @@ fn d5_add_validation() {
         ["add", "a", "main", {"id": "a", "k": "text"}],
         add("a", "main", json!("nope"), json!({"id": "a", "k": "text"})),
         add("a", "main", Value::Null, json!({"id": "a", "k": "col", "c": [{"id": "t", "k": "text"}]})),
-        add("a", "main", Value::Null, json!({"id": "a", "k": "col", "c": [{"id": "a1", "k": "chart"}]})),
+        add("a", "main", Value::Null, json!({"id": "a", "k": "col", "c": [{"id": "a1", "k": "sparkle"}]})),
         add("a", "nope", Value::Null, json!({"id": "a", "k": "text"})),
         add("a", "main", Value::Null, json!({"id": "a", "k": "text", "p": 3}))
     ]));

@@ -45,9 +45,7 @@ pub const T1_KINDS: [&str; 22] = [
 ];
 /// The T2 kinds drawn so far, advertised with T0 and T1 (A23, D26: a kind is advertised once it
 /// is drawn).
-pub const T2_KINDS: &[&str] = &[
-    "picker",
-];
+pub const T2_KINDS: &[&str] = &["picker", "prefs", "effort", "chart", "math", "block"];
 /// Every terminal feature name of v1 (§7.2).
 pub const ALL_FEATURES: [&str; 10] = [
     "blobs",

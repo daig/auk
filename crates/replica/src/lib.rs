@@ -49,6 +49,14 @@ pub struct Settings {
     pub command_lenses: bool,
     /// The per-pane retention budget for surface documents, in bytes (§7.10).
     pub retention: u64,
+    /// The hello advertises the T2 kinds drawn (A23). Off, it lists only T0 and T1 (and no
+    /// `aside`), which is how a program's T2 fallback is checked.
+    #[serde(default = "on")]
+    pub t2_kinds: bool,
+}
+
+fn on() -> bool {
+    true
 }
 
 impl Default for Settings {
@@ -58,6 +66,7 @@ impl Default for Settings {
             native_surfaces: true,
             command_lenses: true,
             retention: 64 << 20,
+            t2_kinds: true,
         }
     }
 }
@@ -185,11 +194,16 @@ impl Answer {
 
 /// The TSP engine's replicated config for these settings (§15.2).
 pub fn tsp_config(settings: &Settings) -> TspConfig {
-    TspConfig {
+    let mut config = TspConfig {
         enabled: settings.native_surfaces,
         retention: settings.retention,
         ..TspConfig::default()
+    };
+    if !settings.t2_kinds {
+        config.kinds.retain(|k| !auk_tsp::T2_KINDS.contains(&k.as_str()));
+        config.features.retain(|f| f != "aside");
     }
+    config
 }
 
 /// One pane replica.
@@ -392,6 +406,9 @@ impl Replica {
         h.update((s.scrollback as u64).to_le_bytes());
         h.update([u8::from(s.native_surfaces), u8::from(s.command_lenses)]);
         h.update(s.retention.to_le_bytes());
+        if !s.t2_kinds {
+            h.update(b"t1");
+        }
         match self.exit {
             None => h.update([0]),
             Some(status) => {

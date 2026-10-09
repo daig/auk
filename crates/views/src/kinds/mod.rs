@@ -62,6 +62,11 @@ pub const KINDS: &[&str] = &[
     "checklist",
     "image",
     "picker",
+    "prefs",
+    "effort",
+    "chart",
+    "math",
+    "block",
 ];
 
 /// Where a child element goes.
@@ -107,7 +112,7 @@ pub(crate) fn has_children(kind: &str) -> bool {
             | "picker"
             | "prefs"
             | "block"
-    ) || (!KINDS.contains(&kind) && kind != "effort" && kind != "chart")
+    ) || !KINDS.contains(&kind)
 }
 
 /// Where `child` of `node` goes.

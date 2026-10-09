@@ -19,7 +19,7 @@
 //! | `clients` | attached clients and the panes they are primary for |
 //! | `snapshot TARGET` | the pane's snapshot (§15.3): its stream position and bytes, base64 |
 //! | `tsp TARGET` | the authoritative replica's TSP state (§7) and the mode gate's counts |
-//! | `settings [--native-surfaces on\|off] [--command-lenses on\|off] [--scrollback N] [--retention BYTES]` | host settings (§15.2); changes reach every pane as a record |
+//! | `settings [--native-surfaces on\|off] [--command-lenses on\|off] [--t2-kinds on\|off] [--scrollback N] [--retention BYTES]` | host settings (§15.2); changes reach every pane as a record |
 //! | `surface-play [--pane TARGET] FILE [from N] [until N] [paced [TIMES]]` | plays a TSP recording into a pane (§7.15) |
 //! | `effect [--window K] toast\|open\|copy TEXT` | asks the windows showing a window key to perform an effect |
 //! | `close TARGET` | closes a pane as a user does: refused with a toast while its session is locked |
@@ -476,6 +476,9 @@ impl Daemon {
         }
         if let Some(on) = on_off("command-lenses")? {
             settings.command_lenses = on;
+        }
+        if let Some(on) = on_off("t2-kinds")? {
+            settings.t2_kinds = on;
         }
         if let Some(n) = number("scrollback")? {
             settings.scrollback = n as usize;

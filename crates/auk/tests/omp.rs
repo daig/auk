@@ -98,6 +98,8 @@ struct Setup {
     before: Option<String>,
     /// omp's arguments in place of `--no-session` (already quoted).
     args: Option<String>,
+    /// The hello lists only T0 and T1 (host setting `t2-kinds off`).
+    t1_only: bool,
 }
 
 /// A live omp in a hermetic daemon pane, shown by a native window.
@@ -128,6 +130,9 @@ impl LiveOmp {
         env.start_daemon();
         if !tsp {
             env.daemon("settings --native-surfaces off");
+        }
+        if setup.t1_only {
+            env.daemon("settings --t2-kinds off");
         }
         let work = env.root.join("work");
         std::fs::create_dir_all(&work).expect("create omp's cwd");
@@ -435,6 +440,17 @@ struct T2Report {
 }
 
 fn t2_report(records: &[Value]) -> T2Report {
+    let all: Vec<String> = auk_tsp::T0_KINDS
+        .iter()
+        .chain(auk_tsp::T1_KINDS.iter())
+        .chain(auk_tsp::T2_KINDS.iter())
+        .map(|k| (*k).to_owned())
+        .collect();
+    t2_report_for(records, &all)
+}
+
+/// [`t2_report`] for a hello that advertised `kinds` (when omp didn't record the reply).
+fn t2_report_for(records: &[Value], kinds: &[String]) -> T2Report {
     let advertised: BTreeSet<String> = records
         .iter()
         .find(|r| r["dir"] == "in" && r["verb"] == "r" && r["body"]["r"] == "hello")
@@ -448,14 +464,7 @@ fn t2_report(records: &[Value]) -> T2Report {
                 .collect()
         })
         // omp 18.8.5 doesn't record the hello reply; the kinds it saw are the daemon's (D22).
-        .unwrap_or_else(|| {
-            auk_tsp::T0_KINDS
-                .iter()
-                .chain(auk_tsp::T1_KINDS.iter())
-                .chain(auk_tsp::T2_KINDS.iter())
-                .map(|k| (*k).to_owned())
-                .collect()
-        });
+        .unwrap_or_else(|| kinds.iter().cloned().collect());
     let mut sent_anyway: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (_, id, kind) in added_kinds(records) {
         if !advertised.contains(&kind) {
@@ -947,58 +956,8 @@ fn ac09_live_composer_native_editing_adopt_and_discard() {
         "the transcript carried over"
     );
 
-    // Settings: a screen surface over the session, from advertised kinds.
-    for (command, role) in [("/settings", "omp.overlay.settings")] {
-        omp.clear(&id);
-        omp.window.type_keys(pane, command);
-        omp.wait_text(&id, command);
-        omp.window.press(pane, Key::Enter, Mods::default());
-        let what = format!("omp's {command} screen");
-        let kinds = omp.window.wait(&what, UI, |w| {
-            let screen = w
-                .tsp(pane)
-                .surfaces()
-                .iter()
-                .find(|s| s.is_live() && s.mode() == auk_tsp::Mode::Screen)?;
-            let found = kinds_under(screen.document().root())
-                .into_iter()
-                .find(|(id, _)| {
-                    screen
-                        .document()
-                        .get(id)
-                        .and_then(|n| n.prop("role"))
-                        .and_then(Value::as_str)
-                        == Some(role)
-                })?;
-            let node = screen.document().get(&found.0)?;
-            Some(kinds_under(node))
-        });
-        let inline = omp
-            .window
-            .live_surface(pane, "s:1")
-            .expect("the session under the screen");
-        assert_eq!(
-            inline.mode(),
-            auk_tsp::Mode::Inline,
-            "the screen surface leaves the inline one"
-        );
-        let used: BTreeSet<&str> = kinds.iter().map(|(_, k)| k.as_str()).collect();
-        eprintln!("{command}: {used:?}");
-        for k in T2.iter().filter(|k| !auk_tsp::T2_KINDS.contains(k)) {
-            assert!(!used.contains(k), "{command} sent unadvertised T2 kind {k}");
-        }
-        omp.window.press(pane, Key::Escape, Mods::default());
-        omp.window.wait("the screen surface to close", UI, |w| {
-            let screens = w
-                .tsp(pane)
-                .surfaces()
-                .iter()
-                .filter(|s| s.mode() == auk_tsp::Mode::Screen)
-                .count();
-            (screens == 0).then_some(())
-        });
-        omp.ready();
-    }
+    // `/settings` and `/model` open as T2 sheets in the session's layer: see the A23 tests (and
+    // `omp_t2_fallback_under_t0_t1_hello` for their screen surfaces under a T0+T1 hello).
 
     // Leave with an empty composer, then ⌃D.
     omp.clear(&id);
@@ -1197,32 +1156,46 @@ fn ac09_live_transcript_send_and_tool_card() {
     assert!(omp.window.errors().is_empty(), "{:?}", omp.window.errors());
 }
 
-/// T2 fallback under Auk's T0+T1 hello (§8.2, D22, D24), from omp's own record of a live start:
-/// omp guards `effort` (a `row` of `meter` and `text` instead) and sends nothing unadvertised. Its
-/// welcome logo, an `image` it sends without checking `supports()`, is T1 now: the welcome card
-/// draws with omp's built-in mark, and omp gets no errors.
+/// T2 fallback under an explicitly T0+T1 hello (host setting `t2-kinds off`; §8.2, D22, D24, A23),
+/// from omp's own record of a live start: omp guards `effort` (a `row` of `meter` and `text`
+/// instead) and sends nothing unadvertised. Its welcome logo, an `image` it sends without checking
+/// `supports()`, is T1: the welcome card draws with omp's built-in mark, and omp gets no errors.
+/// Without `prefs`, `/settings` is a screen surface over the session, built from T0+T1 kinds.
 #[test]
 fn omp_t2_fallback_under_t0_t1_hello() {
-    let mut omp = LiveOmp::start("omp-t2", true);
-    omp.ready();
+    let mut omp = LiveOmp::start_with(
+        "omp-t2",
+        true,
+        Setup {
+            t1_only: true,
+            ..Setup::default()
+        },
+    );
+    let id = omp.ready();
     let pane = omp.pane;
     // The composer bar's effort widget.
     omp.window.wait("omp's effort widget", UI, |w| {
         let s = w.live_surface(pane, "s:1")?;
         s.document().get("3.bar/effort").map(|_| ())
     });
+    let config = omp.window.tsp(pane).config().clone();
+    assert!(
+        !config.features.iter().any(|f| f == "aside"),
+        "no prefs, so no aside"
+    );
     let records = omp.records();
-    let report = t2_report(&records);
+    let report = t2_report_for(&records, &config.kinds);
     eprintln!("advertised: {:?}", report.advertised);
     eprintln!("errors: {:?}", report.errors);
     eprintln!("T2 kinds sent anyway: {:?}", report.sent_anyway);
     let expected: BTreeSet<String> = auk_tsp::T0_KINDS
         .iter()
         .chain(auk_tsp::T1_KINDS.iter())
-        .chain(auk_tsp::T2_KINDS.iter())
         .map(|k| (*k).to_owned())
         .collect();
-    assert_eq!(report.advertised, expected, "the hello lists exactly T0, T1 and the T2 kinds drawn");
+    let hello: BTreeSet<String> = config.kinds.iter().cloned().collect();
+    assert_eq!(hello, expected, "the hello lists exactly T0 and T1");
+    assert_eq!(report.advertised, expected);
     assert!(report.advertised.contains("image"), "image is T1 (D24)");
     assert!(
         report.sent_anyway.is_empty(),
@@ -1268,7 +1241,65 @@ fn omp_t2_fallback_under_t0_t1_hello() {
         "effort fell back to {kinds:?}"
     );
     assert_eq!(effort.kind(), "row");
+
+    // Without `prefs`, `/settings` is a screen surface over the session, from advertised kinds.
+    for (command, role) in [("/settings", "omp.overlay.settings")] {
+        omp.clear(&id);
+        omp.window.type_keys(pane, command);
+        omp.wait_text(&id, command);
+        omp.window.press(pane, Key::Enter, Mods::default());
+        let what = format!("omp's {command} screen");
+        let kinds = omp.window.wait(&what, UI, |w| {
+            let screen = w
+                .tsp(pane)
+                .surfaces()
+                .iter()
+                .find(|s| s.is_live() && s.mode() == auk_tsp::Mode::Screen)?;
+            let found = kinds_under(screen.document().root())
+                .into_iter()
+                .find(|(id, _)| {
+                    screen
+                        .document()
+                        .get(id)
+                        .and_then(|n| n.prop("role"))
+                        .and_then(Value::as_str)
+                        == Some(role)
+                })?;
+            let node = screen.document().get(&found.0)?;
+            Some(kinds_under(node))
+        });
+        let inline = omp
+            .window
+            .live_surface(pane, "s:1")
+            .expect("the session under the screen");
+        assert_eq!(
+            inline.mode(),
+            auk_tsp::Mode::Inline,
+            "the screen surface leaves the inline one"
+        );
+        let used: BTreeSet<&str> = kinds.iter().map(|(_, k)| k.as_str()).collect();
+        eprintln!("{command}: {used:?}");
+        for k in T2 {
+            assert!(!used.contains(k), "{command} sent unadvertised T2 kind {k}");
+        }
+        omp.window.press(pane, Key::Escape, Mods::default());
+        omp.window.wait("the screen surface to close", UI, |w| {
+            let screens = w
+                .tsp(pane)
+                .surfaces()
+                .iter()
+                .filter(|s| s.mode() == auk_tsp::Mode::Screen)
+                .count();
+            (screens == 0).then_some(())
+        });
+        omp.ready();
+    }
+
+    let report = t2_report_for(&omp.records(), &config.kinds);
+    assert!(report.sent_anyway.is_empty(), "{:?}", report.sent_anyway);
+    assert!(report.errors.is_empty(), "omp got errors: {:?}", report.errors);
     assert!(omp.window.errors().is_empty(), "{:?}", omp.window.errors());
+    omp.clear(&id);
     omp.quit();
 }
 
@@ -1514,6 +1545,7 @@ fn a15_to_a19_omps_overlays_over_a_long_transcript_in_the_dark() {
                 quote(&sessions.to_string_lossy()),
                 quote(&session.to_string_lossy())
             )),
+            ..Setup::default()
         },
     );
     let pane = omp.pane;
@@ -2202,6 +2234,7 @@ fn a23_omps_answer_draws_md_math_typeset() {
                 quote(&sessions.to_string_lossy()),
                 quote(&session.to_string_lossy())
             )),
+            ..Setup::default()
         },
     );
     let pane = omp.pane;
@@ -2287,4 +2320,163 @@ fn a23_omps_answer_draws_md_math_typeset() {
         "omp's config is unchanged"
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A23 `prefs` and `effort` on a live omp 18.8.5 under Auk's full hello, with no prompt. The
+/// composer's footer shows omp's thinking effort as an `effort` node (not the T1 fallback row),
+/// drawn as the book's meter with omp's level. `/settings` opens omp's settings as a `prefs` sheet
+/// in the session's layer (not a screen surface): it docks at the pane's right edge (`aside`), so
+/// omp hears the narrower width and the full width back when it goes; Down moves omp's focus,
+/// which the sheet shows; Esc closes it. Nothing is changed: omp's config is byte-identical.
+#[test]
+fn a23_omps_settings_open_as_prefs_and_footer_shows_effort() {
+    let config = real_home().join(".omp/agent/config.yml");
+    let config_before = std::fs::read(&config).ok();
+    let mut omp = LiveOmp::start("omp-prefs", true);
+    let id = omp.ready();
+    let pane = omp.pane;
+    let advertised = &omp.window.tsp(pane).config().clone();
+    for k in T2 {
+        assert!(advertised.kinds.iter().any(|a| a == k), "{k} is advertised");
+    }
+    assert!(advertised.features.iter().any(|f| f == "aside"));
+
+    // The footer's effort chip: an `effort` node, drawn as a meter.
+    let (effort, level) = omp.window.wait("omp's effort chip", UI, |w| {
+        let s = w.live_surface(pane, "s:1")?;
+        kinds_under(s.document().root())
+            .into_iter()
+            .find(|(_, k)| k == "effort")
+            .and_then(|(id, _)| {
+                let level = s.document().get(&id)?.prop("level")?.as_str()?.to_owned();
+                Some((id, level))
+            })
+    });
+    omp.window.frame();
+    let s = omp.window.live_surface(pane, "s:1").expect("the session");
+    assert!(s.document().get("3.bar/effort").is_none(), "no fallback row");
+    let el = omp.window.element_of(pane, s, &effort).expect("drawn");
+    let doc = omp.window.doc(pane);
+    assert!(omp.window.class(pane, el).contains("sf-effort"));
+    assert_eq!(doc.attribute(el, "role"), Some("meter"));
+    assert_eq!(doc.attribute(el, "data-level"), Some(level.as_str()));
+    let b = doc.border_box(el).expect("laid out");
+    assert!(b.w > 0.0 && b.h > 0.0, "the ring has a size: {b:?}");
+    eprintln!("effort {effort}: level {level}, {b:?}");
+
+    // `/settings`: the prefs sheet, docked beside the session.
+    omp.window.type_keys(pane, "/settings");
+    omp.wait_text(&id, "/settings");
+    omp.window.press(pane, Key::Enter, Mods::default());
+    let pf = omp.window.wait("omp's settings sheet", UI, |w| {
+        let s = w.live_surface(pane, "s:1")?;
+        let layer = s.document().region("layer")?;
+        kinds_under(layer)
+            .into_iter()
+            .find(|(_, k)| k == "prefs")
+            .map(|(id, _)| id)
+    });
+    assert!(
+        omp.window
+            .tsp(pane)
+            .surfaces()
+            .iter()
+            .all(|s| !s.is_live() || s.mode() != auk_tsp::Mode::Screen),
+        "no screen surface"
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    omp.window.frame();
+    let page = omp.window.view(pane).element();
+    assert!(
+        omp.window.class(pane, page).contains("auk-aside"),
+        "the sheet docks"
+    );
+    let s = omp.window.live_surface(pane, "s:1").expect("the session");
+    let pf_el = omp.window.element_of(pane, s, &pf).expect("drawn");
+    let doc = omp.window.doc(pane);
+    let sheet = doc.border_box(pf_el).expect("laid out");
+    let pane_box = doc.border_box(page).expect("laid out");
+    assert!(
+        (sheet.x + sheet.w - (pane_box.x + pane_box.w)).abs() < 1.0 && sheet.w < pane_box.w * 0.61,
+        "docked at the right edge: {sheet:?} in {pane_box:?}"
+    );
+    assert!(
+        !omp.window.with_class(pane, pf_el, "pf-row").is_empty(),
+        "rows are drawn"
+    );
+    let log = omp.log.clone();
+    let resizes = || -> Vec<u64> {
+        std::fs::read_to_string(&log)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter(|r| r["dir"] == "in" && r["body"]["ev"] == "resize")
+            .filter_map(|r| r["body"]["cols"].as_u64())
+            .collect()
+    };
+    let narrow = u64::from(SIZE.0 - auk_tsp::aside_reserve(SIZE.0));
+    omp.window.wait("omp to hear the narrower width", UI, |_| {
+        resizes().contains(&narrow).then_some(())
+    });
+
+    // Down moves omp's focus; the sheet follows.
+    let prop = |w: &NativeWindow, p: &str| {
+        let s = w.live_surface(pane, "s:1")?;
+        s.document().get(&pf)?.prop(p).cloned()
+    };
+    let before = prop(&omp.window, "focus");
+    omp.window.press(pane, Key::Down, Mods::default());
+    let focus = omp.window.wait("omp to move the focus", UI, |w| {
+        let now = prop(w, "focus")?;
+        (Some(&now) != before.as_ref()).then_some(now)
+    });
+    eprintln!("focus {before:?} -> {focus}");
+    omp.window.frame();
+
+    // Esc closes the sheet, and the full width comes back.
+    for _ in 0..3 {
+        let open = |w: &NativeWindow| {
+            w.live_surface(pane, "s:1")
+                .is_some_and(|s| s.document().get(&pf).is_some())
+        };
+        if !open(&omp.window) {
+            break;
+        }
+        omp.window.press(pane, Key::Escape, Mods::default());
+        let start = std::time::Instant::now();
+        let f = prop(&omp.window, "focus");
+        while open(&omp.window)
+            && prop(&omp.window, "focus") == f
+            && start.elapsed() < Duration::from_secs(3)
+        {
+            std::thread::sleep(Duration::from_millis(25));
+            omp.window.frame();
+        }
+    }
+    omp.window.wait("the settings sheet to close", UI, |w| {
+        let s = w.live_surface(pane, "s:1")?;
+        s.document().get(&pf).is_none().then_some(())
+    });
+    omp.window.wait("omp to hear the full width", UI, |_| {
+        let r = resizes();
+        let at = r.iter().position(|&c| c == narrow)?;
+        r[at..].contains(&u64::from(SIZE.0)).then_some(())
+    });
+    omp.window.frame();
+    assert!(!omp
+        .window
+        .class(pane, omp.window.view(pane).element())
+        .contains("auk-aside"));
+    assert!(omp.window.errors().is_empty(), "{:?}", omp.window.errors());
+    let report = t2_report(&omp.records());
+    assert!(report.errors.is_empty(), "omp got errors: {:?}", report.errors);
+    assert!(report.sent_anyway.is_empty(), "{:?}", report.sent_anyway);
+    omp.ready();
+    omp.clear(&id);
+    omp.quit();
+    assert_eq!(
+        std::fs::read(&config).ok(),
+        config_before,
+        "omp's config is unchanged"
+    );
 }

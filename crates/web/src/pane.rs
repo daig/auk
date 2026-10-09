@@ -107,10 +107,9 @@ struct LensDoc {
 impl LensDoc {
     fn new(settings: &ViewSettings, scale: f32, font: Option<&Arc<Vec<u8>>>, cols: u16) -> LensDoc {
         let mut term = Terminal::new(cols.max(2), 1, auk_term::Config::default());
-        // The engine takes every kind the views draw, `block` (never advertised to programs)
-        // among them.
+        // The engine takes every kind the views draw.
         let mut config = auk_tsp::Config::default();
-        for kind in auk_views::KINDS.iter().chain(&["block"]) {
+        for kind in auk_views::KINDS {
             if !config.kinds.iter().any(|k| k == kind) {
                 config.kinds.push((*kind).to_owned());
             }

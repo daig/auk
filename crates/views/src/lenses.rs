@@ -189,8 +189,7 @@ impl LensLayer {
         view.command_blocks = true;
         let el = view.element();
         doc.append_child(body, el);
-        let mut kinds: Vec<String> = crate::KINDS.iter().map(|k| (*k).to_owned()).collect();
-        kinds.extend(["block", "math", "effort"].map(str::to_owned));
+        let kinds: Vec<String> = crate::KINDS.iter().map(|k| (*k).to_owned()).collect();
         let config = Config {
             kinds,
             features: Vec::new(),
