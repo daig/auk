@@ -37,24 +37,31 @@ pub(crate) fn md(cx: &mut Cx, node: NodeRef, m: &mut Mount, _look: &mut Look) {
     let Extra::Md(st) = &mut m.extra else {
         unreachable!()
     };
-    st.update(&mut cx.dom, m.el, &text, stream, marks);
+    // Mermaid figures draw for the theme at the region zoom times the display scale (§8.3).
+    let env = crate::md::MdEnv {
+        dark: cx.set.dark,
+        density: cx.set.font_px / 13.0 * cx.dom.doc.device_scale(),
+    };
+    st.update(&mut cx.dom, m.el, &text, stream, marks, env);
     // Blocks are the node's generated parts.
     m.generated = st.blocks.iter().map(|b| b.el).collect();
     // Many blocks: virtualize (§8.3).
     let many = st.blocks.len() > 64;
     super::virtualize(cx, node.id(), m.el, many.then_some(60.0));
-    m.clock = stream && !cx.set.reduce_motion;
+    // The clock also draws in diagrams finished in the background.
+    m.clock = (stream && !cx.set.reduce_motion) || !st.figs.is_empty();
 }
 
-/// The streaming caret pulses.
+/// The streaming caret pulses, and diagrams drawn in the background draw in.
 pub(crate) fn tick_md(cx: &mut Cx, _node: NodeRef, m: &mut Mount) -> bool {
-    let Extra::Md(st) = &m.extra else {
+    let Extra::Md(st) = &mut m.extra else {
         return false;
     };
-    let Some(c) = st.caret else { return false };
+    let drawing = st.poll_figures(&mut cx.dom);
+    let Some(c) = st.caret else { return drawing };
     if cx.set.reduce_motion {
         cx.dom.set_style(c, "");
-        return false;
+        return drawing;
     }
     let t = (cx.now.rem_euclid(1000.0)) / 1000.0;
     let o = if t < 0.5 { 1.0 } else { 0.25 };

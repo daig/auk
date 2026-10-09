@@ -26,6 +26,10 @@ parley = "0.11"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 # Sanitized SVG: parsed and filtered to the allowlist (usvg's roxmltree), drawn by resvg.
 resvg = { version = "0.48.1", default-features = false, features = ["text", "system-fonts"] }
+# Mermaid fences in `md` (§8.5, §18.4, A23): parse, layout and SVG in Rust, drawn by resvg.
+merman = { version = "=0.8.0", default-features = false, features = ["svg", "diagram-flowchart", "diagram-sequence", "diagram-class", "diagram-state", "diagram-er", "diagram-gantt", "diagram-pie"] }
+# Advances of the face diagram text draws with, for merman's text measurement.
+skrifa = "0.44"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]

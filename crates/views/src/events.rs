@@ -63,7 +63,8 @@ pub struct Zoom {
 pub struct ZoomImage {
     /// The node.
     pub id: String,
-    /// Its blob (builtin images never zoom).
+    /// Its blob (builtin images never zoom), or a picture the terminal made: a mermaid
+    /// diagram's id (`mermaid:…`), drawn by [`crate::image::load_made_for_viewer`].
     pub blob: String,
     /// The viewer title: `alt`, else `title`.
     pub title: Option<String>,
@@ -291,6 +292,28 @@ impl PaneView {
                 return Some(vec![Outcome::Copy(crate::kinds::block::raw_text(
                     &text, cols,
                 ))]);
+            }
+            // A mermaid figure's Open (book:5026): the diagram large, in the image viewer.
+            if has("mfig-open") {
+                let id = doc.attribute(p, "data-mfig")?.to_owned();
+                let title = doc
+                    .parent(p)
+                    .and_then(|h| {
+                        doc.element_children(h)
+                            .into_iter()
+                            .find(|c| self.class_has(*c, "mfig-kind"))
+                    })
+                    .map(|k| text_content(doc, k));
+                return Some(vec![Outcome::Zoom(Box::new(Zoom {
+                    surface: surface.key(),
+                    images: vec![ZoomImage {
+                        id: node.id().to_owned(),
+                        blob: id,
+                        title,
+                        open: None,
+                    }],
+                    index: 0,
+                }))]);
             }
             if has("code-copy") {
                 // The fence's text: its `pre`.

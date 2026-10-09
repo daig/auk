@@ -43,6 +43,7 @@ mod kinds;
 pub mod lenses;
 mod md;
 mod measure;
+pub mod mermaid;
 pub mod motion;
 pub mod palette;
 pub mod sheets;

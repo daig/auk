@@ -17,15 +17,18 @@ publish = false
 [dependencies]
 bitflags = { version = "2", default-features = false, features = ["serde", "std"] }
 bytemuck = { version = "1", default-features = false, features = ["aarch64_simd", "derive", "extern_crate_alloc", "min_const_generics"] }
+euclid = { version = "0.22" }
 fastrand = { version = "2" }
+foldhash = { version = "0.2" }
 fontique = { version = "0.11" }
 futures-core = { version = "0.3" }
 futures-sink = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 harfrust = { version = "0.12" }
-hashbrown = { version = "0.17", default-features = false, features = ["default-hasher", "inline-more", "raw-entry"] }
-indexmap = { version = "2" }
+hashbrown = { version = "0.17" }
+indexmap = { version = "2", features = ["serde"] }
 kurbo = { version = "0.13" }
+libm = { version = "0.2" }
 linebender_resource_handle = { version = "0.1", default-features = false, features = ["std"] }
 lock_api = { version = "0.4", features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["std"] }
@@ -34,7 +37,10 @@ naga-types = { version = "30", default-features = false, features = ["std"] }
 num-traits = { version = "0.2", features = ["libm"] }
 once_cell = { version = "1" }
 parking_lot = { version = "0.12", features = ["arc_lock"] }
-phf_shared = { version = "0.14", default-features = false, features = ["std"] }
+percent-encoding = { version = "2" }
+phf = { version = "0.13", features = ["macros"] }
+phf_shared-582f2526e08bb6a0 = { package = "phf_shared", version = "0.14", default-features = false, features = ["std"] }
+phf_shared-594e8ee84c453af0 = { package = "phf_shared", version = "0.13" }
 raw-window-handle = { version = "0.6", default-features = false, features = ["std"] }
 read-fonts = { version = "0.41", default-features = false, features = ["experimental_font_api", "std"] }
 regex-automata = { version = "0.4" }
@@ -51,16 +57,22 @@ tracing = { version = "0.1" }
 bitflags = { version = "2", default-features = false, features = ["serde", "std"] }
 cc = { version = "1", default-features = false, features = ["parallel"] }
 fastrand = { version = "2" }
-hashbrown = { version = "0.17", default-features = false, features = ["default-hasher", "inline-more", "raw-entry"] }
-indexmap = { version = "2" }
+foldhash = { version = "0.2" }
+hashbrown = { version = "0.17" }
+indexmap = { version = "2", features = ["serde"] }
+libm = { version = "0.2" }
 log = { version = "0.4", default-features = false, features = ["std"] }
+memchr = { version = "2" }
 naga-types = { version = "30", default-features = false, features = ["std"] }
 num-traits = { version = "0.2", features = ["libm"] }
 once_cell = { version = "1" }
-phf_shared = { version = "0.14", default-features = false, features = ["std"] }
+phf = { version = "0.13", features = ["macros"] }
+phf_shared-582f2526e08bb6a0 = { package = "phf_shared", version = "0.14", default-features = false, features = ["std"] }
+phf_shared-594e8ee84c453af0 = { package = "phf_shared", version = "0.13" }
 proc-macro2 = { version = "1" }
 quote = { version = "1" }
 serde_core = { version = "1", default-features = false, features = ["alloc", "rc", "result", "std"] }
+serde_json = { version = "1", features = ["float_roundtrip", "preserve_order", "raw_value"] }
 syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", features = ["extra-traits", "fold", "full", "visit"] }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2", features = ["extra-traits", "full", "visit", "visit-mut"] }
 thiserror = { version = "2" }
@@ -71,6 +83,7 @@ bit-vec = { version = "0.8" }
 block2 = { version = "0.6" }
 dispatch2 = { version = "0.3" }
 errno = { version = "0.3" }
+form_urlencoded = { version = "1" }
 http = { version = "1" }
 httparse = { version = "1" }
 libc = { version = "0.2", features = ["extra_traits"] }
@@ -100,6 +113,7 @@ zerocopy = { version = "0.8", default-features = false, features = ["derive", "s
 bit-set = { version = "0.8" }
 bit-vec = { version = "0.8" }
 fontique = { version = "0.11", default-features = false, features = ["fontconfig-dlopen"] }
+form_urlencoded = { version = "1" }
 http = { version = "1" }
 httparse = { version = "1" }
 libc = { version = "0.2", features = ["extra_traits"] }

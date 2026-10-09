@@ -1,0 +1,12 @@
+flowchart LR
+    A[Start] -->|parse| B(Round step)
+    B --> C{Valid?}
+    C -->|yes| D[(Database)]
+    C -->|no| E((Retry))
+    subgraph store [Storage]
+        D --> F>Flag]
+        F --> G[/Lean right/]
+    end
+    E -.-> B
+    G ==> H{{Hexagon}}
+    H --> I[[Subroutine]]

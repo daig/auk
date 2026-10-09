@@ -17,7 +17,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::Cursor;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use auk_ui::ImageContent;
 use image::codecs::gif::GifDecoder;
@@ -488,20 +488,70 @@ fn escape(s: &str, out: &mut String) {
     }
 }
 
-/// The fonts SVG text draws with: the system's, loaded once.
-fn svg_fonts() -> Arc<usvg::fontdb::Database> {
-    static FONTS: OnceLock<Arc<usvg::fontdb::Database>> = OnceLock::new();
-    FONTS
-        .get_or_init(|| {
-            let mut db = usvg::fontdb::Database::new();
-            db.load_system_fonts();
-            if cfg!(target_os = "macos") {
-                db.set_sans_serif_family("Helvetica");
-                db.set_monospace_family("Menlo");
-            }
-            Arc::new(db)
-        })
-        .clone()
+/// The fonts SVG text draws with: the system's, loaded once, plus any the host adds
+/// ([`add_svg_font`]).
+pub fn svg_fonts() -> Arc<usvg::fontdb::Database> {
+    if let Some(db) = fonts_slot()
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+    {
+        return db.clone();
+    }
+    let mut slot = fonts_slot().write().unwrap_or_else(|e| e.into_inner());
+    slot.get_or_insert_with(|| {
+        let mut db = usvg::fontdb::Database::new();
+        db.load_system_fonts();
+        if cfg!(target_os = "macos") {
+            db.set_sans_serif_family("Helvetica");
+            db.set_monospace_family("Menlo");
+        }
+        Arc::new(db)
+    })
+    .clone()
+}
+
+fn fonts_slot() -> &'static RwLock<Option<Arc<usvg::fontdb::Database>>> {
+    static FONTS: RwLock<Option<Arc<usvg::fontdb::Database>>> = RwLock::new(None);
+    &FONTS
+}
+
+/// Bumped whenever the SVG fonts change, so pictures with laid-out text are drawn again.
+static FONT_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Which set of SVG fonts is in use (part of the cache keys of pictures with laid-out text).
+pub(crate) fn font_generation() -> u64 {
+    FONT_GENERATION.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Adds a font (a TTF/OTF file's bytes) for SVG text and makes it every generic family: for
+/// hosts without system fonts (the browser client), so diagrams and SVG images have text.
+pub fn add_svg_font(data: Vec<u8>) {
+    // Once per font (every pane of the browser client offers the same one).
+    static ADDED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    {
+        let id = auk_tsp::blob::blob_id(&data);
+        let mut added = ADDED.lock().unwrap_or_else(|e| e.into_inner());
+        if added.contains(&id) {
+            return;
+        }
+        added.push(id);
+    }
+    let mut db = (*svg_fonts()).clone();
+    let before: std::collections::HashSet<_> = db.faces().map(|f| f.id).collect();
+    db.load_font_data(data);
+    let family = db
+        .faces()
+        .find(|f| !before.contains(&f.id))
+        .and_then(|f| f.families.first().map(|(n, _)| n.clone()));
+    let Some(family) = family else { return };
+    db.set_monospace_family(family.clone());
+    db.set_sans_serif_family(family.clone());
+    db.set_serif_family(family.clone());
+    db.set_cursive_family(family.clone());
+    db.set_fantasy_family(family);
+    *fonts_slot().write().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(db));
+    FONT_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
 
 fn decode_svg(bytes: &[u8], density: f32, prefix: &str) -> Result<Picture, String> {
@@ -524,10 +574,15 @@ fn decode_svg(bytes: &[u8], density: f32, prefix: &str) -> Result<Picture, Strin
 
 /// Draws an SVG (already sanitized, or one the terminal ships) at `density`, capped at
 /// [`MAX_SIDE`] px a side. Returns the content and the SVG's size in CSS px.
-fn render_svg(svg: &str, density: f32) -> Result<(ImageContent, (f32, f32)), String> {
+pub(crate) fn render_svg(svg: &str, density: f32) -> Result<(ImageContent, (f32, f32)), String> {
     let opt = usvg::Options {
         fontdb: svg_fonts(),
         font_family: "Helvetica".into(),
+        // Nothing outside the document: `data:` images only, never files or URLs.
+        image_href_resolver: usvg::ImageHrefResolver {
+            resolve_data: usvg::ImageHrefResolver::default_data_resolver(),
+            resolve_string: Box::new(|_, _| None),
+        },
         ..usvg::Options::default()
     };
     let tree = usvg::Tree::from_str(svg, &opt).map_err(|e| format!("can't draw the SVG: {e}"))?;
@@ -743,12 +798,47 @@ pub fn request_blob(blob: &auk_tsp::Blob, density: f32) -> Poll {
         let now = c.clock;
         c.entries.insert(key.clone(), (now, Slot::Pending));
     }
+    let bytes = blob.bytes.clone();
     background::submit(Job {
         key,
-        bytes: blob.bytes.clone(),
-        format,
+        work: Box::new(move || decode_raster(&bytes, format)),
     });
     Poll::Pending
+}
+
+/// A picture made by `work` (a diagram, say), cached under `key`: ready if it is cached,
+/// otherwise made in the background like a big raster ([`request_blob`]) and pending until then.
+pub(crate) fn request_made(
+    key: &str,
+    work: impl FnOnce() -> Result<Picture, String> + Send + 'static,
+) -> Poll {
+    {
+        let mut c = lock();
+        match c.hit(key) {
+            Some(Slot::Done(loaded)) => return Poll::Ready(loaded.clone()),
+            Some(Slot::Pending) => return Poll::Pending,
+            None => {}
+        }
+        c.clock += 1;
+        let now = c.clock;
+        c.entries.insert(key.to_owned(), (now, Slot::Pending));
+    }
+    background::submit(Job {
+        key: key.to_owned(),
+        work: Box::new(work),
+    });
+    Poll::Pending
+}
+
+/// A picture made by `work`, cached under `key`, made now on this thread when it isn't.
+pub(crate) fn load_made(key: &str, work: impl FnOnce() -> Result<Picture, String>) -> Loaded {
+    cached(key.to_owned(), work)
+}
+
+/// A picture the terminal made (not a blob) for the image viewer: a mermaid diagram, by the id
+/// its figure's Open gave ([`crate::Outcome::Zoom`]), drawn at `density`.
+pub fn load_made_for_viewer(id: &str, density: f32) -> Option<Loaded> {
+    crate::mermaid::load_for_viewer(id, density)
 }
 
 /// The picture for `blob` if it is decoded, without decoding anything.
@@ -784,16 +874,16 @@ pub fn settle() {
     }
 }
 
-/// A raster decoding in the background.
+/// A picture decoding (a raster) or being made (a diagram) in the background.
 struct Job {
     key: String,
-    bytes: Vec<u8>,
-    format: ImageFormat,
+    work: Box<dyn FnOnce() -> Result<Picture, String> + Send>,
 }
 
 impl Job {
     fn run(self) {
-        let loaded = std::panic::catch_unwind(|| decode_raster(&self.bytes, self.format))
+        let work = self.work;
+        let loaded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(work))
             .unwrap_or_else(|_| Err("the decoder failed".into()))
             .map(Arc::new);
         lock().store(&self.key, &loaded);

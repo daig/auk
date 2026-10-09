@@ -700,6 +700,8 @@ impl PaneSurfaces {
 /// system fonts (the browser client), so the document's text draws in the one font the host has.
 pub fn use_font(doc: &mut Document, data: Vec<u8>) {
     use parley::fontique::GenericFamily;
+    // SVG text (diagrams, SVG images) draws in it too.
+    crate::image::add_svg_font(data.clone());
     let collection = &mut doc.fonts_mut().font_cx.collection;
     let blob = parley::fontique::Blob::new(std::sync::Arc::new(data));
     let ids: Vec<_> = collection

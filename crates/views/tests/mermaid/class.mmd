@@ -1,0 +1,16 @@
+classDiagram
+    class Surface {
+        +String id
+        +Mode mode
+        +open() void
+        +close() void
+    }
+    class Node {
+        +String kind
+        +props() Map
+    }
+    class Region
+    Surface "1" *-- "many" Node : holds
+    Surface o-- Region
+    Node <|-- Text
+    Node <|-- List

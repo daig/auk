@@ -1,0 +1,12 @@
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Running : start
+    Running --> Paused : pause
+    Paused --> Running : resume
+    Running --> Done : finish
+    state Running {
+        [*] --> Fetch
+        Fetch --> Build
+        Build --> [*]
+    }
+    Done --> [*]
