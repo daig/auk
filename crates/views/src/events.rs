@@ -288,6 +288,9 @@ impl PaneView {
                 return Some(vec![Outcome::Redraw]);
             }
             if has("sf-block-copy") && node.kind() == "block" {
+                if !self.command_blocks {
+                    return Some(vec![Outcome::Copy(String::new())]);
+                }
                 let raw = node
                     .children()
                     .find(|c| crate::kinds::block::is_raw(node, *c));
@@ -1116,6 +1119,7 @@ impl PaneView {
             crate::kinds::block::raw_text(text, cols)
         };
         match node.kind() {
+            "block" if !self.command_blocks => String::new(),
             "block" => node
                 .children()
                 .find(|c| crate::kinds::block::is_raw(node, *c))
