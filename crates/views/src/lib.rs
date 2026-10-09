@@ -41,6 +41,7 @@ pub mod icons;
 pub mod image;
 mod kinds;
 pub mod lenses;
+pub mod math;
 mod md;
 mod measure;
 pub mod motion;

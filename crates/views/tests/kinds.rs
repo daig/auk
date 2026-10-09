@@ -614,11 +614,12 @@ fn md_gfm_strikethrough_tables_and_math_delimiters() {
     let align = |e| format!("{:?}", h.doc.computed_style(e).unwrap().text_align).to_lowercase();
     assert!(align(td[1]).contains("right") || align(td[1]).contains("end"), "{}", align(td[1]));
     assert!(align(td[2]).contains("center"), "{}", align(td[2]));
-    // Math delimiters: the TeX, kept (Math rendering is T2, §8.2), inline and display.
+    // Math delimiters: the TeX kept in `data-tex` around the typeset formula (A23; tests/math.rs
+    // covers the drawing), inline and display.
     let inline = h.find_class(md, "math");
     assert_eq!(inline.len(), 1);
     assert_eq!(h.attr(inline[0], "data-tex").as_deref(), Some("a^2 + b^2"));
-    assert_eq!(h.text(inline[0]), "a^2 + b^2");
+    assert_eq!(h.text(inline[0]), "", "a picture, not the TeX");
     let display = h.find_class(md, "math-display");
     assert_eq!(display.len(), 1);
     assert_eq!(h.attr(display[0], "data-tex").as_deref().map(str::trim), Some("\\int_0^1 x\\,dx"));

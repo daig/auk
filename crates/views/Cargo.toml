@@ -26,6 +26,18 @@ parley = "0.11"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 # Sanitized SVG: parsed and filtered to the allowlist (usvg's roxmltree), drawn by resvg.
 resvg = { version = "0.48.1", default-features = false, features = ["text", "system-fonts"] }
+# `math` and md math (§8.5, §18.4, amendment A23): KaTeX-compatible TeX parsing and layout in pure
+# Rust, glyph outlines from the KaTeX fonts it embeds.
+ratex-parser = "0.1.14"
+ratex-layout = "0.1.14"
+ratex-types = "0.1.14"
+ratex-font = "0.1.14"
+ratex-katex-fonts = "0.1.14"
+# The KaTeX fonts compiled in for debug builds too (rust-embed reads them from disk otherwise,
+# which the browser can't).
+rust-embed = { version = "8.11", default-features = false, features = ["debug-embed"] }
+# Glyph outlines of the KaTeX fonts (already in the tree through the UI engine).
+skrifa = "0.44"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]

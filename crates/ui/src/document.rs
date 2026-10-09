@@ -475,6 +475,18 @@ impl Document {
         }
     }
 
+    /// Paints an element's replaced picture as a mask in the element's `color` (its alpha
+    /// coverage filled with `currentColor`) instead of its own colors, so one picture (typeset
+    /// math) follows the theme and a sheet's `color` without being drawn again.
+    pub fn set_image_tint(&mut self, id: NodeId, tint: bool) {
+        self.node_mut(id).image_tint = tint;
+    }
+
+    /// Whether an element's replaced picture paints in its `color` ([`Self::set_image_tint`]).
+    pub fn image_tint(&self, id: NodeId) -> bool {
+        self.node(id).image_tint
+    }
+
     /// An element's replaced content.
     pub fn image(&self, id: NodeId) -> Option<&crate::image::ImageContent> {
         self.node(id).image.as_deref()

@@ -291,6 +291,7 @@ pub(crate) fn tick(cx: &mut Cx, node: NodeRef, m: &mut Mount) -> bool {
         }
         "tool" | "agent" => agent::tick(cx, node, m),
         "image" => rich::tick_image(cx, node, m),
+        "math" => rich::tick_math(cx, node, m),
         "editor" | "input" => input::tick(cx, node, m),
         _ => false,
     }

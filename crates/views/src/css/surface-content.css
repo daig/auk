@@ -49,8 +49,6 @@
 .sf-md .md-html { white-space: pre-wrap; color: var(--t3); }
 .sf-md .md-img { color: var(--t3); }
 .sf-md .md-img::before { content: '[image] '; }
-.sf-md .math, .sf-md .math-display { color: var(--t2); }
-.sf-md .math-display { white-space: pre-wrap; }
 .sf-md .md-table { overflow-x: auto; }
 .sf-md table { border-collapse: collapse; }
 .sf-md th, .sf-md td { padding: 2px 12px 2px 0; text-align: left; border-bottom: 1px solid var(--l2); vertical-align: top; }
@@ -122,8 +120,16 @@
 .sf-ansi-more { align-self: flex-start; color: var(--t3); font-size: 12px; margin-top: 2px; }
 .sf-rows-mark { align-self: flex-start; font-size: 10px; color: var(--t4); border: 1px solid var(--l3); border-radius: 4px; padding: 0 4px; line-height: 14px; margin-bottom: 2px; }
 
-/* T2 fallback: math */
-.sf-math .md { color: var(--t2); }
+/* math, and md math: a typeset svg painting in currentColor (--t1 from .md and .math-display),
+   1.1em of the text; display math is a block centered in the width, scrolling sideways when wide */
+.sf-math .md { color: var(--t1); }
+.sf-math .md > p { margin: 0; }
+.math, .math-display { font-size: 1.1em; }
+.math > svg, .math-display > svg { display: inline-block; }
+.math-display { display: block; color: var(--t1); text-align: center; overflow-x: auto; overflow-y: hidden; margin: 2px 0; }
+.math.pending, .math-display.pending { font-size: 1em; color: var(--t3); white-space: pre-wrap; }
+code.math-err { color: var(--bad); white-space: pre-wrap; }
+.math-display > code.math-err { display: inline-block; text-align: left; }
 
 /* image: a replaced box with its children over it; a dashed card while missing */
 .sf-image { position: relative; display: flex; flex-direction: column; align-items: flex-start; }

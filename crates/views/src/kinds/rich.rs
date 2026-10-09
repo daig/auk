@@ -1,5 +1,5 @@
 //! Kinds on rich sub-engines (§8.5, §18.4): `md code diff ansi rows image`, and the T2 `math`
-//! drawn as a plain fallback.
+//! (typeset by [`crate::math`], as md math is).
 
 use super::layout::preview_lines;
 use super::{begin, icon, part};
@@ -37,21 +37,35 @@ pub(crate) fn md(cx: &mut Cx, node: NodeRef, m: &mut Mount, _look: &mut Look) {
     let Extra::Md(st) = &mut m.extra else {
         unreachable!()
     };
+    st.math_em = math_em(cx.set.font_px, cx.dom.doc.device_scale());
     st.update(&mut cx.dom, m.el, &text, stream, marks);
+    let math_pending = !st.math_pending.is_empty();
     // Blocks are the node's generated parts.
     m.generated = st.blocks.iter().map(|b| b.el).collect();
     // Many blocks: virtualize (§8.3).
     let many = st.blocks.len() > 64;
     super::virtualize(cx, node.id(), m.el, many.then_some(60.0));
-    m.clock = stream && !cx.set.reduce_motion;
+    m.clock = stream && !cx.set.reduce_motion || math_pending;
 }
 
-/// The streaming caret pulses.
+/// Math's device pixels per em in a region at terminal font `font_px` (regions zoom by
+/// `font_px / 13`, §8.3; body text is 13px).
+pub(crate) fn math_em(font_px: f32, device_scale: f32) -> u32 {
+    crate::math::em_px(13.0, font_px / 13.0, device_scale)
+}
+
+/// The streaming caret pulses; formulas typeset in the background are filled in.
 pub(crate) fn tick_md(cx: &mut Cx, _node: NodeRef, m: &mut Mount) -> bool {
-    let Extra::Md(st) = &m.extra else {
+    let Extra::Md(st) = &mut m.extra else {
         return false;
     };
-    let Some(c) = st.caret else { return false };
+    let mut math = false;
+    if !st.math_pending.is_empty() {
+        let pending = std::mem::take(&mut st.math_pending);
+        st.math_pending = crate::math::fill(&mut cx.dom, pending);
+        math = !st.math_pending.is_empty();
+    }
+    let Some(c) = st.caret else { return math };
     if cx.set.reduce_motion {
         cx.dom.set_style(c, "");
         return false;
@@ -629,19 +643,39 @@ pub(crate) fn rows(cx: &mut Cx, node: NodeRef, m: &mut Mount, _look: &mut Look) 
     st.draw(&mut cx.dom, mini, 0..n);
 }
 
+/// `math` (book: math): one TeX formula, `div.md > div.math-display` centered in the node's
+/// width when `display`, else `div.md > p > span.math` at the node's start, typeset like md math.
+/// A formula typesetting in the background shows its TeX until the clock fills it in.
 pub(crate) fn math(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
     begin(cx, m);
     let display = bool_prop(node.props(), "display");
     look.class_if(display, "display");
     let tex = text_prop(node);
     let md = part(cx, m, "div", "md");
-    let el = cx.dom.child(
-        md,
-        if display { "div" } else { "span" },
-        if display { "math-display" } else { "math" },
-    );
-    cx.dom.attr(el, "data-tex", &tex);
-    cx.dom.text(el, &tex);
+    let parent = if display {
+        md
+    } else {
+        cx.dom.child(md, "p", "")
+    };
+    let em = math_em(cx.set.font_px, cx.dom.doc.device_scale());
+    let (_, pending) = crate::math::mount(&mut cx.dom, parent, &tex, display, em);
+    m.clock = pending.is_some();
+}
+
+/// A `math` node waiting for the background: drawn again once its formula is ready.
+pub(crate) fn tick_math(cx: &mut Cx, node: NodeRef, m: &mut Mount) -> bool {
+    crate::math::pump();
+    let display = bool_prop(node.props(), "display");
+    let tex = crate::math::normalize(&text_prop(node), display);
+    let em = math_em(cx.set.font_px, cx.dom.doc.device_scale());
+    if matches!(
+        crate::math::request(tex.trim(), display, em),
+        crate::math::Poll::Pending
+    ) {
+        return true;
+    }
+    crate::view::render_node(cx, m, node);
+    m.clock
 }
 
 /// Per-node state of an `image`: what it shows, its frame element and its animation clock.

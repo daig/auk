@@ -42,6 +42,10 @@ pub(crate) struct MdState {
     pub marks: Vec<Span>,
     /// Blocks re-rendered by the last update (for checking incremental work).
     pub rerendered: usize,
+    /// Device pixels per em of math (set by the kind before an update; 0 picks 13px at 1x).
+    pub math_em: u32,
+    /// Formulas typesetting in the background, filled in by the clock.
+    pub math_pending: Vec<crate::math::Pending>,
 }
 
 /// Top-level block ranges of `text`, and the reference definition lines.
@@ -179,16 +183,28 @@ impl MdState {
         true
     }
 
-    fn render_block(&self, dom: &mut Dom, src: &str) -> NodeId {
+    fn render_block(&mut self, dom: &mut Dom, src: &str) -> NodeId {
         let el = dom.el("div", "md");
+        let src = math_delimiters(src);
         let full;
         let input = if self.refdefs.is_empty() {
-            src
+            &*src
         } else {
             full = format!("{src}\n\n{}", self.refdefs);
             &full
         };
-        render_events(dom, el, Parser::new_ext(input, options()), &self.marks);
+        let em = if self.math_em == 0 {
+            crate::math::em_px(13.0, 1.0, 1.0)
+        } else {
+            self.math_em
+        };
+        render_events(
+            dom,
+            el,
+            Parser::new_ext(input, options()),
+            &self.marks,
+            (em, &mut self.math_pending),
+        );
         el
     }
 }
@@ -236,6 +252,8 @@ struct Renderer<'d, 'a, 'm> {
     /// Ordered-list counters.
     lists: Vec<Option<u64>>,
     in_link: usize,
+    /// Math's device pixels per em, and the formulas left to the background.
+    math: (u32, &'m mut Vec<crate::math::Pending>),
 }
 
 fn render_events<'e>(
@@ -243,6 +261,7 @@ fn render_events<'e>(
     holder: NodeId,
     events: impl Iterator<Item = Event<'e>>,
     marks: &[Span],
+    math: (u32, &mut Vec<crate::math::Pending>),
 ) {
     let mut r = Renderer {
         dom,
@@ -253,6 +272,7 @@ fn render_events<'e>(
         table: None,
         lists: Vec::new(),
         in_link: 0,
+        math,
     };
     for ev in events {
         r.event(ev);
@@ -262,6 +282,13 @@ fn render_events<'e>(
 impl Renderer<'_, '_, '_> {
     fn top(&self) -> NodeId {
         *self.stack.last().expect("holder")
+    }
+
+    /// A typeset formula (book: md Math).
+    fn math(&mut self, tex: &str, display: bool) {
+        let p = self.top();
+        let (_, pending) = crate::math::mount(self.dom, p, tex, display, self.math.0);
+        self.math.1.extend(pending);
     }
 
     fn open(&mut self, tag: &str, class: &str) -> NodeId {
@@ -320,18 +347,8 @@ impl Renderer<'_, '_, '_> {
                 }
                 self.dom.text(c, &t);
             }
-            Event::InlineMath(t) => {
-                let p = self.top();
-                let m = self.dom.child(p, "span", "math");
-                self.dom.attr(m, "data-tex", &t);
-                self.dom.text(m, &t);
-            }
-            Event::DisplayMath(t) => {
-                let p = self.top();
-                let m = self.dom.child(p, "div", "math-display");
-                self.dom.attr(m, "data-tex", &t);
-                self.dom.text(m, &t);
-            }
+            Event::InlineMath(t) => self.math(&t, false),
+            Event::DisplayMath(t) => self.math(&t, true),
             Event::Html(t) | Event::InlineHtml(t) => {
                 let p = self.top();
                 self.dom.text(p, &t);
@@ -675,6 +692,104 @@ fn title_case(s: &str) -> String {
         Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
         None => String::new(),
     }
+}
+
+/// The math delimiters pulldown-cmark doesn't know, as the ones it does (book: md Math):
+/// `\(…\)` → `$…$`, `\[…\]` → `$$…$$`, and a `\begin{env}…\end{env}` starting a line →
+/// `$$\begin{env}…\end{env}$$`. Code spans and fences, `$` math and escaped characters are left
+/// as they are, as is an indented code block.
+fn math_delimiters(src: &str) -> std::borrow::Cow<'_, str> {
+    use std::borrow::Cow;
+    if !(src.contains("\\(") || src.contains("\\[") || src.contains("\\begin{"))
+        || src.starts_with("    ")
+        || src.starts_with('\t')
+    {
+        return Cow::Borrowed(src);
+    }
+    let b = src.as_bytes();
+    let run = |at: usize, c: u8| b[at..].iter().take_while(|&&x| x == c).count();
+    let line_start = |at: usize| {
+        src[..at]
+            .rsplit('\n')
+            .next()
+            .is_none_or(|l| l.trim().is_empty())
+    };
+    let mut out = String::new();
+    let (mut i, mut copied) = (0, 0);
+    while i < b.len() {
+        match b[i] {
+            b'`' => {
+                // A code span or fence: to the closing run of the same length.
+                let n = run(i, b'`');
+                let mut j = i + n;
+                i = loop {
+                    match b[j..].iter().position(|&x| x == b'`') {
+                        Some(k) => {
+                            let at = j + k;
+                            let m = run(at, b'`');
+                            if m == n {
+                                break at + m;
+                            }
+                            j = at + m;
+                        }
+                        None => break i + n,
+                    }
+                };
+            }
+            b'$' => {
+                let close = if b.get(i + 1) == Some(&b'$') { "$$" } else { "$" };
+                i = match src[i + close.len()..].find(close) {
+                    Some(k) => i + close.len() + k + close.len(),
+                    None => i + close.len(),
+                };
+            }
+            b'\\' => match b.get(i + 1) {
+                Some(&o @ (b'(' | b'[')) => {
+                    let (close, fence) = if o == b'(' { ("\\)", "$") } else { ("\\]", "$$") };
+                    if let Some(k) = src[i + 2..].find(close) {
+                        let end = i + 2 + k;
+                        let inner = src[i + 2..end].trim();
+                        if !inner.is_empty() && !inner.contains('$') {
+                            out.push_str(&src[copied..i]);
+                            out.push_str(fence);
+                            out.push_str(inner);
+                            out.push_str(fence);
+                            i = end + 2;
+                            copied = i;
+                            continue;
+                        }
+                    }
+                    i += 2;
+                }
+                Some(b'b') if src[i..].starts_with("\\begin{") && line_start(i) => {
+                    let name = src[i + 7..].split('}').next().unwrap_or("");
+                    let end = format!("\\end{{{name}}}");
+                    let valid = !name.is_empty()
+                        && name.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'*');
+                    match src[i..].find(&end).filter(|_| valid) {
+                        Some(k) => {
+                            let stop = i + k + end.len();
+                            out.push_str(&src[copied..i]);
+                            out.push_str("$$");
+                            out.push_str(&src[i..stop]);
+                            out.push_str("$$");
+                            i = stop;
+                            copied = i;
+                        }
+                        None => i += 1,
+                    }
+                }
+                Some(_) => i += 2,
+                None => i += 1,
+            },
+            _ => i += 1,
+        }
+    }
+    if copied == 0 {
+        return Cow::Borrowed(src);
+    }
+    out.push_str(&src[copied..]);
+    Cow::Owned(out)
 }
 
 fn is_hex_color(t: &str) -> bool {
