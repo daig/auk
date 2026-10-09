@@ -186,6 +186,11 @@ impl PaneView {
         ev: PointerEvent,
     ) -> Option<Vec<Outcome>> {
         let key = surface.key();
+        if node.kind() == "picker"
+            && let Some(press) = crate::kinds::picker::press(doc, node, &hit.parts)
+        {
+            return Some(self.picker_press(doc, pane, surface, node, press, ev));
+        }
         for &p in &hit.parts {
             let class = self.written.class.get(&p).cloned().unwrap_or_default();
             let has = |c: &str| class.split(' ').any(|x| x == c);
@@ -316,6 +321,80 @@ impl PaneView {
             }
         }
         None
+    }
+
+    /// A press on a `picker` part (book:6383-6395): rows select, and activate on the selected
+    /// row, the row clicked last or a double click (once, never when disabled); buttons, scopes,
+    /// tabs, strip chips and the backdrop send `action`; the narrow scope button opens its menu.
+    fn picker_press(
+        &mut self,
+        doc: &mut Document,
+        pane: &TspPane,
+        surface: &Surface,
+        node: NodeRef,
+        press: crate::kinds::picker::Press,
+        ev: PointerEvent,
+    ) -> Vec<Outcome> {
+        use crate::kinds::picker::Press;
+        let key = surface.key();
+        let id = node.id().to_owned();
+        let Some(sv) = self.surfaces.iter_mut().find(|s| s.key == key) else {
+            return Vec::new();
+        };
+        let ps = sv.st.pickers.entry(id.clone()).or_default();
+        match press {
+            Press::Row { item, disabled } => {
+                let selected = node.prop("selected").and_then(Value::as_str) == Some(item.as_str());
+                let last = ps.last_click.clone();
+                let activate = if ev.clicks >= 2 {
+                    // Once per double click: not again when its first press activated.
+                    !last.as_ref().is_some_and(|(i, a)| *i == item && *a)
+                } else {
+                    selected || last.as_ref().is_some_and(|(i, _)| *i == item)
+                };
+                let activate = activate && !disabled;
+                ps.last_click = Some((item.clone(), activate || (ev.clicks >= 2)));
+                if ev.clicks >= 2 && !activate {
+                    return Vec::new();
+                }
+                let event = if activate {
+                    ViewEvent::Activate {
+                        id,
+                        item,
+                        values: None,
+                    }
+                } else {
+                    ViewEvent::Select {
+                        id,
+                        item,
+                        values: None,
+                    }
+                };
+                vec![self.event(surface, event)]
+            }
+            Press::Act(Some(action)) => {
+                let menu = ps.menu;
+                ps.menu = false;
+                if menu {
+                    self.refresh(doc, pane, key, std::slice::from_ref(&id));
+                }
+                vec![self.event(
+                    surface,
+                    ViewEvent::Action {
+                        id,
+                        action,
+                        mods: ev.mods,
+                        values: None,
+                    },
+                )]
+            }
+            Press::Menu => {
+                ps.menu = !ps.menu;
+                self.refresh(doc, pane, key, &[id]);
+                vec![Outcome::Redraw]
+            }
+            Press::Act(None) | Press::Nothing => Vec::new(),
+        }
     }
 
     fn event(&self, surface: &Surface, event: ViewEvent) -> Outcome {

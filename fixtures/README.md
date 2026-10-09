@@ -13,6 +13,7 @@ Each `.jsonl` file uses Tern's recording format (book:11579): one message per li
 | `python-{table,ask,progress,chat}` | The tern-sdk Python examples at `19658cb`, run under `tools/tsp_record.py` with the scenarios in `scenarios/`. |
 | `omp-session` | omp 18.8.5 (re-recorded 2026-10-08; the 18.8.4 recording is in git history at `75f3bb6`), three prompts (an overview, an edit with a diff, a shell command) in a scratch copy of tern-sdk, under `tools/tsp_record.py` with `scenarios/omp-session.json`. About 91 s and 541 frames. |
 | `omp-session-own` | omp's own log of the same session (`PI_TUI_TSP_RECORD`), for cross-checking the recorder. omp appends to that file, so empty it before re-recording. |
+| `omp-picker` | omp 18.8.5, no prompts (recorded 2026-10-08), under `tools/tsp_record.py` with `scenarios/omp-picker.json` and the recorder's hello, which advertises `picker`: `/model` opens the model hub as a `picker` sheet, `son` is typed, Down/Down/Up, Enter opens the role strip, Right/Right/Left move its chip, Esc cancels it, three backspaces and Esc close the hub; then a `status.model` action on the composer's model control opens the md "Switch model" sheet, `gpt` is typed (no match: the empty state), Down/Down, Esc clears and Esc closes. Nothing is assigned or switched (`~/.omp/agent/config.yml` unchanged). 28 frames. |
 
 Re-record with the commands in each `.meta.json` (`argv`, `cwd`, `env`). Recordings of model output aren't reproducible; keep the originals.
 

@@ -452,6 +452,7 @@ fn t2_report(records: &[Value]) -> T2Report {
             auk_tsp::T0_KINDS
                 .iter()
                 .chain(auk_tsp::T1_KINDS.iter())
+                .chain(auk_tsp::T2_KINDS.iter())
                 .map(|k| (*k).to_owned())
                 .collect()
         });
@@ -758,9 +759,10 @@ fn ac09_replay_draws_transcript_tool_cards_and_diffs_natively() {
 /// and `layer`; keys typed in the pane reach omp, which owns the text; a native selection replaced
 /// by typing becomes an `edit` event omp applies; ⌘Z becomes an `undo` event omp applies; ⌃G runs
 /// `$EDITOR` and omp comes back by adopting its closed surface (`o adopt:true`), with the edited
-/// text in the composer. omp's settings and model picker (T2 `prefs` and `picker`) open as screen
-/// surfaces built from T1 kinds. ⌃D quits omp, and the shell's next prompt discards the inline
-/// surface.
+/// text in the composer. omp's settings (T2 `prefs`, not advertised yet) open as a screen surface
+/// built from T1 kinds; its model hub is a `picker` sheet now (A23, tested in
+/// `a23_omps_model_hub_and_model_dropdown_are_picker_sheets`). ⌃D quits omp, and the shell's
+/// next prompt discards the inline surface.
 /// §8.4: the effects the engine accepts but doesn't draw (filters, backdrop-filter, masks, 3D
 /// transforms) are only a gap if omp sends them. It doesn't: neither recording holds a
 /// stylesheet or an `el` style that names one, and after the replay through the daemon, the
@@ -945,11 +947,8 @@ fn ac09_live_composer_native_editing_adopt_and_discard() {
         "the transcript carried over"
     );
 
-    // Settings and the model picker: screen surfaces over the session, from T1 kinds.
-    for (command, role) in [
-        ("/settings", "omp.overlay.settings"),
-        ("/model", "omp.overlay.model-hub"),
-    ] {
+    // Settings: a screen surface over the session, from advertised kinds.
+    for (command, role) in [("/settings", "omp.overlay.settings")] {
         omp.clear(&id);
         omp.window.type_keys(pane, command);
         omp.wait_text(&id, command);
@@ -985,8 +984,8 @@ fn ac09_live_composer_native_editing_adopt_and_discard() {
         );
         let used: BTreeSet<&str> = kinds.iter().map(|(_, k)| k.as_str()).collect();
         eprintln!("{command}: {used:?}");
-        for k in T2 {
-            assert!(!used.contains(k), "{command} sent T2 kind {k}");
+        for k in T2.iter().filter(|k| !auk_tsp::T2_KINDS.contains(k)) {
+            assert!(!used.contains(k), "{command} sent unadvertised T2 kind {k}");
         }
         omp.window.press(pane, Key::Escape, Mods::default());
         omp.window.wait("the screen surface to close", UI, |w| {
@@ -1220,9 +1219,10 @@ fn omp_t2_fallback_under_t0_t1_hello() {
     let expected: BTreeSet<String> = auk_tsp::T0_KINDS
         .iter()
         .chain(auk_tsp::T1_KINDS.iter())
+        .chain(auk_tsp::T2_KINDS.iter())
         .map(|k| (*k).to_owned())
         .collect();
-    assert_eq!(report.advertised, expected, "the hello lists exactly T0+T1");
+    assert_eq!(report.advertised, expected, "the hello lists exactly T0, T1 and the T2 kinds drawn");
     assert!(report.advertised.contains("image"), "image is T1 (D24)");
     assert!(
         report.sent_anyway.is_empty(),
@@ -1467,10 +1467,10 @@ fn first_with_class(w: &NativeWindow, pane: u64, el: auk_ui::NodeId, class: &str
 }
 
 /// Amendments A15-A19 on a live omp 18.8.5, with no prompt: omp resumes a session file many
-/// panes long (no model call), in a dark window. Its Switch Model overlay (opened by clicking
-/// the composer's model control, as a user does) sits in the pane's visible area and lays out
-/// its list (A16), drawn over its scrim, not under it (A15); a window focus change doesn't
-/// replay the card's pop (A17). Its Usage overlay (the cost control) takes a click on its
+/// panes long (no model call), in a dark window. Its Switch Model sheet (opened by clicking the
+/// composer's model control, as a user does; a `picker` since A23) sits in the pane's visible
+/// area and lays out its list (A16), drawn over its dim, not under it (A15); a window focus
+/// change doesn't replay the sheet-in (A17). Its Usage overlay (the cost control) takes a click on its
 /// Details tab, which omp makes active, and the card omp's new props build doesn't pop again.
 /// The pane's OSC 11 answer is the dark theme's background and its TSP facts say dark (A19).
 /// Esc closes each overlay; nothing is picked, and omp's config is left as it was.
@@ -1537,7 +1537,8 @@ fn a15_to_a19_omps_overlays_over_a_long_transcript_in_the_dark() {
     let long = omp.window.doc(pane).border_box(page).expect("laid out");
     assert!(long.h > viewport.1 * 2.0, "a long transcript: {long:?} in {viewport:?}");
 
-    // Clicking the composer's model control opens omp's Switch Model overlay.
+    // Clicking the composer's model control opens omp's Switch Model sheet: with `picker`
+    // advertised (A23) a `picker` in the layer, where A15-A17 hold for it as for an overlay.
     let model = omp.with_role("omp.composer.model");
     assert_eq!(model.len(), 1, "omp's model control: {model:?}");
     let s = omp.window.live_surface(pane, "s:1").expect("the session surface");
@@ -1548,76 +1549,58 @@ fn a15_to_a19_omps_overlays_over_a_long_transcript_in_the_dark() {
         out.iter().any(|o| matches!(o, Outcome::Event { .. })),
         "the click goes to omp: {out:?}"
     );
-    let (ov, list) = omp.window.wait("omp's model overlay", UI, |w| {
+    let pk = omp.window.wait("omp's model sheet", UI, |w| {
         let s = w.live_surface(pane, "s:1")?;
-        let kinds = kinds_under(s.document().root());
-        let ov = kinds.iter().find(|(_, k)| k == "overlay")?.0.clone();
-        let list = kinds_under(s.document().get(&ov)?)
-            .into_iter()
-            .find(|(id, k)| {
-                k == "list"
-                    && s.document().get(id).and_then(|n| n.prop("role")).and_then(Value::as_str)
-                        == Some("omp.model-browser.list")
-            })?
-            .0;
-        Some((ov, list))
+        let kinds = kinds_under(s.document().region("layer")?);
+        Some(kinds.iter().find(|(_, k)| k == "picker")?.0.clone())
     });
     let s = omp.window.live_surface(pane, "s:1").expect("the session surface");
-    let ov_n = s.document().get(&ov).expect("the overlay");
-    assert_eq!(ov_n.prop("modal"), Some(&Value::Bool(true)), "a modal overlay");
-    let ov_el = omp.window.element_of(pane, s, &ov).expect("drawn");
-    let card = first_with_class(&omp.window, pane, ov_el, "sf-ov-card");
-    // Its pop finishes.
+    let pk_el = omp.window.element_of(pane, s, &pk).expect("drawn");
+    let card = first_with_class(&omp.window, pane, pk_el, "pk-sheet");
+    // Its sheet-in finishes.
     std::thread::sleep(Duration::from_millis(300));
     omp.window.frame();
     let opacity = |w: &NativeWindow| w.doc(pane).computed_style(card).map(|c| c.opacity);
-    assert_eq!(opacity(&omp.window), Some(1.0), "the pop finished");
+    assert_eq!(opacity(&omp.window), Some(1.0), "the sheet-in finished");
 
-    // A16: the card lies in the pane's visible area (the layer, one viewport from the pane's
+    // A16: the sheet lies in the pane's visible area (the layer, one viewport from the pane's
     // top), not ~a transcript's length down.
     let doc = omp.window.doc(pane);
     let layers = first_with_class(&omp.window, pane, page, "auk-layers");
     let l = doc.border_box(layers).expect("the layer laid out");
-    let c = doc.border_box(card).expect("the card laid out");
+    let c = doc.border_box(card).expect("the sheet laid out");
     assert!((l.h - viewport.1).abs() < 1.0, "the layer is one viewport tall: {l:?}");
     assert!(
         c.h > 0.0 && c.y >= l.y && c.y + c.h <= l.y + l.h,
-        "the card {c:?} lies in the visible area {l:?}"
+        "the sheet {c:?} lies in the visible area {l:?}"
     );
     // Its list lays out the rows it shows.
-    let s = omp.window.live_surface(pane, "s:1").expect("the session surface");
-    let items: Vec<String> = s
-        .document()
-        .get(&list)
-        .expect("the list")
-        .children()
-        .filter(|n| n.kind() == "item")
-        .map(|n| n.id().to_owned())
-        .collect();
-    assert!(items.len() >= 2, "models to pick from: {items:?}");
-    let first = omp.window.element_of(pane, s, &items[0]).expect("drawn");
-    assert!(doc.laid_out(first), "the list's first row is laid out");
+    let rows = omp.window.with_class(pane, pk_el, "pk-row");
+    assert!(rows.len() >= 2, "models to pick from: {}", rows.len());
+    assert!(doc.laid_out(rows[0]), "the list's first row is laid out");
 
-    // A15: the card draws over its scrim: a pixel of its bottom padding is the card's own
-    // color, not half-dimmed.
+    // A15: the sheet draws over its dim, not under it: a pixel of its action bar's empty
+    // middle is the sheet's own color, not dimmed.
     let bg = doc.computed_style(card).expect("styled").background_color;
-    assert_eq!(bg.a, 1.0, "an opaque card");
+    assert_eq!(bg.a, 1.0, "an opaque sheet");
     let want = [bg.r, bg.g, bg.b].map(|v| (v * 255.0).round() as u8);
+    let fill = first_with_class(&omp.window, pane, pk_el, "pk-bar-fill");
+    let f = doc.border_box(fill).expect("laid out");
     let (x0, y0) = (c.x.floor(), c.y.floor());
     let px = render_part(doc, (x0, y0, c.w.ceil() as u32 + 2, c.h.ceil() as u32 + 2));
-    let p = px.pixel((c.x + c.w / 2.0 - x0) as u32, (c.y + c.h - 4.0 - y0) as u32);
+    let p = px.pixel((f.x + f.w / 2.0 - x0) as u32, (f.y + 4.0 - y0) as u32);
     assert!(
         [p.0, p.1, p.2].iter().zip(want).all(|(a, b)| a.abs_diff(b) <= 3),
-        "the card's background {p:?} is its color {want:?}, not dimmed"
+        "the sheet's background {p:?} is its color {want:?}, not dimmed"
     );
-    // Clicks land in the card, not the scrim (A15's hit order).
-    let hit = auk_ui::hit_test(doc, c.x + c.w / 2.0, c.y + c.h - 4.0).expect("a hit");
+    // Clicks land in the sheet, not the dim (A15's hit order).
+    let hit = auk_ui::hit_test(doc, f.x + f.w / 2.0, f.y + 4.0).expect("a hit");
     assert!(
         std::iter::successors(Some(hit), |&e| doc.parent(e)).any(|e| e == card),
-        "the press lands in the card"
+        "the press lands in the sheet"
     );
 
-    // A17: a window focus change restyles the card without replaying its pop.
+    // A17: a window focus change restyles the sheet without replaying its sheet-in.
     omp.window.set_focused(pane, false);
     assert_eq!(opacity(&omp.window), Some(1.0), "no replay on blur");
     omp.window.set_focused(pane, true);
@@ -1626,9 +1609,9 @@ fn a15_to_a19_omps_overlays_over_a_long_transcript_in_the_dark() {
 
     // Esc closes it, using no model.
     omp.window.press(pane, Key::Escape, Mods::default());
-    omp.window.wait("the model overlay to close", UI, |w| {
+    omp.window.wait("the model sheet to close", UI, |w| {
         let s = w.live_surface(pane, "s:1")?;
-        s.document().get(&ov).is_none().then_some(())
+        s.document().get(&pk).is_none().then_some(())
     });
 
     // omp's Usage overlay (its cost control): a click on its Details tab reaches omp, which
@@ -1721,4 +1704,228 @@ fn a15_to_a19_omps_overlays_over_a_long_transcript_in_the_dark() {
         "omp's config is unchanged"
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The `picker` in the session's layer, if one is open: its node id.
+fn open_picker(w: &NativeWindow, pane: u64) -> Option<String> {
+    let s = w.live_surface(pane, "s:1")?;
+    let kinds = kinds_under(s.document().region("layer")?);
+    Some(kinds.into_iter().find(|(_, k)| k == "picker")?.0)
+}
+
+/// A prop of the open picker.
+fn picker_prop(w: &NativeWindow, pane: u64, id: &str, prop: &str) -> Option<Value> {
+    let s = w.live_surface(pane, "s:1")?;
+    s.document().get(id)?.prop(prop).cloned()
+}
+
+/// Amendment A23 (`picker`, T2) on a live omp 18.8.5 with no prompt. Advertised, `picker`
+/// changes both of omp's model sheets. `/model` opens the model hub as a `picker` in the session's
+/// layer (not a screen surface): scopes, tabs and rows draw in the visible area; typed keys filter
+/// it (drawn as the head's query, keys stay omp's); Down moves the selection, which the view
+/// shows; Enter opens the role strip, drawn above the action bar and in view with the selected
+/// chip ringed (`focus:"strip"`); Right moves the chip; Esc cancels. A click on a tab reaches omp,
+/// which makes it active. The composer's model control opens the md "Switch model" sheet (72px
+/// from the top, at most 680 wide); a click on a row selects it. Esc closes both; nothing is
+/// assigned or switched, and omp's config is unchanged.
+#[test]
+fn a23_omps_model_hub_and_model_dropdown_are_picker_sheets() {
+    let config = real_home().join(".omp/agent/config.yml");
+    let config_before = std::fs::read(&config).ok();
+    let mut omp = LiveOmp::start("omp-picker", true);
+    let id = omp.ready();
+    let pane = omp.pane;
+    let page = omp.window.view(pane).element();
+
+    // `/model`: the hub, as a picker in the session's layer.
+    omp.window.type_keys(pane, "/model");
+    omp.wait_text(&id, "/model");
+    omp.window.press(pane, Key::Enter, Mods::default());
+    let pk = omp.window.wait("omp's model hub", UI, |w| {
+        let pk = open_picker(w, pane)?;
+        picker_prop(w, pane, &pk, "scopes")?;
+        Some(pk)
+    });
+    assert!(
+        omp.window
+            .tsp(pane)
+            .surfaces()
+            .iter()
+            .all(|s| !s.is_live() || s.mode() != auk_tsp::Mode::Screen),
+        "no screen surface"
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    omp.window.frame();
+    let s = omp.window.live_surface(pane, "s:1").expect("the session");
+    let pk_el = omp.window.element_of(pane, s, &pk).expect("drawn");
+    let class = omp.window.class(pane, pk_el);
+    assert!(class.contains("sf-picker") && class.contains("sz-lg"), "{class}");
+    let layers = first_with_class(&omp.window, pane, page, "auk-layers");
+    let doc = omp.window.doc(pane);
+    let l = doc.border_box(layers).expect("the layer");
+    let sheet = first_with_class(&omp.window, pane, pk_el, "pk-sheet");
+    let sh = doc.border_box(sheet).expect("the sheet");
+    assert!(
+        sh.y >= l.y && sh.y + sh.h <= l.y + l.h + 0.5 && sh.w <= 1120.5,
+        "the sheet {sh:?} in the visible area {l:?}"
+    );
+    assert!(!omp.window.with_class(pane, pk_el, "pk-scope").is_empty(), "scopes");
+    assert!(!omp.window.with_class(pane, pk_el, "pk-tab").is_empty(), "tabs");
+    let rows = omp.window.with_class(pane, pk_el, "pk-row");
+    assert!(rows.len() >= 2, "rows: {}", rows.len());
+
+    // Typing filters: the query is omp's, drawn in the head.
+    omp.window.type_keys(pane, "son");
+    omp.window.wait("omp to take the query", UI, |w| {
+        (picker_prop(w, pane, &pk, "query")? == "son").then_some(())
+    });
+    omp.window.frame();
+    let q = first_with_class(&omp.window, pane, pk_el, "q");
+    assert_eq!(omp.window.text_content(pane, q), "son");
+    // Down moves omp's selection; the view shows it.
+    let before = picker_prop(&omp.window, pane, &pk, "selected");
+    omp.window.press(pane, Key::Down, Mods::default());
+    let sel = omp.window.wait("the selection to move", UI, |w| {
+        let now = picker_prop(w, pane, &pk, "selected")?;
+        (Some(&now) != before.as_ref()).then_some(now)
+    });
+    omp.window.frame();
+    let shown_sel: Vec<String> = omp
+        .window
+        .with_class(pane, pk_el, "sel")
+        .into_iter()
+        .filter_map(|e| omp.window.doc(pane).attribute(e, "data-v").map(str::to_owned))
+        .collect();
+    assert_eq!(shown_sel, [sel.as_str().unwrap().to_owned()]);
+
+    // Enter opens the role strip: in view, above the bar, its selected chip ringed.
+    omp.window.press(pane, Key::Enter, Mods::default());
+    omp.window.wait("the role strip", UI, |w| {
+        let strip = picker_prop(w, pane, &pk, "strip")?;
+        (strip.is_object() && picker_prop(w, pane, &pk, "focus")? == "strip").then_some(())
+    });
+    omp.window.frame();
+    let doc = omp.window.doc(pane);
+    let strip = first_with_class(&omp.window, pane, pk_el, "pk-strip");
+    let bar = first_with_class(&omp.window, pane, pk_el, "pk-bar");
+    let (st, b) = (doc.border_box(strip).unwrap(), doc.border_box(bar).unwrap());
+    assert!(
+        st.h > 0.0 && (st.y + st.h - b.y).abs() < 1.0 && b.y + b.h <= l.y + l.h + 0.5,
+        "the strip {st:?} sits on the bar {b:?} in view {l:?}"
+    );
+    let chips = omp.window.with_class(pane, strip, "pk-schip");
+    let n = picker_prop(&omp.window, pane, &pk, "strip").unwrap()["items"]
+        .as_array()
+        .map_or(0, Vec::len);
+    assert_eq!(chips.len(), n);
+    let sheet = first_with_class(&omp.window, pane, pk_el, "pk-sheet");
+    assert!(omp.window.class(pane, sheet).contains("f-strip"));
+    let ringed = |w: &NativeWindow| {
+        let strip = first_with_class(w, pane, pk_el, "pk-strip");
+        w.with_class(pane, strip, "pk-schip")
+            .iter()
+            .position(|&c| w.class(pane, c).split(' ').any(|x| x == "sel"))
+    };
+    let at = ringed(&omp.window).expect("a selected chip");
+    omp.window.press(pane, Key::Right, Mods::default());
+    omp.window.wait("the strip's chip to move", UI, |w| {
+        (ringed(w)? != at).then_some(())
+    });
+    // Esc cancels the strip: nothing assigned.
+    omp.window.press(pane, Key::Escape, Mods::default());
+    omp.window.wait("the strip to close", UI, |w| {
+        picker_prop(w, pane, &pk, "strip")
+            .is_none_or(|s| s.is_null())
+            .then_some(())
+    });
+
+    // A click on a tab reaches omp, which makes it active.
+    omp.window.frame();
+    let tabs = omp.window.with_class(pane, pk_el, "pk-tab");
+    let (tab_el, tab_id) = tabs
+        .iter()
+        .filter(|&&t| !omp.window.class(pane, t).split(' ').any(|c| c == "on"))
+        .find_map(|&t| {
+            let v = omp.window.doc(pane).attribute(t, "data-v")?.to_owned();
+            Some((t, v))
+        })
+        .expect("an inactive tab");
+    let r = omp.window.doc(pane).border_box(tab_el).unwrap();
+    let out = omp.window.click(pane, r.x + r.w / 2.0, r.y + r.h / 2.0);
+    assert!(out.iter().any(|o| matches!(o, Outcome::Event { .. })), "{out:?}");
+    omp.window.wait("omp to make the tab active", UI, |w| {
+        (picker_prop(w, pane, &pk, "tab")? == tab_id.as_str()).then_some(())
+    });
+
+    // Esc (clearing the query first) closes the hub.
+    for _ in 0..4 {
+        if open_picker(&omp.window, pane).is_none() {
+            break;
+        }
+        omp.window.press(pane, Key::Escape, Mods::default());
+        let start = std::time::Instant::now();
+        let q = picker_prop(&omp.window, pane, &pk, "query");
+        while open_picker(&omp.window, pane).is_some()
+            && picker_prop(&omp.window, pane, &pk, "query") == q
+            && start.elapsed() < Duration::from_secs(3)
+        {
+            std::thread::sleep(Duration::from_millis(25));
+            omp.window.frame();
+        }
+    }
+    assert!(open_picker(&omp.window, pane).is_none(), "Esc closes the hub");
+    omp.ready();
+
+    // The composer's model control: the md Switch model sheet.
+    let model = omp.with_role("omp.composer.model");
+    let s = omp.window.live_surface(pane, "s:1").expect("the session");
+    let el = omp.window.element_of(pane, s, &model[0].0).expect("drawn");
+    let b = omp.window.doc(pane).border_box(el).expect("laid out");
+    omp.window.click(pane, b.x + b.w / 2.0, b.y + b.h / 2.0);
+    let pk = omp.window.wait("omp's model dropdown", UI, |w| {
+        let pk = open_picker(w, pane)?;
+        (picker_prop(w, pane, &pk, "size")? == "md").then_some(pk)
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    omp.window.frame();
+    let s = omp.window.live_surface(pane, "s:1").expect("the session");
+    let pk_el = omp.window.element_of(pane, s, &pk).expect("drawn");
+    let doc = omp.window.doc(pane);
+    let sheet = first_with_class(&omp.window, pane, pk_el, "pk-sheet");
+    let sh = doc.border_box(sheet).expect("the sheet");
+    assert!(sh.w <= 680.5 && (sh.y - l.y - 72.0).abs() < 1.0, "an md sheet: {sh:?} in {l:?}");
+    // A click on an unselected row selects it (omp moves `selected`).
+    let selected = picker_prop(&omp.window, pane, &pk, "selected");
+    let row = omp
+        .window
+        .with_class(pane, pk_el, "pk-row")
+        .into_iter()
+        .find(|&r| {
+            let c = omp.window.class(pane, r);
+            let c: Vec<&str> = c.split(' ').collect();
+            !c.contains(&"grp") && !c.contains(&"sel") && !c.contains(&"off")
+        })
+        .expect("another model");
+    let item = omp.window.doc(pane).attribute(row, "data-v").unwrap().to_owned();
+    let r = omp.window.doc(pane).border_box(row).unwrap();
+    let out = omp.window.click(pane, r.x + r.w / 2.0, r.y + r.h / 2.0);
+    assert!(out.iter().any(|o| matches!(o, Outcome::Event { .. })), "{out:?}");
+    omp.window.wait("omp to select the clicked row", UI, |w| {
+        (picker_prop(w, pane, &pk, "selected")? == item.as_str()).then_some(())
+    });
+    assert_ne!(selected.as_ref().and_then(Value::as_str), Some(item.as_str()));
+    omp.window.press(pane, Key::Escape, Mods::default());
+    omp.window.wait("the dropdown to close", UI, |w| {
+        open_picker(w, pane).is_none().then_some(())
+    });
+    assert!(omp.window.errors().is_empty(), "{:?}", omp.window.errors());
+    let report = t2_report(&omp.records());
+    assert!(report.errors.is_empty(), "omp got errors: {:?}", report.errors);
+    omp.ready();
+    omp.quit();
+    assert_eq!(
+        std::fs::read(&config).ok(),
+        config_before,
+        "omp's config is unchanged"
+    );
 }

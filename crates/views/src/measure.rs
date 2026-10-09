@@ -580,6 +580,7 @@ impl PaneView {
         let lh = self.settings.cell.1;
         let mut estimated = Vec::new();
         for (i, sv) in self.surfaces.iter_mut().enumerate() {
+            crate::kinds::picker::apply_reveals(doc, &mut sv.st.pickers);
             for &clip in sv.st.follow.values() {
                 if doc.try_node(clip).is_none() {
                     continue;

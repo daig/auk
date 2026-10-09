@@ -7,6 +7,7 @@ pub(crate) mod data;
 pub(crate) mod el;
 pub(crate) mod input;
 pub(crate) mod layout;
+pub(crate) mod picker;
 pub(crate) mod rich;
 
 use crate::common;
@@ -16,8 +17,9 @@ use auk_tsp::NodeRef;
 use auk_ui::NodeId;
 use std::collections::HashMap;
 
-/// The T0 and T1 kinds (§8.2): what the hello advertises and what this crate draws.
-pub const KINDS: [&str; 38] = [
+/// The kinds this crate draws and the hello advertises (§8.2): T0, T1 and the T2 kinds drawn so far
+/// (A23).
+pub const KINDS: &[&str] = &[
     "col",
     "row",
     "card",
@@ -56,6 +58,7 @@ pub const KINDS: [&str; 38] = [
     "agent",
     "checklist",
     "image",
+    "picker",
 ];
 
 /// Where a child element goes.
@@ -121,7 +124,7 @@ pub(crate) fn route(node: NodeRef, child: NodeRef) -> Route {
                 Route::Slot(0)
             }
         }
-        "seg" | "overlay" | "list" | "tool" | "agent" | "image" => Route::Slot(0),
+        "seg" | "overlay" | "list" | "tool" | "agent" | "image" | "picker" => Route::Slot(0),
         // The native child, else the raw one (§9.6): the block mounts only the one it shows.
         "block" => Route::Slot(usize::from(block::is_raw(node, child))),
         _ => Route::Direct,
@@ -216,6 +219,7 @@ pub(crate) fn render(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
         "toast" => layout::toast(cx, node, m, look),
         "tabs" => layout::tabs(cx, node, m, look),
         "list" => layout::list(cx, node, m, look),
+        "picker" => picker::picker(cx, node, m, look),
         "item" => layout::item(cx, node, m, look),
         "text" => data::text(cx, node, m, look),
         "badge" => data::badge(cx, node, m, look),
