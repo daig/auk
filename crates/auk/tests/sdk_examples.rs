@@ -247,8 +247,11 @@ impl Run {
             .iter()
             .find(|l| l["body"]["r"] == "hello")
             .unwrap_or_else(|| panic!("the program never read a hello reply: {ins:?}"));
-        // T0 and T1 (§8.2, D24).
-        assert_eq!(reply["body"]["kinds"].as_array().unwrap().len(), 38);
+        // T0, T1 (§8.2, D24) and the T2 kinds drawn so far (A23).
+        assert_eq!(
+            reply["body"]["kinds"].as_array().unwrap().len(),
+            38 + auk_tsp::T2_KINDS.len()
+        );
         let frames = lines
             .iter()
             .filter(|l| l["dir"] == "out" && l["verb"] == "f")

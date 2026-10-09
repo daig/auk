@@ -8,7 +8,7 @@ use auk_tsp::blob::{MAX_BLOB, blob_id};
 use auk_tsp::wire::MAX_APC;
 use auk_tsp::{
     ALL_FEATURES, AnchorKey, Config, Delivery, Facts, Gate, Grid, Mode, Mods, Refused, RevealAt,
-    ScrollBy, SheetChecker, State, T0_KINDS, T1_KINDS, TitleSource, TspPane, ViewEvent,
+    ScrollBy, SheetChecker, State, T0_KINDS, T1_KINDS, T2_KINDS, TitleSource, TspPane, ViewEvent,
 };
 use common::{Back, Harness, TestGrid, decode, events, obj, payload};
 use serde_json::{Value, json};
@@ -447,14 +447,15 @@ fn b6_advertises_exactly_t0_and_t1() {
         .iter()
         .map(|k| k.as_str().unwrap())
         .collect();
-    let mut want: Vec<&str> = T0_KINDS.iter().chain(&T1_KINDS).copied().collect();
+    let mut want: Vec<&str> = T0_KINDS.iter().chain(&T1_KINDS).chain(T2_KINDS).copied().collect();
     kinds.sort_unstable();
     want.sort_unstable();
     assert_eq!(kinds, want);
     // `image` joined T1 (D24).
     assert!(kinds.contains(&"image"));
+    // T2 kinds are advertised once drawn (A23).
     for t2 in ["math", "chart", "picker", "prefs", "effort", "block"] {
-        assert!(!kinds.contains(&t2), "{t2} is T2");
+        assert_eq!(kinds.contains(&t2), T2_KINDS.contains(&t2), "{t2} is T2");
     }
     for f in reply["features"].as_array().unwrap() {
         assert!(ALL_FEATURES.contains(&f.as_str().unwrap()));

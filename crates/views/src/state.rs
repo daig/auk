@@ -100,6 +100,8 @@ pub(crate) struct SurfaceState {
     /// The window last given to each virtualized container, and whether it's kept from the
     /// container's end.
     pub virt_window: HashMap<NodeId, (f32, f32, bool)>,
+    /// `picker` sheets: rows drawn, selection kept in view, the last click, by node id.
+    pub pickers: HashMap<String, crate::kinds::picker::PickerState>,
 }
 
 /// The key local view state is remembered by: the node's `key` under the same parent, or its id
@@ -202,6 +204,7 @@ impl SurfaceState {
         }
         self.forget_virtual_under(id);
         self.overlays.remove(id);
+        self.pickers.remove(id);
         if self.preedit.as_ref().is_some_and(|p| p.id == id) {
             self.preedit = None;
         }

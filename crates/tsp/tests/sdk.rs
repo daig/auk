@@ -10,7 +10,7 @@ use std::io;
 use std::rc::Rc;
 use std::time::Duration;
 
-use auk_tsp::{Mode, State, T0_KINDS, T1_KINDS, ViewEvent};
+use auk_tsp::{Mode, State, T0_KINDS, T1_KINDS, T2_KINDS, ViewEvent};
 use common::{Harness, apc_payloads};
 use serde_json::Value;
 use tern_sdk::term::Terminal;
@@ -110,6 +110,7 @@ fn e2_sdk_sessions_flow_while_the_primary_draws() {
     let mut want: Vec<String> = T0_KINDS
         .iter()
         .chain(&T1_KINDS)
+        .chain(T2_KINDS)
         .map(|k| (*k).to_owned())
         .collect();
     want.sort();

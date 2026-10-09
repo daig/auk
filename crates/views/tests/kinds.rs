@@ -23,6 +23,7 @@ fn advertised_kinds_are_t0_and_t1() {
     let mut want: Vec<&str> = auk_tsp::T0_KINDS
         .iter()
         .chain(&auk_tsp::T1_KINDS)
+        .chain(auk_tsp::T2_KINDS)
         .copied()
         .collect();
     let mut have: Vec<&str> = KINDS.to_vec();
@@ -49,7 +50,8 @@ fn every_t0_t1_kind_renders() {
         used.insert(n.kind().to_owned());
         stack.extend(n.children());
     }
-    for k in KINDS {
+    // T2 kinds have their own suites (A23); the shared probe surface stays T0+T1.
+    for &k in KINDS.iter().filter(|k| !auk_tsp::T2_KINDS.contains(k)) {
         assert!(used.contains(k), "the test covers {k}");
     }
     // Each node is .sf.sf-<kind> with data-id; inline kinds are spans.

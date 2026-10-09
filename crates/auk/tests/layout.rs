@@ -286,9 +286,13 @@ fn every_t0_and_t1_kind_renders() {
         .iter()
         .map(|k| k.as_str().expect("a kind name"))
         .collect();
-    let want: BTreeSet<&str> = T0.split(' ').chain(T1.split(' ')).collect();
+    let want: BTreeSet<&str> = T0
+        .split(' ')
+        .chain(T1.split(' '))
+        .chain(auk_tsp::T2_KINDS.iter().copied())
+        .collect();
     let have: BTreeSet<&str> = advertised.iter().copied().collect();
-    assert_eq!(have, want, "the hello lists exactly the T0 and T1 kinds");
+    assert_eq!(have, want, "the hello lists exactly the T0, T1 and drawn T2 kinds");
     assert_eq!(advertised.len(), want.len(), "no duplicates");
 
     // A surface with a node of every kind.
@@ -361,9 +365,15 @@ fn every_t0_and_t1_kind_renders() {
         }
     }
     let kinds: BTreeSet<&str> = seen.keys().map(String::as_str).collect();
+    // T2 kinds have their own suites (A23); the shared probe surface stays T0+T1.
+    let probed: BTreeSet<&str> = want
+        .iter()
+        .copied()
+        .filter(|k| !auk_tsp::T2_KINDS.contains(k))
+        .collect();
     assert_eq!(
-        kinds, want,
-        "the surface holds a node of every advertised kind"
+        kinds, probed,
+        "the surface holds a node of every advertised T0 and T1 kind"
     );
     // A toast node is hidden by design; the pane's toast layer shows it (book:7636).
     let shown = descendants(&p.doc, p.body)

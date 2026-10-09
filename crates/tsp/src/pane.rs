@@ -43,6 +43,11 @@ pub const T1_KINDS: [&str; 22] = [
     "checklist",
     "image",
 ];
+/// The T2 kinds drawn so far, advertised with T0 and T1 (A23, D26: a kind is advertised once it
+/// is drawn).
+pub const T2_KINDS: &[&str] = &[
+    "picker",
+];
 /// Every terminal feature name of v1 (§7.2).
 pub const ALL_FEATURES: [&str; 10] = [
     "blobs",
@@ -95,6 +100,7 @@ impl Default for Config {
             kinds: T0_KINDS
                 .iter()
                 .chain(&T1_KINDS)
+                .chain(T2_KINDS)
                 .map(|k| (*k).to_owned())
                 .collect(),
             features: ALL_FEATURES

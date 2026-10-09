@@ -215,16 +215,20 @@ fn advertises_exactly_the_t0_and_t1_kinds() {
         .iter()
         .map(|k| k.as_str().unwrap())
         .collect();
-    // §8.2, D22: T0 then T1, nothing else.
+    // §8.2, D22, D26: T0, T1 and the T2 kinds drawn so far (A23), nothing else.
     let t0 =
         "col row card section rule spacer text badge kv icon spinner elapsed progress ansi rows el";
     let t1 = "md code diff editor input status seg overlay toast shimmer rate meter list item tabs table tree kbd tool agent checklist image";
-    let mut want: Vec<&str> = t0.split(' ').chain(t1.split(' ')).collect();
+    let mut want: Vec<&str> = t0
+        .split(' ')
+        .chain(t1.split(' '))
+        .chain(auk_tsp::T2_KINDS.iter().copied())
+        .collect();
     let mut got = kinds.clone();
     want.sort_unstable();
     got.sort_unstable();
     assert_eq!(got, want);
-    assert_eq!(kinds.len(), 38, "no duplicates");
+    assert_eq!(kinds.len(), 38 + auk_tsp::T2_KINDS.len(), "no duplicates");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -685,12 +689,17 @@ fn b6_kinds_and_features_list_only_what_is_implemented() {
     let (_env, probe) = setup("b6");
     let reply = hello_reply(&exchange(&probe, &hello(&[]))).clone();
     let kinds = reply["kinds"].as_array().unwrap();
+    // T2 kinds are advertised once drawn (A23).
     for t2 in ["math", "chart", "picker", "prefs", "effort", "block"] {
-        assert!(!kinds.contains(&json!(t2)), "{t2} isn't drawn in v1");
+        assert_eq!(
+            kinds.contains(&json!(t2)),
+            auk_tsp::T2_KINDS.contains(&t2),
+            "{t2} is advertised only once drawn"
+        );
     }
     // omp sends `image` unguarded, so it is T1 (D24).
     assert!(kinds.contains(&json!("image")));
-    assert_eq!(kinds.len(), 38);
+    assert_eq!(kinds.len(), 38 + auk_tsp::T2_KINDS.len());
     let allowed = [
         "blobs",
         "settle",
