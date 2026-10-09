@@ -13,6 +13,7 @@ taffy = { version = "0.14", default-features = false, features = ["std", "flexbo
 parley = "0.11"
 vello = "0.11"
 skrifa = "0.44"
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 # On Linux (the daemon, D7), load fontconfig at run time instead of linking it, so building needs
 # no fontconfig headers; the daemon parses CSS but never enumerates fonts.

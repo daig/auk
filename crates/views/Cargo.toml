@@ -26,6 +26,7 @@ parley = "0.11"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 # Sanitized SVG: parsed and filtered to the allowlist (usvg's roxmltree), drawn by resvg.
 resvg = { version = "0.48.1", default-features = false, features = ["text", "system-fonts"] }
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
 auk-conformance = { path = "../conformance" }

@@ -21,6 +21,12 @@ missing_debug_implementations = "warn"
 dbg_macro = "warn"
 todo = "warn"
 
+# Line tables only: backtraces keep file and line, without full debug info. We debug from tests,
+# logs and backtraces, never a debugger, and full debug info on macOS leaves per-codegen-unit object
+# files in target/ that cargo never removes.
+[profile.dev]
+debug = "line-tables-only"
+
 # Optimize dependencies in dev builds. Luau, wgpu and Vello at -O0 are slow enough to trip plugin
 # budgets and skew rendering in debug test runs; our own crates stay unoptimized for fast rebuilds.
 [profile.dev.package."*"]

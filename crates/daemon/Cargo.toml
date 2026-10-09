@@ -23,6 +23,7 @@ serde_json.workspace = true
 shlex = "2.0.1"
 tokio = { version = "1.53.2", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "process", "macros", "signal"] }
 tokio-util = { version = "0.7.19", features = ["codec"] }
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [lints]
 workspace = true

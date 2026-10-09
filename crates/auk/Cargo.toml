@@ -14,6 +14,7 @@ auk-daemon = { path = "../daemon" }
 auk-plugins = { path = "../plugins" }
 clap = { version = "4.6.7", features = ["derive"] }
 serde_json.workspace = true
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
 auk-conformance = { path = "../conformance" }

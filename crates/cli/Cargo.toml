@@ -21,6 +21,7 @@ auk-views = { version = "0.0.0", path = "../views" }
 clap = { version = "4.6.7", features = ["derive"] }
 serde_json.workspace = true
 shlex = "2.0.1"
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [lints]
 workspace = true

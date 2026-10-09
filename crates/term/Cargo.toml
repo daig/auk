@@ -10,6 +10,7 @@ base64 = "0.23.1"
 blake3 = "1.8.7"
 # Widths are part of the replicated state (§15.2): every replica must use the same tables.
 unicode-width = "=0.2.2"
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 # The oracles and proptest don't build for wasm32; there only the unit tests run (including the
 # pinned state hash, which shows the serialization is the same as on aarch64).

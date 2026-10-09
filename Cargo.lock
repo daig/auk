@@ -190,6 +190,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tern-sdk",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -213,6 +214,7 @@ dependencies = [
  "libc",
  "serde_json",
  "shlex",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -233,6 +235,7 @@ dependencies = [
  "clap",
  "serde_json",
  "shlex",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -252,6 +255,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tern-sdk",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -274,6 +278,7 @@ dependencies = [
  "shlex",
  "tokio",
  "tokio-util",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -288,6 +293,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-util",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -306,6 +312,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "objc2-quartz-core 0.3.2",
  "raw-window-handle",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -325,6 +332,7 @@ dependencies = [
  "toml",
  "tracing",
  "ureq",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -336,6 +344,7 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -352,6 +361,7 @@ dependencies = [
  "vello",
  "web-time",
  "wgpu",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -366,6 +376,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -378,6 +389,7 @@ dependencies = [
  "proptest",
  "tern-sdk",
  "unicode-width",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -389,6 +401,7 @@ dependencies = [
  "objc2-core-graphics",
  "objc2-core-text",
  "swash",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -402,6 +415,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tern-sdk",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -419,6 +433,7 @@ dependencies = [
  "skrifa",
  "taffy",
  "vello",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -442,6 +457,7 @@ dependencies = [
  "syntect",
  "two-face",
  "vello",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -472,6 +488,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -4751,6 +4768,75 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
+
+[[package]]
+name = "workspace-hack"
+version = "0.1.0"
+dependencies = [
+ "bit-set 0.8.0",
+ "bit-vec 0.8.0",
+ "bitflags",
+ "block2 0.6.2",
+ "bytemuck",
+ "cc",
+ "dispatch2",
+ "errno",
+ "fastrand",
+ "fontique",
+ "futures-core",
+ "futures-sink",
+ "futures-util",
+ "harfrust",
+ "hashbrown 0.17.1",
+ "http",
+ "httparse",
+ "indexmap",
+ "js-sys",
+ "kurbo",
+ "libc",
+ "linebender_resource_handle",
+ "linux-raw-sys",
+ "lock_api",
+ "log",
+ "memchr",
+ "naga",
+ "naga-types",
+ "num-traits",
+ "objc2 0.6.5",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-core-text",
+ "objc2-foundation 0.3.2",
+ "objc2-metal 0.3.2",
+ "objc2-quartz-core 0.3.2",
+ "once_cell",
+ "parking_lot",
+ "phf_shared",
+ "ppv-lite86",
+ "proc-macro2",
+ "quote",
+ "rand",
+ "rand_chacha",
+ "raw-window-handle",
+ "read-fonts",
+ "regex-automata",
+ "regex-syntax",
+ "rustix",
+ "serde",
+ "serde_core",
+ "serde_json",
+ "skrifa",
+ "smallvec",
+ "syn 2.0.119",
+ "syn 3.0.6",
+ "thiserror",
+ "tracing",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "yeslogic-fontconfig-sys",
+ "zerocopy",
+]
 
 [[package]]
 name = "writeable"

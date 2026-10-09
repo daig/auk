@@ -13,7 +13,7 @@ source scripts/env.sh
 SUITES="persistence terminal replication tsp sdk_examples omp layout perf plugins app cli web remote"
 # Checklist items (research/sdk-wire.md §10) that can't apply to Auk. F2 is Windows ConPTY only (D1).
 NOT_APPLICABLE="F2"
-TOOLS="cargo-nextest node bun go wasmtime limactl omp htop tmux python3 swiftc"
+TOOLS="cargo-nextest cargo-hakari cargo-sweep node bun go wasmtime limactl omp htop tmux python3 swiftc"
 
 out=target/verify
 mkdir -p "$out"
@@ -54,6 +54,9 @@ for tool in $TOOLS; do
 done
 [ -d /Applications/Ghostty.app ] || missing="$missing Ghostty.app"
 if [ -z "$missing" ]; then record prerequisites PASS; else record prerequisites FAIL "missing:$missing"; fi
+
+# Every crate depends on workspace-hack, and its feature list is current (see crates/workspace-hack).
+step hakari sh -c 'cargo hakari manage-deps --dry-run && cargo hakari generate --diff'
 
 echo "== placeholders"
 grep -rnE 'todo!\(|unimplemented!\(|TODO|FIXME|[Nn]ot implemented' crates --include='*.rs' >"$out/placeholders.log"
@@ -117,6 +120,10 @@ else
 fi
 
 step wasm-build cargo build --release -p auk-web --target wasm32-unknown-unknown
+
+# Drop build output untouched for a day, and output from toolchains rustup doesn't have (Homebrew's).
+cargo sweep --time 1 >"$out/sweep.log" 2>&1 || true
+cargo sweep --installed >>"$out/sweep.log" 2>&1 || true
 
 if [ "$fail" -eq 0 ]; then echo "verify: PASS" >>"$summary"; else echo "verify: FAIL" >>"$summary"; fi
 echo

@@ -12,6 +12,7 @@ auk-mirror = { version = "0.0.0", path = "../mirror" }
 rustix = { version = "1.1.5", features = ["process", "system"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [lints]
 workspace = true

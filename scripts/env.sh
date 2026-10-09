@@ -6,3 +6,6 @@
 if command -v brew >/dev/null 2>&1; then
   export PATH="$(brew --prefix rustup)/bin:$PATH"
 fi
+
+# cargo-hakari and cargo-sweep (`cargo install --locked cargo-hakari cargo-sweep`).
+export PATH="$PATH:$HOME/.cargo/bin"
