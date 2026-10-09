@@ -3,6 +3,7 @@
 
 pub(crate) mod agent;
 pub(crate) mod block;
+pub(crate) mod chart;
 pub(crate) mod data;
 pub(crate) mod effort;
 pub(crate) mod el;
@@ -106,7 +107,7 @@ pub(crate) fn has_children(kind: &str) -> bool {
             | "picker"
             | "prefs"
             | "block"
-    ) || !KINDS.contains(&kind) && kind != "effort"
+    ) || (!KINDS.contains(&kind) && kind != "effort" && kind != "chart")
 }
 
 /// Where `child` of `node` goes.
@@ -243,6 +244,7 @@ pub(crate) fn render(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
         "ansi" => rich::ansi(cx, node, m, look),
         "rows" => rich::rows(cx, node, m, look),
         "math" => rich::math(cx, node, m, look),
+        "chart" => chart::chart(cx, node, m, look),
         "image" => rich::image(cx, node, m, look),
         "editor" | "input" => input::field(cx, node, m, look),
         "tool" => agent::tool(cx, node, m, look),

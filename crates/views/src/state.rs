@@ -92,6 +92,9 @@ pub(crate) struct SurfaceState {
     /// `ansi` with `follow` and `max.h`: the clip that follows the tail, and where it was left.
     pub follow: HashMap<String, NodeId>,
     pub follow_at: HashMap<NodeId, f32>,
+    /// Boxes that start scrolled to their right end once laid out (a chart's heatmap: the
+    /// newest weeks show first).
+    pub scroll_end_x: Vec<NodeId>,
     /// Fields whose scroll the program owns (`topline`), and fields keeping the caret in view.
     pub topline: HashMap<String, (NodeId, f64)>,
     pub caret_follow: HashMap<String, (NodeId, Option<NodeId>)>,

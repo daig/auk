@@ -91,3 +91,36 @@
 .sf-mt-blocks i.on { background-color: var(--mt); }
 .sf-mt-ring { position: relative; display: inline-block; width: 14px; height: 14px; border-radius: 7px; border: 2px solid var(--l3); }
 .sf-mt-ring .arc { position: absolute; top: -2px; left: -2px; width: 14px; height: 14px; border-radius: 7px; border: 2px solid var(--mt); opacity: var(--sf-meter, 0); }
+
+/* chart (T2, A23; book:6975-7075, the look of Tern's omp-panels.css rules): a heatmap of cells
+   whose levels fill with --chart-c at 20/40/65/100%, or bars/spark growing from the bottom.
+   Columns fade in (omp-cell, 8ms stagger per column), bars grow (omp-bar, 0.6s, 20ms stagger
+   capped at 24); the view rebuilds the chart on any prop change, so they replay then. */
+@keyframes omp-cell { from { opacity: 0; } to { opacity: 1; } }
+@keyframes omp-bar { from { transform: scaleY(0); } to { transform: none; } }
+.sf-chart { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; max-width: 100%; --chart-c: var(--sf-p-accent, var(--accent)); --cell: 11px; --gap: 3px; }
+.sf-chart[data-size='sm'] { --cell: 8px; --gap: 2px; }
+.sf-chart[data-size='lg'] { --cell: 13px; --gap: 3px; }
+.sf-chart .hm { display: flex; flex-direction: column; max-width: 100%; overflow-x: auto; font-size: 10px; line-height: 12px; color: var(--t3); }
+.sf-chart .mls { position: relative; flex: none; height: 12px; margin-bottom: 3px; }
+.sf-chart .ml { position: absolute; top: 0; left: calc(var(--rlw, 0px) + var(--at) * (var(--cell) + var(--gap))); white-space: pre; }
+.sf-chart .grid { display: flex; flex-direction: row; align-items: flex-start; gap: var(--gap); }
+.sf-chart .rls { display: flex; flex-direction: column; flex: none; gap: var(--gap); width: calc(var(--rlw, 0px) - var(--gap)); }
+.sf-chart .rl { display: block; height: var(--cell); line-height: var(--cell); white-space: pre; }
+.sf-chart .wk { display: flex; flex-direction: column; flex: none; gap: var(--gap); animation: omp-cell 0.4s ease-out backwards; animation-delay: calc(var(--x) * 8ms); }
+.sf-chart .c { display: block; flex: none; width: var(--cell); height: var(--cell); border-radius: 2px; background-color: color-mix(in srgb, var(--chart-c) var(--p, 0%), transparent); }
+.sf-chart[data-size='sm'] .c { border-radius: 1.5px; }
+.sf-chart .c[data-l='0'] { background-color: var(--l2); }
+.sf-chart .c[data-l='1'] { --p: 20%; }
+.sf-chart .c[data-l='2'] { --p: 40%; }
+.sf-chart .c[data-l='3'] { --p: 65%; }
+.sf-chart .c[data-l='4'] { --p: 100%; }
+.sf-chart .c[data-l='n'] { background-color: transparent; }
+.sf-chart .bars { display: flex; flex-direction: row; align-items: flex-end; align-self: stretch; gap: 2px; min-width: 0; overflow: hidden; height: calc(4 * var(--sf-lh, 17px)); }
+.sf-chart[data-size='sm'] .bars { height: calc(2 * var(--sf-lh, 17px)); }
+.sf-chart[data-size='lg'] .bars { height: calc(8 * var(--sf-lh, 17px)); }
+.sf-chart[data-kind='spark'] .bars { height: var(--sf-lh, 17px); gap: 1px; }
+.sf-chart .b { display: block; flex: 0 1 auto; width: 24px; min-width: 0; max-width: 24px; height: max(1px, calc(var(--v) * 100%)); border-radius: 2px 2px 0 0; background-color: var(--chart-c); transform-origin: 50% 100%; animation: omp-bar 0.6s cubic-bezier(.16, 1, .3, 1) backwards; animation-delay: calc(min(var(--x), 24) * 20ms); }
+.sf-chart[data-kind='spark'] .b { width: 4px; max-width: 4px; border-radius: 1px 1px 0 0; }
+.sf-chart .sum { color: var(--t3); }
+.sf-still .sf-chart .wk, .sf-still .sf-chart .b { animation: none; }

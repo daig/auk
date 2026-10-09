@@ -1929,3 +1929,216 @@ fn a23_omps_model_hub_and_model_dropdown_are_picker_sheets() {
         "omp's config is unchanged"
     );
 }
+
+/// A23 `chart` on a live omp 18.8.5, with no prompt: once Auk advertises `chart`, omp's Usage
+/// overlay (its cost control) draws a year of activity as a native heatmap (`supports("chart")`;
+/// a table of glyphs otherwise). The chart reaches the window with omp's props (7 weekday rows
+/// of up to 53 weeks, month labels, per-day tips, the summary), is a `figure` named by its
+/// summary, lays out md cells (11px, 3px apart), and paints each day's level from the theme's
+/// accent over the card, in the dark and then in the light. Skipped (with a note) while `chart`
+/// isn't in the hello's kinds.
+#[test]
+fn a23_omps_usage_heatmap_is_a_native_chart_in_dark_and_light() {
+    if !auk_tsp::Config::default()
+        .kinds
+        .iter()
+        .any(|k| k == "chart")
+    {
+        eprintln!("skipped: `chart` isn't advertised yet (A23 adds it to the hello's kinds)");
+        return;
+    }
+    let mut omp = LiveOmp::start_with(
+        "omp-chart",
+        true,
+        Setup {
+            dark: true,
+            ..Setup::default()
+        },
+    );
+    let pane = omp.pane;
+    omp.ready();
+    let usage = omp.window.wait("omp's cost control", UI, |w| {
+        let s = w.live_surface(pane, "s:1")?;
+        kinds_under(s.document().root())
+            .into_iter()
+            .find(|(id, _)| {
+                s.document()
+                    .get(id)
+                    .and_then(|n| n.prop("role"))
+                    .and_then(Value::as_str)
+                    == Some("omp.composer.usage")
+            })
+    });
+    let s = omp
+        .window
+        .live_surface(pane, "s:1")
+        .expect("the session surface");
+    let el = omp.window.element_of(pane, s, &usage.0).expect("drawn");
+    let b = omp.window.doc(pane).border_box(el).expect("laid out");
+    omp.window.click(pane, b.x + b.w / 2.0, b.y + b.h / 2.0);
+    // The heatmap arrives once omp has read the usage history.
+    let chart = omp
+        .window
+        .wait("omp's activity heatmap", Duration::from_secs(60), |w| {
+            let s = w.live_surface(pane, "s:1")?;
+            kinds_under(s.document().root())
+                .into_iter()
+                .find(|(_, k)| k == "chart")
+                .map(|(id, _)| id)
+        });
+    let s = omp
+        .window
+        .live_surface(pane, "s:1")
+        .expect("the session surface");
+    let n = s.document().get(&chart).expect("the chart node");
+    assert_eq!(n.prop("kind").and_then(Value::as_str), Some("heatmap"));
+    let cells = n
+        .prop("cells")
+        .and_then(Value::as_array)
+        .expect("cells")
+        .clone();
+    assert_eq!(cells.len(), 7, "a row per weekday");
+    let weeks = cells
+        .iter()
+        .filter_map(Value::as_array)
+        .map(Vec::len)
+        .max()
+        .unwrap_or(0);
+    assert!(weeks > 0 && weeks <= 53, "{weeks} weeks");
+    let summary = n
+        .prop("summary")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    assert!(!summary.is_empty(), "omp names its chart");
+    let report = t2_report(&omp.records());
+    // No error answered any op (an unadvertised kind would be one).
+    assert!(
+        report.errors.is_empty(),
+        "omp got errors: {:?}",
+        report.errors
+    );
+
+    let el = omp.window.element_of(pane, s, &chart).expect("drawn");
+    let doc = omp.window.doc(pane);
+    assert_eq!(doc.attribute(el, "role"), Some("figure"));
+    assert_eq!(doc.attribute(el, "aria-label"), Some(summary.as_str()));
+    let ax = omp.window.view(pane).accessibility(doc);
+    let fig = ax
+        .find(&|a| a.id.as_deref() == Some(chart.as_str()))
+        .expect("in the tree");
+    assert_eq!(
+        (fig.role.as_str(), fig.name.as_deref()),
+        ("figure", Some(summary.as_str()))
+    );
+    let wks = omp.window.with_class(pane, el, "wk");
+    assert_eq!(wks.len(), weeks);
+    let all = omp.window.with_class(pane, el, "c");
+    assert_eq!(all.len(), 7 * weeks);
+    let c0 = doc.border_box(all[0]).expect("a cell laid out");
+    let c1 = doc.border_box(all[1]).expect("a cell laid out");
+    assert_eq!((c0.w, c0.h), (11.0, 11.0), "md cells");
+    assert!(
+        (c1.y - c0.y - 14.0).abs() < 0.01,
+        "3px apart: {c0:?} {c1:?}"
+    );
+
+    // Each drawn day paints its level's color over the card, in the dark and in the light.
+    for dark in [true, false] {
+        if !dark {
+            omp.window.set_dark(false);
+        }
+        // Past the arrivals (omp builds the chart again for the new theme's facts, so its columns
+        // fade in again).
+        let start = std::time::Instant::now();
+        let el = loop {
+            omp.window.frame();
+            let s = omp
+                .window
+                .live_surface(pane, "s:1")
+                .expect("the session surface");
+            let el = omp.window.element_of(pane, s, &chart).expect("drawn");
+            let wks = omp.window.with_class(pane, el, "wk");
+            let doc = omp.window.doc(pane);
+            let settled = start.elapsed() > Duration::from_millis(300)
+                && wks
+                    .iter()
+                    .all(|&w| doc.computed_style(w).is_some_and(|c| c.opacity == 1.0));
+            if settled {
+                break el;
+            }
+            assert!(start.elapsed() < UI, "the chart's arrivals finish");
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        let all = omp.window.with_class(pane, el, "c");
+        let ov_el = std::iter::successors(Some(el), |&e| omp.window.doc(pane).parent(e))
+            .find(|&e| {
+                omp.window
+                    .class(pane, e)
+                    .split(' ')
+                    .any(|c| c == "sf-ov-card")
+            })
+            .expect("the chart is in the overlay's card");
+        let doc = omp.window.doc(pane);
+        let card = doc.computed_style(ov_el).expect("styled").background_color;
+        assert_eq!(card.a, 1.0, "an opaque card");
+        let hm = omp.window.with_class(pane, el, "hm")[0];
+        let r = doc.border_box(hm).expect("laid out");
+        let (x0, y0) = (r.x.floor(), r.y.floor());
+        let px = render_part(doc, (x0, y0, r.w.ceil() as u32 + 1, r.h.ceil() as u32 + 1));
+        let to8 = |v: f32| (v * 255.0).round() as u8;
+        let mut levels = BTreeSet::new();
+        for &c in &all {
+            let l = doc.attribute(c, "data-l").unwrap_or("n").to_owned();
+            let bg = doc.computed_style(c).expect("styled").background_color;
+            let want = [
+                bg.r * bg.a + card.r * (1.0 - bg.a),
+                bg.g * bg.a + card.g * (1.0 - bg.a),
+                bg.b * bg.a + card.b * (1.0 - bg.a),
+            ]
+            .map(to8);
+            let b = doc.border_box(c).expect("laid out");
+            if b.x < r.x || b.x + b.w > r.x + r.w {
+                continue; // scrolled out of view
+            }
+            let p = px.pixel((b.x + b.w / 2.0 - x0) as u32, (b.y + b.h / 2.0 - y0) as u32);
+            assert!(
+                [p.0, p.1, p.2]
+                    .iter()
+                    .zip(want)
+                    .all(|(a, b)| a.abs_diff(b) <= 3),
+                "dark={dark}: level {l} cell {p:?}, want {want:?}"
+            );
+            levels.insert(l);
+        }
+        eprintln!(
+            "dark={dark}: levels drawn {levels:?}; heatmap {r:?} scrolls to {:?}; card {:?}",
+            doc.scroll_size(hm),
+            doc.border_box(ov_el)
+        );
+        // The full level is omp's palette accent (`--sf-p-accent`, book:6986), else the theme's.
+        let hex = |v: &str| -> Option<[u8; 3]> {
+            let h = v.trim().strip_prefix('#')?;
+            let byte = |i: usize| u8::from_str_radix(h.get(i..i + 2)?, 16).ok();
+            Some([byte(0)?, byte(2)?, byte(4)?])
+        };
+        let custom = &doc.computed_style(el).expect("styled").custom;
+        let palette = custom.get("--sf-p-accent").and_then(|v| hex(v));
+        let theme = hex(custom.get("--accent").expect("--accent")).expect("a hex accent");
+        eprintln!("dark={dark}: palette accent {palette:?}, theme accent {theme:?}");
+        let accent = palette.unwrap_or(theme);
+        if let Some(&c) = all
+            .iter()
+            .find(|&&c| doc.attribute(c, "data-l") == Some("4"))
+        {
+            let bg = doc.computed_style(c).expect("styled").background_color;
+            assert_eq!([to8(bg.r), to8(bg.g), to8(bg.b)], accent, "dark={dark}");
+        }
+    }
+    omp.window.press(pane, Key::Escape, Mods::default());
+    omp.window.wait("the usage overlay to close", UI, |w| {
+        let s = w.live_surface(pane, "s:1")?;
+        s.document().get(&chart).is_none().then_some(())
+    });
+    omp.quit();
+}

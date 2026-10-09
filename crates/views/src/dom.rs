@@ -62,6 +62,9 @@ impl Dom<'_> {
     /// A text node appended to `parent`.
     pub fn text(&mut self, parent: NodeId, text: &str) -> NodeId {
         let t = self.doc.create_text(text);
+        // A reused node id: forget what was written on the element it was.
+        self.w.style.remove(&t);
+        self.w.class.remove(&t);
         self.doc.append_child(parent, t);
         t
     }
