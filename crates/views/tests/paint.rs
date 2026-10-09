@@ -232,3 +232,51 @@ fn sdk_ask_card_draws_its_ring() {
         "--card inside the ring: {inside:?} vs {card:?}"
     );
 }
+
+/// A split diff drawn (§8.5): the removed half tinted with `--bad`, the added half with `--ok`,
+/// and the blank side of an unpaired line shaded with `--sf-shade` over the diff's `--code-bg`.
+#[test]
+fn split_diff_draws_its_halves_and_the_blank_side() {
+    let mut h = common::Harness::new();
+    h.hello(&[]);
+    h.surface(
+        "s1",
+        "inline",
+        json!([{"id": "d", "k": "diff", "p": {"mode": "split", "hunks": [
+            {"oldStart": 1, "newStart": 1, "lines": ["-old words", "+new words", "+added"]}
+        ]}}]),
+    );
+    h.frame();
+    let d = h.el("s1", "d");
+    let rows = h.find_class(d, "sf-dr");
+    assert_eq!(rows.len(), 2);
+    let r = h.doc.border_box(d).unwrap();
+    let (w, hgt) = (960, (r.y + r.h).ceil() as u32 + 4);
+    let px = render(&h.doc, w, hgt);
+    let bg = h.doc.computed_style(d).unwrap().background_color;
+    let base = over(bg, [255, 255, 255]);
+    // Right of the text, inside each half.
+    let at = |el: NodeId| {
+        let b = h.doc.border_box(el).unwrap();
+        pixel(&px, w, b.x + b.w - 6.0, b.y + b.h / 2.0)
+    };
+    let first = h.doc.element_children(rows[0]);
+    let (del, add) = (at(first[0]), at(first[1]));
+    assert!(
+        del[0] > del[1] + 8 && add[1] > add[0] + 8,
+        "removed reads red {del:?}, added green {add:?}"
+    );
+    let second = h.doc.element_children(rows[1]);
+    assert!(h.class(second[0]).contains("nil"));
+    let shade = h.doc.computed_style(second[0]).unwrap().background_color;
+    let want = over(shade, base);
+    let got = at(second[0]);
+    assert!(
+        near(got, want),
+        "--sf-shade over --code-bg: {got:?}, want {want:?}"
+    );
+    assert!(
+        got.iter().zip(base).any(|(a, b)| a.abs_diff(b) >= 2),
+        "the blank side is visible: {got:?} vs {base:?}"
+    );
+}

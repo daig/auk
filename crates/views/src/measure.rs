@@ -367,6 +367,28 @@ impl PaneView {
                     changed = true;
                 }
             }
+            // Diffs under the Edits setting's Split: side by side once wider than 112 cells.
+            let diffs: Vec<String> = sv
+                .st
+                .diffs
+                .iter()
+                .filter(|(_, el)| dom.doc.laid_out_since(**el, since) && dom.doc.laid_out(**el))
+                .map(|(id, _)| id.clone())
+                .collect();
+            for id in diffs {
+                let Some(m) = sv.mounts.get_mut(&id) else {
+                    continue;
+                };
+                visits += 1;
+                if crate::kinds::rich::redecide_diff(&mut dom, m, cw) {
+                    changed = true;
+                    if !m.hl.is_empty() {
+                        sv.st.hl_waiting.insert(id.clone(), m.el);
+                        sv.clocked.insert(id);
+                        m.clock = true;
+                    }
+                }
+            }
             // Text cuts (`truncate` start/middle on one line).
             for t in sv.st.truncs.values() {
                 if !dom.doc.laid_out_since(t.el, since) {

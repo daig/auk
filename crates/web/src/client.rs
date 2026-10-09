@@ -75,6 +75,9 @@ struct App {
     scale: f32,
     cell: (u32, u32),
     dark: bool,
+    /// The Edits setting (§8.5): `?edits=split` draws auto-mode diffs side by side when wider
+    /// than 112 cells; otherwise Inline (unified).
+    split_diffs: bool,
     /// The facts last told the daemon: the page's look, motion and clock, followed as they
     /// change (§4.5).
     facts: ClientFacts,
@@ -288,6 +291,7 @@ async fn start_inner() -> Result<(), String> {
         scale,
         cell,
         dark,
+        split_diffs: param("edits").as_deref() == Some("split"),
         facts: first_facts,
         views: BTreeMap::new(),
         ui,
@@ -1031,6 +1035,7 @@ impl App {
             font_px: FONT_PT,
             cell: (self.cell.0 as f32 / scale, self.cell.1 as f32 / scale),
             dark: self.dark,
+            split_diffs: self.split_diffs,
             ..ViewSettings::default()
         };
         // Every pane's surfaces take their changes, shown or not.

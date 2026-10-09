@@ -488,6 +488,12 @@ impl Later {
             PASS.with(|p| p.borrow_mut().deferred.push(Deferred(self)));
         }
     }
+
+    /// The text for a node to draw in itself, outside a render (a diff redrawn by the measure
+    /// loop).
+    pub fn deferred(self) -> Deferred {
+        Deferred(self)
+    }
 }
 
 /// A text highlighting in the background and the plain lines waiting for it.

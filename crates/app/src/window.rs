@@ -767,6 +767,7 @@ impl WinState {
             program_colors: self.settings.program_colors,
             native_editing: self.settings.native_editing,
             links_plain_click: self.settings.links_plain_click,
+            split_diffs: self.settings.split_diffs,
             ..ViewSettings::default()
         };
         // Surfaces paint into the UI layer's scene, under the chrome.

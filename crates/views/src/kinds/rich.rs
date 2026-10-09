@@ -309,6 +309,35 @@ fn inside_open_fold(st: &mut SurfaceState, node: NodeRef) -> bool {
     false
 }
 
+/// A `diff` node's state: its hunks and grammar, kept so the measure loop can redraw it split or
+/// unified when its width crosses 112 cells (§8.5, the Edits setting).
+#[derive(Debug)]
+pub(crate) struct DiffState {
+    pub hunks: Vec<Hunk>,
+    pub syn: Option<&'static syntect::parsing::SyntaxReference>,
+    /// Drawn side by side.
+    pub split: bool,
+    /// The border-box width the last decision was made at (`None`: from the pane's columns).
+    pub width: Option<f32>,
+}
+
+/// Cells a diff must be wider than to draw side by side under the Split setting.
+pub(crate) const SPLIT_CELLS: f32 = 112.0;
+
+/// Whether an auto-mode diff is wide enough to split: its laid-out width when it has one, else
+/// the pane's columns. Also returns the width it decided from.
+fn wide_enough(doc: &auk_ui::Document, el: NodeId, cols: u16, cw: f32) -> (bool, Option<f32>) {
+    match doc.border_box(el).filter(|r| r.w > 0.0 && doc.laid_out(el)) {
+        Some(r) => (split_at(r.w, cw), Some(r.w)),
+        None => (f32::from(cols) > SPLIT_CELLS, None),
+    }
+}
+
+/// Whether a block `w` px wide is wider than 112 cells of `cw` px (half a pixel of slack).
+pub(crate) fn split_at(w: f32, cw: f32) -> bool {
+    w > SPLIT_CELLS * cw + 0.5
+}
+
 pub(crate) fn diff(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
     begin(cx, m);
     let p = node.props();
@@ -316,14 +345,23 @@ pub(crate) fn diff(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
         Some(h @ Value::Array(_)) => diff::parse_hunks(h),
         _ => diff::parse_unified(str_prop(p, "text").unwrap_or("")),
     };
-    let split = match str_prop(p, "mode") {
-        Some("split") => true,
-        Some("unified") => false,
-        _ => cx.set.split_diffs && cx.cols > 112,
+    // `mode` "split" and "unified" win; anything else follows the Edits setting: Inline draws
+    // unified, Split draws side by side when the block is wider than 112 cells, re-deciding as
+    // its width changes (the measure loop, [`redecide_diff`]).
+    let mode = str_prop(p, "mode");
+    let follows = cx.set.split_diffs && !matches!(mode, Some("split" | "unified"));
+    let (split, width) = match mode {
+        Some("split") => (true, None),
+        Some("unified") => (false, None),
+        _ if cx.set.split_diffs => wide_enough(cx.dom.doc, m.el, cx.cols, cx.set.cell.0),
+        _ => (false, None),
     };
+    if follows {
+        cx.st.diffs.insert(node.id().to_owned(), m.el);
+    } else {
+        cx.st.diffs.remove(node.id());
+    }
     look.class_if(split, "split");
-    let lang = str_prop(p, "lang");
-    let path = str_prop(p, "path");
     let maxno = hunks
         .iter()
         .flat_map(|h| h.lines.iter())
@@ -334,9 +372,71 @@ pub(crate) fn diff(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
     look.style(&format!("--sf-gw: {};", maxno.to_string().len()));
     let (add, del) = diff::counts(&hunks);
     look.attr("aria-label", format!("Diff, {add} added, {del} removed"));
-    let body = part(cx, m, "div", "sf-diff-body");
+    let syn = highlight::find(str_prop(p, "lang"), str_prop(p, "path"));
+    let st = DiffState {
+        hunks,
+        syn,
+        split,
+        width,
+    };
+    let (body, hl) = diff_body(&mut cx.dom, m.el, &st);
+    m.generated.push(body);
+    // Each side is highlighted in the background and drawn in when in view.
+    for h in hl {
+        h.finish();
+    }
+    m.extra = Extra::Diff(Box::new(st));
+}
+
+/// Draws a diff that follows the Edits setting again when its width crossed 112 cells since it
+/// was drawn: the body is rebuilt split or unified and the node's class follows. Returns whether
+/// it changed anything.
+pub(crate) fn redecide_diff(dom: &mut Dom, m: &mut Mount, cw: f32) -> bool {
+    let Some(r) = dom.doc.border_box(m.el) else {
+        return false;
+    };
+    let Extra::Diff(st) = &mut m.extra else {
+        return false;
+    };
+    if r.w <= 0.0 || st.width == Some(r.w) {
+        return false;
+    }
+    st.width = Some(r.w);
+    let want = split_at(r.w, cw);
+    if want == st.split {
+        return false;
+    }
+    st.split = want;
+    for g in std::mem::take(&mut m.generated) {
+        if dom.doc.try_node(g).is_some() {
+            dom.doc.remove(g);
+        }
+    }
+    let (body, hl) = diff_body(dom, m.el, st);
+    m.generated.push(body);
+    let class = dom.class_of(m.el).to_owned();
+    let mut parts: Vec<&str> = class.split(' ').filter(|c| *c != "split").collect();
+    if want {
+        parts.push("split");
+    }
+    let class = parts.join(" ");
+    dom.set_class(m.el, &class);
+    m.hl = hl.into_iter().map(highlight::Later::deferred).collect();
+    true
+}
+
+/// The diff's body (`.sf-diff-body`, or `.sf-diff-empty` with no changes) under `el`, and the
+/// highlighting each side waits for.
+fn diff_body(dom: &mut Dom, el: NodeId, st: &DiffState) -> (NodeId, Vec<highlight::Later>) {
+    let hunks = &st.hunks;
+    let split = st.split;
+    if hunks.iter().all(|h| h.lines.is_empty()) {
+        let e = dom.child(el, "div", "sf-diff-empty");
+        dom.text(e, "No changes");
+        return (e, Vec::new());
+    }
+    let body = dom.child(el, "div", "sf-diff-body");
     // Highlight each side as a whole so multi-line constructs color right.
-    let syn = highlight::find(lang, path);
     let side = |op_keep: Op| -> Option<highlight::Later> {
         let lines: Vec<String> = hunks
             .iter()
@@ -344,112 +444,111 @@ pub(crate) fn diff(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
             .filter(|l| l.op == Op::Ctx || l.op == op_keep)
             .map(|l| l.text.clone())
             .collect();
-        syn.map(|s| highlight::later(s, &lines.join("\n")))
+        st.syn.map(|s| highlight::later(s, &lines.join("\n")))
     };
     let mut old_hl = side(Op::Del);
     let mut new_hl = side(Op::Add);
     let (mut oi, mut ni) = (0usize, 0usize);
-    let mut prev_end: Option<u64> = None;
-    for h in &hunks {
-        let gap = match prev_end {
-            Some(e) => h.old_start.saturating_sub(e),
-            None => h.old_start.saturating_sub(1),
-        };
-        if gap > 0 {
-            let sep = cx.dom.child(body, "div", "sf-dsep");
-            cx.dom.text(
-                sep,
-                &format!("⋯ {gap} unchanged line{}", if gap == 1 { "" } else { "s" }),
-            );
+    let mut prev: Option<&Hunk> = None;
+    for h in hunks {
+        // Between hunks: a fold row with the gap (when both ends are known) and the next
+        // hunk's function. The first hunk's header isn't drawn.
+        if let Some(p) = prev {
+            let old_len = p.lines.iter().filter(|l| l.op != Op::Add).count() as u64;
+            let sep = dom.child(body, "div", "sf-dsep");
+            let gap =
+                (p.known && h.known).then(|| h.old_start.saturating_sub(p.old_start + old_len));
+            match gap {
+                Some(g) if g > 0 => dom.text(
+                    sep,
+                    &format!("⋯ {g} unchanged line{}", if g == 1 { "" } else { "s" }),
+                ),
+                _ => dom.text(sep, "⋯"),
+            };
             if let Some(f) = &h.func {
-                cx.dom.child_text(sep, "span", "fn", f);
+                dom.child_text(sep, "span", "fn", f);
             }
         }
-        let mut rows: Vec<(Side, Side)> = Vec::new();
-        let mut k = 0;
-        while k < h.lines.len() {
-            let l = &h.lines[k];
-            match l.op {
-                Op::Ctx => {
-                    rows.push((Some((l, oi)), Some((l, ni))));
-                    oi += 1;
-                    ni += 1;
-                    k += 1;
-                }
-                _ => {
-                    let ds = k;
-                    while k < h.lines.len() && h.lines[k].op == Op::Del {
-                        k += 1;
-                    }
-                    let as_ = k;
-                    while k < h.lines.len() && h.lines[k].op == Op::Add {
-                        k += 1;
-                    }
-                    let dels: Vec<(&DLine, usize)> = h.lines[ds..as_]
-                        .iter()
-                        .map(|l| {
-                            oi += 1;
-                            (l, oi - 1)
-                        })
-                        .collect();
-                    let adds: Vec<(&DLine, usize)> = h.lines[as_..k]
-                        .iter()
-                        .map(|l| {
-                            ni += 1;
-                            (l, ni - 1)
-                        })
-                        .collect();
-                    if split {
-                        for j in 0..dels.len().max(adds.len()) {
-                            rows.push((dels.get(j).copied(), adds.get(j).copied()));
-                        }
-                    } else {
-                        for d in dels {
-                            rows.push((Some(d), None));
-                        }
-                        for a in adds {
-                            rows.push((None, Some(a)));
-                        }
-                    }
-                }
-            }
-        }
-        for (old, new) in rows {
+        prev = Some(h);
+        for (old, new) in diff_rows(h, split, &mut oi, &mut ni) {
             if split {
-                let r = cx.dom.child(body, "div", "sf-dr");
-                diff_line(cx, r, old, &mut old_hl, true, true);
-                diff_line(cx, r, new, &mut new_hl, true, false);
-            } else {
-                match (old, new) {
-                    (Some(o), Some(_)) => diff_line(cx, body, Some(o), &mut old_hl, false, true),
-                    (Some(o), None) => diff_line(cx, body, Some(o), &mut old_hl, false, true),
-                    (None, Some(n)) => diff_line(cx, body, Some(n), &mut new_hl, false, false),
-                    (None, None) => {}
-                }
+                let r = dom.child(body, "div", "sf-dr");
+                diff_line(dom, r, old, &mut old_hl, true, true);
+                diff_line(dom, r, new, &mut new_hl, true, false);
+            } else if let Some(o) = old {
+                diff_line(dom, body, Some(o), &mut old_hl, false, true);
+            } else if let Some(n) = new {
+                diff_line(dom, body, Some(n), &mut new_hl, false, false);
             }
         }
-        let old_len = h.lines.iter().filter(|l| l.op != Op::Add).count() as u64;
-        prev_end = Some(h.old_start + old_len);
     }
-    // Each side is highlighted in the background and drawn in when in view.
-    for hl in [old_hl, new_hl].into_iter().flatten() {
-        hl.finish();
-    }
+    (body, [old_hl, new_hl].into_iter().flatten().collect())
 }
 
 /// One side of a diff row: the line and its index in that side's highlighted text.
 type Side<'a> = Option<(&'a DLine, usize)>;
 
+/// A hunk's rows. Unified: one line per row, a change's removed lines before its added ones.
+/// Split: context on both sides; the i-th removed and the i-th added line of a change share a
+/// row, the side an unpaired line lacks left blank. `oi`/`ni` count each side's lines.
+fn diff_rows<'a>(
+    h: &'a Hunk,
+    split: bool,
+    oi: &mut usize,
+    ni: &mut usize,
+) -> Vec<(Side<'a>, Side<'a>)> {
+    let mut rows: Vec<(Side, Side)> = Vec::new();
+    let mut k = 0;
+    while k < h.lines.len() {
+        let l = &h.lines[k];
+        if l.op == Op::Ctx {
+            rows.push((Some((l, *oi)), Some((l, *ni))));
+            *oi += 1;
+            *ni += 1;
+            k += 1;
+            continue;
+        }
+        let ds = k;
+        while k < h.lines.len() && h.lines[k].op == Op::Del {
+            k += 1;
+        }
+        let as_ = k;
+        while k < h.lines.len() && h.lines[k].op == Op::Add {
+            k += 1;
+        }
+        let mut dels = Vec::new();
+        for l in &h.lines[ds..as_] {
+            dels.push((l, *oi));
+            *oi += 1;
+        }
+        let mut adds = Vec::new();
+        for l in &h.lines[as_..k] {
+            adds.push((l, *ni));
+            *ni += 1;
+        }
+        if split {
+            for j in 0..dels.len().max(adds.len()) {
+                rows.push((dels.get(j).copied(), adds.get(j).copied()));
+            }
+        } else {
+            rows.extend(dels.into_iter().map(|d| (Some(d), None)));
+            rows.extend(adds.into_iter().map(|a| (None, Some(a))));
+        }
+    }
+    rows
+}
+
 fn diff_line(
-    cx: &mut Cx,
+    dom: &mut Dom,
     parent: NodeId,
-    l: Option<(&DLine, usize)>,
+    l: Side,
     hl: &mut Option<highlight::Later>,
     half: bool,
     old_side: bool,
 ) {
     let Some((l, idx)) = l else {
-        cx.dom.child(parent, "div", "sf-dl half empty");
+        // The blank side of an unpaired line (`--sf-shade`).
+        dom.child(parent, "div", "sf-dl half nil");
         return;
     };
     let op = match l.op {
@@ -462,23 +561,23 @@ fn diff_line(
     } else {
         format!("sf-dl {op}")
     };
-    let row = cx.dom.child(parent, "div", &class);
+    let row = dom.child(parent, "div", &class);
     let num = |n: Option<u64>| n.map(|n| n.to_string()).unwrap_or_default();
     if half {
         let n = if old_side { l.old } else { l.new };
-        cx.dom.child_text(row, "span", "sf-dg", &num(n));
+        dom.child_text(row, "span", "sf-dg", &num(n));
     } else {
-        cx.dom.child_text(row, "span", "sf-dg", &num(l.old));
-        cx.dom.child_text(row, "span", "sf-dg", &num(l.new));
+        dom.child_text(row, "span", "sf-dg", &num(l.old));
+        dom.child_text(row, "span", "sf-dg", &num(l.new));
     }
     let mark = match l.op {
         Op::Ctx => " ",
         Op::Del => "-",
         Op::Add => "+",
     };
-    cx.dom.child_text(row, "span", "sf-dm", mark);
-    let t = cx.dom.child(row, "span", "sf-dt");
-    line_into(&mut cx.dom, t, &l.text, None, &l.em);
+    dom.child_text(row, "span", "sf-dm", mark);
+    let t = dom.child(row, "span", "sf-dt");
+    line_into(dom, t, &l.text, None, &l.em);
     if let Some(h) = hl.as_mut() {
         h.add(highlight::DeferredLine {
             el: t,

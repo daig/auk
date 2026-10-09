@@ -85,6 +85,9 @@ pub(crate) struct SurfaceState {
     pub hl_waiting: HashMap<String, NodeId>,
     /// Cards and tools showing a preview (clamped after layout), by node id: their element.
     pub previews: HashMap<String, NodeId>,
+    /// Diffs following the Edits setting's Split (split or not by their laid-out width), by
+    /// node id: their element.
+    pub diffs: HashMap<String, NodeId>,
     /// Text cut after layout.
     pub truncs: HashMap<String, crate::kinds::data::Trunc>,
     /// Tables fitted after layout.
@@ -190,6 +193,7 @@ impl SurfaceState {
         self.scrollers.remove(id);
         self.truncs.remove(id);
         self.previews.remove(id);
+        self.diffs.remove(id);
         self.hl_waiting.remove(id);
         self.tables.remove(id);
         if let Some(c) = self.follow.remove(id) {
