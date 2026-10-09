@@ -4,6 +4,7 @@
 pub(crate) mod agent;
 pub(crate) mod block;
 pub(crate) mod data;
+pub(crate) mod effort;
 pub(crate) mod el;
 pub(crate) mod input;
 pub(crate) mod layout;
@@ -101,7 +102,7 @@ pub(crate) fn has_children(kind: &str) -> bool {
             | "picker"
             | "prefs"
             | "block"
-    ) || !KINDS.contains(&kind)
+    ) || !KINDS.contains(&kind) && kind != "effort"
 }
 
 /// Where `child` of `node` goes.
@@ -241,7 +242,7 @@ pub(crate) fn render(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
         "tool" => agent::tool(cx, node, m, look),
         "agent" => agent::agent(cx, node, m, look),
         "checklist" => agent::checklist(cx, node, m, look),
-        "effort" => agent::effort(cx, node, m, look),
+        "effort" => effort::effort(cx, node, m, look),
         "el" => el::el(cx, node, m, look),
         "block" => block::block(cx, node, m, look),
         _ => generic(cx, node, m, look),

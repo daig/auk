@@ -198,6 +198,10 @@ pub struct PaneView {
     pub(crate) hidden_at: Option<f64>,
     /// `el` controls never flip (a lens layer's view, §9.6).
     pub(crate) inert_controls: bool,
+    /// A `block`'s Copy copies its raw child's output: true only for the command blocks' own
+    /// view (§9.6). A program's `block` isn't a command block, so its Copy copies an empty string
+    /// (book:8346, amendment A23).
+    pub(crate) command_blocks: bool,
     /// What the last layout did (frame statistics), and the measure targets visited since.
     pub(crate) work: crate::measure::LayoutWork,
     pub(crate) measure_visits: usize,
@@ -262,6 +266,7 @@ impl PaneView {
             paused_ms: 0.0,
             hidden_at: None,
             inert_controls: false,
+            command_blocks: false,
             work: Default::default(),
             measure_visits: 0,
             measure_mark: 0,

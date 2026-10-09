@@ -120,8 +120,60 @@
 .toast.info .ico { color: var(--accent); }
 .toast .mono { font-family: var(--mono); color: var(--t3); }
 
-.sf-effort { display: inline-flex; }
-.sf-eff { display: inline-block; width: 14px; height: 14px; border-radius: 7px; border: 2px solid var(--l3); }
-.sf-effort[data-level='high'] .sf-eff, .sf-effort[data-level='xhigh'] .sf-eff, .sf-effort[data-level='max'] .sf-eff { border-color: var(--warn); }
-.sf-effort[data-level='medium'] .sf-eff, .sf-effort[data-level='low'] .sf-eff { border-color: var(--accent); }
+/* effort: the thinking-effort ring (book:7074-7146). A level's arc is two rotors (kinds/effort.rs);
+   at max the track and arc fade out and the fire takes their place. */
+.sf-effort {
+  display: inline-flex; flex: none; align-items: center; vertical-align: middle;
+  --eff: transparent; --fire-hi: #ffc24a;
+  --fire: color-mix(in srgb, var(--sf-p-thinkingMax, var(--bad)) 80%, var(--fire-hi));
+}
+.sf-effort[data-level='minimal'] { --eff: var(--sf-p-thinkingMinimal, var(--sf-c-muted)); }
+.sf-effort[data-level='low'] { --eff: var(--sf-p-thinkingLow, var(--sf-c-info)); }
+.sf-effort[data-level='medium'] { --eff: var(--sf-p-thinkingMedium, var(--sf-c-accent)); }
+.sf-effort[data-level='high'] { --eff: var(--sf-p-thinkingHigh, var(--sf-c-warning)); }
+.sf-effort[data-level='xhigh'] { --eff: var(--sf-p-thinkingXhigh, var(--sf-c-error)); }
+.sf-effort[data-level='max'] { --eff: var(--sf-p-thinkingMax, var(--sf-c-error)); }
+.sf-eff { position: relative; display: inline-block; flex: none; width: 14px; height: 14px; }
+.sf-eff > span { position: absolute; }
+.sf-eff .track, .sf-eff .blaze, .sf-eff .ring { box-sizing: border-box; width: 14px; height: 14px; border-radius: 7px; border: 2px solid var(--l3); }
+.sf-eff .track, .sf-eff .arc, .sf-eff .blaze { left: 0; top: 0; }
+.sf-eff .arc { width: 14px; height: 14px; }
+.sf-eff .half, .sf-eff .cut { position: absolute; top: 0; width: 7px; height: 14px; overflow: hidden; }
+.sf-eff .rot { position: absolute; top: 0; width: 14px; height: 14px; transition: transform 0.4s ease; }
+.sf-eff .ring { position: absolute; top: 0; left: 0; border-color: var(--eff); transition: border-color 0.3s; }
+.sf-eff .r { left: 7px; }
+.sf-eff .r .rot { left: -7px; animation: sf-eff-sweep 0.3s ease-in; }
+.sf-eff .r .cut { left: 0; }
+.sf-eff .l { left: 0; }
+.sf-eff .l .rot { left: 0; animation: sf-eff-sweep 0.3s ease-out 0.3s backwards; }
+.sf-eff .l .cut { left: 7px; }
+.sf-eff .l .ring { left: -7px; }
+@keyframes sf-eff-sweep { from { transform: rotate(0deg); } }
+.sf-effort.unknown .track { border-style: dashed; border-color: var(--t4); }
+.sf-effort.unknown .arc { opacity: 0; }
+/* The fire: a ring in --fire, a crown of three flames rising off its top, an ember inside. */
+.sf-eff .blaze { border-color: var(--fire); }
+.sf-eff .blaze, .sf-eff .crown, .sf-eff .ember { opacity: 0; transition: opacity 0.3s; }
+.sf-eff .track, .sf-eff .arc { transition: opacity 0.3s; }
+.sf-eff .crown { left: 2px; top: -3px; width: 10px; height: 7px; }
+.sf-eff .flame {
+  position: absolute; bottom: 0; width: 4px; height: 4px; background-color: var(--fire);
+  border-radius: 0 50% 50% 50%; transform: rotate(45deg);
+}
+.sf-eff .f1 { left: 0; height: 3px; width: 3px; }
+.sf-eff .f2 { left: 3px; bottom: 2px; background-color: var(--fire-hi); }
+.sf-eff .f3 { left: 7px; height: 3px; width: 3px; }
+.sf-eff .ember { left: 5px; top: 5px; width: 4px; height: 4px; border-radius: 2px; background-color: var(--fire-hi); }
+.sf-effort[data-level='max'] .track, .sf-effort[data-level='max'] .arc { opacity: 0; }
+.sf-effort[data-level='max'] .blaze, .sf-effort[data-level='max'] .crown, .sf-effort[data-level='max'] .ember { opacity: 1; }
+.sf-effort[data-level='max'] .crown { animation: sf-flame 1.4s steps(4) 0.5s infinite; }
+.sf-effort[data-level='max'] .ember { animation: sf-ember 0.9s steps(9) 0.5s infinite alternate; }
+@keyframes sf-flame {
+  0% { transform: none; } 25% { transform: translateY(-1px) scaleY(1.15); }
+  50% { transform: translateY(0.5px) scaleY(0.9); } 75% { transform: translateY(-0.5px) scaleX(0.9) scaleY(1.1); }
+  100% { transform: none; }
+}
+@keyframes sf-ember { from { opacity: 1; } to { opacity: 0.45; } }
+.sf-paused .sf-eff *, .sf-still .sf-eff * { animation: none !important; }
+.sf-still .sf-eff * { transition: none !important; }
 .sf-unknown { display: flex; flex-direction: column; min-width: 0; }

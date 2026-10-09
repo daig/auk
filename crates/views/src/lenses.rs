@@ -186,6 +186,7 @@ impl LensLayer {
         let mut view = PaneView::new(&mut doc, settings);
         // `el` controls don't flip in lens views (§9.6).
         view.inert_controls = true;
+        view.command_blocks = true;
         let el = view.element();
         doc.append_child(body, el);
         let mut kinds: Vec<String> = crate::KINDS.iter().map(|k| (*k).to_owned()).collect();

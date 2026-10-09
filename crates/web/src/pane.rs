@@ -126,10 +126,12 @@ impl LensDoc {
         let open = json!({"id": LENS_SF, "mode": "inline", "listen": false});
         tsp.on_apc(&mut term, format!("tsp;o;{open}").as_bytes());
         let _ = tsp.take_output();
+        let mut surfaces = new_surfaces(settings, scale, font);
+        surfaces.set_command_blocks(true);
         LensDoc {
             term,
             tsp,
-            surfaces: new_surfaces(settings, scale, font),
+            surfaces,
             shown: None,
             card: None,
             error: None,

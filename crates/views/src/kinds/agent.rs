@@ -1,5 +1,4 @@
-//! Agent kinds: `tool`, `agent`, `checklist` (research/elements.md §2.8), and the T2 `effort` as a
-//! plain fallback.
+//! Agent kinds: `tool`, `agent`, `checklist` (research/elements.md §2.8).
 
 use super::layout::{preview_lines, tool_icon};
 use super::{begin, icon, part, slot, spans_into};
@@ -778,23 +777,4 @@ pub(crate) fn checklist(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Lo
     }
     let _ = spans::parse_spans;
     let _ = state_key;
-}
-
-pub(crate) fn effort(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
-    begin(cx, m);
-    let level = str_prop(node.props(), "level").unwrap_or("off");
-    let n = ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
-        .iter()
-        .position(|l| *l == level)
-        .unwrap_or(0);
-    look.attr("data-level", level);
-    look.attr("role", "meter");
-    look.attr("aria-valuenow", n.to_string());
-    look.attr("aria-valuetext", level);
-    let r = part(cx, m, "span", "sf-eff");
-    cx.dom.attr(r, "aria-hidden", "true");
-    cx.dom.set_style(
-        r,
-        &format!("--sf-meter: {}", crate::common::fmt_num(n as f64 / 6.0)),
-    );
 }

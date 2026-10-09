@@ -148,6 +148,12 @@ impl PaneSurfaces {
         }
     }
 
+    /// Whether this document's `block`s are command blocks, whose Copy copies the raw output
+    /// (a lens card's private engine); a program's `block` copies an empty string (A23).
+    pub fn set_command_blocks(&mut self, on: bool) {
+        self.view.command_blocks = on;
+    }
+
     /// Installs plugin sheets (manifest styles and `tern.css`, §8.4 cascade step 3) into the
     /// pane's documents, replacing the last set. Returns whether anything changed.
     pub fn set_plugin_sheets(&mut self, sheets: &[(String, String)]) -> bool {
