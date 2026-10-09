@@ -977,3 +977,35 @@ fn table_layout_table_caption_and_float_are_rejected_as_in_tern() {
         auk_ui::style::Display::Inline
     );
 }
+
+/// A relayout can measure a text box again (here at min-content, for a flex item's automatic
+/// minimum size, under nested flex columns whose many measurements overflow Taffy's measure
+/// cache) while its final layout, and that of the boxes above it, come from the cache. The lines
+/// broken for that measurement must not be what is left: the box keeps its one-line height and
+/// would paint one word per line over what follows (omp's Usage overlay as its "checked … ago"
+/// ticked or the pointer moved).
+#[test]
+fn a_measurement_does_not_leave_its_line_breaks_behind_a_cached_final_layout() {
+    let mut doc = doc_with(
+        ".ov { display: flex } .col { display: flex; flex-direction: column }
+         .card { width: 300px } .row { display: flex }",
+    );
+    let root = doc.root();
+    let body = el(&mut doc, root, "body", "", None);
+    let ov = el(&mut doc, body, "div", "ov", None);
+    let card = el(&mut doc, ov, "div", "col card", None);
+    let a = el(&mut doc, card, "div", "col", None);
+    let b = el(&mut doc, a, "div", "col", None);
+    let tick = el(&mut doc, b, "div", "", Some("1s"));
+    let list = el(&mut doc, b, "div", "col", None);
+    let row = el(&mut doc, list, "div", "row", None);
+    let text = el(&mut doc, row, "div", "", Some("aaa bbb ccc"));
+    doc.update();
+    for k in 2..10 {
+        let t = doc.children(tick)[0];
+        doc.set_text(t, &format!("{k}s"));
+        doc.update();
+        assert_eq!(doc.border_box(text).unwrap().h, 10.0, "tick {k}");
+        assert_eq!(doc.line_count(text), 1, "tick {k}: lines as laid out, not as last measured");
+    }
+}

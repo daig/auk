@@ -8,7 +8,7 @@ pub(crate) mod table;
 
 use crate::css::values::CalcNode;
 use crate::document::Document;
-use crate::dom::{Inner, NodeId, NodeKind, Rect, VirtRow};
+use crate::dom::{Inner, NodeId, NodeKind, Rect, VirtRow, flags};
 use taffy::prelude::*;
 use taffy::{
     BlockContext, CacheTree, LayoutBlockContainer, LayoutFlexboxContainer, LayoutGridContainer,
@@ -75,7 +75,11 @@ impl LayoutPartialTree for Document {
 
 impl CacheTree for Document {
     fn cache_get(&mut self, node_id: taffy::NodeId, input: &LayoutInput) -> Option<LayoutOutput> {
-        self.node_mut(NodeId::from_taffy(node_id)).cache.get(input)
+        let n = self.node_mut(NodeId::from_taffy(node_id));
+        if input.run_mode == RunMode::PerformLayout && n.flags & flags::PERFORM_STALE != 0 {
+            return None;
+        }
+        n.cache.get(input)
     }
     fn cache_store(&mut self, node_id: taffy::NodeId, input: &LayoutInput, out: LayoutOutput) {
         self.node_mut(NodeId::from_taffy(node_id))
@@ -132,6 +136,33 @@ impl LayoutGridContainer for Document {
 
 impl Document {
     fn compute_uncached(
+        &mut self,
+        tid: taffy::NodeId,
+        inputs: LayoutInput,
+        block_ctx: Option<&mut BlockContext<'_>>,
+    ) -> LayoutOutput {
+        let id = NodeId::from_taffy(tid);
+        let out = self.compute_uncached_inner(tid, inputs, block_ctx);
+        match inputs.run_mode {
+            // This box and everything under it is placed as of now.
+            RunMode::PerformLayout => self.node_mut(id).flags &= !flags::PERFORM_STALE,
+            // An inline formatting context keeps the lines it broke for this measurement (and
+            // its atoms were laid out for it): its final layout, and that of every box above it
+            // whose cached final layout would skip it, has to run again.
+            RunMode::ComputeSize if self.node(id).inner == Inner::Ifc => {
+                let mut cur = Some(id);
+                while let Some(c) = cur {
+                    let n = self.node_mut(c);
+                    n.flags |= flags::PERFORM_STALE;
+                    cur = n.layout_parent;
+                }
+            }
+            _ => {}
+        }
+        out
+    }
+
+    fn compute_uncached_inner(
         &mut self,
         tid: taffy::NodeId,
         inputs: LayoutInput,

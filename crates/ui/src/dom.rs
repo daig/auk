@@ -176,6 +176,11 @@ pub(crate) mod flags {
     /// The box's children are rebuilt from scratch, not only extended (`BOX_DIRTY` from a
     /// change other than children added or removed).
     pub const BOX_FULL: u16 = 32;
+    /// The box's retained layout state (an inline formatting context's line breaks, its atoms'
+    /// places) was overwritten by a measurement (`RunMode::ComputeSize`) since its last
+    /// perform-layout, or a box under it was: its cached final layout must not be reused, as a
+    /// hit skips the subtree and would leave that measurement's state to be painted.
+    pub const PERFORM_STALE: u16 = 64;
 }
 
 /// A rectangle in CSS px.
