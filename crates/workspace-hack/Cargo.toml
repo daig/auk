@@ -34,11 +34,13 @@ naga-types = { version = "30", default-features = false, features = ["std"] }
 num-traits = { version = "0.2", features = ["libm"] }
 once_cell = { version = "1" }
 parking_lot = { version = "0.12", features = ["arc_lock"] }
-phf_shared = { version = "0.14", default-features = false, features = ["std"] }
+phf_shared-582f2526e08bb6a0 = { package = "phf_shared", version = "0.14", default-features = false, features = ["std"] }
+phf_shared-a6292c17cd707f01 = { package = "phf_shared", version = "0.11", default-features = false, features = ["std"] }
 raw-window-handle = { version = "0.6", default-features = false, features = ["std"] }
 read-fonts = { version = "0.41", default-features = false, features = ["experimental_font_api", "std"] }
 regex-automata = { version = "0.4" }
 regex-syntax = { version = "0.8" }
+rust-embed-utils = { version = "8", default-features = false, features = ["debug-embed"] }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1", default-features = false, features = ["alloc", "rc", "result", "std"] }
 serde_json = { version = "1", features = ["float_roundtrip", "preserve_order", "raw_value"] }
@@ -57,9 +59,11 @@ log = { version = "0.4", default-features = false, features = ["std"] }
 naga-types = { version = "30", default-features = false, features = ["std"] }
 num-traits = { version = "0.2", features = ["libm"] }
 once_cell = { version = "1" }
-phf_shared = { version = "0.14", default-features = false, features = ["std"] }
+phf_shared-582f2526e08bb6a0 = { package = "phf_shared", version = "0.14", default-features = false, features = ["std"] }
+phf_shared-a6292c17cd707f01 = { package = "phf_shared", version = "0.11", default-features = false, features = ["std"] }
 proc-macro2 = { version = "1" }
 quote = { version = "1" }
+rust-embed-utils = { version = "8", default-features = false, features = ["debug-embed"] }
 serde_core = { version = "1", default-features = false, features = ["alloc", "rc", "result", "std"] }
 syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", features = ["extra-traits", "fold", "full", "visit"] }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2", features = ["extra-traits", "full", "visit", "visit-mut"] }

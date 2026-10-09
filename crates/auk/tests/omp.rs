@@ -1722,3 +1722,149 @@ fn a15_to_a19_omps_overlays_over_a_long_transcript_in_the_dark() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ---------------------------------------------------------------------------------------------
+// A23: math
+
+/// The answer of [`math_session`]: md math in every delimiter of omp's dialect, and a typo.
+const MATH_ANSWER: &str = "## Math\n\n\
+    Euler: $e^{i\\pi} + 1 = 0$, and \\(\\alpha_1 + \\beta\\) inline.\n\n\
+    $$\\sum_{k=1}^{n} k = \\frac{n(n+1)}{2}$$\n\n\
+    \\[\n\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}\n\\]\n\n\
+    \\begin{aligned}\nf(x) &= (x+1)^2 \\\\\n&= x^2 + 2x + 1\n\\end{aligned}\n\n\
+    A typo: $\\frac{1}$.";
+
+/// A session file with one question and [`MATH_ANSWER`], for `--resume` (no model call).
+fn math_session(dir: &Path, cwd: &Path) -> PathBuf {
+    let id = "01a23000-0000-7000-8000-00000000a23a";
+    let at = |i: usize| format!("2026-10-08T08:00:{i:02}.000Z");
+    let lines = [
+        serde_json::json!({"type": "session", "version": 3, "id": id, "timestamp": at(0), "cwd": cwd}),
+        serde_json::json!({"type": "model_change", "id": "m0000000", "parentId": null, "timestamp": at(0),
+                           "model": "xai-oauth/grok-4.7", "resolvedModelIsFallback": false}),
+        serde_json::json!({"type": "message", "id": "u0000000", "parentId": "m0000000", "timestamp": at(1),
+            "message": {"role": "user", "content": [{"type": "text", "text": "Some math?"}],
+                        "attribution": "user", "timestamp": 1_791_449_000_000u64}}),
+        serde_json::json!({"type": "message", "id": "a0000000", "parentId": "u0000000", "timestamp": at(2),
+            "message": {"role": "assistant", "content": [{"type": "text", "text": MATH_ANSWER}],
+                        "api": "openai-responses", "provider": "xai-oauth", "model": "grok-4.7",
+                        "usage": {"input": 10, "output": 10, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 20,
+                                  "cost": {"input": 0.0, "output": 0.0, "cacheRead": 0.0, "cacheWrite": 0.0, "total": 0.0}},
+                        "stopReason": "stop", "timestamp": 1_791_449_002_000u64}}),
+    ];
+    let path = dir.join(format!("2026-10-08T08-00-00-000Z_{id}.jsonl"));
+    let text: Vec<String> = lines.iter().map(Value::to_string).collect();
+    std::fs::write(&path, text.join("\n") + "\n").expect("write the session");
+    path
+}
+
+/// A23 math on a live omp 18.8.5, with no prompt: omp resumes a session whose answer has math
+/// (no model call) and sends it as `md` with the TeX as written. The window typesets every
+/// delimiter of the dialect (`$…$`, `\(…\)` inline; `$$…$$`, `\[…\]`, `\begin{env}` display)
+/// into `svg`s painting in the text color, and shows the typo as `code.math-err` titled with
+/// the error. Nothing is picked; omp's config is left as it was.
+#[test]
+fn a23_omps_answer_draws_md_math_typeset() {
+    let config = real_home().join(".omp/agent/config.yml");
+    let config_before = std::fs::read(&config).ok();
+    let dir = std::env::temp_dir().join(format!("auk-omp-a23-math-{}", std::process::id()));
+    let sessions = dir.join("sessions");
+    std::fs::create_dir_all(&sessions).expect("a session dir");
+    let session = math_session(&sessions, &dir);
+    let mut omp = LiveOmp::start_with(
+        "omp-a23-math",
+        true,
+        Setup {
+            dark: true,
+            before: None,
+            args: Some(format!(
+                "--session-dir {} --resume {}",
+                quote(&sessions.to_string_lossy()),
+                quote(&session.to_string_lossy())
+            )),
+        },
+    );
+    let pane = omp.pane;
+    omp.ready();
+
+    // omp sends the answer as md, the TeX as written.
+    let md = omp.window.wait("the answer's md", UI, |w| {
+        let s = w.live_surface(pane, "s:1")?;
+        kinds_under(s.document().root())
+            .into_iter()
+            .find(|(id, k)| {
+                k == "md"
+                    && s.document()
+                        .get(id)
+                        .and_then(|n| n.prop("text"))
+                        .and_then(Value::as_str)
+                        .is_some_and(|t| t.contains("\\begin{aligned}"))
+            })
+            .map(|(id, _)| id)
+    });
+    let s = omp.window.live_surface(pane, "s:1").expect("the session surface");
+    let text = s.document().get(&md).unwrap().prop("text").unwrap().as_str().unwrap().to_owned();
+    for part in ["$e^{i\\pi} + 1 = 0$", "\\(\\alpha_1 + \\beta\\)", "\\[", "\\begin{pmatrix}"] {
+        assert!(text.contains(part), "omp keeps {part}: {text}");
+    }
+    let el = omp.window.element_of(pane, s, &md).expect("drawn");
+    omp.window.frame();
+    let doc = omp.window.doc(pane);
+    let tex = |e: auk_ui::NodeId| doc.attribute(e, "data-tex").unwrap_or("").to_owned();
+    let inline: Vec<String> = omp.window.with_class(pane, el, "math").into_iter().map(tex).collect();
+    assert_eq!(inline, ["e^{i\\pi} + 1 = 0", "\\alpha_1 + \\beta"]);
+    let display = omp.window.with_class(pane, el, "math-display");
+    let shown: Vec<String> = display.iter().map(|&e| tex(e)).collect();
+    assert_eq!(shown.len(), 3, "{shown:?}");
+    assert!(shown[0].contains("\\sum") && shown[1].contains("pmatrix") && shown[2].starts_with("\\begin{aligned}"));
+    let err = omp.window.with_class(pane, el, "math-err");
+    assert_eq!(err.len(), 1);
+    assert_eq!(omp.window.text_content(pane, err[0]), "\\frac{1}");
+    assert!(doc.attribute(err[0], "title").is_some_and(|t| !t.is_empty()));
+
+    // Each formula is a picture painted in the text color: light ink on the dark page.
+    let formulas: Vec<auk_ui::NodeId> = omp
+        .window
+        .with_class(pane, el, "math")
+        .into_iter()
+        .chain(display)
+        .collect();
+    for f in formulas {
+        let svg = *doc.children(f).first().expect("the svg");
+        assert!(doc.image(svg).is_some() && doc.image_tint(svg), "{} is typeset", tex(f));
+        let b = doc.border_box(svg).expect("laid out");
+        assert!(b.w > 8.0 && b.h > 8.0, "{b:?}");
+        let color = doc.computed_style(svg).expect("styled").color;
+        let want = [color.r, color.g, color.b].map(|v| (v * 255.0).round() as u8);
+        let (x0, y0) = (b.x.floor(), b.y.floor());
+        let px = render_part(doc, (x0, y0, b.w.ceil() as u32 + 1, b.h.ceil() as u32 + 1));
+        // The page is the most common pixel; the ink, the pixel furthest from it.
+        let mut counts: BTreeMap<[u8; 3], usize> = BTreeMap::new();
+        let mut pixels = Vec::new();
+        for y in 0..px.height {
+            for x in 0..px.width {
+                let p = px.pixel(x, y);
+                *counts.entry([p.0, p.1, p.2]).or_default() += 1;
+                pixels.push([p.0, p.1, p.2]);
+            }
+        }
+        let page = *counts.iter().max_by_key(|(_, n)| **n).unwrap().0;
+        let dist = |p: &[u8; 3]| -> u32 {
+            p.iter().zip(page).map(|(a, b)| u32::from(a.abs_diff(b))).sum()
+        };
+        let ink = *pixels.iter().max_by_key(|p| dist(p)).unwrap();
+        let lum = |c: [u8; 3]| c.iter().map(|&v| u32::from(v)).sum::<u32>();
+        assert!(
+            ink.iter().zip(want).all(|(a, b)| a.abs_diff(b) <= 8) && lum(ink) > lum(page),
+            "{}: ink {ink:?} is the text color {want:?}, light on {page:?}",
+            tex(f)
+        );
+    }
+    omp.quit();
+    assert_eq!(
+        std::fs::read(&config).ok(),
+        config_before,
+        "omp's config is unchanged"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

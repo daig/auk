@@ -553,7 +553,7 @@ impl Painter<'_> {
         if let Some(image) = n.image.as_deref()
             && s.visibility == Visibility::Visible
         {
-            self.paint_image(image, s, r, l, xf);
+            self.paint_image(image, n.image_tint, s, r, l, xf);
         }
         let clip = s.overflow_x.clips() || s.overflow_y.clips();
         if clip {
@@ -648,10 +648,13 @@ impl Painter<'_> {
     }
 
     /// Replaced content: the picture placed in the content box by `object-fit`, clipped to the
-    /// content box (with the box's radii, inset by its border).
+    /// content box (with the box's radii, inset by its border). A tinted picture paints its
+    /// coverage in `color`: the picture in an isolated layer, then `color` composited into it
+    /// source-in.
     fn paint_image(
         &mut self,
         image: &ImageContent,
+        tint: bool,
         s: &ComputedStyle,
         r: Rect,
         l: &taffy::Layout,
@@ -675,8 +678,27 @@ impl Painter<'_> {
             .push_clip_layer(Fill::NonZero, xf, &RoundedRect::from_rect(kr(content), rr));
         let place = Affine::translate(((content.x + x) as f64, (content.y + y) as f64))
             * Affine::scale_non_uniform(w as f64 / iw as f64, h as f64 / ih as f64);
-        self.scene
-            .draw_image(&image.brush(s.image_rendering), xf * place);
+        if tint {
+            let area = kr(content);
+            self.scene
+                .push_layer(Fill::NonZero, Mix::Normal, 1.0, xf, &area);
+            self.scene
+                .draw_image(&image.brush(s.image_rendering), xf * place);
+            self.scene.push_layer(
+                Fill::NonZero,
+                BlendMode::new(Mix::Normal, Compose::SrcIn),
+                1.0,
+                xf,
+                &area,
+            );
+            self.scene
+                .fill(Fill::NonZero, xf, brush(s.color), None, &area);
+            self.scene.pop_layer();
+            self.scene.pop_layer();
+        } else {
+            self.scene
+                .draw_image(&image.brush(s.image_rendering), xf * place);
+        }
         self.scene.pop_layer();
     }
 

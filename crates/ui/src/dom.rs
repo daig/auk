@@ -257,6 +257,9 @@ pub struct Node {
     pub(crate) skipped: bool,
     /// Replaced content: a picture painted into the content box ([`crate::Document::set_image`]).
     pub(crate) image: Option<Box<crate::image::ImageContent>>,
+    /// The replaced picture is a mask painted in the element's `color` (`currentColor`), as
+    /// typeset math is ([`crate::Document::set_image_tint`]).
+    pub(crate) image_tint: bool,
     /// The absolutely positioned boxes this in-flow, non-positioned box passes up to its
     /// containing block (box building's `collect_abspos`), kept until something under it changes
     /// its boxes ([`crate::Document::mark_box_dirty`] clears it on the way up), so rebuilding a
@@ -371,6 +374,7 @@ impl Node {
             measured: Vec::new(),
             skipped: false,
             image: None,
+            image_tint: false,
             abspos: None,
             laid_out_in: 0,
             virt_kids: None,
