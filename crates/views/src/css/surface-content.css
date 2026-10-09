@@ -111,7 +111,9 @@
 .sf-dt { flex: 1 1 auto; min-width: 0; }
 .sf-dr { display: flex; }
 .sf-dl.half { flex: 1 1 0; min-width: 0; }
-.sf-dl.half.empty { background-color: var(--l1); }
+.sf-dl.half.nil { background-color: var(--sf-shade); }
+.sf-dl.half + .sf-dl.half { border-left: 1px solid var(--l2); }
+.sf-diff-empty { padding: 6px 10px; color: var(--t3); }
 .sf-dsep { padding: 2px 10px; color: var(--t3); background-color: var(--l1); }
 .sf-dsep .fn { margin-left: 12px; color: var(--t2); }
 

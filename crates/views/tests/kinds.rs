@@ -627,7 +627,9 @@ fn md_gfm_strikethrough_tables_and_math_delimiters() {
 }
 
 /// §8.5 Diff: with `mode` absent or `auto`, the Edits setting decides (unified by default; with
-/// Split, side by side only when wider than 112 cells); an explicit mode wins.
+/// Split, side by side only when the block is wider than 112 cells, re-deciding as the width
+/// changes); an explicit mode wins. The pane is `cols` cells of 8px wide here (the view's width
+/// follows the window, as a host resizes both).
 #[test]
 fn diff_mode_absent_or_auto_follows_the_edits_setting() {
     let mut h = Harness::new();
@@ -650,6 +652,7 @@ fn diff_mode_absent_or_auto_follows_the_edits_setting() {
     };
     // The default setting: unified, at any width.
     for cols in [80, 200] {
+        h.doc.set_viewport(f32::from(cols) * 8.0, 800.0);
         h.view.set_cols(&mut h.doc, &h.pane, cols);
         h.frame();
         assert_eq!(split(&h), [false, false, false, true], "{cols} cols");
@@ -661,6 +664,7 @@ fn diff_mode_absent_or_auto_follows_the_edits_setting() {
     };
     h.view.set_settings(&mut h.doc, &h.pane, settings);
     for (cols, wide) in [(112, false), (113, true), (200, true), (80, false)] {
+        h.doc.set_viewport(f32::from(cols) * 8.0, 800.0);
         h.view.set_cols(&mut h.doc, &h.pane, cols);
         h.frame();
         assert_eq!(split(&h), [wide, wide, false, true], "{cols} cols");

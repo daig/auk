@@ -27,6 +27,9 @@ pub struct Hunk {
     pub new_start: u64,
     /// The function name from the `@@` header, if any.
     pub func: Option<String>,
+    /// Whether the start lines were given (an `@@` header, `oldStart`): fold rows count the
+    /// gap between known hunks and say only `⋯` otherwise.
+    pub known: bool,
     pub lines: Vec<DLine>,
 }
 
@@ -34,12 +37,14 @@ pub struct Hunk {
 pub fn parse_unified(text: &str) -> Vec<Hunk> {
     let mut hunks: Vec<Hunk> = Vec::new();
     let mut raw: Vec<(Op, String)> = Vec::new();
-    let mut head: Option<(u64, u64, Option<String>)> = None;
+    let mut head: Option<(u64, u64, Option<String>, bool)> = None;
     let flush = |hunks: &mut Vec<Hunk>,
-                 head: &Option<(u64, u64, Option<String>)>,
+                 head: &Option<(u64, u64, Option<String>, bool)>,
                  raw: &mut Vec<(Op, String)>| {
-        if let Some((o, n, f)) = head {
-            hunks.push(number(*o, *n, f.clone(), std::mem::take(raw)));
+        if let Some((o, n, f, known)) = head {
+            let mut h = number(*o, *n, f.clone(), std::mem::take(raw));
+            h.known = *known;
+            hunks.push(h);
         }
         raw.clear();
     };
@@ -64,7 +69,7 @@ pub fn parse_unified(text: &str) -> Vec<Hunk> {
                     n = v;
                 }
             }
-            head = Some((o, n, (!func.is_empty()).then(|| func.to_owned())));
+            head = Some((o, n, (!func.is_empty()).then(|| func.to_owned()), true));
             continue;
         }
         if head.is_none() {
@@ -76,7 +81,7 @@ pub fn parse_unified(text: &str) -> Vec<Hunk> {
             {
                 continue;
             }
-            head = Some((1, 1, None));
+            head = Some((1, 1, None, false));
         }
         if line.starts_with("\\ ") {
             continue;
@@ -101,7 +106,8 @@ pub fn parse_hunks(v: &Value) -> Vec<Hunk> {
     arr.iter()
         .filter_map(|h| {
             let o = h.as_object()?;
-            let old = o.get("oldStart").and_then(Value::as_u64).unwrap_or(1);
+            let start = o.get("oldStart").and_then(Value::as_u64);
+            let old = start.unwrap_or(1);
             let new = o.get("newStart").and_then(Value::as_u64).unwrap_or(old);
             let raw = o
                 .get("lines")?
@@ -115,7 +121,9 @@ pub fn parse_hunks(v: &Value) -> Vec<Hunk> {
                     _ => (Op::Ctx, l.to_owned()),
                 })
                 .collect();
-            Some(number(old, new, None, raw))
+            let mut h = number(old, new, None, raw);
+            h.known = start.is_some();
+            Some(h)
         })
         .collect()
 }
@@ -146,6 +154,7 @@ fn number(old: u64, new: u64, func: Option<String>, raw: Vec<(Op, String)>) -> H
         old_start: old,
         new_start: new,
         func,
+        known: true,
         lines,
     }
 }
@@ -279,5 +288,10 @@ mod tests {
             parse_hunks(&json!([{"oldStart": 36, "newStart": 36, "lines": ["-a b c", "+a B c"]}]));
         assert_eq!(&h[0].lines[1].text[h[0].lines[1].em[0].clone()], "B");
         assert_eq!(counts(&h), (1, 1));
+        // Whether the start lines were given: an `@@` header or `oldStart`.
+        assert!(h[0].known);
+        assert!(!parse_hunks(&json!([{"lines": ["-a", "+b"]}]))[0].known);
+        assert!(!parse_unified("-a\n+b\n")[0].known);
+        assert!(parse_unified("@@ -3 +3 @@\n-a\n+b\n")[0].known);
     }
 }

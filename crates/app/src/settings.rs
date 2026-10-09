@@ -8,6 +8,7 @@
 //! | `native_editing` | `true` | native editing in program fields (§7.9) |
 //! | `links_plain_click` | `false` | a plain click opens links (otherwise ⌘-click, §7.8) |
 //! | `hyperlinks` | `"dotted"` | grid links: `"dotted"` underline, only on `"hover"`, or `"off"` |
+//! | `edits` | `"inline"` | diffs (§8.5): `"inline"` (unified) or `"split"` (side by side wider than 112 cells) |
 //! | `reduce_motion` | `"system"` | `true`, `false`, or follow the system setting (§7.13) |
 //! | `keymap` | none | a preset layer: `"tmux"` (§9.8 keymap layers) |
 //! | `keymap_prefix` | `"ctrl+b"` | the preset's prefix |
@@ -41,6 +42,9 @@ pub struct Settings {
     pub program_colors: bool,
     pub native_editing: bool,
     pub links_plain_click: bool,
+    /// The Edits setting: `diff` nodes without an explicit `mode` draw side by side when wider
+    /// than 112 cells (Split) or unified (Inline, the default).
+    pub split_diffs: bool,
     /// How OSC 8 links in the grid draw.
     pub hyperlinks: LinkStyle,
     pub reduce_motion: Motion,
@@ -57,6 +61,7 @@ impl Default for Settings {
             program_colors: true,
             native_editing: true,
             links_plain_click: false,
+            split_diffs: false,
             hyperlinks: LinkStyle::Dotted,
             reduce_motion: Motion::System,
             keymap: None,
@@ -110,6 +115,15 @@ impl Settings {
             Some(_) => {
                 problems.push("hyperlinks: expected \"dotted\", \"hover\" or \"off\"".into());
                 LinkStyle::Dotted
+            }
+        };
+        s.split_diffs = match v.get("edits") {
+            None | Some(Value::Null) => false,
+            Some(Value::String(x)) if x == "inline" => false,
+            Some(Value::String(x)) if x == "split" => true,
+            Some(_) => {
+                problems.push("edits: expected \"inline\" or \"split\"".into());
+                false
             }
         };
         s.reduce_motion = match v.get("reduce_motion") {
@@ -255,5 +269,17 @@ mod tests {
         );
         assert_eq!(Settings::from_json(&json!({})), Settings::default());
         assert!(Settings::default().reduces_motion(true));
+    }
+
+    /// The Edits setting: Inline by default, `"split"` turns split diffs on, anything else is a
+    /// problem and keeps Inline.
+    #[test]
+    fn reads_the_edits_setting() {
+        assert!(!Settings::default().split_diffs);
+        assert!(Settings::from_json(&json!({"edits": "split"})).split_diffs);
+        assert!(!Settings::from_json(&json!({"edits": "inline"})).split_diffs);
+        let bad = Settings::from_json(&json!({"edits": true}));
+        assert!(!bad.split_diffs);
+        assert_eq!(bad.problems.len(), 1);
     }
 }

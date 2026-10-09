@@ -30,6 +30,7 @@ pub(crate) enum Extra {
     Toast(crate::kinds::layout::ToastState),
     Image(Box<crate::kinds::rich::ImageState>),
     Chart(u64),
+    Diff(Box<crate::kinds::rich::DiffState>),
 }
 
 /// One TSP node's element and its parts.
