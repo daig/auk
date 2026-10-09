@@ -616,6 +616,23 @@ impl PaneView {
                     doc.set_scroll_offset(scroll, 0.0, y + (cr.y + cr.h - sr.y - sr.h));
                 }
             }
+            for (sc, el, top) in std::mem::take(&mut sv.st.reveal_els) {
+                let (Some(sr), Some(er)) = (
+                    doc.try_node(sc).and(doc.border_box(sc)),
+                    doc.try_node(el).and(doc.border_box(el)),
+                ) else {
+                    continue;
+                };
+                let (_, y) = doc.scroll_offset(sc);
+                let to = if top || er.y < sr.y {
+                    y + er.y - sr.y
+                } else if er.y + er.h > sr.y + sr.h {
+                    y + er.y + er.h - sr.y - sr.h
+                } else {
+                    y
+                };
+                doc.set_scroll_offset(sc, 0.0, to);
+            }
             if let Some(r) = sv.st.reveal.take()
                 && let Some(m) = sv.mounts.get(&r.id)
             {

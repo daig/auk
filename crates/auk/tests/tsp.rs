@@ -719,7 +719,7 @@ fn b6_kinds_and_features_list_only_what_is_implemented() {
         .map(|f| f.as_str().unwrap())
         .collect();
     assert!(features.iter().all(|f| allowed.contains(f)), "{features:?}");
-    // The aside docking of `prefs` isn't implemented (prefs is T2).
+    // `aside` (the docking of `prefs`) is advertised with `prefs`, which this hello doesn't list.
     assert!(!features.contains(&"aside"));
     // An unadvertised kind fails as unknown.
     exchange(&probe, &open("s1", "flow"));

@@ -8,6 +8,7 @@ pub(crate) mod el;
 pub(crate) mod input;
 pub(crate) mod layout;
 pub(crate) mod picker;
+pub(crate) mod prefs;
 pub(crate) mod rich;
 
 use crate::common;
@@ -125,6 +126,7 @@ pub(crate) fn route(node: NodeRef, child: NodeRef) -> Route {
             }
         }
         "seg" | "overlay" | "list" | "tool" | "agent" | "image" | "picker" => Route::Slot(0),
+        "prefs" => Route::Slot(prefs::route(child)),
         // The native child, else the raw one (§9.6): the block mounts only the one it shows.
         "block" => Route::Slot(usize::from(block::is_raw(node, child))),
         _ => Route::Direct,
@@ -248,6 +250,7 @@ pub(crate) fn render(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
         "effort" => agent::effort(cx, node, m, look),
         "el" => el::el(cx, node, m, look),
         "block" => block::block(cx, node, m, look),
+        "prefs" => prefs::prefs(cx, node, m, look),
         _ => generic(cx, node, m, look),
     }
 }

@@ -412,6 +412,7 @@ impl PaneView {
             }
         }
         self.place_surfaces(doc, pane);
+        self.place_aside(doc, pane);
     }
 
     fn add_surface(&mut self, surface: &Surface) -> usize {

@@ -102,6 +102,11 @@ pub(crate) struct SurfaceState {
     pub virt_window: HashMap<NodeId, (f32, f32, bool)>,
     /// `picker` sheets: rows drawn, selection kept in view, the last click, by node id.
     pub pickers: HashMap<String, crate::kinds::picker::PickerState>,
+    /// `prefs` pages, by node id: their kept skeleton and what they last showed.
+    pub prefs: HashMap<String, crate::kinds::prefs::Memo>,
+    /// One-shot scrolls after layout: `(scroller, element, to the top)`, else to the nearest
+    /// edge (a `prefs` focus ring).
+    pub reveal_els: Vec<(NodeId, NodeId, bool)>,
 }
 
 /// The key local view state is remembered by: the node's `key` under the same parent, or its id
@@ -205,6 +210,7 @@ impl SurfaceState {
         self.forget_virtual_under(id);
         self.overlays.remove(id);
         self.pickers.remove(id);
+        self.prefs.remove(id);
         if self.preedit.as_ref().is_some_and(|p| p.id == id) {
             self.preedit = None;
         }

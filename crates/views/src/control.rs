@@ -213,7 +213,8 @@ impl PaneView {
         self.cols = cols;
         let now = self.last_now;
         self.pass += 1;
-        self.rerender_kinds(doc, pane, now, &["ansi", "diff", "rows", "picker"]);
+        self.rerender_kinds(doc, pane, now, &["ansi", "diff", "rows", "picker", "prefs"]);
+        self.place_aside(doc, pane);
         self.fit_dirty = true;
     }
 

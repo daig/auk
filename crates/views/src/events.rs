@@ -191,6 +191,10 @@ impl PaneView {
         {
             return Some(self.picker_press(doc, pane, surface, node, press, ev));
         }
+        if node.kind() == "prefs" {
+            let events = crate::kinds::prefs::click(doc, surface, node, &hit.parts)?;
+            return Some(events.into_iter().map(|e| self.event(surface, e)).collect());
+        }
         for &p in &hit.parts {
             let class = self.written.class.get(&p).cloned().unwrap_or_default();
             let has = |c: &str| class.split(' ').any(|x| x == c);
