@@ -36,7 +36,10 @@ ratex-katex-fonts = "0.1.14"
 # The KaTeX fonts compiled in for debug builds too (rust-embed reads them from disk otherwise,
 # which the browser can't).
 rust-embed = { version = "8.11", default-features = false, features = ["debug-embed"] }
-# Glyph outlines of the KaTeX fonts (already in the tree through the UI engine).
+# Mermaid fences in `md` (§8.5, §18.4, A23): parse, layout and SVG in Rust, drawn by resvg.
+merman = { version = "=0.8.0", default-features = false, features = ["svg", "diagram-flowchart", "diagram-sequence", "diagram-class", "diagram-state", "diagram-er", "diagram-gantt", "diagram-pie"] }
+# Glyph outlines of the KaTeX fonts, and advances of the face mermaid diagram text draws with
+# (already in the tree through the UI engine).
 skrifa = "0.44"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 

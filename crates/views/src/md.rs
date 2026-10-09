@@ -46,6 +46,27 @@ pub(crate) struct MdState {
     pub math_em: u32,
     /// Formulas typesetting in the background, filled in by the clock.
     pub math_pending: Vec<crate::math::Pending>,
+    /// The theme and density mermaid figures were drawn for.
+    pub env: MdEnv,
+    /// Mermaid figures whose diagram is being drawn in the background.
+    pub figs: Vec<Fig>,
+}
+
+/// What mermaid figures are drawn for: the theme and the density (image px per CSS px).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct MdEnv {
+    pub dark: bool,
+    pub density: f32,
+}
+
+/// A mermaid figure waiting for its picture.
+#[derive(Debug)]
+pub(crate) struct Fig {
+    pub fig: NodeId,
+    pub body: NodeId,
+    pub id: String,
+    pub kind: &'static str,
+    pub src: String,
 }
 
 /// Top-level block ranges of `text`, and the reference definition lines.
@@ -85,11 +106,18 @@ impl MdState {
         text: &str,
         stream: bool,
         marks: Vec<Span>,
+        env: MdEnv,
     ) -> bool {
-        if text == self.source && stream == self.stream && marks == self.marks {
+        if text == self.source && stream == self.stream && marks == self.marks && env == self.env
+        {
             self.rerendered = 0;
             return false;
         }
+        // A new theme or density draws the diagrams again; the end of a stream may close a
+        // mermaid fence that showed as code.
+        let env_changed = env != self.env;
+        let stream_ended = self.stream && !stream;
+        self.env = env;
         let marks_changed = marks != self.marks;
         // Re-split from the last block when the text only grew.
         let (ranges, refdefs) = if !marks_changed
@@ -121,15 +149,21 @@ impl MdState {
         let mut rerendered = 0;
         let mut blocks: Vec<Block> = Vec::with_capacity(ranges.len());
         let mut old = std::mem::take(&mut self.blocks).into_iter();
+        let old_last = self.ranges.len().checked_sub(1);
+        let n = ranges.len();
         for (i, r) in ranges.iter().enumerate() {
             let src = &text[r.clone()];
             let prev = old.next();
+            // Provisional: the streamed tail, where an open mermaid fence stays code.
+            let provisional = stream && i + 1 == n;
+            let mermaid = has_mermaid(src);
+            let redo_fig = mermaid && (env_changed || (stream_ended && Some(i) == old_last));
             match prev {
-                Some(b) if !all && b.src == src => {
+                Some(b) if !all && !redo_fig && b.src == src => {
                     blocks.push(b);
                 }
                 Some(b) => {
-                    let el = self.render_block(dom, src);
+                    let el = self.render_block(dom, src, provisional);
                     dom.doc.insert_before(holder, el, Some(b.el));
                     dom.doc.remove(b.el);
                     blocks.push(Block {
@@ -139,7 +173,7 @@ impl MdState {
                     rerendered += 1;
                 }
                 None => {
-                    let el = self.render_block(dom, src);
+                    let el = self.render_block(dom, src, provisional);
                     dom.doc.append_child(holder, el);
                     blocks.push(Block {
                         src: src.to_owned(),
@@ -155,6 +189,10 @@ impl MdState {
                 dom.doc.remove(b.el);
             }
         }
+        // Figures of blocks drawn again are gone.
+        self.figs.retain(|f| {
+            dom.doc.try_node(f.fig).is_some() && blocks.iter().any(|b| is_within(dom, f.fig, b.el))
+        });
         let n = blocks.len();
         for (i, b) in blocks.iter().enumerate() {
             dom.set_class(
@@ -183,7 +221,7 @@ impl MdState {
         true
     }
 
-    fn render_block(&mut self, dom: &mut Dom, src: &str) -> NodeId {
+    fn render_block(&mut self, dom: &mut Dom, src: &str, provisional: bool) -> NodeId {
         let el = dom.el("div", "md");
         let src = math_delimiters(src);
         let full;
@@ -198,15 +236,185 @@ impl MdState {
         } else {
             self.math_em
         };
+        let fig = FigCx {
+            env: self.env,
+            // A fence left open while streaming stays code (book:5000).
+            open_fence: provisional && !fences_closed(&src),
+            figs: &mut self.figs,
+        };
         render_events(
             dom,
             el,
             Parser::new_ext(input, options()),
             &self.marks,
             (em, &mut self.math_pending),
+            fig,
         );
         el
     }
+
+    /// Draws in the diagrams finished in the background, and turns the ones that failed into
+    /// code. Returns whether any is still being drawn.
+    pub fn poll_figures(&mut self, dom: &mut Dom) -> bool {
+        if self.figs.is_empty() {
+            return false;
+        }
+        crate::image::pump();
+        let density = self.env.density;
+        let mut waiting = Vec::new();
+        for f in std::mem::take(&mut self.figs) {
+            if dom.doc.try_node(f.fig).is_none() {
+                continue;
+            }
+            match crate::mermaid::peek(&f.id, density) {
+                None => waiting.push(f),
+                Some(Ok(pic)) => {
+                    dom.clear(f.body);
+                    picture_into(dom, f.body, f.kind, &pic);
+                }
+                Some(Err(e)) => {
+                    let parent = dom.doc.parent(f.fig);
+                    if let Some(parent) = parent {
+                        let holder = dom.el("div", "code");
+                        dom.doc.insert_before(parent, holder, Some(f.fig));
+                        dom.doc.remove(f.fig);
+                        fallback(dom, holder, &f.src, &e);
+                    }
+                }
+            }
+        }
+        self.figs = waiting;
+        !self.figs.is_empty()
+    }
+}
+
+/// Whether `el` is `root` or inside it.
+fn is_within(dom: &Dom, mut el: NodeId, root: NodeId) -> bool {
+    loop {
+        if el == root {
+            return true;
+        }
+        match dom.doc.parent(el) {
+            Some(p) => el = p,
+            None => return false,
+        }
+    }
+}
+
+/// Whether a block's source has a mermaid fence (its figure depends on the theme).
+fn has_mermaid(src: &str) -> bool {
+    src.lines().any(|l| {
+        let t = l.trim_start_matches([' ', '>', '-', '*', '+']).trim_start();
+        let rest = t
+            .strip_prefix("```")
+            .or_else(|| t.strip_prefix("~~~"))
+            .map(|r| r.trim_start_matches(['`', '~']).trim_start());
+        rest.is_some_and(|r| r.starts_with("mermaid"))
+    })
+}
+
+/// Whether every code fence in a block's source is closed.
+fn fences_closed(src: &str) -> bool {
+    let mut open: Option<(char, usize)> = None;
+    for l in src.lines() {
+        let t = l.trim_start_matches([' ', '>', '-', '*', '+']).trim_start();
+        let Some(c) = t.chars().next().filter(|c| *c == '`' || *c == '~') else {
+            continue;
+        };
+        let n = t.chars().take_while(|x| *x == c).count();
+        if n < 3 {
+            continue;
+        }
+        match open {
+            None => open = Some((c, n)),
+            Some((oc, on)) if oc == c && n >= on && t[n..].trim().is_empty() => open = None,
+            Some(_) => {}
+        }
+    }
+    open.is_none()
+}
+
+/// What a block's mermaid fences need.
+struct FigCx<'f> {
+    env: MdEnv,
+    open_fence: bool,
+    figs: &'f mut Vec<Fig>,
+}
+
+/// A mermaid fence: `figure.mfig[data-m] > div.mfig-head (icon, "mermaid · <kind>", Open) +
+/// div.mfig-body` with the diagram at natural size (book:5018). While the diagram is drawn in
+/// the background the body shows its source; one that can't be drawn is a code block with a note.
+fn mermaid_block(dom: &mut Dom, parent: NodeId, text: &str, fig: &mut FigCx) {
+    let text = text.strip_suffix('\n').unwrap_or(text);
+    let kind = match crate::mermaid::kind(text) {
+        Ok(k) => k,
+        Err(k) => {
+            let holder = dom.child(parent, "div", "code");
+            fallback(dom, holder, text, &crate::mermaid::unsupported(&k));
+            return;
+        }
+    };
+    let (id, poll) = crate::mermaid::request(text, fig.env.dark, fig.env.density);
+    if let crate::image::Poll::Ready(Err(e)) = &poll {
+        let holder = dom.child(parent, "div", "code");
+        fallback(dom, holder, text, e);
+        return;
+    }
+    let f = dom.child(parent, "figure", "mfig");
+    dom.attr(f, "data-m", text);
+    let head = dom.child(f, "div", "mfig-head");
+    let ic = dom.child(head, "span", "mfig-ic");
+    if let Some(g) = crate::icons::glyph("diagram") {
+        dom.text(ic, &g.to_string());
+    }
+    dom.child_text(head, "span", "mfig-kind", &format!("mermaid · {kind}"));
+    let open = dom.child_text(head, "button", "btn sm quiet mfig-open", "Open");
+    dom.attr(open, "data-mfig", &id);
+    dom.attr(open, "title", "Show the diagram large");
+    let body = dom.child(f, "div", "mfig-body");
+    match poll {
+        crate::image::Poll::Ready(Ok(pic)) => picture_into(dom, body, kind, &pic),
+        _ => {
+            dom.attr(f, "aria-busy", "true");
+            let pre = dom.child(body, "pre", "mfig-src");
+            dom.child_text(pre, "code", "", text);
+            fig.figs.push(Fig {
+                fig: f,
+                body,
+                id,
+                kind,
+                src: text.to_owned(),
+            });
+        }
+    }
+}
+
+/// The diagram's picture in a figure's body, at its natural size.
+fn picture_into(dom: &mut Dom, body: NodeId, kind: &str, pic: &crate::image::Picture) {
+    if let Some(f) = dom.doc.parent(body) {
+        dom.doc.remove_attribute(f, "aria-busy");
+    }
+    let el = dom.child(body, "svg", "mfig-svg");
+    dom.attr(el, "role", "img");
+    dom.attr(el, "aria-label", &format!("{kind} diagram"));
+    let mut content = pic.frames[0].content.clone();
+    content.natural = pic.size;
+    dom.set_style(
+        el,
+        &format!(
+            "width: {}px; height: {}px",
+            crate::common::fmt_num(f64::from(pic.size.0)),
+            crate::common::fmt_num(f64::from(pic.size.1))
+        ),
+    );
+    dom.doc.set_image(el, Some(content));
+}
+
+/// A mermaid fence that isn't drawn: the code block, and a quiet note saying why.
+fn fallback(dom: &mut Dom, holder: NodeId, text: &str, why: &str) {
+    code_block(dom, holder, Some("mermaid"), text);
+    let note = dom.child_text(holder, "div", "mfig-note", &format!("Not drawn: {why}"));
+    dom.attr(note, "title", why);
 }
 
 /// The deepest last element that holds inline content, where the streaming caret goes.
@@ -240,11 +448,12 @@ fn last_inline_container(dom: &Dom, mut el: NodeId) -> NodeId {
     }
 }
 
-struct Renderer<'d, 'a, 'm> {
+struct Renderer<'d, 'a, 'm, 'f> {
     dom: &'d mut Dom<'a>,
     stack: Vec<NodeId>,
     marks: &'m [Span],
-    /// Inside a code block: (holder, lang, text).
+    fig: FigCx<'f>,
+    /// Inside a code block: (parent, lang, text).
     code: Option<(NodeId, Option<String>, String)>,
     html: Option<(NodeId, String)>,
     /// Table state: alignments, in head, column index.
@@ -262,11 +471,13 @@ fn render_events<'e>(
     events: impl Iterator<Item = Event<'e>>,
     marks: &[Span],
     math: (u32, &mut Vec<crate::math::Pending>),
+    fig: FigCx,
 ) {
     let mut r = Renderer {
         dom,
         stack: vec![holder],
         marks,
+        fig,
         code: None,
         html: None,
         table: None,
@@ -279,7 +490,7 @@ fn render_events<'e>(
     }
 }
 
-impl Renderer<'_, '_, '_> {
+impl Renderer<'_, '_, '_, '_> {
     fn top(&self) -> NodeId {
         *self.stack.last().expect("holder")
     }
@@ -312,8 +523,13 @@ impl Renderer<'_, '_, '_> {
                     return;
                 }
                 Event::End(TagEnd::CodeBlock) => {
-                    let (holder, lang, text) = self.code.take().unwrap();
-                    code_block(self.dom, holder, lang.as_deref(), &text);
+                    let (parent, lang, text) = self.code.take().unwrap();
+                    if lang.as_deref() == Some("mermaid") && !self.fig.open_fence {
+                        mermaid_block(self.dom, parent, &text, &mut self.fig);
+                    } else {
+                        let holder = self.dom.child(parent, "div", "code");
+                        code_block(self.dom, holder, lang.as_deref(), &text);
+                    }
                     return;
                 }
                 _ => return,
@@ -451,8 +667,7 @@ impl Renderer<'_, '_, '_> {
                     CodeBlockKind::Indented => None,
                 };
                 let p = self.top();
-                let holder = self.dom.child(p, "div", "code");
-                self.code = Some((holder, lang, String::new()));
+                self.code = Some((p, lang, String::new()));
             }
             Tag::HtmlBlock => {
                 let p = self.top();

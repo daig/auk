@@ -749,7 +749,9 @@ impl WinState {
                 .get(&v.pane)
                 .and_then(|p| p.replica.tsp().blobs().get(&blob).cloned())
                 .map(|b| request_blob(&b, scale))
-        };
+        }
+        // A picture the terminal made (a mermaid diagram's Open), not a blob.
+        .or_else(|| auk_views::image::load_made_for_viewer(&blob, scale).map(Poll::Ready));
         let decoding = matches!(picture, Some(Poll::Pending));
         match picture {
             Some(Poll::Ready(Ok(p))) => {
@@ -765,6 +767,10 @@ impl WinState {
                         .get(&v.pane)
                         .and_then(|pd| pd.replica.tsp().blobs().get(&blob).cloned())
                         .and_then(|b| auk_views::image::load_blob(&b, scale * k as f32).ok())
+                        .or_else(|| {
+                            auk_views::image::load_made_for_viewer(&blob, scale * k as f32)
+                                .and_then(Result::ok)
+                        })
                         .unwrap_or(p)
                 } else {
                     p

@@ -1,0 +1,18 @@
+sequenceDiagram
+    participant U as User
+    participant A as Agent
+    participant T as Tool
+    U->>A: Fix the failing test
+    activate A
+    A->>T: run cargo test
+    T-->>A: 1 failed
+    Note over A,T: reads the failure
+    loop until green
+        A->>T: edit and rerun
+    end
+    alt passes
+        A-->>U: Done
+    else still failing
+        A-->>U: Needs help
+    end
+    deactivate A

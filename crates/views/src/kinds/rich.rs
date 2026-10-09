@@ -38,14 +38,20 @@ pub(crate) fn md(cx: &mut Cx, node: NodeRef, m: &mut Mount, _look: &mut Look) {
         unreachable!()
     };
     st.math_em = math_em(cx.set.font_px, cx.dom.doc.device_scale());
-    st.update(&mut cx.dom, m.el, &text, stream, marks);
+    // Mermaid figures draw for the theme at the region zoom times the display scale (§8.3).
+    let env = crate::md::MdEnv {
+        dark: cx.set.dark,
+        density: cx.set.font_px / 13.0 * cx.dom.doc.device_scale(),
+    };
+    st.update(&mut cx.dom, m.el, &text, stream, marks, env);
     let math_pending = !st.math_pending.is_empty();
     // Blocks are the node's generated parts.
     m.generated = st.blocks.iter().map(|b| b.el).collect();
     // Many blocks: virtualize (§8.3).
     let many = st.blocks.len() > 64;
     super::virtualize(cx, node.id(), m.el, many.then_some(60.0));
-    m.clock = stream && !cx.set.reduce_motion || math_pending;
+    // The clock also fills in formulas and draws in diagrams finished in the background.
+    m.clock = (stream && !cx.set.reduce_motion) || math_pending || !st.figs.is_empty();
 }
 
 /// Math's device pixels per em in a region at terminal font `font_px` (regions zoom by
@@ -54,7 +60,8 @@ pub(crate) fn math_em(font_px: f32, device_scale: f32) -> u32 {
     crate::math::em_px(13.0, font_px / 13.0, device_scale)
 }
 
-/// The streaming caret pulses; formulas typeset in the background are filled in.
+/// The streaming caret pulses; formulas typeset and diagrams drawn in the background are filled
+/// in.
 pub(crate) fn tick_md(cx: &mut Cx, _node: NodeRef, m: &mut Mount) -> bool {
     let Extra::Md(st) = &mut m.extra else {
         return false;
@@ -65,10 +72,11 @@ pub(crate) fn tick_md(cx: &mut Cx, _node: NodeRef, m: &mut Mount) -> bool {
         st.math_pending = crate::math::fill(&mut cx.dom, pending);
         math = !st.math_pending.is_empty();
     }
-    let Some(c) = st.caret else { return math };
+    let drawing = st.poll_figures(&mut cx.dom) || math;
+    let Some(c) = st.caret else { return drawing };
     if cx.set.reduce_motion {
         cx.dom.set_style(c, "");
-        return false;
+        return drawing;
     }
     let t = (cx.now.rem_euclid(1000.0)) / 1000.0;
     let o = if t < 0.5 { 1.0 } else { 0.25 };

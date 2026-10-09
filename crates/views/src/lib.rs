@@ -44,6 +44,7 @@ pub mod lenses;
 pub mod math;
 mod md;
 mod measure;
+pub mod mermaid;
 pub mod motion;
 pub mod palette;
 pub mod sheets;

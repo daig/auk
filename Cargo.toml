@@ -35,3 +35,12 @@ opt-level = 2
 # Line numbers in backtraces from release test runs (scripts/verify.sh runs everything in release).
 [profile.release]
 debug = "line-tables-only"
+
+# Mermaid (A23) is off the frame path: build its engine for size, not speed (about half its
+# code in the browser client).
+[profile.release.package.merman-core]
+opt-level = "s"
+[profile.release.package.merman-render]
+opt-level = "s"
+[profile.release.package.lol_html]
+opt-level = "s"
