@@ -685,6 +685,122 @@ pub fn parse_time<'i>(input: &mut Parser<'i>) -> PResult<f32> {
             value, ref unit, ..
         } if unit.eq_ignore_ascii_case("ms") => Ok(value / 1000.0),
         Token::Number { value: 0.0, .. } => Ok(0.0),
+        Token::Function(ref name)
+            if matches!(
+                name.to_ascii_lowercase().as_str(),
+                "calc" | "min" | "max" | "clamp"
+            ) =>
+        {
+            let name = name.to_ascii_lowercase();
+            match time_fn(input, &name)? {
+                (v, true) if v.is_finite() => Ok(v),
+                _ => Err(ParseError::unexpected_token()),
+            }
+        }
+        _ => Err(ParseError::unexpected_token()),
+    }
+}
+
+/// A `calc()`, `min()`, `max()` or `clamp()` of times and numbers (a chart's stagger,
+/// `calc(min(var(--x), 24) * 20ms)`): `(value, is a time)`, the value in seconds for a time.
+fn time_fn<'i>(input: &mut Parser<'i>, name: &str) -> PResult<(f32, bool)> {
+    input.parse_nested_block(|i| match name {
+        "calc" => time_sum(i),
+        "clamp" => {
+            let a = time_sum(i)?;
+            i.expect_comma()?;
+            let b = time_sum(i)?;
+            i.expect_comma()?;
+            let c = time_sum(i)?;
+            if a.1 != b.1 || b.1 != c.1 {
+                return Err(ParseError::unexpected_token());
+            }
+            Ok((b.0.min(c.0).max(a.0), b.1))
+        }
+        _ => {
+            let args = i.parse_comma_separated(time_sum)?;
+            let kind = args[0].1;
+            if args.iter().any(|a| a.1 != kind) {
+                return Err(ParseError::unexpected_token());
+            }
+            let it = args.iter().map(|a| a.0);
+            Ok((
+                if name == "min" {
+                    it.fold(f32::INFINITY, f32::min)
+                } else {
+                    it.fold(f32::NEG_INFINITY, f32::max)
+                },
+                kind,
+            ))
+        }
+    })
+}
+
+fn time_sum<'i>(input: &mut Parser<'i>) -> PResult<(f32, bool)> {
+    let mut acc = time_product(input)?;
+    loop {
+        let state = input.state();
+        let sign = match input.next() {
+            Ok(Token::Delim('+')) => 1.0,
+            Ok(Token::Delim('-')) => -1.0,
+            _ => {
+                input.reset(&state);
+                return Ok(acc);
+            }
+        };
+        let rhs = time_product(input)?;
+        if rhs.1 != acc.1 {
+            return Err(ParseError::unexpected_token());
+        }
+        acc.0 += sign * rhs.0;
+    }
+}
+
+fn time_product<'i>(input: &mut Parser<'i>) -> PResult<(f32, bool)> {
+    let mut acc = time_atom(input)?;
+    loop {
+        let state = input.state();
+        let mul = match input.next() {
+            Ok(Token::Delim('*')) => true,
+            Ok(Token::Delim('/')) => false,
+            _ => {
+                input.reset(&state);
+                return Ok(acc);
+            }
+        };
+        let rhs = time_atom(input)?;
+        if mul {
+            if acc.1 && rhs.1 {
+                return Err(ParseError::unexpected_token());
+            }
+            acc = (acc.0 * rhs.0, acc.1 || rhs.1);
+        } else {
+            if rhs.1 || rhs.0 == 0.0 {
+                return Err(ParseError::unexpected_token());
+            }
+            acc.0 /= rhs.0;
+        }
+    }
+}
+
+fn time_atom<'i>(input: &mut Parser<'i>) -> PResult<(f32, bool)> {
+    match input.next()?.clone() {
+        Token::Number { value, .. } => Ok((value, false)),
+        Token::Dimension {
+            value, ref unit, ..
+        } if unit.eq_ignore_ascii_case("s") => Ok((value, true)),
+        Token::Dimension {
+            value, ref unit, ..
+        } if unit.eq_ignore_ascii_case("ms") => Ok((value / 1000.0, true)),
+        Token::ParenthesisBlock => input.parse_nested_block(time_sum),
+        Token::Function(ref name) => {
+            let name = name.to_ascii_lowercase();
+            if matches!(name.as_str(), "calc" | "min" | "max" | "clamp") {
+                time_fn(input, &name)
+            } else {
+                Err(ParseError::unexpected_token())
+            }
+        }
         _ => Err(ParseError::unexpected_token()),
     }
 }
@@ -800,6 +916,25 @@ mod tests {
         let mixed = len("calc(50% - 10px)").compute(&cx);
         assert_eq!(mixed.resolve(200.0), 90.0);
         assert_eq!(len("min(10px, 5em)").compute(&cx), LengthPct::Px(10.0));
+    }
+
+    #[test]
+    fn times_take_calc_min_max_and_clamp() {
+        let t = |s: &str| {
+            let mut p = Parser::new(s);
+            parse_time(&mut p).ok()
+        };
+        let near = |a: Option<f32>, b: f32| a.is_some_and(|a| (a - b).abs() < 1e-6);
+        assert!(near(t("20ms"), 0.02));
+        assert!(near(t("calc(3 * 8ms)"), 0.024));
+        assert!(near(t("calc(min(30, 24) * 20ms)"), 0.48));
+        assert!(near(t("calc(0.5s + 100ms)"), 0.6));
+        assert!(near(t("calc((2 + 1) * 10ms / 2)"), 0.015));
+        assert!(near(t("max(10ms, 0.1s)"), 0.1));
+        assert!(near(t("clamp(0s, calc(40 * 20ms), 480ms)"), 0.48));
+        assert_eq!(t("calc(3 * 4)"), None, "a number isn't a time");
+        assert_eq!(t("calc(3ms * 4ms)"), None);
+        assert_eq!(t("calc(3ms + 4)"), None);
     }
 
     #[test]

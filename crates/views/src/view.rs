@@ -29,6 +29,7 @@ pub(crate) enum Extra {
     Tool(Box<crate::kinds::agent::ToolState>),
     Toast(crate::kinds::layout::ToastState),
     Image(Box<crate::kinds::rich::ImageState>),
+    Chart(u64),
 }
 
 /// One TSP node's element and its parts.

@@ -593,6 +593,12 @@ impl PaneView {
                     sv.st.follow_at.insert(clip, doc.scroll_offset(clip).1);
                 }
             }
+            for el in std::mem::take(&mut sv.st.scroll_end_x) {
+                if doc.try_node(el).is_some() {
+                    let (mx, _) = doc.max_scroll(el);
+                    doc.set_scroll_offset(el, mx, doc.scroll_offset(el).1);
+                }
+            }
             for &(scroll, top) in sv.st.topline.values() {
                 if doc.try_node(scroll).is_some() {
                     doc.set_scroll_offset(scroll, 0.0, top as f32 * lh);
