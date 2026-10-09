@@ -1,0 +1,17 @@
+[
+  {"wait": "open", "timeout": 30},
+  {"wait": "idle", "ms": 2500, "timeout": 30},
+  {"keys": "/settings"},
+  {"wait": "idle", "ms": 600},
+  {"key": "enter"},
+  {"wait": "frame", "contains": "prefs", "timeout": 20},
+  {"wait": "idle", "ms": 1500},
+  {"key": "enter"},
+  {"wait": "idle", "ms": 1500},
+  {"key": "escape"},
+  {"wait": "idle", "ms": 800},
+  {"key": "escape"},
+  {"wait": "idle", "ms": 1200},
+  {"signal": "TERM"},
+  {"wait": "exit", "timeout": 15}
+]

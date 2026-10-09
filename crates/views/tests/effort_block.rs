@@ -154,10 +154,18 @@ fn effort_level_changes_move_the_same_parts_and_ignore_children() {
     h.frame_ops("s1", 2, json!([["set", "e", {"level": "xhigh"}]]));
     h.frame();
     let (r1, l1) = rotors(&h, el);
-    // The same elements, so the rotors transition (the arc sweeps to the new fill).
+    // The same elements, so the rotors transition (the arc sweeps to the new fill) as one
+    // clockwise arc: low (120°, 0°) to xhigh (180°, 120°) is the right rotor's 60° first, then
+    // the left's 120°, 0.4 s in all.
     assert_eq!((r0, l0), (r1, l1));
-    assert_eq!(style(&h, r1), "transform: rotate(180deg)");
-    assert_eq!(style(&h, l1), "transform: rotate(120deg)");
+    assert_eq!(
+        style(&h, r1),
+        "transform: rotate(180deg); transition: transform 0.133s linear 0s;"
+    );
+    assert_eq!(
+        style(&h, l1),
+        "transform: rotate(120deg); transition: transform 0.267s linear 0.133s;"
+    );
     let st = h.doc.computed_style(r1).unwrap();
     assert!(
         st.transitions
@@ -623,4 +631,37 @@ fn a_command_blocks_copy_still_copies_its_raw_output() {
         [Outcome::Copy(t)] => assert_eq!(t.trim_end(), "one\ntwo"),
         other => panic!("{other:?}"),
     }
+}
+
+/// The lens picks the block's icon, not an overriding `role`; Native/Raw shows only with both a
+/// native and a raw child (book: block).
+#[test]
+fn the_lens_picks_the_icon_and_native_raw_needs_both_children() {
+    let mut h = harness();
+    h.surface(
+        "s1",
+        "inline",
+        json!([
+            {"id": "g", "k": "block", "p": {"cmd": "git log", "lens": "git.log", "role": "my.role"},
+             "c": [{"id": "v", "k": "col", "c": [{"id": "vt", "k": "text", "p": {"text": "native"}}]},
+                   {"id": "raw", "k": "ansi", "p": {"text": "x"}}]},
+            {"id": "plain", "k": "block", "p": {"cmd": "git log", "lens": "git.log"},
+             "c": [{"id": "v2", "k": "col", "c": [{"id": "vt2", "k": "text", "p": {"text": "native only"}}]}]},
+            {"id": "plug", "k": "block", "p": {"cmd": "k", "lens": "plugin.k8s.get"},
+             "c": [{"id": "raw3", "k": "ansi", "p": {"text": "y"}}]}
+        ]),
+    );
+    settle(&mut h);
+    let icon = |h: &Harness, id: &str| h.text(h.find_class(h.el("s1", id), "sf-block-ic")[0]);
+    // `role` overrides data-role but the icon stays the lens's.
+    assert_eq!(h.attr(h.el("s1", "g"), "data-role").as_deref(), Some("my.role"));
+    assert_eq!(icon(&h, "g"), icon(&h, "plain"), "git.log's icon either way");
+    let terminal = auk_views::icons::glyph("terminal").map(String::from).unwrap_or_default();
+    assert_eq!(icon(&h, "plug"), terminal, "a plugin lens gets the terminal icon");
+    assert_ne!(icon(&h, "g"), terminal);
+    // Native/Raw with both; not with a native view alone (nothing raw to show).
+    assert_eq!(h.find_class(h.el("s1", "g"), "sf-block-opt").len(), 2);
+    assert!(h.find_class(h.el("s1", "plain"), "sf-block-seg").is_empty());
+    assert_eq!(h.attr(h.el("s1", "plain"), "data-view").as_deref(), Some("native"));
+    assert_eq!(h.text(h.el("s1", "plain")).contains("native only"), true);
 }

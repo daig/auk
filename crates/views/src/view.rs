@@ -181,6 +181,8 @@ pub struct PaneView {
     pub(crate) visible: bool,
     pub(crate) focused: bool,
     pub(crate) hover: Vec<NodeId>,
+    /// An ordered `prefs` list item being dragged by its grip.
+    pub(crate) reorder: Option<crate::kinds::prefs::Reorder>,
     pub(crate) toasts: crate::kinds::layout::ToastHost,
     pub(crate) last_now: f64,
     pub(crate) pass: u64,
@@ -257,6 +259,7 @@ impl PaneView {
             visible: true,
             focused: true,
             hover: Vec::new(),
+            reorder: None,
             toasts,
             last_now: 0.0,
             pass: 0,
@@ -685,6 +688,8 @@ impl PaneView {
         }
         // 3. Child lists.
         let mut placed: HashSet<&str> = HashSet::new();
+        // Kinds whose own drawing reads their children re-render when the children change.
+        let mut reread: Vec<String> = Vec::new();
         for id in &dc.children {
             if id == surface.id() {
                 continue;
@@ -693,10 +698,14 @@ impl PaneView {
             if mounts.contains_key(id.as_str()) {
                 place_children(&mut cx, mounts, clocked, node);
                 placed.insert(id.as_str());
+                if kinds::reads_children(node.kind()) && !dc.nodes.contains(id) {
+                    reread.push(id.clone());
+                }
             }
         }
         // 4. Props and text. A list's `selected` and `filter` show on its items.
         let mut ids: Vec<String> = dc.nodes.iter().cloned().collect();
+        ids.extend(reread);
         for id in &dc.nodes {
             if let Some(n) = doc_t.get(id)
                 && n.kind() == "list"

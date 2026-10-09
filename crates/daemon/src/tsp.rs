@@ -307,11 +307,9 @@ pub fn parse_view_event(v: &Value) -> Result<ViewEvent, String> {
             values: values(),
         },
         "action" => {
-            let act = str_of("act")?;
-            let action = match v.get("value").and_then(Value::as_str) {
-                Some(value) => format!("{act}={value}"),
-                None => act,
-            };
+            // `act` and `value` stay apart: an `act` holding `=` isn't split again.
+            let action = str_of("act")?;
+            let value = v.get("value").and_then(Value::as_str).map(str::to_owned);
             let mut mods = Mods::NONE;
             for m in v
                 .get("mods")
@@ -330,6 +328,7 @@ pub fn parse_view_event(v: &Value) -> Result<ViewEvent, String> {
             ViewEvent::Action {
                 id,
                 action,
+                value: auk_tsp::ActValue::Exact(value),
                 mods,
                 values: values(),
             }
@@ -440,7 +439,8 @@ mod tests {
             ev,
             ViewEvent::Action {
                 id: "b".into(),
-                action: "open=x=y".into(),
+                action: "open".into(),
+                value: auk_tsp::ActValue::Exact(Some("x=y".into())),
                 mods: Mods {
                     shift: true,
                     ..Mods::NONE
@@ -448,6 +448,10 @@ mod tests {
                 values: None
             }
         );
+        // An `act` holding `=` reaches the program as it was sent.
+        let ev = parse_view_event(&json!({"ev": "action", "id": "b", "act": "a=b"})).unwrap();
+        assert_eq!(ev.body("s")["act"], "a=b");
+        assert!(ev.body("s").get("value").is_none());
         assert!(parse_view_event(&json!({"ev": "ack", "id": "x"})).is_err());
         assert!(parse_view_event(&json!({"ev": "edit", "id": "x"})).is_err());
     }

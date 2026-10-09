@@ -376,48 +376,75 @@ impl Background {
         if cfg!(target_arch = "wasm32") {
             return;
         }
-        type Job = std::sync::Weak<std::sync::Mutex<Highlighter>>;
-        // The newest text first: what just arrived is what the view shows (a transcript's
-        // end), and a text queued earlier and scrolled away can wait.
-        static WORKER: OnceLock<std::sync::Arc<(std::sync::Mutex<Vec<Job>>, std::sync::Condvar)>> =
-            OnceLock::new();
-        let q = WORKER.get_or_init(|| {
-            let q = std::sync::Arc::new((
-                std::sync::Mutex::new(Vec::<Job>::new()),
-                std::sync::Condvar::new(),
-            ));
-            let worker = q.clone();
-            std::thread::Builder::new()
-                .name("auk-highlight".into())
-                .spawn(move || {
-                    let (jobs, ready) = &*worker;
-                    loop {
-                        let job = {
-                            let mut jobs = jobs.lock().unwrap_or_else(|e| e.into_inner());
-                            loop {
-                                if let Some(j) = jobs.pop() {
-                                    break j;
-                                }
-                                jobs = ready.wait(jobs).unwrap_or_else(|e| e.into_inner());
+        let (queue, ready) = &**worker();
+        queue
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .jobs
+            .push(std::sync::Arc::downgrade(&self.0));
+        ready.notify_all();
+    }
+}
+
+/// The worker's queue: texts to highlight (the newest first: what just arrived is what the view
+/// shows, a transcript's end, and a text queued earlier and scrolled away can wait), and whether
+/// it is on one.
+#[derive(Default)]
+struct Queue {
+    jobs: Vec<std::sync::Weak<std::sync::Mutex<Highlighter>>>,
+    busy: bool,
+}
+
+type Worker = std::sync::Arc<(std::sync::Mutex<Queue>, std::sync::Condvar)>;
+
+/// The highlight worker thread and its queue, started on first use.
+fn worker() -> &'static Worker {
+    static WORKER: OnceLock<Worker> = OnceLock::new();
+    WORKER.get_or_init(|| {
+        let q: Worker = std::sync::Arc::default();
+        let worker = q.clone();
+        std::thread::Builder::new()
+            .name("auk-highlight".into())
+            .spawn(move || {
+                let (queue, ready) = &*worker;
+                loop {
+                    let job = {
+                        let mut q = queue.lock().unwrap_or_else(|e| e.into_inner());
+                        q.busy = false;
+                        ready.notify_all();
+                        loop {
+                            if let Some(j) = q.jobs.pop() {
+                                q.busy = true;
+                                break j;
                             }
-                        };
-                        // A text dropped meanwhile is skipped; each turn holds the lock briefly.
-                        while let Some(h) = job.upgrade() {
-                            let mut h = h.lock().unwrap_or_else(|e| e.into_inner());
-                            if h.step(WORKER_CHUNK) == 0 {
-                                break;
-                            }
+                            q = ready.wait(q).unwrap_or_else(|e| e.into_inner());
+                        }
+                    };
+                    // A text dropped meanwhile is skipped; each turn holds the lock briefly.
+                    while let Some(h) = job.upgrade() {
+                        let mut h = h.lock().unwrap_or_else(|e| e.into_inner());
+                        if h.step(WORKER_CHUNK) == 0 {
+                            break;
                         }
                     }
-                })
-                .expect("the highlight worker");
-            q
-        });
-        let (jobs, ready) = &**q;
-        jobs.lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push(std::sync::Arc::downgrade(&self.0));
-        ready.notify_one();
+                }
+            })
+            .expect("the highlight worker");
+        q
+    })
+}
+
+/// Waits until the worker has highlighted every text queued so far: for hosts that draw
+/// deterministically (headless goldens) and tests, so the next frame draws in what is in view
+/// whatever the machine's load.
+pub fn settle() {
+    if cfg!(target_arch = "wasm32") {
+        return;
+    }
+    let (queue, ready) = &**worker();
+    let mut q = queue.lock().unwrap_or_else(|e| e.into_inner());
+    while q.busy || !q.jobs.is_empty() {
+        q = ready.wait(q).unwrap_or_else(|e| e.into_inner());
     }
 }
 

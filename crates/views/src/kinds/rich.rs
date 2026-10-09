@@ -42,6 +42,7 @@ pub(crate) fn md(cx: &mut Cx, node: NodeRef, m: &mut Mount, _look: &mut Look) {
     let env = crate::md::MdEnv {
         dark: cx.set.dark,
         density: cx.set.font_px / 13.0 * cx.dom.doc.device_scale(),
+        viewer: cx.set.viewer,
     };
     st.update(&mut cx.dom, m.el, &text, stream, marks, env);
     let math_pending = !st.math_pending.is_empty();
@@ -73,7 +74,11 @@ pub(crate) fn tick_md(cx: &mut Cx, _node: NodeRef, m: &mut Mount) -> bool {
         math = !st.math_pending.is_empty();
     }
     let drawing = st.poll_figures(&mut cx.dom) || math;
-    let Some(c) = st.caret else { return drawing };
+    // The streaming caret, while it is still in the document (the clock also runs for
+    // highlighting drawing in, after a stream).
+    let Some(c) = st.caret.filter(|&c| cx.dom.doc.try_node(c).is_some()) else {
+        return drawing;
+    };
     if cx.set.reduce_motion {
         cx.dom.set_style(c, "");
         return drawing;
@@ -479,7 +484,8 @@ fn diff_body(dom: &mut Dom, el: NodeId, st: &DiffState) -> (NodeId, Vec<highligh
             let old_len = p.lines.iter().filter(|l| l.op != Op::Add).count() as u64;
             let sep = dom.child(body, "div", "sf-dsep");
             let gap =
-                (p.known && h.known).then(|| h.old_start.saturating_sub(p.old_start + old_len));
+                (p.known && h.known && !h.new_file)
+                    .then(|| h.old_start.saturating_sub(p.old_start + old_len));
             match gap {
                 Some(g) if g > 0 => dom.text(
                     sep,
@@ -765,7 +771,7 @@ pub(crate) fn math(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
         cx.dom.child(md, "p", "")
     };
     let em = math_em(cx.set.font_px, cx.dom.doc.device_scale());
-    let (_, pending) = crate::math::mount(&mut cx.dom, parent, &tex, display, em);
+    let (_, pending) = crate::math::mount(&mut cx.dom, parent, &tex, display, true, em);
     m.clock = pending.is_some();
 }
 
@@ -861,8 +867,9 @@ pub(crate) fn image(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
                 (None, Some(h)) if ph > 0.0 => (h * pw / ph, h),
                 _ => (pw, ph),
             };
-            let zoom =
-                builtin.is_none() && crate::common::Actions::read(p, "image").click.is_none();
+            let zoom = cx.set.viewer
+                && builtin.is_none()
+                && crate::common::Actions::read(p, "image").click.is_none();
             look.class_if(zoom, "sf-zoom");
             let label = alt.unwrap_or("Image");
             let el = if pic.svg {

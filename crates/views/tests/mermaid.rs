@@ -990,17 +990,31 @@ fn the_figure_paints_offscreen_on_its_card() {
     assert!(counts[0] > counts[3], "42% outweighs 8%: {counts:?}");
 }
 
+/// This thread's CPU time, in ms: the work done, which a loaded machine (other tests running
+/// alongside) doesn't stretch as it does the wall clock.
+fn cpu_ms() -> f64 {
+    let mut t = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+    // SAFETY: `t` is a valid timespec to write.
+    let r = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut t) };
+    assert_eq!(r, 0, "the thread's CPU clock");
+    t.tv_sec as f64 * 1000.0 + t.tv_nsec as f64 / 1e6
+}
+
 /// Off the frame path, but quick: each sample diagram is laid out, written as SVG and drawn at
 /// 2x in well under a frame budget's worth of background time (the engine builds optimized).
+/// Both run on this thread, so its CPU time is what they cost.
 #[test]
 fn diagrams_lay_out_and_draw_quickly() {
-    let _ = mermaid::svg(&src("pie"), true); // fonts and advances, once
+    // Fonts and advances, and the system font database pictures draw with: loaded once a
+    // process, not per diagram.
+    let _ = mermaid::svg(&src("pie"), true);
+    let _ = pictures::svg_fonts();
     for name in ["flowchart", "sequence", "class", "state", "er", "gantt", "pie"] {
         let s = src(name);
-        let t = std::time::Instant::now();
+        let t = cpu_ms();
         let svg = mermaid::svg(&s, true).unwrap();
-        let laid = t.elapsed().as_secs_f64() * 1000.0;
-        let t = std::time::Instant::now();
+        let laid = cpu_ms() - t;
+        let t = cpu_ms();
         let opt = usvg::Options {
             fontdb: pictures::svg_fonts(),
             ..usvg::Options::default()
@@ -1009,8 +1023,8 @@ fn diagrams_lay_out_and_draw_quickly() {
         let (w, h) = (tree.size().width() * 2.0, tree.size().height() * 2.0);
         let mut pm = resvg::tiny_skia::Pixmap::new(w.ceil() as u32, h.ceil() as u32).unwrap();
         resvg::render(&tree, resvg::tiny_skia::Transform::from_scale(2.0, 2.0), &mut pm.as_mut());
-        let drawn = t.elapsed().as_secs_f64() * 1000.0;
-        eprintln!("{name}: layout+svg {laid:.1} ms, draw 2x {drawn:.1} ms");
+        let drawn = cpu_ms() - t;
+        eprintln!("{name}: layout+svg {laid:.1} ms, draw 2x {drawn:.1} ms (CPU)");
         assert!(laid + drawn < 250.0, "{name}: {laid:.1} + {drawn:.1} ms");
     }
 }

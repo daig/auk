@@ -1811,6 +1811,7 @@ fn f5_surface_events_carry_sf() {
         ViewEvent::Action {
             id: "t".into(),
             action: "x".into(),
+            value: auk_tsp::ActValue::Split,
             mods: Mods::NONE,
             values: None,
         },
@@ -1996,6 +1997,7 @@ fn f8_pointer_actions_map_to_events() {
             ViewEvent::Action {
                 id: "card".into(),
                 action: "open-file=src/a.rs".into(),
+                value: auk_tsp::ActValue::Split,
                 mods,
                 values: None,
             },
@@ -2008,6 +2010,7 @@ fn f8_pointer_actions_map_to_events() {
             ViewEvent::Action {
                 id: "card".into(),
                 action: "rerun".into(),
+                value: auk_tsp::ActValue::Split,
                 mods: Mods::NONE,
                 values: None,
             },
@@ -2079,6 +2082,7 @@ fn f9_form_values() {
     let ev = ViewEvent::Action {
         id: button["id"].as_str().unwrap().into(),
         action: button["act"].as_str().unwrap().into(),
+        value: auk_tsp::ActValue::Split,
         mods: Mods::NONE,
         values: Some(values),
     };

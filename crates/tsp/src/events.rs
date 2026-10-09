@@ -65,6 +65,18 @@ impl Mods {
 /// An event a client originates from the view (§7.7, §7.8, §7.9). Keys are never events: typed
 /// text reaches the program as PTY bytes; only `Edit`, `Undo` and `Send` stand in for keys, each
 /// behind its program feature.
+/// How a [`ViewEvent::Action`]'s `act` and `value` come from its `action`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum ActValue {
+    /// `action` is a node's action name: it splits at its first `=` into `act` and `value`
+    /// (§7.8).
+    #[default]
+    Split,
+    /// `action` is the view's own act, sent as is (`=` and all), with this value if any: a
+    /// picker's scope, tab or strip chip, a `prefs` page or row.
+    Exact(Option<String>),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum ViewEvent {
     /// A fold flipped locally. `key` defaults to the node's `key` prop.
@@ -90,6 +102,8 @@ pub enum ViewEvent {
     Action {
         id: String,
         action: String,
+        /// How `act` and `value` come from `action`.
+        value: ActValue,
         mods: Mods,
         values: Option<Map<String, Value>>,
     },
@@ -195,13 +209,17 @@ impl ViewEvent {
             }
             ViewEvent::Action {
                 action,
+                value,
                 mods,
                 values: v,
                 ..
             } => {
-                let (act, value) = match action.split_once('=') {
-                    Some((act, value)) => (act, Some(value)),
-                    None => (action.as_str(), None),
+                let (act, value) = match value {
+                    ActValue::Exact(value) => (action.as_str(), value.as_deref()),
+                    ActValue::Split => match action.split_once('=') {
+                        Some((act, value)) => (act, Some(value)),
+                        None => (action.as_str(), None),
+                    },
                 };
                 put("act", s(act));
                 if let Some(value) = value {
@@ -285,6 +303,7 @@ mod tests {
         let ev = ViewEvent::Action {
             id: "b".into(),
             action: "open=a=b".into(),
+            value: ActValue::Split,
             mods: Mods {
                 meta: true,
                 shift: true,
@@ -299,12 +318,25 @@ mod tests {
         let ev = ViewEvent::Action {
             id: "b".into(),
             action: "rerun".into(),
+            value: ActValue::Split,
             mods: Mods::NONE,
             values: None,
         };
         assert_eq!(
             ev.body("s1"),
             json!({"ev": "action", "sf": "s1", "id": "b", "act": "rerun"})
+        );
+        // A value given apart: the name is the act as is, `=` and all.
+        let ev = ViewEvent::Action {
+            id: "b".into(),
+            action: "a=b".into(),
+            value: ActValue::Exact(Some("c".into())),
+            mods: Mods::NONE,
+            values: None,
+        };
+        assert_eq!(
+            ev.body("s1"),
+            json!({"ev": "action", "sf": "s1", "id": "b", "act": "a=b", "value": "c"})
         );
     }
 

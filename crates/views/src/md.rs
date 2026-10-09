@@ -57,6 +57,8 @@ pub(crate) struct MdState {
 pub(crate) struct MdEnv {
     pub dark: bool,
     pub density: f32,
+    /// The host has an image viewer: figures draw Open.
+    pub viewer: bool,
 }
 
 /// A mermaid figure waiting for its picture.
@@ -368,9 +370,11 @@ fn mermaid_block(dom: &mut Dom, parent: NodeId, text: &str, fig: &mut FigCx) {
         dom.text(ic, &g.to_string());
     }
     dom.child_text(head, "span", "mfig-kind", &format!("mermaid · {kind}"));
-    let open = dom.child_text(head, "button", "btn sm quiet mfig-open", "Open");
-    dom.attr(open, "data-mfig", &id);
-    dom.attr(open, "title", "Show the diagram large");
+    if fig.env.viewer {
+        let open = dom.child_text(head, "button", "btn sm quiet mfig-open", "Open");
+        dom.attr(open, "data-mfig", &id);
+        dom.attr(open, "title", "Show the diagram large");
+    }
     let body = dom.child(f, "div", "mfig-body");
     match poll {
         crate::image::Poll::Ready(Ok(pic)) => picture_into(dom, body, kind, &pic),
@@ -463,6 +467,11 @@ struct Renderer<'d, 'a, 'm, 'f> {
     in_link: usize,
     /// Math's device pixels per em, and the formulas left to the background.
     math: (u32, &'m mut Vec<crate::math::Pending>),
+    /// Per paragraph, in order: whether it holds nothing but one display formula.
+    math_alone: Vec<bool>,
+    /// The paragraph being drawn (an index into `math_alone`), if inside one.
+    para: usize,
+    in_para: bool,
 }
 
 fn render_events<'e>(
@@ -473,6 +482,33 @@ fn render_events<'e>(
     math: (u32, &mut Vec<crate::math::Pending>),
     fig: FigCx,
 ) {
+    let events: Vec<Event<'e>> = events.collect();
+    // Which paragraphs are one display formula and nothing else (whitespace and line breaks
+    // aside).
+    let mut math_alone = Vec::new();
+    let mut cur: Option<(usize, bool)> = None;
+    for ev in &events {
+        match ev {
+            Event::Start(Tag::Paragraph) => cur = Some((0, true)),
+            Event::End(TagEnd::Paragraph) => {
+                if let Some((n, only)) = cur.take() {
+                    math_alone.push(only && n == 1);
+                }
+            }
+            Event::DisplayMath(_) => {
+                if let Some((n, _)) = &mut cur {
+                    *n += 1;
+                }
+            }
+            Event::SoftBreak | Event::HardBreak => {}
+            Event::Text(t) if t.trim().is_empty() => {}
+            _ => {
+                if let Some((_, only)) = &mut cur {
+                    *only = false;
+                }
+            }
+        }
+    }
     let mut r = Renderer {
         dom,
         stack: vec![holder],
@@ -484,9 +520,20 @@ fn render_events<'e>(
         lists: Vec::new(),
         in_link: 0,
         math,
+        math_alone,
+        para: 0,
+        in_para: false,
     };
     for ev in events {
+        let end_para = matches!(ev, Event::End(TagEnd::Paragraph));
+        if matches!(ev, Event::Start(Tag::Paragraph)) {
+            r.in_para = true;
+        }
         r.event(ev);
+        if end_para {
+            r.para += 1;
+            r.in_para = false;
+        }
     }
 }
 
@@ -498,7 +545,11 @@ impl Renderer<'_, '_, '_, '_> {
     /// A typeset formula (book: md Math).
     fn math(&mut self, tex: &str, display: bool) {
         let p = self.top();
-        let (_, pending) = crate::math::mount(self.dom, p, tex, display, self.math.0);
+        // Display math alone in its paragraph is a block (`div.math-display`); amid the
+        // paragraph's text it is `span.math.display`, inline-level in the `p`.
+        let block =
+            display && (!self.in_para || self.math_alone.get(self.para).copied().unwrap_or(false));
+        let (_, pending) = crate::math::mount(self.dom, p, tex, display, block, self.math.0);
         self.math.1.extend(pending);
     }
 
@@ -951,12 +1002,37 @@ fn math_delimiters(src: &str) -> std::borrow::Cow<'_, str> {
                     }
                 };
             }
-            b'$' => {
-                let close = if b.get(i + 1) == Some(&b'$') { "$$" } else { "$" };
-                i = match src[i + close.len()..].find(close) {
-                    Some(k) => i + close.len() + k + close.len(),
-                    None => i + close.len(),
+            b'$' if b.get(i + 1) == Some(&b'$') => {
+                i = match src[i + 2..].find("$$") {
+                    Some(k) => i + 2 + k + 2,
+                    None => i + 2,
                 };
+            }
+            b'$' => {
+                // `$…$` math only as pulldown-cmark reads it: the opening `$` not followed by
+                // whitespace, the closing one not preceded by whitespace nor followed by a
+                // digit, within the paragraph. A lone `$` (a price) skips only itself, so a
+                // `\(…\)` after it still converts.
+                let mut close = None;
+                if b.get(i + 1).is_some_and(|c| !c.is_ascii_whitespace()) {
+                    let mut j = i + 1;
+                    while let Some(k) = src[j..].find('$') {
+                        let at = j + k;
+                        if src[i + 1..at].contains("\n\n") {
+                            break;
+                        }
+                        let after = b.get(at + 1).copied();
+                        if !b[at - 1].is_ascii_whitespace()
+                            && b[at - 1] != b'\\'
+                            && !after.is_some_and(|c| c.is_ascii_digit() || c == b'$')
+                        {
+                            close = Some(at + 1);
+                            break;
+                        }
+                        j = at + 1;
+                    }
+                }
+                i = close.unwrap_or(i + 1);
             }
             b'\\' => match b.get(i + 1) {
                 Some(&o @ (b'(' | b'[')) => {

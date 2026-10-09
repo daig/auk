@@ -98,6 +98,9 @@ pub struct ViewSettings {
     pub links_plain_click: bool,
     /// Markdown headings: annotated (body size with `#` markers) or sized.
     pub annotated_headings: bool,
+    /// The host shows pictures large (the app's image viewer): images click to zoom and mermaid
+    /// figures draw Open. The browser client has no viewer, so it draws neither.
+    pub viewer: bool,
 }
 
 impl ViewSettings {
@@ -128,6 +131,7 @@ impl Default for ViewSettings {
             native_editing: true,
             links_plain_click: false,
             annotated_headings: true,
+            viewer: true,
         }
     }
 }

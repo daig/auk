@@ -130,13 +130,15 @@
 .pk-scroll { display: block; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 6px; }
 .sf-picker.st-loading .pk-list, .sf-picker.st-error .pk-list { display: none; }
 .pk-row {
-  display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 8px; border-radius: var(--r-ctl);
+  position: relative; display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 8px; border-radius: var(--r-ctl);
   color: var(--t1); white-space: pre; cursor: default;
 }
 .sf-picker.lay-cards .pk-row { height: 54px; }
 .sf-picker.lay-timeline .pk-row { height: 26px; }
 .sf-picker.lay-timeline .pk-row[data-node='user'] { height: 34px; }
 .sf-picker.lay-tree .pk-row { height: 24px; gap: 4px; }
+/* Group headers are 32px in every layout (book: row heights). */
+.sf-picker .pk-list .pk-row.grp { height: 32px; }
 .pk-row:hover { background-color: var(--l1); }
 .pk-row.sel { background-color: color-mix(in srgb, var(--accent) 18%, transparent); }
 .pk-sheet.f-list .pk-row.sel { box-shadow: inset 2px 0 0 var(--accent); }
@@ -284,3 +286,15 @@
 .pk-btn.on { color: var(--t1); background-color: color-mix(in srgb, var(--accent) 18%, transparent); border-color: var(--accent); }
 .pk-btn.off { opacity: 0.45; cursor: default; }
 .pk-btn .kbds { display: inline-flex; gap: 2px; }
+
+/* The confirm strip (book: confirm): over the selected row (inset 0 in it), the trash icon, the
+   text, the danger button and Keep, opaque over the row; the list is .pk-spacer.confirming. */
+.pk-row > .pk-confirm {
+  position: absolute; left: 0; right: 0; top: 0; bottom: 0; z-index: 2; display: flex; align-items: center;
+  gap: 8px; padding: 0 6px 0 10px; border-radius: var(--r-ctl); color: var(--t1); cursor: default;
+  text-transform: none; letter-spacing: 0; font-weight: 400;
+  background-color: color-mix(in srgb, var(--bad) 14%, var(--pop-bg)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bad) 45%, transparent);
+}
+.pk-ct-ic { display: inline-flex; flex: none; color: var(--bad); }
+.pk-ct { flex: 1 1 auto; min-width: 0; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.pk-confirm .pk-btn { flex: none; height: 24px; }

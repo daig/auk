@@ -13,7 +13,7 @@ pub const SEMANTIC: [&str; 21] = [
 ];
 
 /// Semantic tokens that name a color (`--sf-c-<token>`).
-const COLOR_TOKENS: [&str; 14] = [
+pub(crate) const COLOR_TOKENS: [&str; 14] = [
     "muted", "dim", "accent", "success", "warning", "error", "info", "link", "num", "path", "key",
     "ins", "del", "code",
 ];

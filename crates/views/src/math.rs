@@ -216,14 +216,20 @@ fn glyph(b: &mut PathBuilder, x: f32, y: f32, px: f32, font_name: &str, code: u3
     false
 }
 
-/// Fills a display list's coverage into a picture at `em` device px per em.
+/// Fills a display list's coverage into a picture at `em` device px per em. A formula wider or
+/// taller than [`MAX_SIDE`] device px at that size is drawn at a smaller one that fits (it still
+/// shows at its size in em, drawn coarser), not refused.
 fn draw(list: &DisplayList, em: f64) -> Result<Formula, String> {
     let total = list.height + list.depth;
-    let (w, h) = (
-        ((list.width + 2.0 * PAD) * em).ceil().max(1.0),
-        ((total + 2.0 * PAD) * em).ceil().max(1.0),
-    );
-    if w > f64::from(MAX_SIDE) || h > f64::from(MAX_SIDE) {
+    let (fw, fh) = (list.width + 2.0 * PAD, total + 2.0 * PAD);
+    let side = f64::from(MAX_SIDE);
+    let em = if (fw * em).ceil() > side || (fh * em).ceil() > side {
+        (side / fw.max(fh)).floor().min(em).max(f64::MIN_POSITIVE)
+    } else {
+        em
+    };
+    let (w, h) = ((fw * em).ceil().max(1.0), (fh * em).ceil().max(1.0));
+    if w > side || h > side {
         return Err("formula too large to draw".into());
     }
     let mut pixmap = Pixmap::new(w as u32, h as u32).ok_or("formula too large to draw")?;
@@ -590,25 +596,29 @@ pub(crate) struct Pending {
     pub tex: String,
     pub display: bool,
     pub em: u32,
+    /// The wrapper's class once typeset.
+    pub class: &'static str,
 }
 
-/// Appends a formula to `parent` (book: md Math, `math`): `span.math` (inline) or
-/// `div.math-display` (display) holding the TeX in `data-tex` around an `svg` that paints the
-/// formula in `currentColor`; a formula that fails is `code.math-err` titled with the error
-/// (in a `div.math-display` for display math). Returns the wrapper and, if the formula is
+/// Appends a formula to `parent` (book: md Math, `math`): `span.math` (inline),
+/// `div.math-display` (display, a block of its own) or `span.math.display` (display amid a
+/// paragraph's text, `block` false) holding the TeX in `data-tex` around an `svg` that paints
+/// the formula in `currentColor`; a formula that fails is `code.math-err` titled with the error
+/// (in its wrapper for display math). Returns the wrapper and, if the formula is
 /// typesetting in the background, what to fill in later ([`fill`]).
 pub(crate) fn mount(
     dom: &mut Dom,
     parent: NodeId,
     tex: &str,
     display: bool,
+    block: bool,
     em: u32,
 ) -> (NodeId, Option<Pending>) {
     let tex = normalize(tex, display);
-    let (tag, class) = if display {
-        ("div", "math-display")
-    } else {
-        ("span", "math")
+    let (tag, class) = match (display, block) {
+        (true, true) => ("div", "math-display"),
+        (true, false) => ("span", "math display"),
+        _ => ("span", "math"),
     };
     match request(tex.trim(), display, em) {
         Poll::Ready(Err(e)) if !display => {
@@ -633,6 +643,7 @@ pub(crate) fn mount(
                 tex: tex.trim().to_owned(),
                 display,
                 em,
+                class,
             };
             (el, Some(p))
         }
@@ -672,8 +683,7 @@ pub(crate) fn fill(dom: &mut Dom, pending: Vec<Pending>) -> Vec<Pending> {
         }
         match request(&p.tex, p.display, p.em) {
             Poll::Ready(t) => {
-                let class = if p.display { "math-display" } else { "math" };
-                dom.set_class(p.el, class);
+                dom.set_class(p.el, p.class);
                 fill_with(dom, p.el, &p.source, t);
             }
             Poll::Pending => left.push(p),

@@ -115,6 +115,13 @@ pub(crate) fn has_children(kind: &str) -> bool {
     ) || !KINDS.contains(&kind)
 }
 
+/// Kinds whose own drawing depends on their children (not only where they go): `prefs` turns
+/// its editor card on for an editor child, `picker` says "Nothing to preview" without one, and
+/// `block` shows Native/Raw only with both. They re-render when their children change.
+pub(crate) fn reads_children(kind: &str) -> bool {
+    matches!(kind, "prefs" | "picker" | "block")
+}
+
 /// Where `child` of `node` goes.
 pub(crate) fn route(node: NodeRef, child: NodeRef) -> Route {
     match node.kind() {
@@ -173,7 +180,9 @@ pub(crate) fn virtualize(cx: &mut Cx, id: &str, el: NodeId, estimate: Option<f32
     let had = cx.st.virt.get(id).copied();
     match estimate {
         Some(e) => {
-            if had.map(|(h, _)| h) != Some(el) {
+            // A new element, or a new estimate (a picker switching layouts changes its row
+            // height): set it again.
+            if had != Some((el, e)) {
                 cx.dom.doc.set_virtual(el, Some(e));
                 cx.st.virt.insert(id.to_owned(), (el, e));
             }

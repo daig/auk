@@ -1,0 +1,36 @@
+{
+  "argv": [
+    "/Users/dai/.local/bin/omp",
+    "--no-session",
+    "--no-title"
+  ],
+  "cwd": "/private/tmp/claude-501/-Users-dai-code-tern-clone/31364f1a-19f4-408f-a94a-d692aa417101/scratchpad/prefs-theme/work",
+  "cols": 120,
+  "rows": 40,
+  "env": [],
+  "recorded": "2026-10-09T12:01:34-0600",
+  "recorder": "tools/tsp_record.py",
+  "exit_status": 143,
+  "counts": {
+    "in e": 10,
+    "in r": 1,
+    "out f": 9,
+    "out o": 1,
+    "out osc": 2,
+    "out q": 1,
+    "out t": 1,
+    "out x": 1
+  },
+  "user_vars": {},
+  "unanswered_queries": {
+    "CSI ?2026$p": 1,
+    "CSI ?2048$p": 1,
+    "CSI ?2031$p": 1,
+    "CSI ?2004$p": 1,
+    "CSI ?1010$p": 1,
+    "CSI ?1011$p": 1,
+    "CSI 22;2t": 1,
+    "CSI 0 q": 2
+  },
+  "note": "omp 18.8.5 (installed binary): /settings under a hello advertising prefs, picker and aside, no prompts; Enter on Dark Theme opens its 102-theme submenu as a picker in the prefs editor card, Esc closes it, Esc the sheet; ~/.omp/agent/config.yml unchanged (sha1 cdda4b55)"
+}

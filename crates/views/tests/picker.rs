@@ -266,7 +266,8 @@ fn picker_draws_head_scopes_tabs_rows_strip_and_bar_from_its_props() {
             "local/off"
         ]
     );
-    // The first group header carries the column heads. At this width (scopes and a side
+    // The group headers carry the column heads (every one: whichever sticks shows them). At
+    // this width (scopes and a side
     // preview) the label keeps its 260px only without the lowest-priority column (`int`).
     let heads: Vec<String> = h
         .find_class(rows[0], "head")
@@ -275,7 +276,7 @@ fn picker_draws_head_scopes_tabs_rows_strip_and_bar_from_its_props() {
         .collect();
     assert_eq!(heads, ["Ctx", "$/M"]);
     assert!(has(&h, el, "h0") && !has(&h, el, "h1") && !has(&h, el, "h2"));
-    assert!(h.find_class(rows[2], "head").is_empty());
+    assert_eq!(h.find_class(rows[2], "head").len(), 2);
     assert_eq!(h.text(first(&h, rows[0], "pk-gl")), "Recent");
     // Current, selected, disabled.
     assert!(has(&h, rows[1], "cur"));
@@ -1133,4 +1134,375 @@ fn omp_model_hub_and_dropdown_replay_as_picker_sheets() {
         regions.is_empty(),
         "the session isn't covered after the sheets close"
     );
+}
+
+/// `confirm` (book): a strip over the selected row with a trash icon, the text, a danger
+/// button (default "Delete", sending `confirm.act` or "confirm") and Keep (`cancel`); the list
+/// is `.pk-spacer.confirming` meanwhile. It follows the selection, survives virtualization, and
+/// goes with the prop.
+#[test]
+fn picker_confirm_strip_sits_over_the_selected_row() {
+    let mut h = harness(120);
+    let (items, order) = many_items(260);
+    open(
+        &mut h,
+        json!({"title": "Sessions", "query": "", "items": items, "order": order, "selected": "m3",
+               "confirm": {"text": [{"t": "Delete "}, {"t": "model 3", "s": "strong"}, {"t": "?"}]}}),
+        json!([]),
+    );
+    let pk = h.el("s1", "pk");
+    let strip = one(&h, pk, "pk-confirm");
+    assert_eq!(h.attr(strip, "role").as_deref(), Some("alertdialog"));
+    assert_eq!(h.text(one(&h, strip, "pk-ct")), "Delete model 3?");
+    assert!(!h.find_class(strip, "pk-ct-ic").is_empty());
+    let spacer = one(&h, pk, "pk-spacer");
+    assert!(has(&h, spacer, "confirming"));
+    let row = |h: &Harness, id: &str| {
+        h.find_class(pk, "pk-row")
+            .into_iter()
+            .find(|&r| h.attr(r, "data-v").as_deref() == Some(id))
+            .unwrap()
+    };
+    let (s, r) = (bbox(&h.doc, strip), bbox(&h.doc, row(&h, "m3")));
+    assert!((s.y - r.y).abs() < 0.5 && (s.h - r.h).abs() < 0.5, "strip {s:?} over row {r:?}");
+    let buttons = h.find_class(strip, "pk-btn");
+    let labels: Vec<String> = buttons.iter().map(|&b| h.text(b)).collect();
+    assert_eq!(labels, ["Delete", "Keep"]);
+    assert!(has(&h, buttons[0], "danger"));
+    let from = h.sent.len();
+    click(&mut h, buttons[0], 1);
+    let pk = h.el("s1", "pk");
+    let strip = one(&h, pk, "pk-confirm");
+    let keep = h.find_class(strip, "pk-btn")[1];
+    click(&mut h, keep, 1);
+    assert_eq!(
+        events(&h, from),
+        [
+            json!({"ev": "action", "sf": "s1", "id": "pk", "act": "confirm"}),
+            json!({"ev": "action", "sf": "s1", "id": "pk", "act": "cancel"})
+        ]
+    );
+    // A custom act and label; the strip moves with the selection.
+    set(&mut h, 3, json!({"selected": "m5", "confirm": {"text": "Forget it?", "act": "forget", "label": "Forget"}}));
+    settle(&mut h);
+    let pk = h.el("s1", "pk");
+    let strip = one(&h, pk, "pk-confirm");
+    let b = h.find_class(strip, "pk-btn")[0];
+    assert_eq!(h.text(b), "Forget");
+    assert_eq!(h.attr(b, "data-v").as_deref(), Some("forget"));
+    let (s, r) = (bbox(&h.doc, strip), bbox(&h.doc, row(&h, "m5")));
+    assert!((s.y - r.y).abs() < 0.5, "{s:?} {r:?}");
+    // Gone with the prop.
+    set(&mut h, 4, json!({"confirm": null}));
+    let pk = h.el("s1", "pk");
+    assert!(h.find_class(pk, "pk-confirm").is_empty());
+    assert!(!has(&h, one(&h, pk, "pk-spacer"), "confirming"));
+}
+
+/// Column heads ride on every group header, so whichever group sticks at the top of the list
+/// shows them (book: Column `head`), not only the first.
+#[test]
+fn picker_column_heads_ride_on_every_group_header() {
+    let mut h = harness(160);
+    open(&mut h, hub_props(), json!([]));
+    let pk = h.el("s1", "pk");
+    let groups: Vec<NodeId> = h
+        .find_class(pk, "pk-row")
+        .into_iter()
+        .filter(|&r| has(&h, r, "grp"))
+        .collect();
+    assert_eq!(groups.len(), 2);
+    let heads_of = |g: NodeId| -> Vec<String> {
+        h.find_class(g, "head").into_iter().map(|e| h.text(e)).collect()
+    };
+    let first_heads = heads_of(groups[0]);
+    assert!(!first_heads.is_empty());
+    for g in groups {
+        assert_eq!(heads_of(g), first_heads, "{}", h.text(g));
+    }
+    assert!(h.find_class(pk, "pk-colhead").is_empty(), "the list starts with a group");
+}
+
+// ---------------------------------------------------------------------------------------------
+// omp's other picker layouts (fixtures/tsp/omp-picker-sessions.jsonl, omp-picker-tree-copy.jsonl)
+
+/// The heights of the item rows (not group headers) under `el`, by `data-v`.
+fn row_heights(h: &Harness, el: NodeId) -> Vec<(String, f32)> {
+    h.find_class(el, "pk-row")
+        .into_iter()
+        .filter(|&r| !has(h, r, "grp") && h.doc.laid_out(r))
+        .filter_map(|r| Some((h.attr(r, "data-v")?, bbox(&h.doc, r).h)))
+        .collect()
+}
+
+/// omp 18.8.5's session picker (`omp --resume`, no prompt): a `screen` sheet of `cards` with a
+/// side preview, a "Today" group, `when`/`size` columns, items added and replaced through
+/// `itemsAdd` (a "history" badge that comes and goes), and search hits.
+#[test]
+fn omp_session_picker_is_a_screen_of_cards() {
+    let mut seen: Vec<(u64, Vec<String>)> = Vec::new();
+    let h = replay("omp-picker-sessions.jsonl", |h, rec| {
+        if rec.verb == "q" {
+            h.view.set_cols(&mut h.doc, &h.pane, 120);
+            // As the hosts do (`surfaces::HOST_CSS`): the pane fills the window, so a screen
+            // surface does.
+            h.doc.set_stylesheet(
+                "host-pane",
+                auk_ui::SheetKind::BuiltIn,
+                None,
+                ".auk-pane { min-height: 100vh; }",
+            );
+        }
+        if rec.verb != "f" || rec.body["sf"] != "s:2" {
+            return;
+        }
+        let s = rec.body["s"].as_u64().unwrap();
+        h.now += 1000.0;
+        h.frame();
+        let el = h.el("s:2", "0");
+        let mut facts = vec![h.class(el)];
+        let sheet = one(h, el, "pk-sheet");
+        // The screen surface fills the pane, which fills the window.
+        let (vw, vh) = h.doc.viewport();
+        let screen = auk_ui::Rect::new(0.0, 0.0, vw, vh);
+        let sb = bbox(&h.doc, sheet);
+        facts.push(format!(
+            "fills={}",
+            (sb.w - screen.w).abs() < 1.0 && (sb.h - screen.h).abs() < 1.0
+        ));
+        let dim = one(h, el, "pk-dim");
+        facts.push(format!("dim={}", h.doc.laid_out(dim) && bbox(&h.doc, dim).w > 0.0));
+        for (id, ht) in row_heights(h, el) {
+            facts.push(format!("{}:{ht}", id.rsplit('_').next().unwrap_or("")));
+        }
+        for g in h.find_class(el, "grp") {
+            facts.push(format!("grp {} {}", h.text(first(h, g, "pk-gl")), bbox(&h.doc, g).h));
+        }
+        let badges: Vec<String> = h.find_class(el, "pk-badge").into_iter().map(|b| h.text(b)).collect();
+        facts.push(format!("badges={badges:?}"));
+        facts.push(format!("marks={}", h.find_class(el, "sf-mark").len()));
+        let slot = one(h, el, "pk-pv-slot");
+        facts.push(format!("preview={}", h.doc.element_children(slot).len()));
+        seen.push((s, facts));
+    });
+    assert!(h.errors().is_empty(), "{:?}", h.errors());
+    let at = |s: u64| -> &Vec<String> {
+        &seen.iter().find(|(x, _)| *x == s).unwrap_or_else(|| panic!("s{s}: {seen:?}")).1
+    };
+    let first_frame = at(1);
+    let class = &first_frame[0];
+    for c in ["sz-screen", "lay-cards", "pv-side"] {
+        assert!(class.split(' ').any(|x| x == c), "{class}");
+    }
+    assert!(first_frame.contains(&"fills=true".to_owned()), "{first_frame:?}");
+    assert!(first_frame.contains(&"dim=false".to_owned()), "no backdrop: {first_frame:?}");
+    // Card rows are 54px, group headers 32px.
+    let heights: Vec<&String> = first_frame.iter().filter(|f| f.ends_with(".jsonl:54")).collect();
+    assert_eq!(heights.len(), 2, "{first_frame:?}");
+    assert!(first_frame.contains(&"grp Today 32".to_owned()), "{first_frame:?}");
+    assert!(first_frame.iter().any(|f| f.starts_with("preview=") && f != "preview=0"));
+    // itemsAdd replaces an item through a render: the badge comes, then goes.
+    assert!(at(6).contains(&"badges=[\"history\"]".to_owned()), "{:?}", at(6));
+    assert!(at(7).contains(&"badges=[]".to_owned()), "{:?}", at(7));
+    assert!(at(7).iter().any(|f| f.starts_with("marks=") && f != "marks=0"), "{:?}", at(7));
+}
+
+/// omp 18.8.5's `/tree` and `/copy` on a resumed session (no prompt): the tree is 24px rows
+/// with chevrons (leaves here) and five filter tabs drawn as chips (past four); the copy picker
+/// is a timeline (user rows 34px, the rest 26px, nodes by kind) whose `focus: "preview"` rings
+/// the preview pane.
+#[test]
+fn omp_tree_and_copy_pickers_draw_their_layouts() {
+    let mut tree = None;
+    let mut timeline = Vec::new();
+    let h = replay("omp-picker-tree-copy.jsonl", |h, rec| {
+        if rec.verb == "q" {
+            h.view.set_cols(&mut h.doc, &h.pane, 120);
+        }
+        if rec.verb != "f" {
+            return;
+        }
+        let s = rec.body["s"].as_u64().unwrap();
+        h.now += 1000.0;
+        h.frame();
+        let doc = h.pane.surfaces()[0].document();
+        if s == 5 && doc.get("16.^picker").is_some() {
+            let el = h.el("s:1", "16.^picker");
+            let tabs = one(h, el, "pk-tabs");
+            let chev: Vec<String> = h.find_class(el, "pk-chev").into_iter().map(|c| h.class(c)).collect();
+            tree = Some((
+                h.class(el),
+                h.class(tabs),
+                h.find_class(tabs, "pk-tab").len(),
+                row_heights(h, el),
+                chev,
+            ));
+        }
+        if doc.get("18").is_some() {
+            let el = h.el("s:1", "18");
+            let sheet = one(h, el, "pk-sheet");
+            let nodes: Vec<String> = h.find_class(el, "pk-node").into_iter().map(|n| h.class(n)).collect();
+            let tool_icons = h
+                .find_class(el, "n-tool")
+                .into_iter()
+                .filter(|&n| !h.find_class(n, "ico").is_empty())
+                .count();
+            timeline.push((s, h.class(el), h.class(sheet), row_heights(h, el), nodes, tool_icons));
+        }
+    });
+    assert!(h.errors().is_empty(), "{:?}", h.errors());
+    let (class, tabs, ntabs, heights, chev) = tree.expect("the tree picker drew");
+    assert!(class.split(' ').any(|c| c == "lay-tree"), "{class}");
+    assert_eq!(ntabs, 5);
+    assert!(tabs.split(' ').any(|c| c == "chips"), "past four tabs are chips: {tabs}");
+    assert!(!heights.is_empty() && heights.iter().all(|(_, h)| (*h - 24.0).abs() < 0.5), "{heights:?}");
+    assert!(chev.iter().all(|c| c == "pk-chev leaf"), "{chev:?}");
+    let (s, class, sheet, heights, nodes, tool_icons) = &timeline[0];
+    assert_eq!(*s, 10);
+    assert!(class.split(' ').any(|c| c == "lay-timeline"), "{class}");
+    assert!(sheet.split(' ').any(|c| c == "f-list"), "{sheet}");
+    assert_eq!(nodes.len(), 11);
+    assert!(nodes.contains(&"pk-node n-user".to_owned()) && nodes.contains(&"pk-node n-assistant".to_owned()));
+    assert!(*tool_icons > 0, "tool nodes carry their tool's icon");
+    for (id, ht) in heights {
+        let user = nodes.len() == 11 && ["98cdd7d1"].contains(&id.as_str());
+        if user {
+            assert!((ht - 34.0).abs() < 0.5, "{id} {ht}");
+        } else {
+            assert!((ht - 26.0).abs() < 0.5 || (ht - 34.0).abs() < 0.5, "{id} {ht}");
+        }
+    }
+    let users = heights.iter().filter(|(_, h)| (*h - 34.0).abs() < 0.5).count();
+    assert_eq!(users, 3, "the three user turns: {heights:?}");
+    let preview = timeline.iter().find(|t| t.0 == 12).expect("frame 12");
+    assert!(preview.2.split(' ').any(|c| c == "f-preview"), "{}", preview.2);
+}
+
+/// Tree rows (book: `depth` draws indent guides, `open` a chevron rotated when true, unset a
+/// leaf; `dot: "accent"` lights the guides) and timeline nodes, on a synthetic sheet.
+#[test]
+fn picker_tree_guides_and_chevrons_follow_depth_and_open() {
+    let mut h = harness(140);
+    open(
+        &mut h,
+        json!({"layout": "tree", "query": "", "items": [
+            {"id": "a", "label": "root", "open": true},
+            {"id": "b", "label": "child", "depth": 1, "open": false},
+            {"id": "c", "label": "leaf", "depth": 2, "dot": "accent"},
+        ]}),
+        json!([]),
+    );
+    let el = h.el("s1", "pk");
+    let row = |h: &Harness, v: &str| {
+        h.find_class(el, "pk-row").into_iter().find(|&r| h.attr(r, "data-v").as_deref() == Some(v)).unwrap()
+    };
+    let guides = |h: &Harness, v: &str| -> (usize, String) {
+        match h.find_class(row(h, v), "pk-guides").first() {
+            Some(&g) => (h.find_class(g, "pk-g").len(), h.class(g)),
+            None => (0, String::new()),
+        }
+    };
+    assert_eq!(guides(&h, "a").0, 0);
+    assert_eq!(guides(&h, "b"), (1, "pk-guides".to_owned()));
+    assert_eq!(guides(&h, "c"), (2, "pk-guides accent".to_owned()));
+    let chev = |h: &Harness, v: &str| h.class(one(h, row(h, v), "pk-chev"));
+    assert_eq!(chev(&h, "a"), "pk-chev open");
+    assert_eq!(chev(&h, "b"), "pk-chev");
+    assert_eq!(chev(&h, "c"), "pk-chev leaf");
+    assert!(h.find_class(one(&h, row(&h, "c"), "pk-chev"), "ico").is_empty(), "a leaf draws no chevron");
+    // No dot lead in a tree: the accent is the guides'.
+    assert!(h.find_class(row(&h, "c"), "pk-dot").is_empty());
+    for v in ["a", "b", "c"] {
+        assert!((bbox(&h.doc, row(&h, v)).h - 24.0).abs() < 0.5);
+    }
+}
+
+/// The bar folds as it narrows (book: Action bar folding): the Escape action moves into the
+/// head's esc (`.fold-esc`), then secondary buttons drop their keycaps (`.fold-keys`); with no
+/// Escape action the keycaps go first. It unfolds when there is room again.
+#[test]
+fn picker_action_bar_folds_esc_then_keys() {
+    let acts = |esc: bool| {
+        let mut a = vec![
+            json!({"id": "go", "label": "Switch to this one", "keys": ["enter"], "primary": true}),
+            json!({"id": "sum", "label": "Summarize & switch", "keys": ["shift", "enter"]}),
+            json!({"id": "label", "label": "Label the entry", "keys": ["shift", "l"]}),
+            json!({"id": "filter", "label": "Filter entries", "keys": ["ctrl", "o"]}),
+        ];
+        if esc {
+            a.push(json!({"id": "close", "label": "Close the sheet", "keys": ["esc"], "end": true}));
+        }
+        json!({"size": "lg", "query": "", "items": [{"id": "x", "label": "x"}], "actions": a})
+    };
+    let folds = |cols: u16, esc: bool| {
+        let mut h = harness(cols);
+        open(&mut h, acts(esc), json!([]));
+        let el = h.el("s1", "pk");
+        (has(&h, el, "fold-esc"), has(&h, el, "fold-keys"), h.find_class(el, "pk-esc").len())
+    };
+    assert_eq!(folds(150, true), (false, false, 0), "room for everything");
+    assert_eq!(folds(106, true), (true, false, 1), "esc moves to the head");
+    assert_eq!(folds(80, true), (true, true, 1), "then the keycaps go");
+    assert_eq!(folds(80, false).1, true, "without an Escape action the keycaps go first");
+}
+
+/// `itemsDel` drops items from the catalog through a render, and the rows go with them.
+#[test]
+fn picker_items_add_and_del_update_the_rows() {
+    let mut h = harness(140);
+    let (items, _) = many_items(5);
+    open(&mut h, json!({"query": "", "items": items}), json!([]));
+    let ids = |h: &Harness| -> Vec<String> {
+        let el = h.el("s1", "pk");
+        h.find_class(el, "pk-row").into_iter().filter_map(|r| h.attr(r, "data-v")).collect()
+    };
+    assert_eq!(ids(&h), ["m0", "m1", "m2", "m3", "m4"]);
+    set(&mut h, 3, json!({"itemsDel": ["m1", "m3"]}));
+    assert_eq!(ids(&h), ["m0", "m2", "m4"]);
+    set(&mut h, 4, json!({"itemsAdd": [{"id": "m9", "label": "late"}, {"id": "m0", "label": "renamed"}]}));
+    assert_eq!(ids(&h), ["m0", "m2", "m4", "m9"]);
+    let el = h.el("s1", "pk");
+    let m0 = h.find_class(el, "pk-row").into_iter().find(|&r| h.attr(r, "data-v").as_deref() == Some("m0")).unwrap();
+    assert_eq!(h.text(one(&h, m0, "pk-label")), "renamed");
+}
+
+/// Small behaviors: hits mark styled (spans) labels too; a text fact's tooltip only when it is
+/// cut; a numeric `selected` is the same row as its string id (a click on it activates); the
+/// error state's retry, disabled in the bar, is `.off` there too.
+#[test]
+fn picker_details_hits_on_spans_fact_tips_numeric_selected_and_off_state_buttons() {
+    let mut h = harness(140);
+    open(
+        &mut h,
+        json!({"query": "us", "items": [
+            {"id": "1", "label": [{"t": "user: ", "s": "accent"}, {"t": "hello"}],
+             "facts": {"who": "short", "long": "a value far too long for its column"}},
+            {"id": "2", "label": "two"}
+        ], "columns": [{"id": "who"}, {"id": "long", "format": "dim"}],
+          "hits": {"1": [[0, 2]]}, "selected": 1}),
+        json!([]),
+    );
+    let el = h.el("s1", "pk");
+    let row1 = h.find_class(el, "pk-row").into_iter().find(|&r| h.attr(r, "data-v").as_deref() == Some("1")).unwrap();
+    let marks: Vec<String> = h.find_class(row1, "sf-mark").into_iter().map(|m| h.text(m)).collect();
+    assert_eq!(marks, ["us"]);
+    assert_eq!(h.text(one(&h, row1, "pk-label")), "user: hello");
+    let facts = h.find_class(row1, "pk-fact");
+    assert!(h.attr(facts[0], "title").is_none(), "a value that fits has no tooltip");
+    assert_eq!(h.attr(facts[1], "title").as_deref(), Some("a value far too long for its column"));
+    // `selected: 1` selects row "1": a click on it activates.
+    assert!(has(&h, row1, "sel"));
+    let out = click(&mut h, row1, 1);
+    assert!(matches!(events_of(&out)[..], [ViewEvent::Activate { .. }]), "{out:?}");
+    // The error state's retry, disabled.
+    set(&mut h, 3, json!({"state": "error", "message": "boom", "actions": [
+        {"id": "retry", "label": "Retry", "disabled": "Offline"}]}));
+    let el = h.el("s1", "pk");
+    let err = one(&h, el, "pk-err");
+    let b = one(&h, err, "pk-btn");
+    assert!(has(&h, b, "off"));
+    assert_eq!(h.attr(b, "title").as_deref(), Some("Offline"));
+    let from = h.sent.len();
+    click(&mut h, b, 1);
+    assert!(events(&h, from).is_empty(), "a disabled retry sends nothing");
 }

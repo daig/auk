@@ -729,3 +729,17 @@ fn omps_usage_heatmap_and_autoresearch_trend_render_named_and_themed() {
         assert_eq!(h.text(sum), "latency per run · best 58 ms");
     }
 }
+
+/// A semantic token that names no color (`strong`) still fills: `--chart-c` resolves (to the
+/// accent without a palette entry), not to an undefined `--sf-c-strong`.
+#[test]
+fn a_semantic_token_without_a_color_still_fills() {
+    let mut chart = heatmap(4);
+    chart["token"] = json!("strong");
+    let mut h = chart_surface(ViewSettings::default(), json!([{"id": "hm", "k": "chart", "p": chart}]));
+    settle(&mut h);
+    let el = h.el("s1", "hm");
+    let c = h.doc.computed_style(el).unwrap().custom.get("--chart-c").map(|v| v.trim().to_owned());
+    let accent = h.doc.computed_style(el).unwrap().custom.get("--accent").map(|v| v.trim().to_owned());
+    assert!(c.is_some() && c == accent, "{c:?} vs {accent:?}");
+}

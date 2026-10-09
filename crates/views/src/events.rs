@@ -344,6 +344,7 @@ impl PaneView {
                     ViewEvent::Action {
                         id: node.id().to_owned(),
                         action: act,
+                        value: auk_tsp::ActValue::Split,
                         mods: ev.mods,
                         values: None,
                     },
@@ -374,7 +375,12 @@ impl PaneView {
         let ps = sv.st.pickers.entry(id.clone()).or_default();
         match press {
             Press::Row { item, disabled } => {
-                let selected = node.prop("selected").and_then(Value::as_str) == Some(item.as_str());
+                // `selected` as the rows read it: a numeric id is the same item as its string.
+                let selected = node
+                    .prop("selected")
+                    .and_then(crate::kinds::picker::item_id)
+                    .as_deref()
+                    == Some(item.as_str());
                 let last = ps.last_click.clone();
                 let activate = if ev.clicks >= 2 {
                     // Once per double click: not again when its first press activated.
@@ -402,7 +408,7 @@ impl PaneView {
                 };
                 vec![self.event(surface, event)]
             }
-            Press::Act(Some(action)) => {
+            Press::Act(Some((action, value))) => {
                 let menu = ps.menu;
                 ps.menu = false;
                 if menu {
@@ -413,6 +419,7 @@ impl PaneView {
                     ViewEvent::Action {
                         id,
                         action,
+                        value: auk_tsp::ActValue::Exact(value),
                         mods: ev.mods,
                         values: None,
                     },
@@ -568,6 +575,7 @@ impl PaneView {
                 ViewEvent::Action {
                     id: node.id().to_owned(),
                     action: other.to_owned(),
+                    value: auk_tsp::ActValue::Split,
                     mods,
                     values: self.values(surface, node.id()),
                 },

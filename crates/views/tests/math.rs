@@ -625,3 +625,59 @@ fn formulas_paint_in_current_color_in_both_themes_and_follow_a_sheet() {
         );
     }
 }
+
+/// `$$…$$` amid a paragraph's text is `span.math.display` (inline-level in the `p`, drawn as a
+/// centered line); alone in its paragraph it is `div.math-display` (book: md Math).
+#[test]
+fn display_math_amid_text_is_a_span_and_alone_a_div() {
+    let mut h = harness(true);
+    let text = "So $$a+b$$ holds.\n\n$$c+d$$\n";
+    show(&mut h, json!([{"id": "m", "k": "md", "p": {"text": text}}]));
+    let m = h.el("s1", "m");
+    let amid: Vec<NodeId> = h
+        .find_class(m, "display")
+        .into_iter()
+        .filter(|&e| h.class(e).split(' ').any(|c| c == "math"))
+        .collect();
+    assert_eq!(amid.len(), 1);
+    let tag = |e: NodeId| h.doc.node(e).element().unwrap().tag.as_str().to_owned();
+    assert_eq!(tag(amid[0]), "span");
+    assert_eq!(h.attr(amid[0], "data-tex").as_deref(), Some("a+b"));
+    assert_eq!(tag(h.doc.parent(amid[0]).unwrap()), "p");
+    let block = h.find_class(m, "math-display");
+    assert_eq!(block.len(), 1);
+    assert_eq!(tag(block[0]), "div");
+    assert_eq!(h.attr(block[0], "data-tex").as_deref(), Some("c+d"));
+    // Drawn as a line of its own, centered like the block.
+    let st = h.doc.computed_style(amid[0]).unwrap();
+    assert_eq!(format!("{:?}", st.display).to_lowercase().contains("block"), true, "{:?}", st.display);
+}
+
+/// A lone `$` (a price) doesn't swallow a `\(…\)` after it: only `$…$` as pulldown-cmark reads
+/// it pairs up (the closing `$` not followed by a digit).
+#[test]
+fn a_lone_dollar_leaves_later_delimiters_alone() {
+    let mut h = harness(true);
+    let text = "It costs $5, then \\(x^2\\) and $10 more.";
+    show(&mut h, json!([{"id": "m", "k": "md", "p": {"text": text}}]));
+    let m = h.el("s1", "m");
+    let tex: Vec<String> = h
+        .find_class(m, "math")
+        .into_iter()
+        .filter_map(|e| h.attr(e, "data-tex"))
+        .collect();
+    assert_eq!(tex, ["x^2"]);
+    let all = h.text(m);
+    assert!(all.contains("$5") && all.contains("$10"), "{all}");
+}
+
+/// A formula wider than [`math::MAX_SIDE`] device px at its size draws at a smaller one that
+/// fits, keeping its size in em, instead of failing.
+#[test]
+fn a_formula_too_wide_to_draw_draws_coarser() {
+    let wide = "x".repeat(600);
+    let f = math::typeset_uncached(&wide, false, 40).expect("drawn, not refused");
+    assert!(f.content.data.width <= math::MAX_SIDE && f.content.data.height <= math::MAX_SIDE);
+    let narrow = math::typeset_uncached("xx", false, 40).unwrap();
+    assert!(f.width > 200.0 * narrow.width / 2.0 * 0.9, "its size in em is kept: {}", f.width);
+}

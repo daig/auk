@@ -1,0 +1,17 @@
+[
+  {"wait": "frame", "contains": "picker", "timeout": 30},
+  {"wait": "idle", "ms": 1500, "timeout": 30},
+  {"key": "down"},
+  {"wait": "idle", "ms": 800},
+  {"keys": "over"},
+  {"wait": "idle", "ms": 800},
+  {"key": "backspace"},
+  {"key": "backspace"},
+  {"key": "backspace"},
+  {"key": "backspace"},
+  {"wait": "idle", "ms": 800},
+  {"key": "escape"},
+  {"wait": "idle", "ms": 1500},
+  {"signal": "TERM"},
+  {"wait": "exit", "timeout": 15}
+]

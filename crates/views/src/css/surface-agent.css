@@ -139,7 +139,7 @@
 .sf-eff .track, .sf-eff .arc, .sf-eff .blaze { left: 0; top: 0; }
 .sf-eff .arc { width: 14px; height: 14px; }
 .sf-eff .half, .sf-eff .cut { position: absolute; top: 0; width: 7px; height: 14px; overflow: hidden; }
-.sf-eff .rot { position: absolute; top: 0; width: 14px; height: 14px; transition: transform 0.4s ease; }
+.sf-eff .rot { position: absolute; top: 0; width: 14px; height: 14px; transition: transform 0.4s linear; }
 .sf-eff .ring { position: absolute; top: 0; left: 0; border-color: var(--eff); transition: border-color 0.3s; }
 .sf-eff .r { left: 7px; }
 .sf-eff .r .rot { left: -7px; animation: sf-eff-sweep 0.3s ease-in; }

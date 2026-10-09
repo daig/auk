@@ -192,6 +192,8 @@ impl WinState {
         }
         self.ui_dirty = true;
         if let Some(w) = &self.window {
+            // Rebuilding the menu bar resets the cursor: an armed link keeps its hand.
+            self.reassert_pointer(w);
             w.request_frame();
         }
     }

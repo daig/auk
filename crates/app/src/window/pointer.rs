@@ -195,6 +195,16 @@ impl WinState {
         Ok(out)
     }
 
+    /// Puts the pointing hand back while a link is armed, when AppKit has reset the cursor (a
+    /// menu bar rebuilt on a settings reload, a window change) without the pointer moving.
+    pub(super) fn reassert_pointer(&self, window: &Window) {
+        if self.pointer_shape == auk_platform_macos::PointerShape::PointingHand
+            && window.pointer() != self.pointer_shape
+        {
+            window.set_pointer(self.pointer_shape);
+        }
+    }
+
     /// Follows the pointer over grid links and the ⌘ key: what [`WinState::armed_link`] sees.
     /// Returns whether the armed link changed (the grid and the pointer change with it).
     pub(super) fn track_grid_link(
@@ -265,6 +275,64 @@ impl WinState {
 
     /// A press that a surface took: when it went into the pane's focused program field with
     /// native editing, a drag from it selects in the field.
+    /// A press on a `prefs` ordered list's grip starts dragging its item. Returns whether it did.
+    pub(super) fn reorder_press(&mut self, pane: PaneId, m: &MouseEvent) -> bool {
+        self.reorder_drag = None;
+        let Some((dx, dy)) = self.surface_point(pane, m.x, m.y) else {
+            return false;
+        };
+        let conn = self.conn.clone();
+        let shared = conn.shared();
+        let (Some(sf), Some(data)) = (self.surfaces.get_mut(&pane), shared.panes.get(&pane)) else {
+            return false;
+        };
+        let (doc, pv) = sf.parts();
+        if pv.reorder_press(doc, data.replica.tsp(), dx, dy) {
+            self.reorder_drag = Some(pane);
+            self.ui_dirty = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// The pointer moved while dragging a `prefs` item: it follows. Returns whether a drag is
+    /// under way.
+    pub(super) fn reorder_dragged(&mut self, window: &Window, m: &MouseEvent) -> bool {
+        let Some(pane) = self.reorder_drag else {
+            return false;
+        };
+        if let Some((dx, dy)) = self.surface_point(pane, m.x, m.y)
+            && let Some(sf) = self.surfaces.get_mut(&pane)
+        {
+            let (doc, pv) = sf.parts();
+            pv.reorder_drag(doc, dx, dy);
+            self.ui_dirty = true;
+            window.request_frame();
+        }
+        true
+    }
+
+    /// The release of a `prefs` item drag: the new order goes to the program. Returns whether a
+    /// drag was under way.
+    pub(super) fn reorder_released(&mut self, window: &Window, m: &MouseEvent) -> bool {
+        let Some(pane) = self.reorder_drag.take() else {
+            return false;
+        };
+        let at = self.surface_point(pane, m.x, m.y).unwrap_or((-1.0e6, -1.0e6));
+        let out = match self.surfaces.get_mut(&pane) {
+            Some(sf) => {
+                let (doc, pv) = sf.parts();
+                pv.reorder_release(doc, at.0, at.1).unwrap_or_default()
+            }
+            None => Vec::new(),
+        };
+        self.ui_dirty = true;
+        self.outcomes(window, pane, out);
+        window.request_frame();
+        true
+    }
+
     pub(super) fn field_press(&mut self, pane: PaneId, m: &MouseEvent) {
         self.field_drag = self.field_offset(pane, m.x, m.y).map(|off| (pane, off));
     }

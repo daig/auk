@@ -2480,3 +2480,85 @@ fn a23_omps_settings_open_as_prefs_and_footer_shows_effort() {
         "omp's config is unchanged"
     );
 }
+
+/// A23 `prefs` with a picker in its editor card, on a live omp 18.8.5 with no prompt: in
+/// `/settings`, Enter on Dark Theme (the first row, focused when the sheet opens; 102 themes,
+/// over omp's 12) opens omp's submenu as an md `picker` child of the `prefs` node. It draws in the
+/// editor card, which is the sheet's frame (`.pf-editor.on.pk`): md-sheet tall where the sheet has
+/// room, the picker filling it with rows inside. Esc closes the picker, Esc the sheet; nothing is
+/// applied, and omp's config is byte-identical.
+#[test]
+fn a23_omps_theme_submenu_picker_fills_the_prefs_editor_card() {
+    let config = real_home().join(".omp/agent/config.yml");
+    let config_before = std::fs::read(&config).ok();
+    let mut omp = LiveOmp::start("omp-prefs-picker", true);
+    let id = omp.ready();
+    let pane = omp.pane;
+    omp.window.type_keys(pane, "/settings");
+    omp.wait_text(&id, "/settings");
+    omp.window.press(pane, Key::Enter, Mods::default());
+    let pf = omp.window.wait("omp's settings sheet", UI, |w| {
+        let s = w.live_surface(pane, "s:1")?;
+        let layer = s.document().region("layer")?;
+        let pf = kinds_under(layer).into_iter().find(|(_, k)| k == "prefs")?.0;
+        (s.document().get(&pf)?.prop("focus")?.as_str() == Some("theme.dark")).then_some(pf)
+    });
+    omp.window.press(pane, Key::Enter, Mods::default());
+    let picker = omp.window.wait("omp's theme picker", UI, |w| {
+        let s = w.live_surface(pane, "s:1")?;
+        let node = s.document().get(&pf)?;
+        kinds_under(node).into_iter().find(|(_, k)| k == "picker").map(|(id, _)| id)
+    });
+    std::thread::sleep(Duration::from_millis(400));
+    omp.window.frame();
+    let s = omp.window.live_surface(pane, "s:1").expect("the session");
+    let pf_el = omp.window.element_of(pane, s, &pf).expect("drawn");
+    let pk_el = omp.window.element_of(pane, s, &picker).expect("drawn");
+    let doc = omp.window.doc(pane);
+    let card = omp.window.with_class(pane, pf_el, "pf-editor")[0];
+    assert_eq!(omp.window.class(pane, card), "pf-editor on pk");
+    assert!(
+        std::iter::successors(Some(pk_el), |&e| doc.parent(e)).any(|e| e == card),
+        "the picker is in the card"
+    );
+    let page = doc.border_box(omp.window.with_class(pane, pf_el, "pf")[0]).expect("laid out");
+    let c = doc.border_box(card).expect("laid out");
+    let sheet = doc
+        .border_box(omp.window.with_class(pane, pk_el, "pk-sheet")[0])
+        .expect("laid out");
+    assert!((c.h - 540f32.min(page.h - 80.0)).abs() < 1.0, "card {c:?} in {page:?}");
+    assert!(c.x >= page.x + 15.0 && c.x + c.w <= page.x + page.w - 15.0, "{c:?} {page:?}");
+    assert!((sheet.h - (c.h - 2.0)).abs() < 1.0 && (sheet.w - (c.w - 2.0)).abs() < 1.0, "{sheet:?} {c:?}");
+    let rows: Vec<_> = omp
+        .window
+        .with_class(pane, pk_el, "pk-row")
+        .into_iter()
+        .filter_map(|r| doc.border_box(r))
+        .filter(|r| r.y >= c.y && r.y + r.h <= c.y + c.h)
+        .collect();
+    assert!(rows.len() >= 8, "rows show in the card: {rows:?}");
+    eprintln!("card {c:?}, {} rows in view", rows.len());
+
+    // Esc closes the picker (omp's `close`, bound to esc), Esc the sheet.
+    omp.window.press(pane, Key::Escape, Mods::default());
+    omp.window.wait("the picker to close", UI, |w| {
+        let s = w.live_surface(pane, "s:1")?;
+        s.document().get(&picker).is_none().then_some(())
+    });
+    omp.window.press(pane, Key::Escape, Mods::default());
+    omp.window.wait("the settings sheet to close", UI, |w| {
+        let s = w.live_surface(pane, "s:1")?;
+        s.document().get(&pf).is_none().then_some(())
+    });
+    assert!(omp.window.errors().is_empty(), "{:?}", omp.window.errors());
+    let report = t2_report(&omp.records());
+    assert!(report.errors.is_empty(), "omp got errors: {:?}", report.errors);
+    omp.ready();
+    omp.clear(&id);
+    omp.quit();
+    assert_eq!(
+        std::fs::read(&config).ok(),
+        config_before,
+        "omp's config is unchanged"
+    );
+}

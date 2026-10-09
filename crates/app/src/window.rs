@@ -187,6 +187,8 @@ pub struct WinState {
     pub hover_title: Option<(String, f64, f64)>,
     /// A drag selecting in a program field: the pane and the offset it started at (§7.9).
     field_drag: Option<(PaneId, u64)>,
+    /// The pane whose `prefs` ordered list item is being dragged by its grip.
+    reorder_drag: Option<PaneId>,
     /// Where the input method's window was last told the cursor is, in window points.
     pub ime_area: Option<(f64, f64, f64, f64)>,
     /// The presence item as of the frame's look at the shared state, so the chrome doesn't
@@ -308,6 +310,7 @@ impl WinState {
             pointer_shape: auk_platform_macos::PointerShape::Arrow,
             hover_title: None,
             field_drag: None,
+            reorder_drag: None,
             ime_area: None,
             presence_shown: None,
             lens_seen: BTreeMap::new(),
@@ -744,6 +747,9 @@ impl WinState {
             f64::from(metrics.cell_height),
         );
         self.find_before_frame();
+        // An armed link's pointing hand outlives AppKit resetting the cursor (a menu bar
+        // rebuilt on a settings reload, a window change): put it back.
+        self.reassert_pointer(window);
         // The image viewer's picture, once its background decode is done (A9).
         if self.poll_viewer() {
             window.request_frame();
@@ -1469,6 +1475,11 @@ impl WinState {
                 } else {
                     let _ = self.conn.send(&ClientMsg::Focus { pane });
                 }
+                // A press on an ordered list's grip drags its item (book: prefs).
+                if button == MouseButton::Left && m.clicks <= 1 && self.reorder_press(pane, &m) {
+                    window.request_frame();
+                    return;
+                }
                 if matches!(button, MouseButton::Left | MouseButton::Right)
                     && self.surface_click(window, pane, &m, button)
                 {
@@ -1515,7 +1526,7 @@ impl WinState {
                 window.request_frame();
             }
             MouseKind::Dragged(button) => {
-                if self.field_dragged(window, &m) {
+                if self.reorder_dragged(window, &m) || self.field_dragged(window, &m) {
                     return;
                 }
                 let Some(press) = self.press else { return };
@@ -1545,6 +1556,9 @@ impl WinState {
             }
             MouseKind::Up(button) => {
                 self.field_drag = None;
+                if self.reorder_released(window, &m) {
+                    return;
+                }
                 if let Some(press) = self.press.take()
                     && press.reported
                 {

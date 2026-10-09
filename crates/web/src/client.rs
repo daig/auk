@@ -119,6 +119,8 @@ struct App {
     animating: bool,
     frames: u64,
     composing: bool,
+    /// The pane whose `prefs` ordered list item is being dragged by its grip.
+    reorder: Option<PaneId>,
     /// Text a composition just committed: an `input` event repeating it is the same text.
     composed: Option<String>,
     adapter: String,
@@ -314,6 +316,7 @@ async fn start_inner() -> Result<(), String> {
         animating: false,
         frames: 0,
         composing: false,
+        reorder: None,
         composed: None,
         adapter,
     }));
@@ -410,6 +413,40 @@ async fn start_inner() -> Result<(), String> {
             a.mouse_down(&e);
             let _ = a.input.focus();
             a.request_frame(&app);
+        }
+    });
+    // The pointer's hover: `:hover` styles, a command block's toolbar, a `prefs` menu's preview.
+    on(&canvas, "mousemove", {
+        let app = app.clone();
+        move |e: web_sys::MouseEvent| {
+            let mut a = app.borrow_mut();
+            if a.mouse_move(Some((e.offset_x() as f32, e.offset_y() as f32))) {
+                a.request_frame(&app);
+            }
+        }
+    });
+    on(&window(), "mouseup", {
+        let app = app.clone();
+        let canvas = canvas.clone();
+        move |e: web_sys::MouseEvent| {
+            let mut a = app.borrow_mut();
+            let origin = canvas.get_bounding_client_rect();
+            let at = (
+                (f64::from(e.client_x()) - origin.left()) as f32,
+                (f64::from(e.client_y()) - origin.top()) as f32,
+            );
+            if a.mouse_up(at) {
+                a.request_frame(&app);
+            }
+        }
+    });
+    on(&canvas, "mouseleave", {
+        let app = app.clone();
+        move |_: web_sys::MouseEvent| {
+            let mut a = app.borrow_mut();
+            if a.mouse_move(None) {
+                a.request_frame(&app);
+            }
         }
     });
     on(&canvas, "contextmenu", |e: web_sys::MouseEvent| {
@@ -716,7 +753,18 @@ impl App {
                     secondary: e.button() == 2,
                 };
                 match (self.session.panes.get(&pane), self.views.get_mut(&pane)) {
-                    (Some(p), Some(view)) => view.draw.click(pane, &p.replica, press, content_h),
+                    (Some(p), Some(view)) => {
+                        // A press on a `prefs` grip drags its item instead of clicking.
+                        if !press.secondary
+                            && press.clicks == 1
+                            && view.draw.reorder_press(&p.replica, press, content_h)
+                        {
+                            self.reorder = Some(pane);
+                            None
+                        } else {
+                            view.draw.click(pane, &p.replica, press, content_h)
+                        }
+                    }
                     _ => None,
                 }
             }
@@ -739,6 +787,97 @@ impl App {
         let Some(actions) = actions else {
             return;
         };
+        self.run_actions(actions);
+    }
+
+    /// The pointer moved to `at` (CSS pixels from the canvas's top-left), or left the canvas:
+    /// each pane's views follow it (`PaneDraw::hover`), and the events the hover asks for go to
+    /// the program. Returns whether a redraw is due.
+    fn mouse_move(&mut self, at: Option<(f32, f32)>) -> bool {
+        if let Some(pane) = self.reorder {
+            let press = at.and_then(|(cx, cy)| self.pane_press(pane, cx, cy));
+            if let (Some((press, content_h)), Some(view)) = (press, self.views.get_mut(&pane)) {
+                view.draw.reorder_drag(press, content_h);
+            }
+            return true;
+        }
+        let over = match at.map(|(cx, cy)| self.locate(cx, cy, false)) {
+            Some(Located::Pane {
+                pane,
+                x,
+                y,
+                content_h,
+            }) => Some((pane, x, y, content_h)),
+            _ => None,
+        };
+        let mut changed = false;
+        let mut actions = Vec::new();
+        let panes: Vec<PaneId> = self.views.keys().copied().collect();
+        for pane in panes {
+            let Some(view) = self.views.get_mut(&pane) else {
+                continue;
+            };
+            let (press, content_h) = match over {
+                Some((p, x, y, h)) if p == pane => (
+                    Some(Press {
+                        x,
+                        y,
+                        ..Press::default()
+                    }),
+                    h,
+                ),
+                _ => (None, 0.0),
+            };
+            let (c, a) = view.draw.hover(pane, press, content_h);
+            changed |= c;
+            actions.extend(a);
+        }
+        if !actions.is_empty() {
+            self.run_actions(actions);
+        }
+        changed
+    }
+
+    /// A point of the canvas (CSS pixels) as a press in `pane`'s content area, and that area's
+    /// height.
+    fn pane_press(&self, pane: PaneId, cx: f32, cy: f32) -> Option<(Press, f32)> {
+        match self.locate(cx, cy, false) {
+            Located::Pane {
+                pane: p,
+                x,
+                y,
+                content_h,
+            } if p == pane => Some((
+                Press {
+                    x,
+                    y,
+                    ..Press::default()
+                },
+                content_h,
+            )),
+            _ => None,
+        }
+    }
+
+    /// The button came up: a `prefs` grip drag drops its item. Returns whether a redraw is due.
+    fn mouse_up(&mut self, at: (f32, f32)) -> bool {
+        let Some(pane) = self.reorder.take() else {
+            return false;
+        };
+        let press = self.pane_press(pane, at.0, at.1);
+        let content_h = press.map_or(0.0, |(_, h)| h);
+        let actions = self
+            .views
+            .get_mut(&pane)
+            .and_then(|v| v.draw.reorder_release(pane, press.map(|(p, _)| p), content_h));
+        if let Some(actions) = actions {
+            self.run_actions(actions);
+        }
+        true
+    }
+
+    /// Does what the views asked: events to their surfaces, copies, opens.
+    fn run_actions(&mut self, actions: Vec<Action>) {
         for action in actions {
             match action {
                 Action::Send(auk_mirror::ClientMsg::ViewEvent { pane, sf, event }) => {

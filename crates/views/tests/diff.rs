@@ -379,3 +379,31 @@ fn omp_session_diffs_draw_split_under_the_split_setting() {
         assert!(h.find_class(d, "sf-dr").is_empty());
     }
 }
+
+/// Outside a card a diff has its ring and `--code-bg`; inside one (directly or deeper) it sits
+/// flush, with no ring or background of its own (book: diff).
+#[test]
+fn a_diff_in_a_card_sits_flush() {
+    let mut h = Harness::new();
+    h.hello(&[]);
+    h.surface(
+        "s1",
+        "inline",
+        json!([
+            {"id": "top", "k": "diff", "p": {"text": CHANGE}},
+            {"id": "card", "k": "card", "p": {"head": "src/f.rs"}, "c": [
+                {"id": "inner", "k": "diff", "p": {"text": CHANGE}},
+                {"id": "col", "k": "col", "c": [{"id": "deep", "k": "diff", "p": {"text": CHANGE}}]}
+            ]}
+        ]),
+    );
+    h.frame();
+    let top = h.doc.computed_style(h.el("s1", "top")).unwrap();
+    assert_eq!(top.border_width, [1.0; 4]);
+    assert!(top.background_color.a > 0.5, "{:?}", top.background_color);
+    for id in ["inner", "deep"] {
+        let s = h.doc.computed_style(h.el("s1", id)).unwrap();
+        assert_eq!(s.border_width, [0.0; 4], "{id}");
+        assert_eq!(s.background_color.a, 0.0, "{id}: {:?}", s.background_color);
+    }
+}

@@ -32,7 +32,7 @@ pub mod wire;
 
 pub use blob::{Blob, BlobStore, MemoryBlobs};
 pub use doc::{Document, EL_TAGS, NodeRef, Reveal, RevealAt, Scroll, ScrollBy, el_tag_error};
-pub use events::{Delivery, Mods, Outgoing, Refused, ViewEvent};
+pub use events::{ActValue, Delivery, Mods, Outgoing, Refused, ViewEvent};
 pub use grid::{AnchorError, AnchorKey, Grid, Line};
 pub use hash::{AGE_PROPS, AGENT_AGE_OBJECTS};
 pub use pane::{

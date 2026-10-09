@@ -140,6 +140,7 @@ impl PaneView {
                 return Ok(Some(ViewEvent::Action {
                     id: node.to_owned(),
                     action: act.to_owned(),
+                    value: auk_tsp::ActValue::Split,
                     mods,
                     values: values(&self.checked, node),
                 }));

@@ -114,12 +114,19 @@ fn fixtures_replay_without_errors() {
             .collect();
         assert_eq!(count(&sent, "ack"), count(&recorded, "ack"), "{name}");
         assert_eq!(count(&sent, "hello"), count(&recorded, "hello"), "{name}");
-        // Every surface the program closed is closed, its `main` kept.
+        // Every surface the program closed is closed, its `main` kept (a surface the program
+        // opened and never drew, as omp's session surface under its start-up session picker,
+        // has none to keep).
         let closed: Vec<&str> = records
             .iter()
             .filter(|r| r.dir == Dir::Out && r.verb == "x")
             .map(|r| r.body["id"].as_str().unwrap())
             .collect();
+        let drawn = |id: &str| {
+            records
+                .iter()
+                .any(|r| r.dir == Dir::Out && r.verb == "f" && r.body["sf"] == id)
+        };
         for s in h.pane.surfaces() {
             let want = if closed.contains(&s.id()) {
                 State::Closed
@@ -127,7 +134,11 @@ fn fixtures_replay_without_errors() {
                 State::Live
             };
             assert_eq!(s.state(), want, "{name}: {}", s.id());
-            assert!(s.document().region("main").is_some(), "{name}: {}", s.id());
+            assert!(
+                !drawn(s.id()) || s.document().region("main").is_some(),
+                "{name}: {}",
+                s.id()
+            );
         }
         assert!(frames > 0 || name.contains("docs"), "{name}");
         // Then the shell's prompt takes inline surfaces off the pane, silently.

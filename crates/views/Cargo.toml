@@ -46,6 +46,8 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 [dev-dependencies]
 auk-conformance = { path = "../conformance" }
 base64 = "0.23.1"
+# The timing tests read the thread's CPU clock, which other processes' load doesn't stretch.
+libc = "0.2"
 # Writes the APNG the image tests decode.
 png = "0.18.1"
 # Blocks on wgpu's adapter and device requests in the paint tests.

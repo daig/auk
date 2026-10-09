@@ -202,6 +202,23 @@ pub fn variables(p: &Palette, dark: bool) -> String {
     if let Some(c) = get("text") {
         out.push_str(&format!("--sf-text: {c}; "));
     }
+    // The kit's accents for `prefs` (book: prefs Variables, "follow the program's accent under
+    // .sf-pal"): the accent for rings and tints, as text corrected to 4.5:1 on the surface, and
+    // as a fill darkened until white reads on it at 4.5:1 (book: Kit tokens, `--accent-fill`).
+    if let Some(raw) = variant
+        .iter()
+        .find(|(k, _)| k == "accent")
+        .and_then(|(_, v)| parse_hex(v))
+    {
+        let ink = correct(raw, &bgs, 4.5, dark);
+        let fill = correct(raw, &[[255, 255, 255]], 4.5, false);
+        out.push_str(&format!(
+            "--pf-accent: {}; --pf-accent-ink: {}; --pf-accent-fill: {}; ",
+            hex(raw),
+            hex(ink),
+            hex(fill)
+        ));
+    }
     let _ = fmt_num;
     out
 }
@@ -229,5 +246,11 @@ mod tests {
         );
         // Light appearance with only a dark variant uses the dark one.
         assert!(variables(&p, false).contains("--sf-p-accent"));
+        // The kit accents for prefs: the accent, its ink, and a fill white reads on.
+        assert!(v.contains("--pf-accent: #00b4ff;"), "{v}");
+        let fill = v.split("--pf-accent-fill: ").nth(1).unwrap()[..7].to_owned();
+        assert!(contrast(parse_hex(&fill).unwrap(), [255, 255, 255]) >= 4.5, "{fill}");
+        let ink = v.split("--pf-accent-ink: ").nth(1).unwrap()[..7].to_owned();
+        assert!(contrast(parse_hex(&ink).unwrap(), PAGE_DARK) >= 4.5, "{ink}");
     }
 }

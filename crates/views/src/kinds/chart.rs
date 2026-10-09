@@ -45,8 +45,9 @@ pub fn level(v: Option<&Value>) -> &'static str {
 }
 
 /// The fill color a `token` names, as `--chart-c` (book:6986, 9945, 10030): `accent` (and no
-/// token) uses the program palette's accent if it has one; a semantic token is
-/// `var(--sf-c-<t>)`; a program token is `var(--sf-p-<t>, <the accent>)`. A token that isn't a
+/// token) uses the program palette's accent if it has one; a semantic token naming a color is
+/// `var(--sf-c-<t>)`; any other token (a program token, or a semantic one without a color such
+/// as `strong`) is `var(--sf-p-<t>, <the accent>)`. A token that isn't a
 /// plain name is ignored.
 pub fn fill(token: Option<&str>) -> String {
     const ACCENT: &str = "var(--sf-p-accent, var(--accent))";
@@ -59,7 +60,7 @@ pub fn fill(token: Option<&str>) -> String {
     };
     if t == "accent" {
         ACCENT.to_owned()
-    } else if spans::SEMANTIC.contains(&t) {
+    } else if spans::COLOR_TOKENS.contains(&t) {
         format!("var(--sf-c-{t})")
     } else {
         format!("var(--sf-p-{t}, var(--accent))")
@@ -250,6 +251,10 @@ mod tests {
         assert_eq!(fill(None), "var(--sf-p-accent, var(--accent))");
         assert_eq!(fill(Some("accent")), "var(--sf-p-accent, var(--accent))");
         assert_eq!(fill(Some("success")), "var(--sf-c-success)");
+        // Semantic tokens without a color have no `--sf-c-*`: the palette's, else the accent.
+        for t in ["strong", "em", "mono", "mark", "typo", "icon", "hide"] {
+            assert_eq!(fill(Some(t)), format!("var(--sf-p-{t}, var(--accent))"), "{t}");
+        }
         assert_eq!(
             fill(Some("statusLineCost")),
             "var(--sf-p-statusLineCost, var(--accent))"

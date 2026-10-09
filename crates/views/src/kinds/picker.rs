@@ -45,6 +45,8 @@ pub(crate) struct PickerState {
     pub last_click: Option<(String, bool)>,
     /// The narrow head's scope menu is open.
     pub menu: bool,
+    /// The confirm strip drawn over the selected row.
+    confirm: Option<NodeId>,
 }
 
 /// What a press on a picker part means.
@@ -53,7 +55,7 @@ pub(crate) enum Press {
     /// A row: `select` or `activate` (decided by the caller from the click state).
     Row { item: String, disabled: bool },
     /// `action` with `act` (and `value` for scope/tab/strip); `None` for a disabled button.
-    Act(Option<String>),
+    Act(Option<(String, Option<String>)>),
     /// The narrow head's scope button: opens or closes the menu (local).
     Menu,
     /// Group headers and the sheet itself: nothing.
@@ -75,10 +77,10 @@ pub(crate) fn press(doc: &auk_ui::Document, node: NodeRef, parts: &[NodeId]) -> 
             }
             "act" => {
                 let off = actions(p).iter().any(|a| a.id == v && a.disabled.is_some());
-                Press::Act((!off).then_some(v))
+                Press::Act((!off).then_some((v, None)))
             }
-            "dim" => Press::Act(Some(escape_action(p))),
-            "scope" | "tab" | "strip" => Press::Act(Some(format!("{pk}={v}"))),
+            "dim" => Press::Act(Some((escape_action(p), None))),
+            "scope" | "tab" | "strip" => Press::Act(Some((pk.to_owned(), Some(v)))),
             "menu" => Press::Menu,
             _ => Press::Nothing,
         });
@@ -243,7 +245,7 @@ fn catalog(p: &Map<String, Value>) -> HashMap<String, &Map<String, Value>> {
     catalog_list(p).into_iter().collect()
 }
 
-fn item_id(v: &Value) -> Option<String> {
+pub(crate) fn item_id(v: &Value) -> Option<String> {
     match v {
         Value::String(s) if !s.is_empty() => Some(s.clone()),
         Value::Number(n) => Some(n.to_string()),
@@ -408,23 +410,55 @@ fn ranges(v: Option<&Value>) -> Vec<(u64, u64)> {
     out
 }
 
-/// A number shown compact: `272k`, `1.6M` (book:6339).
-pub(crate) fn compact(n: f64) -> String {
-    let a = n.abs();
-    let (v, unit) = if a >= 1e9 {
-        (n / 1e9, "B")
-    } else if a >= 1e6 {
-        (n / 1e6, "M")
-    } else if a >= 1e3 {
-        (n / 1e3, "k")
-    } else {
-        return fmt_num((n * 10.0).round() / 10.0);
-    };
-    if v.abs() < 10.0 {
-        format!("{}{unit}", fmt_num((v * 10.0).round() / 10.0))
-    } else {
-        format!("{}{unit}", fmt_num(v.round()))
+/// Hashes a JSON value in place (no copy, no serializing): rows' signatures hash every item
+/// on every render.
+pub(crate) fn hash_value(v: &Value, h: &mut impl Hasher) {
+    match v {
+        Value::Null => 0u8.hash(h),
+        Value::Bool(b) => (1u8, b).hash(h),
+        Value::Number(n) => {
+            2u8.hash(h);
+            match n.as_f64() {
+                Some(f) => f.to_bits().hash(h),
+                None => n.to_string().hash(h),
+            }
+        }
+        Value::String(s) => (3u8, s).hash(h),
+        Value::Array(a) => {
+            (4u8, a.len()).hash(h);
+            for x in a {
+                hash_value(x, h);
+            }
+        }
+        Value::Object(o) => {
+            (5u8, o.len()).hash(h);
+            for (k, x) in o {
+                k.hash(h);
+                hash_value(x, h);
+            }
+        }
     }
+}
+
+/// A number shown compact: `272k`, `1.6M` (book:6339). The unit is picked after rounding, so
+/// 999 950 is `1M`, not `1000k`.
+pub(crate) fn compact(n: f64) -> String {
+    const UNITS: [(f64, &str); 4] = [(1.0, ""), (1e3, "k"), (1e6, "M"), (1e9, "B")];
+    let round = |v: f64| {
+        if v.abs() < 10.0 {
+            (v * 10.0).round() / 10.0
+        } else {
+            v.round()
+        }
+    };
+    let a = n.abs();
+    let mut i = UNITS.iter().rposition(|(s, _)| a >= *s).unwrap_or(0);
+    let mut v = round(n / UNITS[i].0);
+    if v.abs() >= 1000.0 && i + 1 < UNITS.len() {
+        i += 1;
+        v = round(n / UNITS[i].0);
+    }
+    format!("{}{}", fmt_num(v), UNITS[i].1)
 }
 
 /// A count with thousands separators.
@@ -498,10 +532,25 @@ fn keycaps(cx: &mut Cx, parent: NodeId, keys: &[String]) {
 // ---------------------------------------------------------------------------------------------
 // Render
 
-/// The sheet's width, estimated from the pane's (for the width states and the fact columns).
-fn sheet_width(cx: &Cx, size: &str) -> f32 {
+/// The `prefs` node whose editor card holds `node` (directly, or in its editor column).
+fn editor_host(node: NodeRef) -> Option<NodeRef> {
+    std::iter::successors(node.parent(), |n| n.parent()).find(|n| n.kind() == "prefs")
+}
+
+/// The sheet's width, estimated from the pane's (for the width states and the fact columns). In
+/// a `prefs` editor card it is the card's: the page's (or the docked sheet's) width less the
+/// card's 16px insets, at most 600px (`surface-prefs.css` `.pf-editor.on`).
+fn sheet_width(cx: &Cx, node: NodeRef, size: &str) -> f32 {
     let zoom = (cx.set.font_px / 13.0).max(0.1);
     let pane = f32::from(cx.cols.max(1)) * cx.set.cell.0 / zoom;
+    if let Some(prefs) = editor_host(node) {
+        let host = if super::prefs::in_layer(prefs) {
+            f32::from(auk_tsp::aside_reserve(cx.cols)) * cx.set.cell.0 / zoom
+        } else {
+            pane
+        };
+        return (host - 32.0).clamp(0.0, 600.0);
+    }
     match size {
         "screen" => pane,
         "md" => (pane - 32.0).min(680.0),
@@ -515,7 +564,7 @@ pub(crate) fn picker(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
     // isn't a routing slot: children go to the preview only.
     let kept = cx.st.pickers.get(&id).and_then(|s| s.scroll);
     let kept = kept.filter(|&sc| {
-        cx.dom.doc.try_node(sc).is_some() && cx.dom.class_of(sc) == "pk-scroll pk-spacer"
+        cx.dom.doc.try_node(sc).is_some() && cx.dom.class_of(sc).starts_with("pk-scroll pk-spacer")
     });
     if let Some(sc) = kept {
         cx.dom.doc.detach(sc);
@@ -577,7 +626,7 @@ pub(crate) fn picker(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
         .collect();
 
     // Width states (book:6281-6282).
-    let w = sheet_width(cx, size);
+    let w = sheet_width(cx, node, size);
     let narrow = w < 760.0;
     let pv_below_auto = preview == "side" && w < 980.0;
     let pv_hide = preview != "none" && w < 640.0;
@@ -719,7 +768,8 @@ pub(crate) fn picker(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
         .filter(|a| !(fold_esc && a.esc() && !a.primary))
         .map(|a| btn_w(a, true))
         .sum();
-    let fold_keys = fold_esc && after_esc > bar_room;
+    // Then (or first, with no Escape action to move) the keycaps go.
+    let fold_keys = after_esc > bar_room;
     look.class_if(fold_esc, "fold-esc");
     look.class_if(fold_keys, "fold-keys");
     if esc_act.is_none() || fold_esc {
@@ -873,7 +923,6 @@ pub(crate) fn picker(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
     let mut y = 0.0f32;
     let mut sel_at = None;
     let mut keys_hash = std::collections::hash_map::DefaultHasher::new();
-    let mut first_group = true;
     let mut fresh: HashMap<String, (NodeId, u64)> = HashMap::new();
     let mut old = cx
         .st
@@ -900,7 +949,7 @@ pub(crate) fn picker(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
                     let mut hs = std::collections::hash_map::DefaultHasher::new();
                     (
                         col_sig,
-                        first_group && any_head,
+                        any_head,
                         label.map(|l| l.to_string()),
                         count.map(f64::to_bits),
                     )
@@ -912,14 +961,15 @@ pub(crate) fn picker(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
                     let cur = current.contains(iid);
                     let hit = hits.and_then(|h| h.get(iid.as_str()));
                     let mut hs = std::collections::hash_map::DefaultHasher::new();
-                    (
-                        col_sig,
-                        sel,
-                        cur,
-                        Value::Object((*it).clone()).to_string(),
-                        hit.map(Value::to_string),
-                    )
-                        .hash(&mut hs);
+                    (col_sig, sel, cur).hash(&mut hs);
+                    for (k, v) in it.iter() {
+                        k.hash(&mut hs);
+                        hash_value(v, &mut hs);
+                    }
+                    match hit {
+                        Some(v) => hash_value(v, &mut hs),
+                        None => 0u8.hash(&mut hs),
+                    }
                     let h = row_h(layout, Some(it));
                     if sel {
                         sel_at = Some((y, y + h));
@@ -945,7 +995,7 @@ pub(crate) fn picker(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
                             cx,
                             *label,
                             *count,
-                            first_group && any_head,
+                            any_head,
                             &cols,
                             &shown_cols,
                             has_cur,
@@ -969,9 +1019,6 @@ pub(crate) fn picker(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
                     }
                 }
             };
-            if matches!(e, Entry::Group { .. }) {
-                first_group = false;
-            }
             fresh.insert(key, (el, sig));
             want.push(el);
         }
@@ -981,6 +1028,50 @@ pub(crate) fn picker(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
             cx.dom.doc.remove(el);
         }
     }
+    // The confirm strip (book: `confirm`): over the selected row, a trash icon, the text, a
+    // danger button sending `confirm.act` (default "confirm") and Keep sending `cancel`.
+    if let Some(old) = cx.st.pickers.get_mut(&id).and_then(|s| s.confirm.take())
+        && cx.dom.doc.try_node(old).is_some()
+    {
+        cx.dom.doc.remove(old);
+    }
+    let confirm = p.get("confirm").and_then(Value::as_object);
+    let mut strip = None;
+    let sel_row = selected
+        .as_ref()
+        .and_then(|s| fresh.get(&format!("i:{s}")))
+        .map(|&(el, _)| el);
+    if let (Some(c), Some(row)) = (confirm, sel_row.filter(|_| show_rows)) {
+        // In the row (absolute, inset 0), so it rides with it through scrolling and
+        // virtualization; `data-pk="confirm"` keeps a press on it off the row.
+        let el = cx.dom.child(row, "div", "pk-confirm");
+        cx.dom.attr(el, "role", "alertdialog");
+        cx.dom.attr(el, "data-pk", "confirm");
+        let ic = cx.dom.child(el, "span", "pk-ct-ic");
+        icon(cx, ic, "trash");
+        let t = cx.dom.child(el, "span", "pk-ct");
+        m.clock |= spans_into(cx, t, c.get("text"));
+        let label = crate::events::text_content(cx.dom.doc, t);
+        cx.dom.attr(el, "aria-label", &label);
+        let act = str_prop(c, "act").filter(|a| !a.is_empty()).unwrap_or("confirm");
+        let label = str_prop(c, "label").filter(|l| !l.is_empty()).unwrap_or("Delete");
+        for (class, v, l) in [("pk-btn danger", act, label), ("pk-btn", "cancel", "Keep")] {
+            let b = cx.dom.child(el, "div", class);
+            cx.dom.attr(b, "role", "button");
+            cx.dom.attr(b, "data-pk", "act");
+            cx.dom.attr(b, "data-v", v);
+            cx.dom.child_text(b, "span", "l", l);
+        }
+        strip = Some(el);
+    }
+    cx.dom.set_class(
+        scroll,
+        if strip.is_some() {
+            "pk-scroll pk-spacer confirming"
+        } else {
+            "pk-scroll pk-spacer"
+        },
+    );
     cx.dom.reconcile(scroll, &want);
     super::virtualize(
         cx,
@@ -1139,6 +1230,7 @@ pub(crate) fn picker(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
     }
     ps.rows = fresh;
     ps.scroll = Some(scroll);
+    ps.confirm = strip;
     ps.selected = selected;
     ps.layout = layout.to_owned();
     ps.order_hash = order_hash;
@@ -1398,11 +1490,13 @@ fn item_row(
         let lab = cx
             .dom
             .child(l1, "span", if mono { "pk-label mono" } else { "pk-label" });
-        if marks.is_empty() || !plain {
+        if marks.is_empty() {
             spans::render(&mut cx.dom, lab, &label_spans);
-        } else {
+        } else if plain {
             let chars: Vec<char> = text.chars().collect();
             marked(cx, lab, &chars, 0, chars.len(), &marks);
+        } else {
+            marked_spans(cx, lab, &label_spans, &marks);
         }
     }
     // Badges (3, then +N) and chips.
@@ -1501,7 +1595,9 @@ fn item_row(
                 Some(v) => {
                     let text = spans::spans_text(&spans::parse_spans(Some(v)));
                     spans_into(cx, e, Some(v));
-                    if !text.is_empty() {
+                    // A value still cut short shows whole as the tooltip (book: Fact columns),
+                    // by the estimate the column widths use (7px a character, 12px padding).
+                    if text.chars().count() as f32 * 7.0 + 12.0 > c.w {
                         cx.dom.attr(e, "title", &text);
                     }
                 }
@@ -1519,6 +1615,36 @@ fn item_row(
 }
 
 /// `chars[from..to]` with the parts inside `marks` (char ranges) in `mark.sf-mark`.
+/// Styled `spans` with the parts inside `marks` (char ranges over their text) in
+/// `mark.sf-mark`, each piece keeping its span's style.
+fn marked_spans(cx: &mut Cx, parent: NodeId, spans_in: &[spans::Span], marks: &[(usize, usize)]) {
+    let in_mark = |i: usize| marks.iter().any(|&(a, b)| i >= a && i < b);
+    let mut at = 0usize;
+    for sp in spans_in {
+        let chars: Vec<char> = sp.t.chars().collect();
+        let mut from = 0;
+        while from < chars.len() {
+            let on = in_mark(at + from);
+            let mut to = from + 1;
+            while to < chars.len() && in_mark(at + to) == on {
+                to += 1;
+            }
+            let piece = spans::Span {
+                t: chars[from..to].iter().collect(),
+                ..sp.clone()
+            };
+            let into = if on {
+                cx.dom.child(parent, "mark", "sf-mark")
+            } else {
+                parent
+            };
+            spans::render(&mut cx.dom, into, &[piece]);
+            from = to;
+        }
+        at += chars.len();
+    }
+}
+
 fn marked(
     cx: &mut Cx,
     parent: NodeId,
@@ -1587,11 +1713,27 @@ fn bar_button(cx: &mut Cx, bar: NodeId, a: &Action, keys: bool) {
     }
 }
 
+/// The empty or error state's button: an action of the bar, disabled (`.off`, the reason as its
+/// tooltip, its clicks sending nothing) as it is there.
 fn state_button(cx: &mut Cx, parent: NodeId, a: &Action) {
-    let b = cx.dom.child(parent, "div", "pk-btn");
+    let b = cx.dom.child(
+        parent,
+        "div",
+        if a.disabled.is_some() {
+            "pk-btn off"
+        } else {
+            "pk-btn"
+        },
+    );
     cx.dom.attr(b, "role", "button");
     cx.dom.attr(b, "data-pk", "act");
     cx.dom.attr(b, "data-v", &a.id);
+    if let Some(r) = &a.disabled {
+        cx.dom.attr(b, "aria-disabled", "true");
+        if !r.is_empty() {
+            cx.dom.attr(b, "title", r);
+        }
+    }
     let l = cx.dom.child(b, "span", "l");
     spans_into(cx, l, Some(&a.label));
 }
@@ -1608,6 +1750,10 @@ mod tests {
         assert_eq!(compact(500_000.0), "500k");
         assert_eq!(compact(3.0), "3");
         assert_eq!(compact(1_000.0), "1k");
+        assert_eq!(compact(999_950.0), "1M");
+        assert_eq!(compact(999.96), "1k");
+        assert_eq!(compact(9_960.0), "10k");
+        assert_eq!(compact(-999_950.0), "-1M");
         assert_eq!(thousands(1604.0), "1,604");
         assert_eq!(thousands(47.0), "47");
         assert_eq!(thousands(1_234_567.0), "1,234,567");

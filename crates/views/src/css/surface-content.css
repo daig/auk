@@ -98,6 +98,8 @@
 
 /* diff */
 .sf-diff { min-width: 0; border-radius: var(--r-ctl); background-color: var(--code-bg); border: 1px solid var(--l2); overflow: hidden; }
+/* Inside a card a diff sits flush: no ring or background of its own (book: diff). */
+.sf-card .sf-diff { border-width: 0; border-radius: 0; background-color: transparent; }
 .sf-diff-body { padding: 4px 0; }
 .sf-dl { display: flex; white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
 .sf-dl.add { background-color: color-mix(in srgb, var(--sf-c-ins) 12%, transparent); }
@@ -138,10 +140,10 @@
 .sf-math .md > p { margin: 0; }
 .math, .math-display { font-size: 1.1em; }
 .math > svg, .math-display > svg { display: inline-block; }
-.math-display { display: block; color: var(--t1); text-align: center; overflow-x: auto; overflow-y: hidden; margin: 2px 0; }
+.math-display, .math.display { display: block; color: var(--t1); text-align: center; overflow-x: auto; overflow-y: hidden; margin: 2px 0; }
 .math.pending, .math-display.pending { font-size: 1em; color: var(--t3); white-space: pre-wrap; }
 code.math-err { color: var(--bad); white-space: pre-wrap; }
-.math-display > code.math-err { display: inline-block; text-align: left; }
+.math-display > code.math-err, .math.display > code.math-err { display: inline-block; text-align: left; }
 
 /* image: a replaced box with its children over it; a dashed card while missing */
 .sf-image { position: relative; display: flex; flex-direction: column; align-items: flex-start; }

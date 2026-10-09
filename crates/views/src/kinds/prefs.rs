@@ -18,6 +18,7 @@ use auk_tsp::{NodeRef, Surface, TspPane, ViewEvent};
 use auk_ui::{Document, NodeId};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 
 /// Child slots: anything else (`.pf-extra`), the editor card (`.pf-editor`), the status preview.
 const EXTRA: usize = 0;
@@ -39,8 +40,21 @@ pub(crate) fn route(child: NodeRef) -> usize {
 pub(crate) struct Memo {
     /// `.pf`, `nav.pf-nav`, `.pf-scroll`, `.pf-doc` and `.pf-top`.
     skeleton: Option<[NodeId; 5]>,
-    /// Content built inside the skeleton by the last render.
+    /// The nav's content and the page's Close, built again every render.
     inner: Vec<NodeId>,
+    /// The document's content (its head, sections or search parts, the "nothing" line), kept
+    /// while the structure is the same.
+    body: Vec<NodeId>,
+    /// The document's structure as last built (book: Updates): page, query, sections, row ids,
+    /// control kinds and options. While it holds, rows patch in place.
+    structure: Option<u64>,
+    /// Each row drawn: its element, its list and the signature of what it shows.
+    rows: HashMap<String, (NodeId, NodeId, u64)>,
+    /// Sections by id (for the focus ring), and the `status-line` one (the preview's place).
+    sections: Vec<(String, NodeId)>,
+    status_sec: Option<NodeId>,
+    /// Focus targets: sections and rows by id.
+    targets: HashMap<String, NodeId>,
     page: String,
     query: String,
     focus: Option<String>,
@@ -52,8 +66,36 @@ pub(crate) struct Memo {
     pub hovered: Option<String>,
 }
 
+/// The pane's width in the region's CSS px (its zoom, font/13, taken out).
+fn pane_px(cx: &Cx) -> f32 {
+    let zoom = (cx.set.font_px / 13.0).max(0.1);
+    f32::from(cx.cols) * cx.set.cell.0 / zoom
+}
+
+/// An open menu's width budget (`--pf-room`, book: prefs Variables), so long options wrap inside
+/// the row: what the row's control may take, from the page's width (`surface-prefs.css`: the
+/// nav, the document's 760px and paddings, the label's room) or the sheet's (its control's 55%).
+fn menu_room(cx: &Cx, sheet: bool) -> f32 {
+    let zoom = (cx.set.font_px / 13.0).max(0.1);
+    let room = if sheet {
+        let sheet = f32::from(auk_tsp::aside_reserve(cx.cols)) * cx.set.cell.0 / zoom;
+        (sheet - 28.0 - 28.0) * 0.55
+    } else {
+        let pane = pane_px(cx);
+        let nav = if pane < 760.0 { 56.0 } else { 220.0 };
+        let doc = (pane - nav).min(760.0) - 56.0;
+        doc - 32.0 - 12.0 - 140.0
+    };
+    room.max(200.0)
+}
+
+/// Whether `n` is a picker or holds one.
+fn holds_picker_node(n: NodeRef) -> bool {
+    n.kind() == "picker" || n.children().any(holds_picker_node)
+}
+
 /// The node's place: a sheet in `layer`, else a page.
-fn in_layer(node: NodeRef) -> bool {
+pub(crate) fn in_layer(node: NodeRef) -> bool {
     std::iter::successors(node.parent(), |n| n.parent())
         .any(|n| n.id() == "layer" && n.parent().is_some_and(|root| root.parent().is_none()))
 }
@@ -193,26 +235,42 @@ fn words(query: &str) -> Vec<String> {
         .collect()
 }
 
-/// `text` into `parent`, with the query's words in `<mark>`.
+/// `text` into `parent`, with the query's words in `<mark>`. Matching is on the lowercase text;
+/// a character whose lowercase is longer or shorter (`İ`) maps back to itself whole.
 fn marked(dom: &mut Dom, parent: NodeId, text: &str, words: &[String]) {
-    let lower = text.to_lowercase();
-    if words.is_empty() || lower.len() != text.len() {
+    if words.is_empty() {
         dom.text(parent, text);
         return;
     }
+    // Each character's place in the text and in its lowercase: (text start, text end, lower
+    // start, lower end).
+    let mut lower = String::with_capacity(text.len());
+    let mut map: Vec<(usize, usize, usize, usize)> = Vec::new();
+    for (i, c) in text.char_indices() {
+        let l0 = lower.len();
+        lower.extend(c.to_lowercase());
+        map.push((i, i + c.len_utf8(), l0, lower.len()));
+    }
+    let back = |a: usize, b: usize| -> Option<(usize, usize)> {
+        let start = map.iter().find(|m| a >= m.2 && a < m.3)?.0;
+        let end = map.iter().find(|m| b > m.2 && b <= m.3)?.1;
+        Some((start, end))
+    };
     let mut ranges: Vec<(usize, usize)> = Vec::new();
     for w in words {
         let mut from = 0;
         while let Some(i) = lower[from..].find(w.as_str()) {
             let a = from + i;
-            ranges.push((a, a + w.len()));
+            if let Some(r) = back(a, a + w.len()) {
+                ranges.push(r);
+            }
             from = a + w.len().max(1);
         }
     }
     ranges.sort();
     let mut at = 0;
     for (a, b) in ranges {
-        if a < at || !text.is_char_boundary(a) || !text.is_char_boundary(b) {
+        if a < at {
             continue;
         }
         if a > at {
@@ -265,7 +323,8 @@ pub(crate) fn prefs(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
     let p = node.props();
     let id = node.id().to_owned();
     let sheet = in_layer(node);
-    let rail = !sheet && f32::from(cx.cols) * cx.set.cell.0 < 760.0;
+    // Below 760 CSS px (the region's zoom, font/13, taken out) the nav is a rail.
+    let rail = !sheet && pane_px(cx) < 760.0;
     let mut memo = cx.st.prefs.remove(&id).unwrap_or_default();
     // The skeleton, kept while it is still this node's.
     let fresh = memo.skeleton.is_none_or(|[root, ..]| {
@@ -283,27 +342,32 @@ pub(crate) fn prefs(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
         };
     }
     let [root, nav, scroll, mut doc, top] = memo.skeleton.expect("built");
-    // Switches leave before the old content goes, to be reused.
-    let mut kept = std::mem::take(&mut memo.switches);
-    for &b in kept.values() {
-        if cx.dom.doc.try_node(b).is_some() {
-            cx.dom.doc.detach(b);
-        }
-    }
-    for n in std::mem::take(&mut memo.inner) {
-        if cx.dom.doc.try_node(n).is_some() {
-            cx.dom.doc.remove(n);
-        }
-    }
     let title = s(p, "title").unwrap_or("Settings");
     let page = str_prop(p, "page").unwrap_or("");
     let query = str_prop(p, "query").unwrap_or("").trim().to_owned();
     let searching = !query.is_empty();
+    let structure = structure_sig(p, &query);
+    // Book (Updates): the document rebuilds only when its structure changes; otherwise rows
+    // patch in place, so a switch slides instead of redrawing.
+    let patch = !fresh && memo.structure == Some(structure);
+    // Rebuilding, the switches leave before the old content goes (a removed node's id is
+    // reused), to be reused so a flip slides.
+    let mut kept: HashMap<String, NodeId> = HashMap::new();
+    if !patch {
+        kept = std::mem::take(&mut memo.switches);
+        for &b in kept.values() {
+            if cx.dom.doc.try_node(b).is_some() {
+                cx.dom.doc.detach(b);
+            }
+        }
+    }
     // A page or query change scrolls to the top and replays the arrive motion.
     if !fresh && (memo.page != page || memo.query != query) {
         cx.dom.doc.remove(doc);
         doc = cx.dom.child(scroll, "div", "pf-doc arrive");
         memo.skeleton = Some([root, nav, scroll, doc, top]);
+        memo.body.clear();
+        memo.rows.clear();
         cx.dom.doc.set_scroll_offset(scroll, 0.0, 0.0);
     }
     let mut class = String::from("pf on");
@@ -316,6 +380,11 @@ pub(crate) fn prefs(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
     cx.dom.set_class(root, &class);
     cx.dom.attr(root, "aria-label", title);
     let pages: Vec<&Map<String, Value>> = arr(p, "pages").iter().filter_map(obj).collect();
+    for n in std::mem::take(&mut memo.inner) {
+        if cx.dom.doc.try_node(n).is_some() {
+            cx.dom.doc.remove(n);
+        }
+    }
     let mut inner = Vec::new();
 
     // Nav: brand, search, page groups.
@@ -396,46 +465,29 @@ pub(crate) fn prefs(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
     let words = words(&query);
     let ed = editing(p);
     let focus = s(p, "focus");
-    let head = cx.dom.child(
-        doc,
-        "header",
-        if searching {
-            "pf-head pf-found"
-        } else {
-            "pf-head"
-        },
-    );
-    inner.push(head);
-    let page_index = pages.iter().position(|pg| str_prop(pg, "id") == Some(page));
-    let page_label = page_index
-        .and_then(|i| s(pages[i], "label").or(str_prop(pages[i], "id")))
-        .unwrap_or(page);
     let sections: Vec<&Map<String, Value>> = arr(p, "sections").iter().filter_map(obj).collect();
-    let row_count: usize = sections.iter().map(|sec| arr(sec, "rows").len()).sum();
-    if searching {
-        let n = row_count;
-        cx.dom.child_text(
-            head,
-            "div",
-            "pf-eyebrow mono",
-            &format!("{n} {}", if n == 1 { "result" } else { "results" }),
-        );
-        cx.dom
-            .child_text(head, "h1", "pf-title", &format!("\u{201c}{query}\u{201d}"));
-    } else {
-        let eyebrow = match page_index {
-            Some(i) => format!("{:02} \u{b7} {page_label}", i + 1),
-            None => page_label.to_owned(),
-        };
-        cx.dom.child_text(head, "div", "pf-eyebrow mono", &eyebrow);
-        cx.dom.child_text(head, "h1", "pf-title", page_label);
-        if let Some(l) = s(p, "lead") {
-            cx.dom.child_text(head, "p", "pf-lead", l);
+    // The row whose menu is open: a choice drawn as a menu, being edited.
+    let menu_open: Option<String> = ed
+        .as_ref()
+        .filter(|e| {
+            find_row(p, e.row).is_some_and(|r| {
+                r.get("control")
+                    .and_then(obj)
+                    .is_some_and(|c| str_prop(c, "k") == Some("choice") && !segmented(c))
+            })
+        })
+        .map(|e| e.row.to_owned());
+    let row_sig = |r: &Map<String, Value>, rid: &str| {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for (k, v) in r {
+            k.hash(&mut h);
+            super::picker::hash_value(v, &mut h);
         }
-    }
-    let mut targets: HashMap<String, NodeId> = HashMap::new();
-    let mut switches = HashMap::new();
-    let mut menu_open: Option<String> = None;
+        let e = ed.as_ref().filter(|e| e.row == rid);
+        e.map(|e| (e.option, e.draft, e.cursor)).hash(&mut h);
+        (focus == Some(rid), memo.menu.as_deref() == Some(rid)).hash(&mut h);
+        h.finish()
+    };
     let preview = node
         .children()
         .any(|c| route(c) == PREVIEW)
@@ -444,90 +496,37 @@ pub(crate) fn prefs(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
     let extra = slot(cx, m, EXTRA, "div", "pf-extra");
     let editor = slot(cx, m, EDITOR, "div", "pf-editor");
     let preview = preview.unwrap_or_else(|| slot(cx, m, PREVIEW, "div", "pf-preview"));
-    if row_count == 0 {
-        let none = if searching {
-            format!("No settings match \u{201c}{query}\u{201d}")
-        } else {
-            "Nothing to set here".to_owned()
-        };
-        let e = cx.dom.child_text(doc, "div", "pf-none", &none);
-        inner.push(e);
-    }
-    // Search results group by page under a page heading.
-    let mut part_body: Option<(Option<&str>, NodeId)> = None;
-    for sec in &sections {
-        let rows = arr(sec, "rows");
-        let sid = str_prop(sec, "id");
-        if rows.is_empty() && sid != Some("status-line") {
-            continue;
-        }
-        let parent = if searching {
-            let sp = str_prop(sec, "page");
-            match part_body {
-                Some((pg, b)) if pg == sp => b,
-                _ => {
-                    let part = cx.dom.child(doc, "div", "pf-part");
-                    inner.push(part);
-                    let info =
-                        sp.and_then(|sp| pages.iter().find(|pg| str_prop(pg, "id") == Some(sp)));
-                    let off = info.and_then(|pg| s(pg, "disabled"));
-                    let h = cx.dom.child(
-                        part,
-                        "div",
-                        if off.is_some() {
-                            "pf-part-h off"
-                        } else {
-                            "pf-part-h"
-                        },
-                    );
-                    if let Some(sp) = sp {
-                        cx.dom.attr(h, "data-pf", "page");
-                        cx.dom.attr(h, "data-v", sp);
-                        icon(
-                            cx,
-                            h,
-                            info.and_then(|pg| s(pg, "icon")).unwrap_or("sliders"),
-                        );
-                        let label = info.and_then(|pg| s(pg, "label")).unwrap_or(sp);
-                        cx.dom.child_text(h, "span", "lbl", label);
-                    }
-                    if let Some(off) = off {
-                        cx.dom.attr(h, "title", off);
-                        cx.dom.attr(h, "data-off", "");
-                    }
-                    let b = cx.dom.child(part, "div", "pf-part-b");
-                    part_body = Some((sp, b));
-                    b
-                }
-            }
-        } else {
-            doc
-        };
-        let section = cx.dom.child(
-            parent,
-            "section",
-            if sid.is_some() && sid == focus {
-                "pf-sec focus"
-            } else {
-                "pf-sec"
-            },
-        );
-        if !searching {
-            inner.push(section);
-        }
-        if let Some(sid) = sid {
-            cx.dom.attr(section, "data-sec", sid);
-            targets.insert(sid.to_owned(), section);
-        }
-        if let Some(t) = s(sec, "title") {
-            cx.dom.child_text(section, "h2", "pf-sec-t", t);
-        }
-        if !rows.is_empty() {
-            let list = cx.dom.child(section, "div", "pf-rows");
-            for r in rows.iter().filter_map(obj) {
+    let mut switches: HashMap<String, NodeId> = HashMap::new();
+    if patch {
+        for sec in &sections {
+            for r in arr(sec, "rows").iter().filter_map(obj) {
                 let Some(rid) = str_prop(r, "id") else {
                     continue;
                 };
+                let Some(&(old, list, sig)) = memo.rows.get(rid) else {
+                    continue;
+                };
+                let new_sig = row_sig(r, rid);
+                if sig == new_sig && cx.dom.doc.try_node(old).is_some() {
+                    continue;
+                }
+                let prefix = format!("{rid}\u{1f}");
+                let mine: Vec<String> = memo
+                    .switches
+                    .keys()
+                    .filter(|k| *k == rid || k.starts_with(&prefix))
+                    .cloned()
+                    .collect();
+                for k in mine {
+                    if let Some(b) = memo.switches.remove(&k) {
+                        if cx.dom.doc.try_node(b).is_some() {
+                            cx.dom.doc.detach(b);
+                        }
+                        kept.insert(k, b);
+                    }
+                }
+                let mut next = HashMap::new();
+                let mut menu = None;
                 let el = draw_row(
                     cx,
                     list,
@@ -537,26 +536,210 @@ pub(crate) fn prefs(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
                     focus == Some(rid),
                     &words,
                     &mut kept,
-                    &mut switches,
-                    &mut menu_open,
+                    &mut next,
+                    &mut menu,
                     memo.menu.as_deref() == Some(rid),
+                    sheet,
                 );
-                targets.insert(rid.to_owned(), el);
+                if cx.dom.doc.try_node(old).is_some() {
+                    cx.dom.doc.insert_before(list, el, Some(old));
+                    cx.dom.doc.remove(old);
+                }
+                memo.switches.extend(next);
+                memo.rows.insert(rid.to_owned(), (el, list, new_sig));
+                memo.targets.insert(rid.to_owned(), el);
             }
         }
-        if sid == Some("status-line") {
-            cx.dom.doc.append_child(section, preview);
+        // The focus ring on sections.
+        for (sid, el) in &memo.sections {
+            if cx.dom.doc.try_node(*el).is_some() {
+                cx.dom.set_class(
+                    *el,
+                    if Some(sid.as_str()) == focus {
+                        "pf-sec focus"
+                    } else {
+                        "pf-sec"
+                    },
+                );
+            }
         }
+        switches = std::mem::take(&mut memo.switches);
+        if let Some(sec) = memo.status_sec.filter(|&e| cx.dom.doc.try_node(e).is_some()) {
+            cx.dom.doc.append_child(sec, preview);
+        }
+    } else {
+        for n in std::mem::take(&mut memo.body) {
+            if cx.dom.doc.try_node(n).is_some() {
+                cx.dom.doc.remove(n);
+            }
+        }
+        memo.rows.clear();
+        memo.sections.clear();
+        memo.status_sec = None;
+        memo.targets.clear();
+        let mut body = Vec::new();
+        let head = cx.dom.child(
+            doc,
+            "header",
+            if searching {
+                "pf-head pf-found"
+            } else {
+                "pf-head"
+            },
+        );
+        body.push(head);
+        let page_index = pages.iter().position(|pg| str_prop(pg, "id") == Some(page));
+        let page_label = page_index
+            .and_then(|i| s(pages[i], "label").or(str_prop(pages[i], "id")))
+            .unwrap_or(page);
+        let row_count: usize = sections.iter().map(|sec| arr(sec, "rows").len()).sum();
+        if searching {
+            let n = row_count;
+            cx.dom.child_text(
+                head,
+                "div",
+                "pf-eyebrow mono",
+                &format!("{n} {}", if n == 1 { "result" } else { "results" }),
+            );
+            cx.dom
+                .child_text(head, "h1", "pf-title", &format!("\u{201c}{query}\u{201d}"));
+        } else {
+            let eyebrow = match page_index {
+                Some(i) => format!("{:02} \u{b7} {page_label}", i + 1),
+                None => page_label.to_owned(),
+            };
+            cx.dom.child_text(head, "div", "pf-eyebrow mono", &eyebrow);
+            cx.dom.child_text(head, "h1", "pf-title", page_label);
+            if let Some(l) = s(p, "lead") {
+                cx.dom.child_text(head, "p", "pf-lead", l);
+            }
+        }
+        if row_count == 0 {
+            let none = if searching {
+                format!("No settings match \u{201c}{query}\u{201d}")
+            } else {
+                "Nothing to set here".to_owned()
+            };
+            let e = cx.dom.child_text(doc, "div", "pf-none", &none);
+            body.push(e);
+        }
+        // Search results group by page under a page heading.
+        let mut part_body: Option<(Option<&str>, NodeId)> = None;
+        for sec in &sections {
+            let rows = arr(sec, "rows");
+            let sid = str_prop(sec, "id");
+            if rows.is_empty() && sid != Some("status-line") {
+                continue;
+            }
+            let parent = if searching {
+                let sp = str_prop(sec, "page");
+                match part_body {
+                    Some((pg, b)) if pg == sp => b,
+                    _ => {
+                        let part = cx.dom.child(doc, "div", "pf-part");
+                        body.push(part);
+                        let info = sp
+                            .and_then(|sp| pages.iter().find(|pg| str_prop(pg, "id") == Some(sp)));
+                        let off = info.and_then(|pg| s(pg, "disabled"));
+                        let h = cx.dom.child(
+                            part,
+                            "div",
+                            if off.is_some() {
+                                "pf-part-h off"
+                            } else {
+                                "pf-part-h"
+                            },
+                        );
+                        if let Some(sp) = sp {
+                            cx.dom.attr(h, "data-pf", "page");
+                            cx.dom.attr(h, "data-v", sp);
+                            icon(
+                                cx,
+                                h,
+                                info.and_then(|pg| s(pg, "icon")).unwrap_or("sliders"),
+                            );
+                            let label = info.and_then(|pg| s(pg, "label")).unwrap_or(sp);
+                            cx.dom.child_text(h, "span", "lbl", label);
+                        }
+                        if let Some(off) = off {
+                            cx.dom.attr(h, "title", off);
+                            cx.dom.attr(h, "data-off", "");
+                        }
+                        let b = cx.dom.child(part, "div", "pf-part-b");
+                        part_body = Some((sp, b));
+                        b
+                    }
+                }
+            } else {
+                doc
+            };
+            let section = cx.dom.child(
+                parent,
+                "section",
+                if sid.is_some() && sid == focus {
+                    "pf-sec focus"
+                } else {
+                    "pf-sec"
+                },
+            );
+            if !searching {
+                body.push(section);
+            }
+            if let Some(sid) = sid {
+                cx.dom.attr(section, "data-sec", sid);
+                memo.targets.insert(sid.to_owned(), section);
+                memo.sections.push((sid.to_owned(), section));
+            }
+            if let Some(t) = s(sec, "title") {
+                cx.dom.child_text(section, "h2", "pf-sec-t", t);
+            }
+            if !rows.is_empty() {
+                let list = cx.dom.child(section, "div", "pf-rows");
+                for r in rows.iter().filter_map(obj) {
+                    let Some(rid) = str_prop(r, "id") else {
+                        continue;
+                    };
+                    let mut menu = None;
+                    let el = draw_row(
+                        cx,
+                        list,
+                        r,
+                        rid,
+                        ed.as_ref().filter(|e| e.row == rid),
+                        focus == Some(rid),
+                        &words,
+                        &mut kept,
+                        &mut switches,
+                        &mut menu,
+                        memo.menu.as_deref() == Some(rid),
+                        sheet,
+                    );
+                    memo.targets.insert(rid.to_owned(), el);
+                    memo.rows.insert(rid.to_owned(), (el, list, row_sig(r, rid)));
+                }
+            }
+            if sid == Some("status-line") {
+                cx.dom.doc.append_child(section, preview);
+                memo.status_sec = Some(section);
+            }
+        }
+        memo.body = body;
     }
     cx.dom.doc.append_child(doc, extra);
-    // The editor card: a glass card over the page while it holds something.
+    // The editor card: a glass card over the page while it holds something. Holding a picker
+    // (omp's submenu of more than 12 options, alone or in its editor column), the card is the
+    // sheet's frame, sized for it (`.pk`): the picker fills it.
     let has_editor = node.children().any(|c| route(c) == EDITOR);
+    let holds_picker = node
+        .children()
+        .filter(|&c| route(c) == EDITOR)
+        .any(holds_picker_node);
     cx.dom.set_class(
         editor,
-        if has_editor {
-            "pf-editor on"
-        } else {
-            "pf-editor"
+        match (has_editor, holds_picker) {
+            (true, true) => "pf-editor on pk",
+            (true, false) => "pf-editor on",
+            _ => "pf-editor",
         },
     );
     cx.dom.doc.append_child(root, editor);
@@ -573,7 +756,7 @@ pub(crate) fn prefs(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
     let focus_owned = focus.map(str::to_owned);
     if focus_owned != memo.focus
         && let Some(f) = &focus_owned
-        && let Some(&el) = targets.get(f)
+        && let Some(&el) = memo.targets.get(f)
     {
         let top_align = sections
             .iter()
@@ -587,6 +770,7 @@ pub(crate) fn prefs(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
     }
     memo.inner = inner;
     memo.switches = switches;
+    memo.structure = Some(structure);
     memo.page = page.to_owned();
     memo.query = query;
     memo.focus = focus_owned;
@@ -595,6 +779,28 @@ pub(crate) fn prefs(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
     }
     memo.menu = menu_open;
     cx.st.prefs.insert(id, memo);
+}
+
+/// The document's structure (book: prefs Updates): page, query, the header's texts, sections
+/// (ids, titles, pages), row ids, control kinds and options. While it holds, rows patch.
+fn structure_sig(p: &Map<String, Value>, query: &str) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (str_prop(p, "page"), query, s(p, "lead")).hash(&mut h);
+    for pg in arr(p, "pages").iter().filter_map(obj) {
+        (str_prop(pg, "id"), s(pg, "label"), s(pg, "disabled")).hash(&mut h);
+    }
+    for sec in arr(p, "sections").iter().filter_map(obj) {
+        (str_prop(sec, "id"), s(sec, "title"), str_prop(sec, "page")).hash(&mut h);
+        for r in arr(sec, "rows").iter().filter_map(obj) {
+            str_prop(r, "id").hash(&mut h);
+            let ctl = r.get("control").and_then(obj);
+            ctl.and_then(|c| str_prop(c, "k")).hash(&mut h);
+            if let Some(o) = ctl.and_then(|c| c.get("options")) {
+                super::picker::hash_value(o, &mut h);
+            }
+        }
+    }
+    h.finish()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -610,6 +816,7 @@ fn draw_row(
     switches: &mut HashMap<String, NodeId>,
     menu_open: &mut Option<String>,
     menu_was_open: bool,
+    sheet: bool,
 ) -> NodeId {
     let empty = Map::new();
     let ctl = r.get("control").and_then(obj).unwrap_or(&empty);
@@ -726,7 +933,8 @@ fn draw_row(
                             "pf-menu"
                         },
                     );
-                    cx.dom.set_style(menu, "--pf-room: 360px");
+                    cx.dom
+                        .set_style(menu, &format!("--pf-room: {}px", fmt_num(f64::from(menu_room(cx, sheet)))));
                     cx.dom.attr(menu, "role", "listbox");
                     for o in &opts {
                         let v = str_prop(o, "value").unwrap_or("");
@@ -876,6 +1084,7 @@ fn draw_row(
                     let it = cx.dom.child(list, "div", &ic);
                     cx.dom.attr(it, "data-v", v);
                     let g = cx.dom.child(it, "span", "pf-grip");
+                    cx.dom.attr(g, "data-pf", "grip");
                     icon(cx, g, "grip");
                     cx.dom.child_text(
                         it,
@@ -962,9 +1171,11 @@ pub(crate) fn click(
     {
         out.push(ViewEvent::Focus { id: id.clone() });
     }
-    let action = |a: String| ViewEvent::Action {
+    // The page's own acts, sent as they are: a row's `act` may hold `=`.
+    let action = |a: &str, value: Option<&str>| ViewEvent::Action {
         id: id.clone(),
-        action: a,
+        action: a.to_owned(),
+        value: auk_tsp::ActValue::Exact(value.map(str::to_owned)),
         mods: Default::default(),
         values: None,
     };
@@ -986,7 +1197,7 @@ pub(crate) fn click(
         let on_menu = act.as_ref().is_some_and(|(_, a)| a == "mi")
             && row_id.as_deref() == Some(open.as_str());
         if !on_menu {
-            out.push(action(format!("close={open}")));
+            out.push(action("close", Some(&open)));
             return Some(out);
         }
     }
@@ -997,9 +1208,9 @@ pub(crate) fn click(
             if doc.attribute(el, "data-off").is_some() {
                 return Some(Vec::new());
             }
-            action(format!("page={}", v?))
+            action("page", Some(&v?))
         }
-        "close" => action("close".to_owned()),
+        "close" => action("close", None),
         _ => {
             let (rid, r) = (row_id.as_deref()?, row?);
             if s(r, "disabled").is_some() {
@@ -1008,6 +1219,8 @@ pub(crate) fn click(
             let empty = Map::new();
             let ctl = r.get("control").and_then(obj).unwrap_or(&empty);
             match a.as_str() {
+                // A grip is dragged, not clicked (`PaneView::reorder_press`).
+                "grip" => return Some(Vec::new()),
                 "reset" => change(rid, Value::Null),
                 "sw" => change(rid, Value::Bool(!bool_prop(ctl, "on"))),
                 "seg" | "mi" => change(rid, Value::String(v?)),
@@ -1034,7 +1247,7 @@ pub(crate) fn click(
                             .collect(),
                     ),
                 ),
-                "act" => action(format!("{}={rid}", v.unwrap_or_else(|| "edit".to_owned()))),
+                "act" => action(v.as_deref().unwrap_or("edit"), Some(rid)),
                 "row" => ViewEvent::Select {
                     id: id.clone(),
                     item: rid.to_owned(),
@@ -1056,7 +1269,168 @@ fn find_row<'a>(p: &'a Map<String, Value>, rid: &str) -> Option<&'a Map<String, 
         .find(|r| str_prop(r, "id") == Some(rid))
 }
 
+/// An ordered multi list's item dragged by its grip (book: prefs, `multi` with `ordered`).
+#[derive(Debug)]
+pub(crate) struct Reorder {
+    scope: String,
+    /// The `prefs` node, its row, and the dragged item's value.
+    node: String,
+    row: String,
+    value: String,
+    /// The dragged `.pf-oi`, its class before the drag, and the pointer's y at the press.
+    item: NodeId,
+    class: String,
+    y0: f32,
+}
+
+/// The new enabled values after dropping `value` on `target` (before it, or after it when
+/// `after`), given the list's items in drawn order with whether each is on. The dragged item
+/// is enabled. `None` when nothing moves.
+pub(crate) fn reorder_values(
+    items: &[(String, bool)],
+    value: &str,
+    target: &str,
+    after: bool,
+) -> Option<Vec<String>> {
+    if value == target {
+        return None;
+    }
+    let mut order: Vec<(String, bool)> = items.to_vec();
+    let from = order.iter().position(|(v, _)| v == value)?;
+    let (v, _) = order.remove(from);
+    let to = order.iter().position(|(t, _)| t == target)?;
+    order.insert(if after { to + 1 } else { to }, (v, true));
+    let before: Vec<&str> = items.iter().filter(|(_, on)| *on).map(|(v, _)| v.as_str()).collect();
+    let now: Vec<String> = order.into_iter().filter(|(_, on)| *on).map(|(v, _)| v).collect();
+    (now.iter().map(String::as_str).collect::<Vec<_>>() != before).then_some(now)
+}
+
 impl PaneView {
+    /// A press on an ordered list's grip starts dragging its item (book: prefs, `multi`):
+    /// returns whether it did. Hosts call this before [`PaneView::click`], and then
+    /// [`PaneView::reorder_drag`] and [`PaneView::reorder_release`].
+    pub fn reorder_press(&mut self, doc: &mut Document, pane: &TspPane, x: f32, y: f32) -> bool {
+        self.reorder = None;
+        let Some(hit) = auk_ui::hit_test(doc, x, y) else {
+            return false;
+        };
+        let chain: Vec<NodeId> = std::iter::successors(Some(hit), |&e| doc.parent(e)).collect();
+        if !chain.iter().any(|&e| doc.attribute(e, "data-pf") == Some("grip")) {
+            return false;
+        }
+        let up = |k: &str| {
+            chain
+                .iter()
+                .find_map(|&e| doc.attribute(e, k).map(|v| (e, v.to_owned())))
+        };
+        let (Some((item, value)), Some((_, row)), Some((_, node)), Some((_, scope))) =
+            (up("data-v"), up("data-row"), up("data-id"), up("data-scope"))
+        else {
+            return false;
+        };
+        // A disabled row's controls do nothing.
+        let Some(sv) = self.surfaces.iter().find(|s| s.scope == scope) else {
+            return false;
+        };
+        let Some(surface) = pane.surface(sv.key) else {
+            return false;
+        };
+        let Some(n) = surface.document().get(&node).filter(|n| n.kind() == "prefs") else {
+            return false;
+        };
+        if find_row(n.props(), &row).is_none_or(|r| s(r, "disabled").is_some()) {
+            return false;
+        }
+        let class = self.written.class(item).unwrap_or("").to_owned();
+        let mut dom = Dom {
+            doc,
+            w: &mut self.written,
+        };
+        dom.set_class(item, &format!("{class} drag"));
+        self.reorder = Some(Reorder {
+            scope,
+            node,
+            row,
+            value,
+            item,
+            class,
+            y0: y,
+        });
+        true
+    }
+
+    /// Whether a grip drag is under way.
+    pub fn reordering(&self) -> bool {
+        self.reorder.is_some()
+    }
+
+    /// The pointer moved while dragging: the item follows it. Returns whether a drag is under
+    /// way.
+    pub fn reorder_drag(&mut self, doc: &mut Document, _x: f32, y: f32) -> bool {
+        let Some(r) = &self.reorder else {
+            return false;
+        };
+        let (item, dy) = (r.item, y - r.y0);
+        if doc.try_node(item).is_some() {
+            let mut dom = Dom {
+                doc,
+                w: &mut self.written,
+            };
+            dom.set_style(item, &format!("transform: translateY({}px);", fmt_num(f64::from(dy))));
+        }
+        true
+    }
+
+    /// The release: dropped on another item of the list, the dragged one moves before it (after
+    /// it on its lower half), is enabled, and the new order goes to the program as `change
+    /// {item = <row>, value = [enabled values in order]}`. `None` when no drag was under way.
+    pub fn reorder_release(&mut self, doc: &mut Document, x: f32, y: f32) -> Option<Vec<Outcome>> {
+        let r = self.reorder.take()?;
+        let _ = x;
+        if doc.try_node(r.item).is_none() {
+            return Some(Vec::new());
+        }
+        {
+            let mut dom = Dom {
+                doc: &mut *doc,
+                w: &mut self.written,
+            };
+            dom.set_class(r.item, &r.class);
+            dom.set_style(r.item, "");
+        }
+        let list = doc.parent(r.item)?;
+        let items: Vec<NodeId> = doc.element_children(list);
+        let drawn: Vec<(String, bool)> = items
+            .iter()
+            .filter_map(|&e| {
+                let v = doc.attribute(e, "data-v")?.to_owned();
+                let on = self.written.class(e).is_some_and(|c| c.split(' ').any(|c| c == "on"));
+                Some((v, on))
+            })
+            .collect();
+        // The item under the pointer's y, by the items' boxes (laid out without the drag).
+        let target = items.iter().find_map(|&e| {
+            let b = doc.border_box(e)?;
+            (y >= b.y && y < b.y + b.h).then(|| (doc.attribute(e, "data-v").map(str::to_owned), y >= b.y + b.h / 2.0))
+        });
+        let Some((Some(target), after)) = target else {
+            return Some(Vec::new());
+        };
+        let Some(values) = reorder_values(&drawn, &r.value, &target, after) else {
+            return Some(Vec::new());
+        };
+        let sv = self.surfaces.iter().find(|s| s.scope == r.scope)?;
+        Some(vec![Outcome::Event {
+            surface: sv.key,
+            sf: sv.id.clone(),
+            event: Box::new(ViewEvent::PrefsChange {
+                id: r.node,
+                item: r.row,
+                value: Value::Array(values.into_iter().map(Value::String).collect()),
+            }),
+        }])
+    }
+
     /// Pointing at an open menu's option previews it: `select {item: "<row>=<value>"}`, once
     /// per option (book: `prefs` events). Hosts call this after [`PaneView::hover`].
     pub fn hover_events(&mut self, doc: &Document) -> Vec<Outcome> {

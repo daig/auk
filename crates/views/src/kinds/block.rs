@@ -1,5 +1,5 @@
 //! `block`: the command-lens block (§8.2 T2, §9.6, research/elements.md §2 `block`). Tern draws
-//! it around a lens view; it isn't advertised to programs.
+//! it around a lens view; programs get it too (advertised with the T2 kinds, amendment A23).
 //!
 //! The block shows `native` when there is one, else `raw`. Native/Raw is a local choice kept by
 //! the node's state key (its `key` among its siblings, else its id); only the shown child is in
@@ -76,9 +76,16 @@ pub(crate) fn view_key(node: NodeRef) -> String {
     format!("{}\u{1f}raw-view", state_key(node))
 }
 
-/// Whether the block shows its raw output.
+/// Whether the block has a raw child (book: the one with id `raw`, else the last `ansi` child).
+fn has_raw(node: NodeRef) -> bool {
+    node.children().any(|c| is_raw(node, c))
+}
+
+/// Whether the block shows its raw output: without a native view, or chosen; never without a
+/// raw child.
 pub(crate) fn shows_raw(cx_more: &std::collections::HashMap<String, bool>, node: NodeRef) -> bool {
-    native(node).is_none() || cx_more.get(&view_key(node)).copied().unwrap_or(false)
+    has_raw(node)
+        && (native(node).is_none() || cx_more.get(&view_key(node)).copied().unwrap_or(false))
 }
 
 /// The label of a command line: the program (no directories, assignments or wrappers) and, for
@@ -135,7 +142,8 @@ pub(crate) fn block(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
     let running = str_prop(p, "state") == Some("running");
     let exit = num_prop(p, "exit").map(|e| e as i64);
     let failed = !running && exit.is_some_and(|e| e != 0);
-    let has_native = native(node).is_some();
+    // Native/Raw only with both to choose from.
+    let has_native = native(node).is_some() && has_raw(node);
     let raw = shows_raw(&cx.st.more, node);
     look.class_if(failed, "failed");
     look.attr("data-role", role.clone());
@@ -152,7 +160,13 @@ pub(crate) fn block(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
     }
     let ic = cx.dom.child(label, "span", "sf-block-ic");
     cx.dom.attr(ic, "aria-hidden", "true");
-    let icon_name = super::layout::role_icon(&role).unwrap_or("terminal");
+    // The lens picks the icon (book: `lens`), not an overriding `role`; plugin lenses get the
+    // terminal icon.
+    let icon_name = if lens.starts_with("plugin.") {
+        "terminal"
+    } else {
+        super::layout::role_icon(&format!("lens.{lens}")).unwrap_or("terminal")
+    };
     icon(cx, ic, icon_name);
     cx.dom.child_text(label, "span", "lbl", &lens_label(line));
     if has_native {

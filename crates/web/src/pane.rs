@@ -36,6 +36,15 @@ const LENS_SF: &str = "lens";
 const CARD_PREFIX: &str = "lens-card-";
 
 /// A document the views draw into, set up the same way for a pane and for a command block.
+/// The browser has no image viewer (a zoom would open nothing), so the views draw no zoom
+/// affordance: no zoom-in images, no Open on mermaid figures.
+fn browser(settings: ViewSettings) -> ViewSettings {
+    ViewSettings {
+        viewer: false,
+        ..settings
+    }
+}
+
 fn new_surfaces(settings: &ViewSettings, scale: f32, font: Option<&Arc<Vec<u8>>>) -> PaneSurfaces {
     let mut surfaces = PaneSurfaces::new(settings.clone(), scale);
     // The browser has no system fonts: surfaces draw in the server's font.
@@ -309,6 +318,7 @@ impl std::fmt::Debug for PaneDraw {
 impl PaneDraw {
     /// `font` is the one font surfaces draw in, for a host without system fonts.
     pub fn new(settings: ViewSettings, scale: f32, font: Option<Arc<Vec<u8>>>) -> PaneDraw {
+        let settings = browser(settings);
         PaneDraw {
             surfaces: new_surfaces(&settings, scale, font.as_ref()),
             lens: BTreeMap::new(),
@@ -335,6 +345,7 @@ impl PaneDraw {
 
     /// Window settings and scale, for the pane and its command blocks.
     pub fn configure(&mut self, tsp: &TspPane, settings: ViewSettings, scale: f32) {
+        let settings = browser(settings);
         self.surfaces.configure(tsp, settings.clone(), scale);
         for l in self.lens.values_mut() {
             l.surfaces.configure(&l.tsp, settings.clone(), scale);
@@ -636,6 +647,71 @@ impl PaneDraw {
         }
     }
 
+    /// A press that may start dragging a `prefs` ordered list item by its grip (book: prefs).
+    /// Returns whether it did; the press is then not a click.
+    pub fn reorder_press(&mut self, replica: &Replica, press: Press, content_px: f32) -> bool {
+        let Some(Target::Surfaces { x, y }) = self.target(press, content_px) else {
+            return false;
+        };
+        let (d, pv) = self.surfaces.parts();
+        pv.reorder_press(d, replica.tsp(), x, y)
+    }
+
+    /// The pointer moved during such a drag: the item follows. Returns whether one is under way.
+    pub fn reorder_drag(&mut self, press: Press, content_px: f32) -> bool {
+        let (x, y) = match self.target(press, content_px) {
+            Some(Target::Surfaces { x, y }) => (x, y),
+            _ => return self.surfaces.view().reordering(),
+        };
+        let (d, pv) = self.surfaces.parts();
+        pv.reorder_drag(d, x, y)
+    }
+
+    /// The release of such a drag: the new order, as an event to send. `None` when no drag was
+    /// under way.
+    pub fn reorder_release(&mut self, pane: PaneId, press: Option<Press>, content_px: f32) -> Option<Vec<Action>> {
+        let (x, y) = match press.and_then(|p| self.target(p, content_px)) {
+            Some(Target::Surfaces { x, y }) => (x, y),
+            _ => (-1.0e6, -1.0e6),
+        };
+        let (d, pv) = self.surfaces.parts();
+        let out = pv.reorder_release(d, x, y)?;
+        Some(actions(pane, None, out))
+    }
+
+    /// The pointer over the pane at `at` (pixels from the content area's top-left), or off it
+    /// (`None`): the views' hover, as the app's (`:hover` styles, a command block's toolbar), and
+    /// what it asks of the program (a `prefs` menu option previewed: `select`). Returns whether
+    /// anything hovered changed, and the events to send.
+    pub fn hover(&mut self, pane: PaneId, at: Option<Press>, content_px: f32) -> (bool, Vec<Action>) {
+        let target = at.and_then(|p| self.target(p, content_px));
+        let off = (-1.0e6, -1.0e6);
+        let mut changed = false;
+        let mut out = Vec::new();
+        let (sx, sy) = match target {
+            Some(Target::Surfaces { x, y }) => (x, y),
+            _ => off,
+        };
+        let (d, pv) = self.surfaces.parts();
+        let before = pv.hovered().to_vec();
+        pv.hover(d, sx, sy);
+        changed |= pv.hovered() != before.as_slice();
+        out.extend(actions(pane, None, pv.hover_events(d)));
+        for (&block, doc) in &mut self.lens {
+            let (x, y) = match target {
+                Some(Target::Lens { block: b, x, y }) if b == block => (x, y),
+                _ => off,
+            };
+            let (d, pv) = doc.surfaces.parts();
+            let before = pv.hovered().to_vec();
+            pv.hover(d, x, y);
+            changed |= pv.hovered() != before.as_slice();
+            let to = format!("{SF_PREFIX}{block}");
+            out.extend(actions(pane, Some(&to), pv.hover_events(d)));
+        }
+        (changed, out)
+    }
+
     /// The node a press at this point lands on, without pressing: its surface (`lens:<block>`
     /// for a command block's card) and the innermost node's id. `None` on the grid or between
     /// nodes.
@@ -733,7 +809,7 @@ fn actions(pane: PaneId, to: Option<&str>, outcomes: Vec<Outcome>) -> Vec<Action
             }
             Outcome::Copy(text) => Some(Action::Copy(text)),
             Outcome::Open(target) => Some(Action::Open(target)),
-            // The browser has no image viewer: a zoom opens nothing.
+            // The browser has no image viewer, and draws nothing that zooms (`browser`).
             Outcome::Zoom(_) | Outcome::Keys | Outcome::Redraw => None,
         })
         .collect()
@@ -882,6 +958,120 @@ mod tests {
         feed(&mut r, b"\x1bc");
         frame(&mut d, &mut r);
         assert!(d.lens_placed.is_empty(), "{d:?}");
+    }
+
+    /// Pointing at an open `prefs` menu's option previews it (`select {item: "<row>=<value>"}`,
+    /// once per option), as in the app; moving off the pane takes the hover away.
+    #[test]
+    fn hover_previews_a_prefs_menu_option() {
+        let mut r = Replica::new(80, 24, Settings::default(), Role::Follower);
+        feed(
+            &mut r,
+            &apc(
+                "q",
+                json!({"q": "hello", "v": [1], "app": "t", "features": []}),
+            ),
+        );
+        feed(&mut r, &apc("o", json!({"id": "s1", "mode": "screen"})));
+        let prefs = json!({"id": "pf", "k": "prefs", "p": {
+            "pages": [{"id": "g", "label": "General"}], "page": "g",
+            "editing": {"row": "region"},
+            "sections": [{"id": "s", "rows": [
+                {"id": "region", "label": "Region", "control": {"k": "choice", "value": "eu", "style": "menu",
+                 "options": [{"value": "us", "label": "US East"}, {"value": "eu", "label": "EU West"}]}}
+            ]}]
+        }});
+        let main = json!({"id": "main", "k": "col", "c": [prefs]});
+        feed(
+            &mut r,
+            &apc(
+                "f",
+                json!({"sf": "s1", "s": 1, "ops": [["add", "main", "s1", null, main]]}),
+            ),
+        );
+        let mut d = draw();
+        frame(&mut d, &mut r);
+        let pf_rect = d.surface_node_rect(r.tsp(), "s1", "pf").expect("drawn");
+        let key = r.tsp().surfaces()[0].key();
+        let doc = d.surfaces().doc();
+        let pf = d.surfaces().view().node_element(key, "pf").unwrap();
+        let pf_box = doc.border_box(pf).unwrap();
+        let option = |v: &str| -> Press {
+            let mut stack = vec![pf];
+            while let Some(e) = stack.pop() {
+                if doc.attribute(e, "data-pf") == Some("mi") && doc.attribute(e, "data-v") == Some(v) {
+                    let b = doc.border_box(e).unwrap();
+                    return Press {
+                        x: pf_rect[0] + b.x - pf_box.x + b.w / 2.0,
+                        y: pf_rect[1] + b.y - pf_box.y + b.h / 2.0,
+                        ..Press::default()
+                    };
+                }
+                stack.extend(doc.element_children(e));
+            }
+            panic!("option {v}");
+        };
+        let (us, eu) = (option("us"), option("eu"));
+        let selects = |acts: &[Action]| -> Vec<String> {
+            acts.iter()
+                .map(|a| match a {
+                    Action::Send(ClientMsg::ViewEvent { pane: 3, sf, event }) if sf == "s1" => {
+                        assert_eq!(event["ev"], "select", "{event}");
+                        event["item"].as_str().unwrap().to_owned()
+                    }
+                    other => panic!("{other:?}"),
+                })
+                .collect()
+        };
+        let (changed, acts) = d.hover(3, Some(us), CONTENT.1);
+        assert!(changed);
+        assert_eq!(selects(&acts), ["region=us"]);
+        // Still on it: nothing more.
+        let (_, acts) = d.hover(3, Some(us), CONTENT.1);
+        assert!(acts.is_empty(), "{acts:?}");
+        let (_, acts) = d.hover(3, Some(eu), CONTENT.1);
+        assert_eq!(selects(&acts), ["region=eu"]);
+        // Off the pane: the hover goes.
+        let (changed, acts) = d.hover(3, None, CONTENT.1);
+        assert!(changed && acts.is_empty());
+        assert!(d.surfaces().view().hovered().is_empty());
+    }
+
+    /// The browser has no image viewer, so it draws no Open on a mermaid figure.
+    #[test]
+    fn mermaid_figures_draw_no_open_in_the_browser() {
+        let mut r = Replica::new(80, 24, Settings::default(), Role::Follower);
+        feed(
+            &mut r,
+            &apc(
+                "q",
+                json!({"q": "hello", "v": [1], "app": "t", "features": []}),
+            ),
+        );
+        feed(&mut r, &apc("o", json!({"id": "s1", "mode": "inline"})));
+        let main = json!({"id": "main", "k": "col", "c": [
+            {"id": "m", "k": "md", "p": {"text": "```mermaid\ngraph LR\n  A --> B\n```\n"}}
+        ]});
+        feed(
+            &mut r,
+            &apc(
+                "f",
+                json!({"sf": "s1", "s": 1, "ops": [["add", "main", "s1", null, main]]}),
+            ),
+        );
+        let mut d = draw();
+        frame(&mut d, &mut r);
+        let key = r.tsp().surfaces()[0].key();
+        let doc = d.surfaces().doc();
+        let m = d.surfaces().view().node_element(key, "m").unwrap();
+        let mut stack = vec![m];
+        let mut classes = Vec::new();
+        while let Some(e) = stack.pop() {
+            classes.push(d.surfaces().view().written().class(e).unwrap_or("").to_owned());
+            stack.extend(doc.element_children(e));
+        }
+        assert!(classes.iter().any(|c| c.contains("mfig")), "a figure: {classes:?}");
+        assert!(!classes.iter().any(|c| c.contains("mfig-open")), "{classes:?}");
     }
 
     #[test]

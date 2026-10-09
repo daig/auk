@@ -306,6 +306,11 @@ impl PaneView {
                 changed |= (m.hl.len(), *hl_budget) != before;
                 if m.hl.is_empty() {
                     sv.st.hl_waiting.remove(&id);
+                } else {
+                    // In view with lines still waiting (the background is on them): the clock
+                    // draws them in as they finish. Out of view the clock would let them go.
+                    m.clock = true;
+                    sv.clocked.insert(id);
                 }
             }
             // Preview clamps.

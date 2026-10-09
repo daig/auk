@@ -463,6 +463,7 @@ dependencies = [
  "base64 0.23.1",
  "image",
  "imara-diff",
+ "libc",
  "merman",
  "parley",
  "png",

@@ -686,7 +686,7 @@ fn b5_apc_and_credits_are_usable() {
 
 #[test]
 fn b6_kinds_and_features_list_only_what_is_implemented() {
-    let (_env, probe) = setup("b6");
+    let (env, probe) = setup("b6");
     let reply = hello_reply(&exchange(&probe, &hello(&[]))).clone();
     let kinds = reply["kinds"].as_array().unwrap();
     // T2 kinds are advertised once drawn (A23).
@@ -719,9 +719,18 @@ fn b6_kinds_and_features_list_only_what_is_implemented() {
         .map(|f| f.as_str().unwrap())
         .collect();
     assert!(features.iter().all(|f| allowed.contains(f)), "{features:?}");
-    // `aside` (the docking of `prefs`) is advertised with `prefs`, which this hello doesn't list.
-    assert!(!features.contains(&"aside"));
-    // An unadvertised kind fails as unknown.
+    // `aside` (the docking of `prefs`) is advertised exactly when `prefs` is (A23).
+    assert!(kinds.contains(&json!("prefs")));
+    assert!(features.contains(&"aside"));
+    // Under `t2-kinds off` the hello lists neither the T2 kinds nor `aside`, and an unadvertised
+    // kind fails as unknown.
+    env.daemon("settings --t2-kinds off");
+    let reply = wait_for("the T0+T1 hello", || {
+        let reply = hello_reply(&exchange(&probe, &hello(&[]))).clone();
+        (!reply["kinds"].as_array()?.contains(&json!("prefs"))).then_some(reply)
+    });
+    assert_eq!(reply["kinds"].as_array().unwrap().len(), 38);
+    assert!(!reply["features"].as_array().unwrap().contains(&json!("aside")));
     exchange(&probe, &open("s1", "flow"));
     let bodies = exchange(
         &probe,
@@ -1565,7 +1574,7 @@ fn d5_add_checks_ids_before_kinds_duplicates_and_limits() {
     let bad = [
         add("x", json!({"id": "y", "k": "text"})),
         json!(["add", "x", "main", {"id": "x", "k": "text"}]),
-        add("x", json!({"id": "x", "k": "math"})),
+        add("x", json!({"id": "x", "k": "nope"})),
         add("main", json!({"id": "main", "k": "text"})),
         add(
             "p",

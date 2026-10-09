@@ -223,18 +223,23 @@ func waitFrame(after: Int, timeout: Double, _ test: (Frame) -> Bool) -> Frame? {
     return nil
 }
 
-/// Lets the window settle: no new frame for `quiet` seconds (up to `limit`).
+/// Lets the window settle: no new picture for `quiet` seconds (up to `limit`). The window server
+/// may deliver "complete" frames at the display rate while nothing in the window changed, so a
+/// frame counts only when its pixels differ from the one before.
 func settle(quiet: Double = 0.3, limit: Double = 5) {
     let start = Date()
-    var count = capture.snapshot().count
+    var seen = capture.snapshot().count
+    var last = capture.snapshot().last?.checksum
     var since = Date()
     while Date().timeIntervalSince(start) < limit {
         usleep(20_000)
-        let now = capture.snapshot().count
-        if now != count {
-            count = now
+        let frames = capture.snapshot()
+        for f in frames[seen...] where f.checksum != last {
+            last = f.checksum
             since = Date()
-        } else if Date().timeIntervalSince(since) >= quiet {
+        }
+        seen = frames.count
+        if Date().timeIntervalSince(since) >= quiet {
             return
         }
     }

@@ -208,8 +208,10 @@ pub(crate) struct ShimmerState {
     pub levels: Vec<u8>,
 }
 
+/// A shimmer color token: a semantic one naming a color, else a palette token (`strong`, `em`
+/// and the other non-color semantic tokens included) over the text's own color.
 fn token_color(t: &str) -> String {
-    if spans::SEMANTIC.contains(&t) {
+    if spans::COLOR_TOKENS.contains(&t) {
         format!("var(--sf-c-{t})")
     } else {
         format!("var(--sf-p-{t}, currentColor)")
@@ -783,6 +785,14 @@ mod tests {
         assert_eq!(format_duration(245_000.0, true), "4:05");
         assert_eq!(format_duration(3_723_000.0, true), "1:02:03");
         assert_eq!(format_duration(-5.0, false), "0.0s");
+    }
+
+    #[test]
+    fn shimmer_tokens_without_a_color_fall_back_to_the_palette_then_the_text() {
+        assert_eq!(token_color("warning"), "var(--sf-c-warning)");
+        for t in ["strong", "em", "mono", "mark", "typo", "icon", "hide"] {
+            assert_eq!(token_color(t), format!("var(--sf-p-{t}, currentColor)"), "{t}");
+        }
     }
 
     #[test]

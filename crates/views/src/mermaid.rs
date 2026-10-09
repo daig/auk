@@ -52,6 +52,8 @@ const FONT_PX: f32 = 13.0;
 pub fn kind(src: &str) -> Result<&'static str, String> {
     let mut lines = src.lines().map(str::trim);
     let mut in_front = false;
+    // Inside a directive (`%%{ … }%%`) that runs over several lines.
+    let mut in_directive = false;
     let mut first = true;
     for line in lines.by_ref() {
         // YAML front matter.
@@ -65,6 +67,14 @@ pub fn kind(src: &str) -> Result<&'static str, String> {
             if line == "---" {
                 in_front = false;
             }
+            continue;
+        }
+        if in_directive {
+            in_directive = !line.contains("}%%");
+            continue;
+        }
+        if line.starts_with("%%{") {
+            in_directive = !line.contains("}%%");
             continue;
         }
         if line.is_empty() || line.starts_with("%%") {
@@ -500,6 +510,12 @@ mod tests {
             Ok("sequence")
         );
         assert_eq!(kind("classDiagram-v2\n"), Ok("class"));
+        // A directive over several lines, and one on a line.
+        assert_eq!(
+            kind("%%{\n  init: { \"theme\": \"dark\" }\n}%%\nsequenceDiagram\n a->>b: hi"),
+            Ok("sequence")
+        );
+        assert_eq!(kind("%%{init: {}}%%\npie\n \"a\": 1"), Ok("pie"));
         assert_eq!(kind("stateDiagram-v2\n"), Ok("state"));
         assert_eq!(kind("erDiagram\n"), Ok("er"));
         assert_eq!(kind("gantt\n"), Ok("gantt"));

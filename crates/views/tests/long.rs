@@ -35,20 +35,25 @@ fn a_long_transcript_measures_and_highlights_only_what_is_in_view() {
     h.frame();
     let (first_card, last_card) = (h.el("s1", "c0"), h.el("s1", "c149"));
     let (first_md, last_md) = (h.el("s1", "m0"), h.el("s1", "m149"));
-    // In view (the document viewport, the top): measured and highlighted.
+    // In view (the document viewport, the top): measured.
     assert!(h.doc.laid_out(first_card));
     assert!(h.class(first_card).contains("clamped"), "{}", h.class(first_card));
-    assert!(!h.find_class(first_md, "tk-keyword").is_empty());
-    // Out of view: only an estimated box, not measured, its code drawn plain until it shows.
+    // Out of view: only an estimated box, not measured.
     assert!(!h.doc.laid_out(last_card));
     assert!(!h.class(last_card).contains("clamped"), "{}", h.class(last_card));
-    assert!(h.find_class(last_md, "tk-keyword").is_empty());
-    assert!(h.text(last_md).contains("let x = 1;"));
     let work = h.view.last_work();
     assert!(
         work.measured < 60,
         "the measure loop visits what's in view, not all 150 cards: {work:?}"
     );
+    // The code highlights in the background (each frame finishes only a few lines itself, so
+    // a loaded machine may show the first frame plain). Once the background is done, a frame
+    // draws in what is in view, and only that: the code out of view stays plain until it shows.
+    auk_views::highlight::settle();
+    h.frame();
+    assert!(!h.find_class(first_md, "tk-keyword").is_empty());
+    assert!(h.find_class(last_md, "tk-keyword").is_empty());
+    assert!(h.text(last_md).contains("let x = 1;"));
 
     // Nothing changed: the next frame measures nothing.
     h.frame();
