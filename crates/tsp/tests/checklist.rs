@@ -2630,3 +2630,36 @@ fn h2_restore_after_a_crash() {
     );
     assert!(restored.pane.surfaces().iter().all(|s| !s.interactive()));
 }
+
+#[test]
+fn a_modal_or_full_overlay_or_a_picker_in_the_layer_covers_the_surface() {
+    // `picker` is T2 (advertised once drawn, D22): accept it here.
+    let mut config = Config::default();
+    config.kinds.push("picker".into());
+    let mut h = Harness::with(config);
+    text_main(&mut h, "s1", "inline");
+    let key = h.pane.surfaces()[0].key();
+    let covered = |h: &Harness| h.pane.covered(key);
+    h.frame(
+        "s1",
+        2,
+        json!([["add", "layer", "s1", null, {"id": "layer", "k": "col"}]]),
+    );
+    assert!(!covered(&h), "an empty layer covers nothing");
+    // A plain popup doesn't cover; a modal one does, inside the layer's column.
+    h.frame("s1", 3, json!([["add", "ov", "layer", null, {"id": "ov", "k": "overlay", "p": {"anchor": "bottom"}}]]));
+    assert!(!covered(&h));
+    h.frame("s1", 4, json!([["set", "ov", {"modal": true}]]));
+    assert!(covered(&h));
+    h.frame(
+        "s1",
+        5,
+        json!([["set", "ov", {"modal": false, "size": "full"}]]),
+    );
+    assert!(covered(&h), "a full sheet covers");
+    h.frame("s1", 6, json!([["del", "ov"]]));
+    assert!(!covered(&h), "uncovered when the sheet goes");
+    h.frame("s1", 7, json!([["add", "pk", "layer", null, {"id": "pk", "k": "col", "c": [{"id": "p", "k": "picker"}]}]]));
+    assert!(covered(&h), "a picker covers");
+    assert!(h.out().is_empty(), "{:?}", h.out());
+}

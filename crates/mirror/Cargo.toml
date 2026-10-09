@@ -12,6 +12,7 @@ tokio = ["dep:tokio", "dep:tokio-util", "dep:bytes"]
 
 [dependencies]
 auk-replica = { path = "../replica" }
+auk-term = { path = "../term" }
 bytes = { version = "1.12.1", optional = true }
 serde = { workspace = true }
 serde_json.workspace = true

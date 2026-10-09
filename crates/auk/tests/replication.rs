@@ -8,8 +8,8 @@ use std::time::Duration;
 use auk_conformance::harness::{Headless, TestEnv, wait_for};
 use auk_conformance::probe::{Probe, events, frame, hello as tsp_hello, open_with};
 use auk_mirror::{
-    Client, ClientFacts, ClientKind, ClientMsg, DaemonMsg, HandshakeError, Hello, Versions,
-    read_msg, write_msg,
+    Client, ClientFacts, ClientKind, ClientMsg, DaemonMsg, HandshakeError, Hello, ThemeColors,
+    Versions, read_msg, write_msg,
 };
 use auk_replica::{Item, Record, Replica, Role, Settings};
 use serde_json::{Value, json};
@@ -495,6 +495,7 @@ fn cell_size_reduced_motion_and_the_12_hour_clock_follow_the_primary_client() {
             dark: false,
             reduce_motion: true,
             hour12: true,
+            colors: None,
         },
     );
     x.send(&ClientMsg::Focus { pane });
@@ -566,6 +567,142 @@ fn cell_size_reduced_motion_and_the_12_hour_clock_follow_the_primary_client() {
     });
     let tsp = env.daemon(&format!("tsp {pane}"));
     assert_eq!(tsp["facts"]["hour12"], false, "{tsp}");
+}
+
+/// What the terminal answered an OSC color query (`11`, `10`, `4;1`): its `rgb:` value.
+fn osc_color(probe: &Probe, query: &str) -> String {
+    probe.write(format!("\x1b]{query};?\x07").as_bytes());
+    let head = format!("\x1b]{query};rgb:");
+    let input = probe.read_until(&format!("the OSC {query} answer"), |b| {
+        let text = String::from_utf8_lossy(b);
+        text.find(&head)
+            .is_some_and(|at| text[at..].contains('\x07'))
+    });
+    let text = String::from_utf8_lossy(&input);
+    let at = text.find(&head).unwrap() + head.len() - "rgb:".len();
+    text[at..].split('\x07').next().unwrap().to_owned()
+}
+
+/// Whether an `rgb:rrrr/gggg/bbbb` answer is a dark color, by the same luminance rule as the
+/// daemon's `Facts::is_dark`.
+fn reads_dark(rgb: &str) -> bool {
+    let parts: Vec<u8> = rgb
+        .trim_start_matches("rgb:")
+        .split('/')
+        .map(|c| u8::from_str_radix(&c[..2], 16).unwrap())
+        .collect();
+    let facts = auk_term::Facts {
+        background: auk_term::Rgb(parts[0], parts[1], parts[2]),
+        ..auk_term::Facts::default()
+    };
+    facts.is_dark()
+}
+
+fn themed(dark: bool) -> ClientFacts {
+    ClientFacts {
+        dark,
+        colors: Some(ThemeColors::from(&auk_term::Facts::for_appearance(dark))),
+        ..ClientFacts::default()
+    }
+}
+
+#[test]
+fn osc11_answers_the_primary_clients_background() {
+    let env = env("osccolors");
+    env.start_daemon();
+    // X, dark, is attached before the pane opens: the program's first query gets its colors,
+    // with no focus or input from X. (The probe asks only once the pane has X as a viewer, so
+    // this doesn't tell the pane's seed facts from X's attach.)
+    let x = RawClient::attach(&env, themed(true));
+    x.presence(|c| c.iter().any(|c| c.id == x.id && c.window_key.is_some()));
+    let probe = Probe::start(&env, &[]);
+    let pane = probe.pane;
+    assert_eq!(osc_color(&probe, "11"), "rgb:1616/1818/1a1a");
+    assert_eq!(osc_color(&probe, "10"), "rgb:d8d8/dada/dbdb");
+    assert_eq!(osc_color(&probe, "4;1"), "rgb:cccc/6666/6666");
+    // The hello's `dark` agrees with OSC 11.
+    probe.write(&tsp_hello(&[]));
+    let bodies = program_reads(&probe, "the hello reply", |b| {
+        b.iter().any(|v| v["r"] == "hello")
+    });
+    let reply = bodies.iter().find(|v| v["r"] == "hello").unwrap();
+    assert_eq!(reply["dark"], json!(true), "{reply}");
+    assert!(reads_dark(&osc_color(&probe, "11")));
+
+    // X turns light: the answers follow, and so does the hello's appearance (a theme event, to
+    // a program with a surface open).
+    probe.write(&open_with(
+        "s1",
+        "flow",
+        json!([{"id": "t", "k": "text", "p": {"text": "hi"}}]),
+    ));
+    x.send(&ClientMsg::Facts(themed(false)));
+    program_reads(&probe, "the light theme event", |b| {
+        events(b, "theme").iter().any(|t| t["dark"] == false)
+    });
+    assert_eq!(osc_color(&probe, "11"), "rgb:fbfb/fbfb/fafa");
+    assert_eq!(osc_color(&probe, "10"), "rgb:1f1f/2323/2828");
+    assert_eq!(osc_color(&probe, "4;1"), "rgb:c9c9/1b1b/0000");
+    assert!(!reads_dark(&osc_color(&probe, "11")));
+
+    // Y names only its appearance (an older client): the answers are Auk's dark colors. Z's
+    // theme has its own red, which OSC 4 then answers.
+    let y = RawClient::attach(
+        &env,
+        ClientFacts {
+            dark: true,
+            ..ClientFacts::default()
+        },
+    );
+    y.send(&ClientMsg::Focus { pane });
+    wait_primary(&env, pane, y.id);
+    assert_eq!(osc_color(&probe, "11"), "rgb:1616/1818/1a1a");
+    let mut own = themed(true);
+    own.colors.as_mut().unwrap().palette[1] = [0x12, 0x34, 0x56];
+    let z = RawClient::attach(&env, own);
+    z.send(&ClientMsg::Focus { pane });
+    wait_primary(&env, pane, z.id);
+    assert_eq!(osc_color(&probe, "4;1"), "rgb:1212/3434/5656");
+}
+
+#[test]
+fn a_new_pane_gets_its_clients_appearance_in_colorfgbg() {
+    let env = env("colorfgbg");
+    env.start_daemon();
+    let script = "printf '<%s>' \"${COLORFGBG-unset}\" > fgbg.txt";
+    let file = env.home.join("fgbg.txt");
+    let read = |what: &str| {
+        let _ = std::fs::remove_file(&file);
+        env.new_pane(&["--", script]);
+        wait_for(what, || {
+            std::fs::read_to_string(&file)
+                .ok()
+                .filter(|t| t.ends_with('>'))
+        })
+    };
+    // No client: none is set.
+    assert_eq!(read("COLORFGBG with no client"), "<unset>");
+    // Nor for a client's facts without colors (the app's defaults before its window draws).
+    let w = RawClient::attach(
+        &env,
+        ClientFacts {
+            dark: true,
+            ..ClientFacts::default()
+        },
+    );
+    w.presence(|c| c.iter().any(|c| c.id == w.id && c.window_key.is_some()));
+    assert_eq!(read("COLORFGBG for facts without colors"), "<unset>");
+    let w_id = w.id;
+    drop(w);
+    let x = RawClient::attach(&env, themed(true));
+    x.presence(|c| {
+        c.iter().any(|c| c.id == x.id && c.window_key.is_some()) && !c.iter().any(|c| c.id == w_id)
+    });
+    assert_eq!(read("COLORFGBG for a dark client"), "<15;0>");
+    x.send(&ClientMsg::Facts(themed(false)));
+    wait_for("the light facts", || {
+        (read("COLORFGBG for a light client") == "<0;15>").then_some(())
+    });
 }
 
 #[test]

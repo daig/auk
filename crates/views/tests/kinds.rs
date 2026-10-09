@@ -753,3 +753,91 @@ fn hidden_title_aria_shrink_and_a_fractional_basis_take_effect() {
     assert!((stiff.w - tight.w * 0.75).abs() < 0.5, "{} of {}", stiff.w, tight.w);
     assert!((soft.w - tight.w * 0.25).abs() < 0.5, "{} of {}", soft.w, tight.w);
 }
+
+/// One line of 13px surface text, as laid out alone.
+fn line_height(h: &mut Harness) -> f32 {
+    h.surface(
+        "lh",
+        "inline",
+        json!([{"id": "one", "k": "text", "p": {"text": "x"}}]),
+    );
+    h.frame();
+    h.doc.border_box(h.el("lh", "one")).expect("laid out").h
+}
+
+/// Amendment A22: text in a row keeps its words whole; the wide sibling shrinks and clips.
+#[test]
+fn a_label_beside_wide_tabs_keeps_its_word() {
+    let mut h = Harness::new();
+    h.hello(&[]);
+    let line = line_height(&mut h);
+    h.doc.set_viewport(420.0, 800.0);
+    let items: Vec<_> = (0..11)
+        .map(|i| json!({"id": format!("t{i}"), "label": format!("Tab number {i}")}))
+        .collect();
+    h.surface(
+        "s1",
+        "inline",
+        json!([{"id": "r", "k": "row", "p": {"gap": "sm"}, "c": [
+            {"id": "kind", "k": "text", "p": {"text": "Kind:"}},
+            {"id": "tabs", "k": "tabs", "p": {"items": items, "active": "t0"}}
+        ]}]),
+    );
+    h.frame();
+    let kind = h.doc.border_box(h.el("s1", "kind")).expect("laid out");
+    let tabs = h.doc.border_box(h.el("s1", "tabs")).expect("laid out");
+    let row = h.doc.border_box(h.el("s1", "r")).expect("laid out");
+    assert!(kind.h <= line + 0.5, "one line: {kind:?}, a line is {line}");
+    assert!(kind.w > 25.0, "its word's width: {kind:?}");
+    assert!(
+        tabs.x + tabs.w <= row.x + row.w + 0.5,
+        "the tabs shrink into the row: {tabs:?} in {row:?}"
+    );
+    // A word longer than the line still breaks, inside the row too.
+    h.frame_ops("s1", 2, json!([["set", "kind", {"text": "x".repeat(200)}]]));
+    h.frame();
+    let kind = h.doc.border_box(h.el("s1", "kind")).expect("laid out");
+    assert!(
+        kind.w <= row.w + 0.5 && kind.h > line * 2.0,
+        "broken at the line: {kind:?}"
+    );
+}
+
+/// Amendment A22: icons are inline boxes 1.2em wide, so a line with no spaces breaks beside
+/// them, not inside words (omp's role lines).
+#[test]
+fn a_line_of_words_and_icons_breaks_only_at_the_icons() {
+    let mut h = Harness::new();
+    h.hello(&[]);
+    let line = line_height(&mut h);
+    h.doc.set_viewport(150.0, 800.0);
+    let words = [
+        "memory", "session", "default", "compact", "planner", "search",
+    ];
+    let mut spans = Vec::new();
+    for w in words {
+        spans.push(json!({"t": w, "s": "muted"}));
+        spans.push(json!({"t": "\u{f0eb}", "s": "icon"}));
+    }
+    h.surface(
+        "s1",
+        "inline",
+        json!([{"id": "roles", "k": "text", "p": {"spans": spans}}]),
+    );
+    h.frame();
+    let el = h.el("s1", "roles");
+    let all = h.doc.border_box(el).expect("laid out");
+    assert!(all.h > line * 1.5, "it wraps: {all:?}");
+    let muted = h.find_class(el, "sf-t-muted");
+    assert_eq!(muted.len(), words.len());
+    for (w, &m) in words.iter().zip(&muted) {
+        let r = h.doc.border_box(m).expect("laid out");
+        assert!(r.h <= line + 0.5, "{w} stays whole on one line: {r:?}");
+    }
+    let icons = h.find_class(el, "sf-t-icon");
+    let r = h.doc.border_box(icons[0]).expect("laid out");
+    assert!(
+        (r.w - 13.0 * 1.2).abs() < 0.6,
+        "an icon is 1.2em wide: {r:?}"
+    );
+}

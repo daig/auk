@@ -385,7 +385,19 @@ impl Daemon {
             Role::Authoritative,
             tsp::engine(&settings, &self.blob_dir()),
         );
-        let spec = self.spawn_spec(id, &kind, &window_key, &cwd, cols, rows);
+        // Clients showing this window key see the new pane; the first becomes its primary, so
+        // the program starts with that client's facts (§15.5).
+        let viewers: Vec<_> = st
+            .clients
+            .iter()
+            .filter(|(_, c)| c.window_key.as_deref() == Some(window_key.as_str()))
+            .map(|(id, c)| (*id, c.tx.clone(), c.facts.clone()))
+            .collect();
+        let seed = viewers.first().map(|(_, _, facts)| facts.clone());
+        let mut spec = self.spawn_spec(id, &kind, &window_key, &cwd, cols, rows);
+        if let Some(facts) = seed.as_ref().filter(|f| f.colors.is_some()) {
+            tell_appearance(&mut spec, facts.dark);
+        }
         let mut replica = replica;
         replica.set_facts(default_facts());
         let pane = Arc::new(Mutex::new(Pane::new(
@@ -397,6 +409,9 @@ impl Daemon {
         )));
         {
             let mut p = lock(&pane);
+            if let Some(facts) = seed {
+                p.seed_facts(facts);
+            }
             p.keep_open = req.keep_open;
             p.plugin = Some(self.plugins.link());
             self.sync_catalog(&mut p);
@@ -425,13 +440,6 @@ impl Daemon {
         st.layout.set_kind(id, tag);
         st.panes.insert(id, pane.clone());
 
-        // Clients showing this window key see the new pane.
-        let viewers: Vec<_> = st
-            .clients
-            .iter()
-            .filter(|(_, c)| c.window_key.as_deref() == Some(window_key.as_str()))
-            .map(|(id, c)| (*id, c.tx.clone(), c.facts.clone()))
-            .collect();
         broadcast_layout(&st, &window_key);
         crate::events::emit(
             "pane_spawned",
@@ -1334,6 +1342,15 @@ impl PasteTracker {
         let keep = buf.len().saturating_sub(Self::START.len() - 1).max(i);
         self.tail = buf[keep..].to_vec();
     }
+}
+
+/// Sets rxvt's `COLORFGBG` (foreground;background) from a client's appearance, for programs
+/// that read it from the environment instead of asking OSC 11. Callers pass only facts a client
+/// filled in (they carry `colors`): before its window is drawn, the app's facts are the
+/// defaults, and an unset variable is better than a wrong one for the shell's life.
+pub(crate) fn tell_appearance(spec: &mut pty::SpawnSpec, dark: bool) {
+    let v = if dark { "15;0" } else { "0;15" };
+    spec.env.insert("COLORFGBG".to_owned(), v.to_owned());
 }
 
 #[cfg(test)]

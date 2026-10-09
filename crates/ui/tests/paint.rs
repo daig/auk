@@ -395,3 +395,92 @@ fn culling_keeps_boxes_whose_shadows_reach_into_view() {
         "the shadow in view is painted"
     );
 }
+
+#[test]
+fn positioned_boxes_paint_and_hit_test_in_tree_order() {
+    // An absolute scrim before a relative card (omp's `.sf-ov-dim` then `.sf-ov-card`): the
+    // card paints over it and takes the hit; an explicit z-index still wins.
+    let page = r#"<!DOCTYPE html><html><head><style>
+    body { margin: 0; background: white; }
+    .wrap { position: relative; width: 100px; height: 60px; }
+    .dim { position: absolute; left: 0; top: 0; width: 100px; height: 60px; background: rgb(0, 0, 0); }
+    .card { position: relative; margin: 10px; width: 30px; height: 30px; background: rgb(255, 0, 0); }
+    .over { position: absolute; left: 50px; top: 10px; width: 30px; height: 30px; background: rgb(0, 0, 255); z-index: 1; }
+    .under { position: relative; margin: -30px 0 0 50px; width: 30px; height: 30px; background: rgb(0, 255, 0); }
+    </style></head><body><div class="wrap"><div class="dim"></div><div class="over"></div>
+    <div class="card"></div><div class="under"></div></div></body></html>"#;
+    let (doc, body) = common::our_layout(page, 100.0, 60.0);
+    let wrap = doc.element_children(body)[0];
+    let kids = doc.element_children(wrap);
+    let (dim, over, card) = (kids[0], kids[1], kids[2]);
+    let Some(px) = render(&doc, 100, 60) else {
+        panic!("no wgpu adapter for offscreen rendering");
+    };
+    let at = |x: u32, y: u32| -> [u8; 4] {
+        let i = ((y * 100 + x) * 4) as usize;
+        [px[i], px[i + 1], px[i + 2], px[i + 3]]
+    };
+    assert_eq!(at(25, 25), [255, 0, 0, 255], "the card over the scrim");
+    assert_eq!(at(5, 50), [0, 0, 0, 255], "the scrim around it");
+    assert_eq!(
+        at(65, 25),
+        [0, 0, 255, 255],
+        "z-index 1 over a later relative box"
+    );
+    assert_eq!(hit_test(&doc, 25.0, 25.0), Some(card));
+    assert_eq!(hit_test(&doc, 5.0, 50.0), Some(dim));
+    assert_eq!(hit_test(&doc, 65.0, 25.0), Some(over));
+}
+
+#[test]
+fn ellipsis_comes_from_a_font_that_has_it() {
+    // A label starting with an icon (Symbols Nerd Font Mono has no "…"): the ellipsis comes
+    // from the text's font, not the first run's, and the text isn't hard-clipped.
+    let mut doc = auk_ui::Document::new();
+    doc.fonts_mut().register_font(
+        std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../text/assets/SymbolsNerdFontMono-Regular.ttf"
+        ))
+        .unwrap(),
+    );
+    doc.set_stylesheet(
+        "base",
+        auk_ui::SheetKind::BuiltIn,
+        None,
+        "body { margin: 0; background: white }
+         .e { width: 100px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+              font: 20px/30px Menlo; color: black }
+         .i { font-family: 'Symbols Nerd Font Mono' }",
+    );
+    let root = doc.root();
+    let body = doc.create_element("body");
+    doc.append_child(root, body);
+    let e = doc.create_element("div");
+    doc.set_attribute(e, "class", "e");
+    doc.append_child(body, e);
+    let icon = doc.create_element("span");
+    doc.set_attribute(icon, "class", "i");
+    doc.append_child(e, icon);
+    let t = doc.create_text("\u{f07b}");
+    doc.append_child(icon, t);
+    let t = doc.create_text(&"\u{2588}".repeat(12));
+    doc.append_child(e, t);
+    doc.set_viewport(120.0, 30.0);
+    doc.update();
+    let Some(px) = render(&doc, 120, 30) else {
+        panic!("no wgpu adapter")
+    };
+    let dark = |x0: u32, x1: u32, y0: u32, y1: u32| {
+        (x0..x1)
+            .flat_map(|x| (y0..y1).map(move |y| (x, y)))
+            .filter(|&(x, y)| px[((y * 120 + x) * 4) as usize] < 128)
+            .count()
+    };
+    assert!(dark(0, 20, 0, 30) > 0, "the icon drawn");
+    assert!(dark(101, 120, 0, 30) == 0, "nothing past the box");
+    // Menlo's blocks and "…" are 12 px wide at 20 px: five blocks fit before the "…" (whose
+    // dots sit low), not a sixth and a clipped seventh.
+    assert!(dark(81, 100, 0, 15) == 0, "no block in the ellipsis' place");
+    assert!(dark(80, 100, 15, 25) > 0, "the ellipsis' dots");
+}

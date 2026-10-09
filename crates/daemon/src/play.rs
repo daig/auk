@@ -286,6 +286,9 @@ impl Daemon {
                 term.cols(),
                 term.rows(),
             );
+            if p.primary().is_some() && p.facts().colors.is_some() {
+                crate::server::tell_appearance(&mut spec, p.facts().dark);
+            }
             spec.program = exe.into_os_string();
             spec.args = vec!["stand-in".into()];
             (p.pid.filter(|_| p.exit.is_none()), spec)

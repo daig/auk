@@ -14,7 +14,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use auk_mirror::layout::SessionId;
-use auk_mirror::{ClientFacts, PaneId};
+use auk_mirror::{ClientFacts, PaneId, ThemeColors};
 use auk_render::{
     Acquired, Gpu, GridRenderer, GridSnapshot, RowSlot, Theme, UiLayer, View, WindowSurface, wgpu,
 };
@@ -479,7 +479,13 @@ fn facts(cell: (u32, u32), dark: bool) -> ClientFacts {
             .flatten()
             .is_some_and(|m| m.matches()),
         hour12: browser_hour12(),
+        // OSC 10/11/4 answers: the colors the page draws panes in.
+        colors: Some(ThemeColors::from(&theme(dark).facts((0, 0)))),
     }
+}
+
+fn theme(dark: bool) -> Theme {
+    if dark { Theme::dark() } else { Theme::light() }
 }
 
 /// Whether the browser's locale shows a 12-hour clock: the resolved `hourCycle` (`h11`/`h12`) of
@@ -922,11 +928,7 @@ impl App {
             }
             Status::Attached => {}
         }
-        let theme = if self.dark {
-            Theme::dark()
-        } else {
-            Theme::light()
-        };
+        let theme = theme(self.dark);
         let tab = self.session.tab(self.want_pane.or(self.focused)).cloned();
         // The panes sit below the tab bar.
         let bar_h = (BAR_HEIGHT as f32 * scale).round();

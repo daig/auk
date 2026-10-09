@@ -178,9 +178,11 @@ dependencies = [
  "auk-mirror",
  "auk-platform-macos",
  "auk-plugins",
+ "auk-render",
  "auk-replica",
  "auk-term",
  "auk-tsp",
+ "auk-ui",
  "auk-views",
  "auk-web",
  "base64 0.23.1",
@@ -279,6 +281,7 @@ name = "auk-mirror"
 version = "0.0.0"
 dependencies = [
  "auk-replica",
+ "auk-term",
  "bytes",
  "futures-util",
  "serde",

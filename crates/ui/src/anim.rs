@@ -318,6 +318,10 @@ pub(crate) struct NodeMotion {
     pub base: Arc<ComputedStyle>,
     transitions: Vec<Transition>,
     animations: Vec<Running>,
+    /// Animations that ran to the end and were dropped, by name: they don't start again while
+    /// the element keeps listing them (CSS Animations 1 §3: an animation starts when its name
+    /// appears in `animation-name`, not on every restyle).
+    pub finished: Vec<Arc<str>>,
 }
 
 /// The keyframes of an animation, resolved for one element: `(offset, declared values)`.
@@ -329,6 +333,7 @@ impl NodeMotion {
             base,
             transitions: Vec::new(),
             animations: Vec::new(),
+            finished: Vec::new(),
         }
     }
 
@@ -347,8 +352,22 @@ impl NodeMotion {
         mut frames: impl FnMut(&str) -> Option<Frames>,
     ) {
         if reduce {
+            // Listed animations that would end count as finished, so they don't all play at
+            // once when motion comes back (ones that loop or fill forwards start then).
             self.transitions.clear();
             self.animations.clear();
+            self.finished = base
+                .animations
+                .as_deref()
+                .into_iter()
+                .flatten()
+                .filter(|a| {
+                    a.duration > 0.0
+                        && a.iterations.is_finite()
+                        && !matches!(&*a.fill_mode, "forwards" | "both")
+                })
+                .map(|a| a.name.clone())
+                .collect();
             self.base = base;
             return;
         }
@@ -387,11 +406,17 @@ impl NodeMotion {
                 easing: t.easing,
             });
         }
-        // Animations: kept by name, new ones start now, removed ones stop.
+        // Animations: kept by name, new ones start now, removed ones stop; finished ones stay
+        // finished while still listed.
         let specs: Vec<Animation> = base.animations.as_deref().cloned().unwrap_or_default();
         let mut next = Vec::with_capacity(specs.len());
+        let mut finished = Vec::new();
         for spec in specs {
             if spec.duration <= 0.0 {
+                continue;
+            }
+            if self.finished.contains(&spec.name) {
+                finished.push(spec.name);
                 continue;
             }
             match self
@@ -426,19 +451,25 @@ impl NodeMotion {
             }
         }
         self.animations = next;
+        self.finished = finished;
         self.base = base;
     }
 
     /// The style shown at `now`, and drops what has finished. `None` when it equals the base.
     pub fn at(&mut self, now: f64) -> Option<ComputedStyle> {
         self.transitions.retain(|t| now < t.start + t.duration);
+        let finished = &mut self.finished;
         self.animations.retain(|a| {
             let fill_forwards = matches!(&*a.spec.fill_mode, "forwards" | "both");
-            fill_forwards
+            let keep = fill_forwards
                 || a.paused_at.is_some()
                 || !a.spec.iterations.is_finite()
                 || now
-                    < a.start + f64::from(a.spec.duration) * 1000.0 * f64::from(a.spec.iterations)
+                    < a.start + f64::from(a.spec.duration) * 1000.0 * f64::from(a.spec.iterations);
+            if !keep {
+                finished.push(a.spec.name.clone());
+            }
+            keep
         });
         if self.is_idle() {
             return None;

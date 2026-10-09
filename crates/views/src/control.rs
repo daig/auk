@@ -100,6 +100,9 @@ impl PaneView {
                 continue;
             };
             let ids: Vec<String> = sv.clocked.iter().cloned().collect();
+            // Under a sheet (`.sf-covered`), spinners and shimmers in main and dock hold their
+            // frame; timers and the rest still run.
+            let held = sv.covered.then_some(sv.regions[2]);
             let mut cx = Cx {
                 dom: Dom {
                     doc: &mut *doc,
@@ -132,6 +135,18 @@ impl PaneView {
                     }
                     !m.hl.is_empty()
                 };
+                if let Some(layer) = held
+                    && matches!(
+                        m.extra,
+                        crate::view::Extra::Spin(_) | crate::view::Extra::Shimmer(_)
+                    )
+                    && !layer.is_some_and(|l| {
+                        std::iter::successors(Some(m.el), |&e| cx.dom.doc.parent(e)).any(|e| e == l)
+                    })
+                {
+                    any |= drawing_in;
+                    continue;
+                }
                 if kinds::tick(&mut cx, node, m) || drawing_in {
                     any = true;
                 } else {

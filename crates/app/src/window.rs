@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use auk_mirror::layout::{Session, SessionId, SplitDir, Tab, TabId, Window as Sessions};
-use auk_mirror::{ClientFacts, ClientMsg, LayoutEdit, PaneId};
+use auk_mirror::{ClientFacts, ClientMsg, LayoutEdit, PaneId, ThemeColors};
 use auk_platform_macos::{
     Appearance, Command, Event, KeyInput, MouseButton, MouseEvent, MouseKind, OptionAsAlt, Preedit,
     ScrollEvent, Size, Window, WindowHandler,
@@ -166,6 +166,8 @@ pub struct WinState {
     pub overlays: overlays::Overlays,
     /// The viewer's picture size, in CSS px.
     pub(crate) viewer_size: (f64, f64),
+    /// The viewer's picture is an SVG (it scales up to fit).
+    pub(crate) viewer_svg: bool,
     /// Bumped whenever the chrome document is rebuilt, for the accessibility tree.
     chrome_updates: u64,
     /// Find (§6.2): the bar, the matches and the current one.
@@ -296,6 +298,7 @@ impl WinState {
             plugins: plugins::PluginState::default(),
             overlays: overlays::Overlays::default(),
             viewer_size: (1.0, 1.0),
+            viewer_svg: false,
             chrome_updates: 0,
             find: None,
             hover_link: None,
@@ -704,6 +707,8 @@ impl WinState {
             dark: self.dark,
             reduce_motion: self.reduce_motion(),
             hour12: auk_platform_macos::system_hour12(),
+            // OSC 10/11/4 answers: the colors this window draws panes in.
+            colors: Some(ThemeColors::from(&self.theme.facts((0, 0)))),
         };
         if self.facts_sent.as_ref() != Some(&facts) {
             let _ = self.conn.send(&ClientMsg::Facts(facts.clone()));

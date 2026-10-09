@@ -80,7 +80,9 @@ html.light #statusline .sl-plugin { color: #2a2d31; }
 }
 html.light .tab .tab-agent { background-color: #e4d8f7; color: #4a2d7a; }
 .backdrop { position: absolute; left: 0; top: 0; }
-.backdrop.dim { background-color: rgba(0, 0, 0, 0.6); }
+/* The scrim behind sheets (book: --dim). */
+.backdrop.dim { background-color: rgba(0, 0, 0, 0.55); }
+html.light .backdrop.dim { background-color: rgba(244, 244, 241, 0.5); }
 .palette {
   position: absolute; left: 50%; top: 60px; width: 520px; margin-left: -260px;
   background-color: #23262a; border: 1px solid #3a3e44; border-radius: 9px; padding: 6px;

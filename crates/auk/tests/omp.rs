@@ -89,6 +89,17 @@ fn omp_is_the_recorded_version() {
     );
 }
 
+/// How [`LiveOmp::start_with`] sets omp up.
+#[derive(Default)]
+struct Setup {
+    /// The window's appearance is dark (its facts carry the dark theme's colors).
+    dark: bool,
+    /// A shell line run (to its next prompt) before omp starts.
+    before: Option<String>,
+    /// omp's arguments in place of `--no-session` (already quoted).
+    args: Option<String>,
+}
+
 /// A live omp in a hermetic daemon pane, shown by a native window.
 struct LiveOmp {
     env: TestEnv,
@@ -106,6 +117,12 @@ impl LiveOmp {
     /// Starts a daemon (with TSP switched off when `tsp` is false), a zsh pane in an empty
     /// temporary cwd and the window, then runs omp from the shell's prompt.
     fn start(name: &str, tsp: bool) -> LiveOmp {
+        LiveOmp::start_with(name, tsp, Setup::default())
+    }
+
+    /// [`LiveOmp::start`] with the window's appearance, a shell line run first, and omp's
+    /// arguments (`--no-session` by default).
+    fn start_with(name: &str, tsp: bool, setup: Setup) -> LiveOmp {
         let omp = omp();
         let env = TestEnv::new(env!("CARGO_BIN_EXE_auk"), name);
         env.start_daemon();
@@ -128,14 +145,28 @@ impl LiveOmp {
         let ready = env.wait(pane, "prompt");
         let prompts = ready["prompts"].as_u64().expect("a prompt count");
         let mut window = NativeWindow::attach(&env, "main", SIZE);
+        if setup.dark {
+            window.set_dark(true);
+        }
         window.wait("the window to become the pane's primary", UI, |w| {
             (w.is_primary(pane)
                 && w.try_replica(pane)
                     .is_some_and(|r| r.terminal().cols() == SIZE.0))
             .then_some(())
         });
+        let mut prompts = prompts;
+        if let Some(before) = &setup.before {
+            window.input(pane, format!("{before}\r").as_bytes());
+            let done = env.daemon(&format!(
+                "wait {pane} --until prompt --timeout {}",
+                UI.as_secs()
+            ));
+            prompts = done["prompts"].as_u64().expect("a prompt count");
+            assert_eq!(prompts, ready["prompts"].as_u64().unwrap() + 1, "{done}");
+        }
+        let args = setup.args.as_deref().unwrap_or("--no-session");
         let line = format!(
-            "HOME={} EDITOR={} PI_TUI_TSP_RECORD={} {} --no-session --no-title\r",
+            "HOME={} EDITOR={} PI_TUI_TSP_RECORD={} {} {args} --no-title\r",
             quote(&real_home().to_string_lossy()),
             quote(&editor.to_string_lossy()),
             quote(&log.to_string_lossy()),
@@ -1356,4 +1387,338 @@ fn omp_closing_toast_shows_for_its_ttl_then_goes() {
         .expect("omp closed its surface with keep");
     assert!(toast < close);
     omp.quit_done();
+}
+
+/// An omp session file of `turns` short question-and-answer turns, written into `dir`, for omp
+/// to resume: a transcript many panes long, with no model call.
+fn long_session(dir: &Path, cwd: &Path, turns: usize) -> PathBuf {
+    let id = "01a20000-0000-7000-8000-00000000a16a";
+    let at = |i: usize| format!("2026-10-08T07:{:02}:{:02}.000Z", i / 60 % 60, i % 60);
+    let mut lines = vec![
+        serde_json::json!({"type": "session", "version": 3, "id": id, "timestamp": at(0), "cwd": cwd}),
+        serde_json::json!({"type": "model_change", "id": "m0000000", "parentId": null, "timestamp": at(0),
+                           "model": "xai-oauth/grok-4.7", "resolvedModelIsFallback": false}),
+    ];
+    let mut parent = "m0000000".to_owned();
+    for t in 0..turns {
+        let (u, a) = (format!("u{t:07}"), format!("a{t:07}"));
+        let answer: Vec<String> = (0..8).map(|l| format!("- Point {l} of answer {t}.")).collect();
+        lines.push(serde_json::json!({"type": "message", "id": u, "parentId": parent, "timestamp": at(2 * t + 1),
+            "message": {"role": "user", "content": [{"type": "text", "text": format!("Question {t}?")}],
+                        "attribution": "user", "timestamp": 1_791_445_349_000u64 + t as u64 * 2000}}));
+        lines.push(serde_json::json!({"type": "message", "id": a, "parentId": u, "timestamp": at(2 * t + 2),
+            "message": {"role": "assistant", "content": [{"type": "text", "text": format!("## Answer {t}\n\n{}", answer.join("\n"))}],
+                        "api": "openai-responses", "provider": "xai-oauth", "model": "grok-4.7",
+                        "usage": {"input": 10, "output": 10, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 20,
+                                  "cost": {"input": 0.0, "output": 0.0, "cacheRead": 0.0, "cacheWrite": 0.0, "total": 0.0}},
+                        "stopReason": "stop", "timestamp": 1_791_445_350_000u64 + t as u64 * 2000}}));
+        parent = a;
+    }
+    let path = dir.join(format!("2026-10-08T07-00-00-000Z_{id}.jsonl"));
+    let text: Vec<String> = lines.iter().map(Value::to_string).collect();
+    std::fs::write(&path, text.join("\n") + "\n").expect("write the session");
+    path
+}
+
+/// Renders the part `(x, y, w, h)` of a window's document offscreen, as the app's UI layer draws
+/// it.
+fn render_part(doc: &auk_ui::Document, (x, y, w, h): (f32, f32, u32, u32)) -> auk_render::Image {
+    use auk_render::{Gpu, OFFSCREEN_FORMAT, OffscreenTarget, UiLayer, wgpu};
+    let gpu = Gpu::new_blocking().expect("a Metal adapter");
+    let mut scene = auk_render::vello::Scene::new();
+    auk_ui::paint::paint_with_transform(
+        doc,
+        &mut scene,
+        auk_render::vello::kurbo::Affine::translate((-f64::from(x), -f64::from(y))),
+    );
+    let mut ui = UiLayer::new(&gpu, OFFSCREEN_FORMAT).expect("a UI layer");
+    ui.render(&gpu, &scene, w, h).expect("the UI layer renders");
+    let target = OffscreenTarget::new(&gpu, w, h);
+    let mut encoder = gpu.device.create_command_encoder(&Default::default());
+    {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("window part"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target.view(),
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        ui.draw(&mut pass);
+    }
+    gpu.queue.submit([encoder.finish()]);
+    target.read(&gpu).expect("readback")
+}
+
+/// The first element under `el` (itself included) whose written class list has `class`.
+fn first_with_class(w: &NativeWindow, pane: u64, el: auk_ui::NodeId, class: &str) -> auk_ui::NodeId {
+    w.with_class(pane, el, class)
+        .first()
+        .copied()
+        .unwrap_or_else(|| panic!("no .{class}"))
+}
+
+/// Amendments A15-A19 on a live omp 18.8.5, with no prompt: omp resumes a session file many
+/// panes long (no model call), in a dark window. Its Switch Model overlay (opened by clicking
+/// the composer's model control, as a user does) sits in the pane's visible area and lays out
+/// its list (A16), drawn over its scrim, not under it (A15); a window focus change doesn't
+/// replay the card's pop (A17). Its Usage overlay (the cost control) takes a click on its
+/// Details tab, which omp makes active, and the card omp's new props build doesn't pop again.
+/// The pane's OSC 11 answer is the dark theme's background and its TSP facts say dark (A19).
+/// Esc closes each overlay; nothing is picked, and omp's config is left as it was.
+#[test]
+fn a15_to_a19_omps_overlays_over_a_long_transcript_in_the_dark() {
+    let config = real_home().join(".omp/agent/config.yml");
+    let config_before = std::fs::read(&config).ok();
+    let dir = std::env::temp_dir().join(format!("auk-omp-a16-{}", std::process::id()));
+    let sessions = dir.join("sessions");
+    std::fs::create_dir_all(&sessions).expect("a session dir");
+    // Asks OSC 11 from the pane's shell as omp does at its start, and keeps the answer.
+    let probe = dir.join("osc11.py");
+    std::fs::write(
+        &probe,
+        "import os, select, sys, termios, tty\n\
+         fd = os.open('/dev/tty', os.O_RDWR)\n\
+         old = termios.tcgetattr(fd)\n\
+         tty.setraw(fd)\n\
+         os.write(fd, b'\\x1b]11;?\\x07')\n\
+         buf = b''\n\
+         while not buf.endswith(b'\\x07') and select.select([fd], [], [], 5)[0]:\n\
+         \x20   buf += os.read(fd, 64)\n\
+         termios.tcsetattr(fd, termios.TCSADRAIN, old)\n\
+         open(sys.argv[1], 'wb').write(buf)\n",
+    )
+    .expect("write the OSC 11 probe");
+    let answer = dir.join("osc11.txt");
+    let session = long_session(&sessions, &dir, 40);
+    let mut omp = LiveOmp::start_with(
+        "omp-a16",
+        true,
+        Setup {
+            dark: true,
+            before: Some(format!(
+                "python3 -I {} {}",
+                quote(&probe.to_string_lossy()),
+                quote(&answer.to_string_lossy())
+            )),
+            args: Some(format!(
+                "--session-dir {} --resume {}",
+                quote(&sessions.to_string_lossy()),
+                quote(&session.to_string_lossy())
+            )),
+        },
+    );
+    let pane = omp.pane;
+    omp.ready();
+
+    // A19: the dark window's background answers OSC 11, and the facts omp hears are dark.
+    let osc11 = std::fs::read(&answer).expect("the OSC 11 answer");
+    assert_eq!(
+        String::from_utf8_lossy(&osc11),
+        "\x1b]11;rgb:1616/1818/1a1a\x07",
+        "OSC 11 answers the dark theme's background"
+    );
+    assert_eq!(
+        omp.env.daemon(&format!("tsp {pane}"))["facts"]["dark"],
+        true
+    );
+
+    // The resumed transcript is many viewports long.
+    let viewport = omp.window.doc(pane).viewport();
+    let page = omp.window.view(pane).element();
+    let long = omp.window.doc(pane).border_box(page).expect("laid out");
+    assert!(long.h > viewport.1 * 2.0, "a long transcript: {long:?} in {viewport:?}");
+
+    // Clicking the composer's model control opens omp's Switch Model overlay.
+    let model = omp.with_role("omp.composer.model");
+    assert_eq!(model.len(), 1, "omp's model control: {model:?}");
+    let s = omp.window.live_surface(pane, "s:1").expect("the session surface");
+    let el = omp.window.element_of(pane, s, &model[0].0).expect("drawn");
+    let b = omp.window.doc(pane).border_box(el).expect("laid out");
+    let out = omp.window.click(pane, b.x + b.w / 2.0, b.y + b.h / 2.0);
+    assert!(
+        out.iter().any(|o| matches!(o, Outcome::Event { .. })),
+        "the click goes to omp: {out:?}"
+    );
+    let (ov, list) = omp.window.wait("omp's model overlay", UI, |w| {
+        let s = w.live_surface(pane, "s:1")?;
+        let kinds = kinds_under(s.document().root());
+        let ov = kinds.iter().find(|(_, k)| k == "overlay")?.0.clone();
+        let list = kinds_under(s.document().get(&ov)?)
+            .into_iter()
+            .find(|(id, k)| {
+                k == "list"
+                    && s.document().get(id).and_then(|n| n.prop("role")).and_then(Value::as_str)
+                        == Some("omp.model-browser.list")
+            })?
+            .0;
+        Some((ov, list))
+    });
+    let s = omp.window.live_surface(pane, "s:1").expect("the session surface");
+    let ov_n = s.document().get(&ov).expect("the overlay");
+    assert_eq!(ov_n.prop("modal"), Some(&Value::Bool(true)), "a modal overlay");
+    let ov_el = omp.window.element_of(pane, s, &ov).expect("drawn");
+    let card = first_with_class(&omp.window, pane, ov_el, "sf-ov-card");
+    // Its pop finishes.
+    std::thread::sleep(Duration::from_millis(300));
+    omp.window.frame();
+    let opacity = |w: &NativeWindow| w.doc(pane).computed_style(card).map(|c| c.opacity);
+    assert_eq!(opacity(&omp.window), Some(1.0), "the pop finished");
+
+    // A16: the card lies in the pane's visible area (the layer, one viewport from the pane's
+    // top), not ~a transcript's length down.
+    let doc = omp.window.doc(pane);
+    let layers = first_with_class(&omp.window, pane, page, "auk-layers");
+    let l = doc.border_box(layers).expect("the layer laid out");
+    let c = doc.border_box(card).expect("the card laid out");
+    assert!((l.h - viewport.1).abs() < 1.0, "the layer is one viewport tall: {l:?}");
+    assert!(
+        c.h > 0.0 && c.y >= l.y && c.y + c.h <= l.y + l.h,
+        "the card {c:?} lies in the visible area {l:?}"
+    );
+    // Its list lays out the rows it shows.
+    let s = omp.window.live_surface(pane, "s:1").expect("the session surface");
+    let items: Vec<String> = s
+        .document()
+        .get(&list)
+        .expect("the list")
+        .children()
+        .filter(|n| n.kind() == "item")
+        .map(|n| n.id().to_owned())
+        .collect();
+    assert!(items.len() >= 2, "models to pick from: {items:?}");
+    let first = omp.window.element_of(pane, s, &items[0]).expect("drawn");
+    assert!(doc.laid_out(first), "the list's first row is laid out");
+
+    // A15: the card draws over its scrim: a pixel of its bottom padding is the card's own
+    // color, not half-dimmed.
+    let bg = doc.computed_style(card).expect("styled").background_color;
+    assert_eq!(bg.a, 1.0, "an opaque card");
+    let want = [bg.r, bg.g, bg.b].map(|v| (v * 255.0).round() as u8);
+    let (x0, y0) = (c.x.floor(), c.y.floor());
+    let px = render_part(doc, (x0, y0, c.w.ceil() as u32 + 2, c.h.ceil() as u32 + 2));
+    let p = px.pixel((c.x + c.w / 2.0 - x0) as u32, (c.y + c.h - 4.0 - y0) as u32);
+    assert!(
+        [p.0, p.1, p.2].iter().zip(want).all(|(a, b)| a.abs_diff(b) <= 3),
+        "the card's background {p:?} is its color {want:?}, not dimmed"
+    );
+    // Clicks land in the card, not the scrim (A15's hit order).
+    let hit = auk_ui::hit_test(doc, c.x + c.w / 2.0, c.y + c.h - 4.0).expect("a hit");
+    assert!(
+        std::iter::successors(Some(hit), |&e| doc.parent(e)).any(|e| e == card),
+        "the press lands in the card"
+    );
+
+    // A17: a window focus change restyles the card without replaying its pop.
+    omp.window.set_focused(pane, false);
+    assert_eq!(opacity(&omp.window), Some(1.0), "no replay on blur");
+    omp.window.set_focused(pane, true);
+    omp.window.frame();
+    assert_eq!(opacity(&omp.window), Some(1.0), "no replay on focus");
+
+    // Esc closes it, using no model.
+    omp.window.press(pane, Key::Escape, Mods::default());
+    omp.window.wait("the model overlay to close", UI, |w| {
+        let s = w.live_surface(pane, "s:1")?;
+        s.document().get(&ov).is_none().then_some(())
+    });
+
+    // omp's Usage overlay (its cost control): a click on its Details tab reaches omp, which
+    // makes it the active tab; the card built again with the new props doesn't pop again.
+    let usage = omp.with_role("omp.composer.usage");
+    assert_eq!(usage.len(), 1, "omp's cost control: {usage:?}");
+    let s = omp.window.live_surface(pane, "s:1").expect("the session surface");
+    let el = omp.window.element_of(pane, s, &usage[0].0).expect("drawn");
+    let b = omp.window.doc(pane).border_box(el).expect("laid out");
+    omp.window.click(pane, b.x + b.w / 2.0, b.y + b.h / 2.0);
+    let (ov, tabs) = omp.window.wait("omp's usage overlay", UI, |w| {
+        let s = w.live_surface(pane, "s:1")?;
+        let kinds = kinds_under(s.document().root());
+        let ov = kinds.iter().find(|(_, k)| k == "overlay")?.0.clone();
+        let tabs = kinds_under(s.document().get(&ov)?)
+            .into_iter()
+            .find(|(_, k)| k == "tabs")?
+            .0;
+        Some((ov, tabs))
+    });
+    let s = omp.window.live_surface(pane, "s:1").expect("the session surface");
+    let active = |s: &auk_tsp::Surface| {
+        s.document()
+            .get(&tabs)
+            .and_then(|n| n.prop("active"))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    };
+    assert_eq!(active(s).as_deref(), Some("overview"));
+    let ov_el = omp.window.element_of(pane, s, &ov).expect("drawn");
+    let tabs_el = omp.window.element_of(pane, s, &tabs).expect("drawn");
+    std::thread::sleep(Duration::from_millis(300));
+    omp.window.frame();
+    let card = first_with_class(&omp.window, pane, ov_el, "sf-ov-card");
+    let c = omp.window.doc(pane).border_box(card).expect("laid out");
+    assert!(
+        c.y >= l.y && c.y + c.h <= l.y + l.h,
+        "the usage card {c:?} lies in the visible area {l:?}"
+    );
+    // The innermost element reading "Details" is the tab.
+    let doc = omp.window.doc(pane);
+    let mut tab = None;
+    let mut stack = vec![tabs_el];
+    while let Some(n) = stack.pop() {
+        if doc.node(n).is_element() && omp.window.text_content(pane, n).trim() == "Details" {
+            tab = Some(n);
+        }
+        stack.extend(doc.children(n).iter().rev());
+    }
+    let r = doc
+        .border_box(tab.expect("the Details tab"))
+        .expect("laid out");
+    let out = omp.window.click(pane, r.x + r.w / 2.0, r.y + r.h / 2.0);
+    assert!(
+        out.iter().any(|o| matches!(o, Outcome::Event { .. })),
+        "the tab's click goes to omp: {out:?}"
+    );
+    omp.window.wait("omp to make Details the active tab", UI, |w| {
+        let s = w.live_surface(pane, "s:1")?;
+        (active(s).as_deref() == Some("detail")).then_some(())
+    });
+    let card = first_with_class(&omp.window, pane, ov_el, "sf-ov-card");
+    assert_eq!(
+        omp.window.doc(pane).computed_style(card).map(|c| c.opacity),
+        Some(1.0),
+        "no replay on new props"
+    );
+
+    // Esc goes back to the first tab, then closes it; omp quits; its config is as it was.
+    let open = |w: &NativeWindow| {
+        w.live_surface(pane, "s:1")
+            .is_some_and(|s| s.document().get(&ov).is_some())
+    };
+    for _ in 0..3 {
+        if !open(&omp.window) {
+            break;
+        }
+        omp.window.press(pane, Key::Escape, Mods::default());
+        let start = std::time::Instant::now();
+        while open(&omp.window) && start.elapsed() < Duration::from_secs(3) {
+            std::thread::sleep(Duration::from_millis(25));
+            omp.window.frame();
+        }
+    }
+    assert!(!open(&omp.window), "Esc closes the usage overlay");
+    omp.quit();
+    assert_eq!(
+        std::fs::read(&config).ok(),
+        config_before,
+        "omp's config is unchanged"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }

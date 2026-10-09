@@ -477,6 +477,15 @@ impl PaneSurfaces {
     /// whether it laid anything out: arrange again.
     pub fn show(&mut self, arranged: &Arranged, scale: f32) -> bool {
         let mut span: Option<(f32, f32)> = None;
+        // Where each shown part of the document is in the layer (the content area), for
+        // overlays anchored outside the layer ([`PaneView::set_shown`]).
+        let mut shown: Vec<(f32, f32, f32)> = Vec::new();
+        if let Some((_, b)) = arranged.screen {
+            shown.push((b.y, b.y + b.h, 0.0));
+        }
+        if let Some((_, b)) = arranged.dock {
+            shown.push((b.y, b.y + b.h, arranged.flow_px / scale));
+        }
         for &(i, y) in &arranged.composed.blocks {
             let b = &arranged.blocks[i];
             if self.lens_block(b).is_some() {
@@ -493,12 +502,19 @@ impl PaneSurfaces {
             let a = r.y + (top - y) / scale;
             let z = r.y + (bottom - y) / scale;
             span = Some(span.map_or((a, z), |(p, q)| (p.min(a), q.max(z))));
+            if arranged.screen.is_none() {
+                shown.push((a, z, top / scale));
+            }
         }
+        let placed = self.view.set_shown(shown);
         let rect = span.map(|(a, z)| Rect::new(0.0, a, self.doc.viewport().0, z - a));
-        if rect == self.view.view_rect() && !self.view.end_windows_left_view(&self.doc) {
+        let moved = rect != self.view.view_rect() || self.view.end_windows_left_view(&self.doc);
+        if !moved && !placed {
             return false;
         }
-        self.view.set_view_rect(rect);
+        if moved {
+            self.view.set_view_rect(rect);
+        }
         let before = self.doc.layout_count();
         self.view.layout(&mut self.doc);
         self.doc.layout_count() != before

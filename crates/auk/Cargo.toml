@@ -22,6 +22,9 @@ auk-mirror = { path = "../mirror" }
 # S1 posts the same CGEvents to Auk and to Ghostty from the test process.
 auk-platform-macos = { path = "../platform-macos" }
 auk-replica = { path = "../replica" }
+# The omp suite renders a window's document offscreen to check what it draws.
+auk-render = { path = "../render" }
+auk-ui = { path = "../ui" }
 # The omp suite encodes keys and reads documents and views like a window.
 auk-term = { path = "../term" }
 auk-tsp = { path = "../tsp" }

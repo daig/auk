@@ -140,6 +140,11 @@ impl PaneView {
     /// A pointer press (§7.8). Local flips apply at once; the returned outcomes tell the host
     /// what to send or do.
     pub fn click(&mut self, doc: &mut Document, pane: &TspPane, ev: PointerEvent) -> Vec<Outcome> {
+        // A modal backdrop takes the pointer: the press reaches nothing beneath and sends no
+        // event (book: overlay "Keys").
+        if auk_ui::hit_test(doc, ev.x, ev.y).is_some_and(|el| self.class_has(el, "sf-ov-dim")) {
+            return vec![Outcome::Redraw];
+        }
         if ev.button != Button::Primary {
             return Vec::new();
         }
@@ -925,6 +930,11 @@ impl PaneView {
 
     /// The context menu for the node under a point: its `menu` actions, then Copy unless named.
     pub fn menu(&self, doc: &Document, pane: &TspPane, x: f32, y: f32) -> Vec<MenuEntry> {
+        // A modal backdrop has no menu, not even its overlay's: the press goes to `click`,
+        // which takes it.
+        if auk_ui::hit_test(doc, x, y).is_some_and(|el| self.class_has(el, "sf-ov-dim")) {
+            return Vec::new();
+        }
         for hit in self.hits(doc, x, y) {
             let Some(s) = pane.surface(hit.surface) else {
                 continue;

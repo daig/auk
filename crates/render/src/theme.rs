@@ -68,39 +68,34 @@ pub const OVERRIDE_BACKGROUND: u16 = 257;
 pub const OVERRIDE_CURSOR: u16 = 258;
 
 impl Theme {
-    /// A dark theme.
+    /// A dark theme. Its default and ANSI colors are [`auk_term::Facts::dark`], which the
+    /// daemon also answers color queries with.
     pub fn dark() -> Theme {
-        let ansi = [
-            0x1d1f21, 0xcc6666, 0xb5bd68, 0xf0c674, 0x81a2be, 0xb294bb, 0x8abeb7, 0xc5c8c6,
-            0x666666, 0xd54e53, 0xb9ca4a, 0xe7c547, 0x7aa6da, 0xc397d8, 0x70c0b1, 0xeaeaea,
-        ];
+        let base = auk_term::Facts::dark();
         Theme {
-            foreground: Rgba::from_hex(0xd8dadb),
-            background: Rgba::from_hex(0x16181a),
-            cursor: Rgba::from_hex(0xf0c674),
-            cursor_text: Rgba::from_hex(0x16181a),
+            foreground: base.foreground.into(),
+            background: base.background.into(),
+            cursor: base.cursor.into(),
+            cursor_text: base.background.into(),
             selection_background: Rgba::from_hex(0x37474f),
             selection_foreground: None,
-            palette: xterm_palette(ansi.map(Rgba::from_hex)),
+            palette: xterm_palette(base.palette.map(Rgba::from)),
             bold_is_bright: false,
             link: Rgba::from_hex(0x6f9ef2),
         }
     }
 
-    /// A light theme.
+    /// A light theme, from [`auk_term::Facts::light`] as [`Theme::dark`].
     pub fn light() -> Theme {
-        let ansi = [
-            0x000000, 0xc91b00, 0x00a600, 0xa08000, 0x0225c7, 0xa22eb8, 0x00a5b2, 0xc7c7c7,
-            0x686868, 0xe0372a, 0x26b229, 0xb8a000, 0x5a68ff, 0xc154d8, 0x00bfc9, 0xffffff,
-        ];
+        let base = auk_term::Facts::light();
         Theme {
-            foreground: Rgba::from_hex(0x1f2328),
-            background: Rgba::from_hex(0xfbfbfa),
-            cursor: Rgba::from_hex(0x3a6ff7),
+            foreground: base.foreground.into(),
+            background: base.background.into(),
+            cursor: base.cursor.into(),
             cursor_text: Rgba::from_hex(0xffffff),
             selection_background: Rgba::from_hex(0xb4d5fe),
             selection_foreground: None,
-            palette: xterm_palette(ansi.map(Rgba::from_hex)),
+            palette: xterm_palette(base.palette.map(Rgba::from)),
             bold_is_bright: false,
             link: Rgba::from_hex(0x2563d9),
         }

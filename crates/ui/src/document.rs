@@ -53,6 +53,9 @@ pub struct Document {
     clock: f64,
     /// Elements with running transitions or animations.
     motion: std::collections::HashMap<NodeId, crate::anim::NodeMotion>,
+    /// Elements' finished animations, by name, once nothing else moves on them
+    /// ([`crate::anim::NodeMotion::finished`]); dropped when the element leaves the tree.
+    finished_anims: std::collections::HashMap<NodeId, Vec<Arc<str>>>,
     /// Pictures by URL, loaded once each (`None`: the URL didn't decode).
     pub(crate) url_images:
         std::collections::HashMap<Arc<str>, Option<Arc<crate::image::ImageContent>>>,
@@ -117,6 +120,7 @@ impl Document {
             url_images: Default::default(),
             clock: 0.0,
             motion: Default::default(),
+            finished_anims: Default::default(),
         };
         doc.root = doc.create_element("html");
         doc.stylist
@@ -225,6 +229,9 @@ impl Document {
             self.mark_containing_block_dirty(child);
         }
         self.invalidate_layout(child);
+        if !self.finished_anims.is_empty() || self.motion.values().any(|m| !m.finished.is_empty()) {
+            self.forget_finished(child);
+        }
         self.node_mut(parent).children.remove(at);
         let n = self.node_mut(child);
         n.parent = None;
@@ -240,6 +247,8 @@ impl Document {
     }
 
     fn free_subtree(&mut self, id: NodeId) {
+        self.motion.remove(&id);
+        self.finished_anims.remove(&id);
         let n = self.nodes[id.index()].take().expect("live node");
         for c in n.children.iter().chain(n.anon_children.iter()) {
             if self
@@ -260,6 +269,7 @@ impl Document {
     /// Free one node (not its children).
     pub(crate) fn free_node(&mut self, id: NodeId) {
         self.motion.remove(&id);
+        self.finished_anims.remove(&id);
         if self.nodes[id.index()].take().is_some() {
             self.free.push(id.0);
         }
@@ -1220,9 +1230,7 @@ impl Document {
                     self.node_mut(id).style = Some(shown);
                 }
             }
-            if !m.is_idle() {
-                self.motion.insert(id, m);
-            }
+            self.keep_motion(id, m);
         }
     }
 
@@ -1248,23 +1256,57 @@ impl Document {
         scope: Option<String>,
     ) -> Arc<ComputedStyle> {
         let has = base.transitions.is_some() || base.animations.is_some();
-        if !has && !self.motion.contains_key(&id) {
-            return base;
+        if !has {
+            self.finished_anims.remove(&id);
+            if !self.motion.contains_key(&id) {
+                return base;
+            }
         }
         let reduce = self.stylist.media.reduced_motion;
         let now = self.clock;
-        let mut m = self
-            .motion
-            .remove(&id)
-            .unwrap_or_else(|| crate::anim::NodeMotion::new(base.clone()));
+        let mut m = self.motion.remove(&id).unwrap_or_else(|| {
+            let mut m = crate::anim::NodeMotion::new(base.clone());
+            m.finished = self.finished_anims.remove(&id).unwrap_or_default();
+            m
+        });
         m.restyle(base.clone(), shown.as_deref(), now, reduce, |name| {
             self.keyframes_for(name, scope.as_deref(), parent, id)
         });
         let out = m.at(now);
+        self.keep_motion(id, m);
+        out.map(Arc::new).unwrap_or(base)
+    }
+
+    /// Keeps an element's motion while something moves on it, else just its finished
+    /// animations' names.
+    fn keep_motion(&mut self, id: NodeId, m: crate::anim::NodeMotion) {
         if !m.is_idle() {
             self.motion.insert(id, m);
+        } else if !m.finished.is_empty() {
+            self.finished_anims.insert(id, m.finished);
         }
-        out.map(Arc::new).unwrap_or(base)
+    }
+
+    /// Forgets the finished animations in a subtree leaving the tree: they run again when it's
+    /// inserted (an element that's inserted is new to CSS).
+    fn forget_finished(&mut self, id: NodeId) {
+        self.finished_anims.remove(&id);
+        if let Some(m) = self.motion.get_mut(&id) {
+            m.finished.clear();
+        }
+        let n = self.node(id);
+        let kids: Vec<NodeId> = n
+            .children
+            .iter()
+            .copied()
+            .chain(n.before)
+            .chain(n.after)
+            .collect();
+        for c in kids {
+            if self.node(c).parent == Some(id) {
+                self.forget_finished(c);
+            }
+        }
     }
 
     /// An animation's keyframes for one element: each keyframe cascaded over the element's

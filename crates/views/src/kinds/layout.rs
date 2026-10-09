@@ -322,6 +322,9 @@ pub(crate) fn seg(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
     m.clock |= spans_into(cx, t, v);
 }
 
+/// The overlay pop's length (`motion.css`).
+const POP_MS: f64 = 220.0;
+
 pub(crate) fn overlay(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
     begin(cx, m);
     let p = node.props();
@@ -334,10 +337,11 @@ pub(crate) fn overlay(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look
         _ => "center".to_owned(),
     };
     look.class(&format!("at-{anchor}"));
-    // An overlay that opens into a drawn surface pops in (§7.13).
-    let drawn = cx.st.drawn;
-    let pop = *cx.st.overlays.entry(node.id().to_owned()).or_insert(drawn);
-    look.class_if(pop, "sf-pop");
+    // An overlay that opens into a drawn surface pops in (§7.13), once: the card a later
+    // render builds (new props) doesn't pop again.
+    let opened = cx.st.drawn.then_some(cx.now);
+    let opened = *cx.st.overlays.entry(node.id().to_owned()).or_insert(opened);
+    look.class_if(opened.is_some_and(|t| cx.now < t + POP_MS), "sf-pop");
     let modal = bool_prop(p, "modal");
     look.class_if(modal, "modal");
     if modal {

@@ -56,6 +56,74 @@ pub(crate) fn box_transform(s: &ComputedStyle, r: Rect) -> Option<Affine> {
     Some(Affine::translate((ox, oy)) * m * Affine::translate((-ox, -oy)))
 }
 
+/// Positioned children in painting order: by z-index, then in tree order (CSS 2 appendix E),
+/// not in layout-child order, which puts absolutely positioned boxes after their in-flow
+/// siblings. `owner` is the box whose layout children they are.
+fn sort_positioned(doc: &Document, owner: NodeId, positioned: &mut [(i32, usize, NodeId)]) {
+    if positioned.len() < 2 {
+        return;
+    }
+    // Usually they're all the owner's own children: their sibling places order them.
+    if positioned
+        .iter()
+        .all(|p| doc.node(p.2).parent == Some(owner))
+    {
+        positioned.sort_by_key(|&(z, k, c)| (z, sibling_key(doc, c), k));
+        return;
+    }
+    // Else their paths from the owner, or from the root for one that isn't below it.
+    let mut paths: Vec<Option<Vec<u32>>> = positioned
+        .iter()
+        .map(|p| tree_path(doc, p.2, Some(owner)))
+        .collect();
+    if paths.iter().any(Option::is_none) {
+        paths = positioned
+            .iter()
+            .map(|p| tree_path(doc, p.2, None))
+            .collect();
+    }
+    let mut keyed: Vec<(i32, Vec<u32>, usize, NodeId)> = positioned
+        .iter()
+        .zip(paths)
+        .map(|(&(z, k, c), path)| (z, path.unwrap_or_default(), k, c))
+        .collect();
+    keyed.sort_by(|a, b| (a.0, &a.1, a.2).cmp(&(b.0, &b.1, b.2)));
+    for (p, (z, _, k, c)) in positioned.iter_mut().zip(keyed) {
+        *p = (z, k, c);
+    }
+}
+
+/// A node's place among its siblings (`::before` first, `::after` last).
+fn sibling_key(doc: &Document, id: NodeId) -> u32 {
+    let n = doc.node(id);
+    match n.kind {
+        NodeKind::Pseudo(crate::dom::PseudoKind::Before) => 0,
+        NodeKind::Pseudo(crate::dom::PseudoKind::After) => u32::MAX,
+        _ => n.index_in_parent + 1,
+    }
+}
+
+/// A node's place in tree order: its sibling places from `top` (else the root) down. `None`
+/// when `top` isn't one of its ancestors.
+fn tree_path(doc: &Document, mut id: NodeId, top: Option<NodeId>) -> Option<Vec<u32>> {
+    let mut path = Vec::new();
+    loop {
+        if Some(id) == top {
+            break;
+        }
+        let Some(parent) = doc.node(id).parent else {
+            if top.is_some() {
+                return None;
+            }
+            break;
+        };
+        path.push(sibling_key(doc, id));
+        id = parent;
+    }
+    path.reverse();
+    Some(path)
+}
+
 fn radii(s: &ComputedStyle, r: Rect) -> RoundedRectRadii {
     let max = (r.w.min(r.h) / 2.0).max(0.0);
     let f = |i: usize| s.border_radius[i].0.resolve(r.w).min(max).max(0.0) as f64;
@@ -516,7 +584,7 @@ impl Painter<'_> {
                 positioned.push((cs.z_index.unwrap_or(0), k, c));
             }
         }
-        positioned.sort_by_key(|(z, k, _)| (*z, *k));
+        sort_positioned(doc, id, &mut positioned);
         for &(z, _, c) in &positioned {
             if z < 0 {
                 self.paint_box(c, child_origin, xf);
@@ -643,14 +711,33 @@ impl Painter<'_> {
                 && root_style.overflow_x.clips()
                 && line_right > il.width + 0.5
             {
-                line.runs()
-                    .next()
-                    .and_then(|r| ellipsis_glyph(r.font(), r.font_size()))
-                    .map(|(gid, adv)| (gid, adv, left + il.width - adv))
+                // From the run the cut falls in, else the first run, else the root's style,
+                // whose font has "…" (an icon font may not).
+                let cut = left + il.width;
+                let runs: Vec<_> = line
+                    .items()
+                    .filter_map(|item| match item {
+                        parley::PositionedLayoutItem::GlyphRun(g) if g.style().brush.edge == 0 => {
+                            let at = left + g.offset();
+                            let r = g.run();
+                            Some((at..at + g.advance(), r.font().clone(), r.font_size()))
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                let at_cut = runs.iter().filter(|r| r.0.contains(&cut));
+                at_cut
+                    .chain(runs.iter())
+                    .map(|(_, font, size)| (font, *size))
+                    .chain(il.ellipsis_font.as_ref().map(|(f, size)| (f, *size)))
+                    .find_map(|(font, size)| {
+                        ellipsis_glyph(font, size).map(|(gid, adv)| (gid, adv, font.clone(), size))
+                    })
+                    .map(|(gid, adv, font, size)| (gid, cut - adv, font, size))
             } else {
                 None
             };
-            let mut last_drawn: Option<(f32, f32, parley::FontData, f32, Color)> = None;
+            let mut last_drawn: Option<(f32, f32, Color)> = None;
             for item in line.items() {
                 match item {
                     parley::PositionedLayoutItem::GlyphRun(g) => {
@@ -665,7 +752,7 @@ impl Painter<'_> {
                         let y = baseline + shift.get(b.owner as usize).copied().unwrap_or(0.0);
                         let run = g.run();
                         let mut x = left + g.offset();
-                        let limit = ellipsis.map(|e| e.2).unwrap_or(f32::INFINITY);
+                        let limit = ellipsis.as_ref().map(|e| e.1).unwrap_or(f32::INFINITY);
                         let mut drawn_end = x;
                         let glyphs: Vec<vello::Glyph> = g
                             .glyphs()
@@ -686,13 +773,7 @@ impl Painter<'_> {
                         if ellipsis.is_some()
                             && last_drawn.as_ref().is_none_or(|l| drawn_end >= l.0)
                         {
-                            last_drawn = Some((
-                                drawn_end,
-                                y,
-                                run.font().clone(),
-                                run.font_size(),
-                                o.style.color,
-                            ));
+                            last_drawn = Some((drawn_end, y, o.style.color));
                         }
                         let synthesis = run.synthesis();
                         let glyph_xf = synthesis
@@ -736,7 +817,10 @@ impl Painter<'_> {
                     }
                     parley::PositionedLayoutItem::InlineBox(b) => {
                         let node = il.boxes[b.id as usize].node;
-                        if ellipsis.is_some_and(|e| left + b.x + b.width > e.2) {
+                        if ellipsis
+                            .as_ref()
+                            .is_some_and(|e| left + b.x + b.width > e.1)
+                        {
                             continue;
                         }
                         if !positioned.iter().any(|p| p.2 == node) {
@@ -745,7 +829,7 @@ impl Painter<'_> {
                     }
                 }
             }
-            if let (Some((gid, _, _)), Some((x, y, font, size, color))) = (ellipsis, last_drawn) {
+            if let (Some((gid, _, font, size)), Some((x, y, color))) = (ellipsis, last_drawn) {
                 self.scene
                     .draw_glyphs(&font)
                     .font_size(size)
@@ -885,7 +969,7 @@ fn hit_box(doc: &Document, id: NodeId, origin: (f32, f32), x: f32, y: f32) -> Op
             positioned.push((cs.z_index.unwrap_or(0), k, c));
         }
     }
-    positioned.sort_by_key(|(z, k, _)| (*z, *k));
+    sort_positioned(doc, id, &mut positioned);
     for &(z, _, c) in positioned.iter().rev() {
         if z >= 0
             && let Some(h) = hit_box(doc, c, child_origin, x, y)

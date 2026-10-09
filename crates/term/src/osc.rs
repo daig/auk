@@ -397,6 +397,67 @@ impl Default for Facts {
     }
 }
 
+impl Facts {
+    /// Auk's dark theme colors (an 8×16 cell). The app and browser draw with them
+    /// (`auk_render::Theme::dark`), and the daemon answers with them for a client that names
+    /// only its appearance.
+    pub fn dark() -> Facts {
+        theme_facts(
+            0xd8dadb,
+            0x16181a,
+            0xf0c674,
+            [
+                0x1d1f21, 0xcc6666, 0xb5bd68, 0xf0c674, 0x81a2be, 0xb294bb, 0x8abeb7, 0xc5c8c6,
+                0x666666, 0xd54e53, 0xb9ca4a, 0xe7c547, 0x7aa6da, 0xc397d8, 0x70c0b1, 0xeaeaea,
+            ],
+        )
+    }
+
+    /// Auk's light theme colors, as [`Facts::dark`].
+    pub fn light() -> Facts {
+        theme_facts(
+            0x1f2328,
+            0xfbfbfa,
+            0x3a6ff7,
+            [
+                0x000000, 0xc91b00, 0x00a600, 0xa08000, 0x0225c7, 0xa22eb8, 0x00a5b2, 0xc7c7c7,
+                0x686868, 0xe0372a, 0x26b229, 0xb8a000, 0x5a68ff, 0xc154d8, 0x00bfc9, 0xffffff,
+            ],
+        )
+    }
+
+    /// [`Facts::dark`] or [`Facts::light`].
+    pub fn for_appearance(dark: bool) -> Facts {
+        if dark { Facts::dark() } else { Facts::light() }
+    }
+
+    /// Whether the background reads as dark: relative luminance under ½, as programs that ask
+    /// OSC 11 decide it.
+    pub fn is_dark(&self) -> bool {
+        let Rgb(r, g, b) = self.background;
+        let lin = |c: u8| {
+            let c = f64::from(c) / 255.0;
+            if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b) < 0.5
+    }
+}
+
+fn theme_facts(foreground: u32, background: u32, cursor: u32, ansi: [u32; 16]) -> Facts {
+    let rgb = |v: u32| Rgb((v >> 16) as u8, (v >> 8) as u8, v as u8);
+    Facts {
+        cell_px: (8, 16),
+        foreground: rgb(foreground),
+        background: rgb(background),
+        cursor: rgb(cursor),
+        palette: ansi.map(rgb),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

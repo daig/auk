@@ -331,16 +331,19 @@ impl TspPane {
         self.route(id, alt).map(|i| &self.surfaces[i])
     }
 
-    /// Whether a live screen surface in the same buffer hides this inline or flow surface.
+    /// Whether something covers this surface's `main` and `dock`: a live screen surface in the
+    /// same buffer (over an inline or flow surface), or a sheet in its own `layer`: a `modal`
+    /// or `size: "full"` overlay, or a `picker` (§7.8, `.sf-covered`).
     pub fn covered(&self, key: SurfaceKey) -> bool {
         let Some(s) = self.surface(key) else {
             return false;
         };
-        s.mode != Mode::Screen
+        let under_screen = s.mode != Mode::Screen
             && self
                 .surfaces
                 .iter()
-                .any(|o| o.is_live() && o.mode == Mode::Screen && o.buffer == s.buffer)
+                .any(|o| o.is_live() && o.mode == Mode::Screen && o.buffer == s.buffer);
+        under_screen || s.document().region("layer").is_some_and(holds_sheet)
     }
 
     /// The program's hello, until the program is gone.
@@ -1527,4 +1530,24 @@ fn sendable(surface: &Surface, id: &str) -> bool {
 /// Whether an `image` node in any of `surfaces` names `blob` (lowercase).
 fn names_blob(surfaces: &[Surface], blob: &str) -> bool {
     surfaces.iter().any(|s| s.doc.names_blob(blob))
+}
+
+/// Whether a node holds a sheet that covers the view: a `modal` or full overlay, or a picker.
+fn holds_sheet(node: crate::doc::NodeRef) -> bool {
+    node.children().any(|c| {
+        let sheet = match c.kind() {
+            "picker" => true,
+            "overlay" => {
+                // As the views read `modal`: true, or a nonzero number.
+                let modal = match c.prop("modal") {
+                    Some(Value::Bool(b)) => *b,
+                    Some(Value::Number(n)) => n.as_f64().is_some_and(|f| f != 0.0),
+                    _ => false,
+                };
+                modal || c.prop("size").and_then(Value::as_str) == Some("full")
+            }
+            _ => false,
+        };
+        sheet || holds_sheet(c)
+    })
 }

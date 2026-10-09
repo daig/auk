@@ -480,6 +480,118 @@ fn transitions_and_keyframe_animations_run_on_the_document_clock() {
     assert!(!doc.animating());
 }
 
+/// A17: a finished animation stays finished through later restyles; it runs again only when
+/// the element's animation names change or the element is inserted again.
+#[test]
+fn finished_animations_dont_replay_on_restyle() {
+    let mut doc = doc_with(
+        "@keyframes pop { from { opacity: 0 } to { opacity: 1 } }
+         @keyframes pop2 { from { opacity: 0 } to { opacity: 1 } }
+         .card { animation: pop 220ms linear }
+         .wrap.focused .card { color: rgb(255, 0, 0) }
+         .wrap.other .card { animation-name: pop2 }",
+    );
+    let root = doc.root();
+    let body = el(&mut doc, root, "body", "", None);
+    let wrap = el(&mut doc, body, "div", "wrap", None);
+    let card = el(&mut doc, wrap, "div", "card", Some("x"));
+    let opacity = |doc: &Document| doc.computed_style(card).unwrap().opacity;
+    doc.set_time(0.0);
+    doc.update();
+    assert_eq!(opacity(&doc), 0.0, "starts");
+    doc.set_time(110.0);
+    doc.update();
+    assert!((opacity(&doc) - 0.5).abs() < 0.01, "{}", opacity(&doc));
+    doc.set_time(300.0);
+    doc.update();
+    assert_eq!(opacity(&doc), 1.0, "finished");
+    assert!(!doc.animating());
+    // An ancestor's class changes the card's style: the animation stays finished.
+    doc.set_time(1000.0);
+    doc.set_attribute(wrap, "class", "wrap focused");
+    doc.update();
+    assert_eq!(color(&doc, card), [255, 0, 0, 255], "restyled");
+    assert_eq!(opacity(&doc), 1.0, "not replayed");
+    assert!(!doc.animating());
+    doc.set_attribute(wrap, "class", "wrap");
+    doc.update();
+    assert_eq!(opacity(&doc), 1.0);
+    assert!(!doc.animating());
+    // A new animation name starts.
+    doc.set_time(2000.0);
+    doc.set_attribute(wrap, "class", "wrap other");
+    doc.update();
+    assert_eq!(opacity(&doc), 0.0, "pop2 starts");
+    assert!(doc.animating());
+    doc.set_time(2300.0);
+    doc.update();
+    assert_eq!(opacity(&doc), 1.0);
+    // And back to `pop`, which is no longer listed as finished.
+    doc.set_time(3000.0);
+    doc.set_attribute(wrap, "class", "wrap");
+    doc.update();
+    assert_eq!(opacity(&doc), 0.0, "pop starts again");
+    doc.set_time(3300.0);
+    doc.update();
+    assert_eq!(opacity(&doc), 1.0);
+    assert!(!doc.animating());
+    // Removed and inserted again: new to CSS, so it runs.
+    doc.set_time(4000.0);
+    doc.detach(card);
+    doc.update();
+    doc.append_child(wrap, card);
+    doc.update();
+    assert_eq!(opacity(&doc), 0.0, "re-inserted");
+    assert!(doc.animating());
+}
+
+/// A17: an element's finished animation is forgotten on detach even while another animation
+/// still runs on it; and turning reduced motion off doesn't replay what was listed meanwhile,
+/// while a looping animation resumes.
+#[test]
+fn finished_animations_beside_running_ones_and_across_reduced_motion() {
+    let mut doc = doc_with(
+        "@keyframes pop { from { opacity: 0 } to { opacity: 1 } }
+         @keyframes spin { from { width: 0px } to { width: 100px } }
+         .card { animation: pop 220ms linear, spin 1s linear infinite }
+         .plain { animation: pop 220ms linear }",
+    );
+    let root = doc.root();
+    let body = el(&mut doc, root, "body", "", None);
+    let wrap = el(&mut doc, body, "div", "", None);
+    let card = el(&mut doc, wrap, "div", "card", Some("x"));
+    let opacity = |doc: &Document, id| doc.computed_style(id).unwrap().opacity;
+    doc.set_time(0.0);
+    doc.update();
+    doc.set_time(300.0);
+    doc.update();
+    assert_eq!(opacity(&doc, card), 1.0, "pop finished, spin runs");
+    assert!(doc.animating());
+    doc.detach(card);
+    doc.update();
+    doc.append_child(wrap, card);
+    doc.set_time(400.0);
+    doc.update();
+    assert_eq!(opacity(&doc, card), 0.0, "re-inserted: pop runs again");
+    doc.detach(card);
+    doc.update();
+
+    // Under reduced motion nothing moves; turned off, `pop` stays done and a loop resumes.
+    doc.set_media_preferences(true, false, false);
+    let plain = el(&mut doc, wrap, "div", "plain", Some("y"));
+    doc.append_child(wrap, card);
+    doc.set_time(1000.0);
+    doc.update();
+    assert_eq!(opacity(&doc, plain), 1.0);
+    assert!(!doc.animating());
+    doc.set_media_preferences(false, false, false);
+    doc.set_time(2000.0);
+    doc.update();
+    assert_eq!(opacity(&doc, plain), 1.0, "not replayed");
+    assert_eq!(opacity(&doc, card), 1.0, "not replayed beside a loop");
+    assert!(doc.animating(), "the loop resumes");
+}
+
 /// §8.4 "Light and dark": `light-dark()` follows the appearance (the document's, or the nearest
 /// `color-scheme`, which the theme sets under `data-theme`); the three supported media features
 /// match the user's preferences; `prefers-color-scheme` is rejected.

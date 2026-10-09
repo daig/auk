@@ -115,7 +115,10 @@
 .sf-spacer.sz-x { height: 8px; }
 
 /* text and spans */
-.sf-text { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* A word breaks only when it is longer than the line: in a row, text keeps its longest word's
+   width (or the row's, at most) and wide siblings shrink instead (amendment A22). */
+.sf-text { min-width: 0; white-space: pre-wrap; overflow-wrap: break-word; }
+.sf-row > .sf-text { min-width: auto; max-width: 100%; }
 .sf-text.nowrap { white-space: pre; overflow: hidden; text-overflow: ellipsis; }
 .sf-text.char { word-break: break-all; }
 .sf-text.prose { max-width: calc(80*var(--sf-cw)); }
@@ -142,7 +145,12 @@
 .sf-t-del { color: var(--sf-c-del); text-decoration: line-through; }
 .sf-t-mark { background-color: var(--sf-mark-bg, var(--sf-mark-bg-default)); border-radius: 3px; }
 .sf-t-typo { text-decoration: underline dotted var(--spelling-error-color); }
-.sf-t-icon { font-family: 'Symbols Nerd Font Mono', 'Symbols Nerd Font', var(--mono); }
+/* Icons draw as atomic boxes 1.2em wide, so a line may break on either side (book: span style
+   `icon`). */
+.sf-t-icon {
+  display: inline-block; min-width: 1.2em; text-align: center; white-space: pre;
+  font-family: 'Symbols Nerd Font Mono', 'Symbols Nerd Font', var(--mono);
+}
 .sf-t-icon.gap { margin-right: 4px; }
 .sf-t-hide { display: none; }
 .sf-link { color: var(--sf-c-link); cursor: pointer; }

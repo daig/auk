@@ -602,6 +602,20 @@ impl Pane {
         }
     }
 
+    /// Facts to answer with before any client is primary: a new pane takes those of the client
+    /// that will be, so a program querying colors as it starts sees that client's theme.
+    pub fn seed_facts(&mut self, facts: ClientFacts) {
+        if self.primary.is_none() {
+            self.facts = facts;
+            self.apply_primary_facts();
+        }
+    }
+
+    /// The facts the pane answers with: its primary's, or the last ones it had.
+    pub fn facts(&self) -> &ClientFacts {
+        &self.facts
+    }
+
     pub fn set_client_facts(&mut self, client: ClientId, facts: ClientFacts) {
         let Some(viewer) = self.viewers.get_mut(&client) else {
             return;
@@ -659,11 +673,8 @@ impl Pane {
     fn apply_primary_facts(&mut self) {
         if let Some(viewer) = self.primary.and_then(|c| self.viewers.get(&c)) {
             self.facts = viewer.facts.clone();
-            let [w, h] = viewer.facts.cell_px;
-            let mut facts = default_facts();
-            facts.cell_px = (w, h);
-            self.replica.set_facts(facts);
         }
+        self.replica.set_facts(self.facts.term_facts());
         let f = &self.facts;
         let tsp = TspFacts {
             cell: (f64::from(f.cell_px[0]), f64::from(f.cell_px[1])),
@@ -705,34 +716,10 @@ impl Pane {
     }
 }
 
-/// Host-default answers for color and size queries until a client supplies its own.
+/// Answers for color and size queries until a client supplies its own: those of
+/// `ClientFacts::default()`, which the TSP hello's facts start from too (light).
 pub fn default_facts() -> auk_term::Facts {
-    use auk_term::Rgb;
-    const PALETTE: [Rgb; 16] = [
-        Rgb(0x00, 0x00, 0x00),
-        Rgb(0xcd, 0x31, 0x31),
-        Rgb(0x0d, 0xbc, 0x79),
-        Rgb(0xe5, 0xe5, 0x10),
-        Rgb(0x24, 0x72, 0xc8),
-        Rgb(0xbc, 0x3f, 0xbc),
-        Rgb(0x11, 0xa8, 0xcd),
-        Rgb(0xe5, 0xe5, 0xe5),
-        Rgb(0x66, 0x66, 0x66),
-        Rgb(0xf1, 0x4c, 0x4c),
-        Rgb(0x23, 0xd1, 0x8b),
-        Rgb(0xf5, 0xf5, 0x43),
-        Rgb(0x3b, 0x8e, 0xea),
-        Rgb(0xd6, 0x70, 0xd6),
-        Rgb(0x29, 0xb8, 0xdb),
-        Rgb(0xff, 0xff, 0xff),
-    ];
-    auk_term::Facts {
-        cell_px: (8, 16),
-        foreground: Rgb(0x1e, 0x1e, 0x1e),
-        background: Rgb(0xff, 0xff, 0xff),
-        cursor: Rgb(0x1e, 0x1e, 0x1e),
-        palette: PALETTE,
-    }
+    ClientFacts::default().term_facts()
 }
 
 /// The path of an OSC 7 `file://host/path` URL, percent-decoded.

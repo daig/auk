@@ -32,6 +32,10 @@ pub struct ClientFacts {
     pub dark: bool,
     pub reduce_motion: bool,
     pub hour12: bool,
+    /// The client's theme, which OSC 4/10/11/12 queries answer with. A client that doesn't say
+    /// gets Auk's dark or light colors, following `dark`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colors: Option<ThemeColors>,
 }
 
 impl Default for ClientFacts {
@@ -41,6 +45,58 @@ impl Default for ClientFacts {
             dark: false,
             reduce_motion: false,
             hour12: false,
+            colors: None,
+        }
+    }
+}
+
+impl ClientFacts {
+    /// The terminal's answers from these facts: the cell size and the theme's colors. Colors
+    /// whose background disagrees with `dark` give way to Auk's for that appearance, so OSC 11
+    /// and the TSP hello's `dark` never tell a program different things.
+    pub fn term_facts(&self) -> auk_term::Facts {
+        let mut facts = self
+            .colors
+            .as_ref()
+            .map(ThemeColors::term_facts)
+            .filter(|f| f.is_dark() == self.dark)
+            .unwrap_or_else(|| auk_term::Facts::for_appearance(self.dark));
+        facts.cell_px = (self.cell_px[0], self.cell_px[1]);
+        facts
+    }
+}
+
+/// A client's theme colors (§15.5): default foreground, background and cursor, and the 16 ANSI
+/// colors, as RGB.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThemeColors {
+    pub foreground: [u8; 3],
+    pub background: [u8; 3],
+    pub cursor: [u8; 3],
+    pub palette: [[u8; 3]; 16],
+}
+
+impl ThemeColors {
+    fn term_facts(&self) -> auk_term::Facts {
+        let rgb = |[r, g, b]: [u8; 3]| auk_term::Rgb(r, g, b);
+        auk_term::Facts {
+            cell_px: (8, 16),
+            foreground: rgb(self.foreground),
+            background: rgb(self.background),
+            cursor: rgb(self.cursor),
+            palette: self.palette.map(rgb),
+        }
+    }
+}
+
+impl From<&auk_term::Facts> for ThemeColors {
+    fn from(f: &auk_term::Facts) -> Self {
+        let rgb = |auk_term::Rgb(r, g, b): auk_term::Rgb| [r, g, b];
+        ThemeColors {
+            foreground: rgb(f.foreground),
+            background: rgb(f.background),
+            cursor: rgb(f.cursor),
+            palette: f.palette.map(rgb),
         }
     }
 }

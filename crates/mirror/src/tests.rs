@@ -344,6 +344,55 @@ fn hello_carries_the_parser_version() {
     assert_eq!(json["versions"]["protocol"], PROTOCOL_VERSION);
 }
 
+#[test]
+fn facts_carry_theme_colors_and_fall_back_to_the_appearance() {
+    let dark = auk_term::Facts::dark();
+    let light = auk_term::Facts::light();
+    assert!(dark.is_dark() && !light.is_dark());
+
+    // A client that names its colors: they round-trip and are what the terminal answers with.
+    let mut ours = ClientFacts {
+        cell_px: [10, 20],
+        dark: true,
+        colors: Some(ThemeColors::from(&dark)),
+        ..ClientFacts::default()
+    };
+    ours.colors.as_mut().unwrap().palette[1] = [1, 2, 3];
+    let msg = ClientMsg::Facts(ours.clone());
+    let mut buf = Vec::new();
+    let got = read_msg::<ClientMsg>(&mut Cursor::new(msg.to_bytes()), &mut buf).unwrap();
+    assert_eq!(got, Some(msg));
+    let facts = ours.term_facts();
+    assert_eq!(facts.cell_px, (10, 20));
+    assert_eq!(facts.background, dark.background);
+    assert_eq!(facts.palette[1], auk_term::Rgb(1, 2, 3));
+
+    // A client that doesn't (an older one): its facts still parse, with Auk's colors for its
+    // appearance.
+    let json = r#"{"cell_px":[8,16],"dark":true,"reduce_motion":false,"hour12":false}"#;
+    let old: ClientFacts = serde_json::from_str(json).unwrap();
+    assert_eq!(old.colors, None);
+    assert_eq!(old.term_facts().background, dark.background);
+    assert_eq!(
+        ClientFacts::default().term_facts().background,
+        light.background
+    );
+    assert!(
+        !serde_json::to_string(&ClientFacts::default())
+            .unwrap()
+            .contains("colors")
+    );
+
+    // Colors that disagree with `dark` give way, so OSC 11 and the hello agree (a guard: the app
+    // and the browser send colors from the theme their `dark` picks).
+    let mixed = ClientFacts {
+        dark: false,
+        colors: Some(ThemeColors::from(&dark)),
+        ..ClientFacts::default()
+    };
+    assert_eq!(mixed.term_facts().background, light.background);
+}
+
 #[cfg(unix)]
 #[test]
 fn blocking_client_handshake_and_refusal() {

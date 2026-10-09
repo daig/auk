@@ -37,8 +37,13 @@ impl FontMetrics {
 pub struct Fonts {
     pub font_cx: FontContext,
     pub layout_cx: LayoutContext<TextBrush>,
-    metrics: HashMap<(Arc<str>, u32, u8, u32), FontMetrics>,
+    metrics: HashMap<FontKey, FontMetrics>,
+    /// The font (and size) each style gives "…", by the same key.
+    ellipsis: HashMap<FontKey, Option<(parley::FontData, f32)>>,
 }
+
+/// A style's font: family, weight, style and size (bits).
+type FontKey = (Arc<str>, u32, u8, u32);
 
 impl std::fmt::Debug for Fonts {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -59,6 +64,7 @@ impl Fonts {
             font_cx: FontContext::new(),
             layout_cx: LayoutContext::new(),
             metrics: HashMap::new(),
+            ellipsis: HashMap::new(),
         }
     }
 
@@ -78,6 +84,7 @@ impl Fonts {
     fn register_blob(&mut self, blob: parley::fontique::Blob<u8>) -> Vec<String> {
         let families = self.font_cx.collection.register_fonts(blob, None);
         self.metrics.clear();
+        self.ellipsis.clear();
         families
             .into_iter()
             .filter_map(|(id, _)| {
@@ -87,6 +94,37 @@ impl Fonts {
                     .map(|s| s.to_string())
             })
             .collect()
+    }
+
+    /// The font (and size) a style gives "…" (U+2026), for a line whose runs' fonts lack it.
+    pub(crate) fn ellipsis_font(
+        &mut self,
+        style: &ComputedStyle,
+    ) -> Option<(parley::FontData, f32)> {
+        let key = (
+            style.font_family.clone(),
+            style.font_weight as u32,
+            style.font_style as u8,
+            style.font_size.to_bits(),
+        );
+        if let Some(f) = self.ellipsis.get(&key) {
+            return f.clone();
+        }
+        let e = "\u{2026}";
+        let mut b = self
+            .layout_cx
+            .style_run_builder(&mut self.font_cx, e, 1.0, false);
+        let idx = b.push_style(text_style(style, TextBrush::default()));
+        b.push_style_run(idx, 0..e.len());
+        let mut layout: parley::Layout<TextBrush> = b.build(e);
+        layout.break_all_lines(None);
+        let f = layout.lines().next().and_then(|line| {
+            line.runs()
+                .next()
+                .map(|r| (r.font().clone(), r.font_size()))
+        });
+        self.ellipsis.insert(key, f.clone());
+        f
     }
 
     /// Metrics of the primary font for a style.

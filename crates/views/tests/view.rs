@@ -1300,6 +1300,13 @@ fn fold_and_overlay_transitions_run_on_the_view_clock() {
         h.view.tick(&mut h.doc, &h.pane, h.now + 316.0).is_none(),
         "settled"
     );
+    // New props build its card again, after the pop: it doesn't pop again (A17).
+    h.now += 1000.0;
+    h.frame_ops("s1", 4, json!([["set", "ov", {"head": "Ask again"}]]));
+    h.frame();
+    let card = h.find_class(ov, "sf-ov-card")[0];
+    assert_eq!(opacity(&h, card), 1.0, "no replay");
+    assert!(h.view.tick(&mut h.doc, &h.pane, h.now + 16.0).is_none());
 
     // Reduce Motion: still equivalents.
     let mut h = Harness::with(
@@ -1603,4 +1610,55 @@ fn a_toast_resets_only_when_it_changes_and_one_asked_for_unseen_doesnt_show_late
     h.now = asked + 6000.0;
     h.frame();
     assert_eq!(shown_toast(&h), None);
+}
+
+#[test]
+fn a_sheet_in_the_layer_covers_main_and_dock_and_holds_their_motion() {
+    let mut h = Harness::new();
+    h.hello(&[]);
+    h.surface(
+        "s1",
+        "inline",
+        json!([{"id": "sp", "k": "spinner", "p": {"label": "Working"}}]),
+    );
+    h.frame_ops(
+        "s1",
+        2,
+        json!([["add", "layer", "s1", null, {"id": "layer", "k": "col"}]]),
+    );
+    h.frame();
+    let k = key(&h, "s1");
+    let main = h.view.region(k, Region::Main).unwrap();
+    let layer = h.view.region(k, Region::Layer).unwrap();
+    let covered = |h: &Harness, el| h.class(el).split(' ').any(|c| c == "sf-covered");
+    assert!(!covered(&h, main));
+    // A modal overlay added into the layer's column covers main (not the layer).
+    h.frame_ops(
+        "s1",
+        3,
+        json!([["add", "ov", "layer", null, {"id": "ov", "k": "overlay", "p": {"modal": true}}]]),
+    );
+    h.frame();
+    assert!(covered(&h, main), "{}", h.class(main));
+    assert!(!covered(&h, layer));
+    // The spinner holds its frame while covered.
+    let sp = h.el("s1", "sp");
+    let shown = |h: &Harness| h.text(sp) + &h.attr(sp, "style").unwrap_or_default();
+    let before = shown(&h);
+    for _ in 0..10 {
+        h.now += 97.0;
+        h.frame();
+    }
+    assert_eq!(shown(&h), before, "held under the sheet");
+    // It goes with the sheet, and the spinner moves again.
+    h.frame_ops("s1", 4, json!([["del", "ov"]]));
+    h.frame();
+    assert!(!covered(&h, main));
+    let mut moved = false;
+    for _ in 0..10 {
+        h.now += 97.0;
+        h.frame();
+        moved |= shown(&h) != before;
+    }
+    assert!(moved, "moves once uncovered");
 }

@@ -71,7 +71,7 @@ pub fn capture(term: &Terminal, tsp: &TspPane, opts: Options) -> String {
             tsp.surfaces()
                 .iter()
                 .rev()
-                .find(|s| s.mode() == Mode::Screen && s.is_live() && !tsp.covered(s.key()))
+                .find(|s| s.mode() == Mode::Screen && s.is_live())
         })
         .flatten();
     if let Some(s) = screen {

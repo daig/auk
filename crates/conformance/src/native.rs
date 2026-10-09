@@ -522,6 +522,51 @@ impl NativeWindow {
         self.outcome(pane, o)
     }
 
+    /// The window's appearance: its facts (with the theme's colors, as the app sends them) and
+    /// the views' theme for every shown pane.
+    pub fn set_dark(&mut self, dark: bool) {
+        self.settings.dark = dark;
+        let facts = ClientFacts {
+            dark,
+            colors: Some(auk_mirror::ThemeColors::from(
+                &auk_term::Facts::for_appearance(dark),
+            )),
+            ..ClientFacts::default()
+        };
+        self.send(&ClientMsg::Facts(facts));
+        let settings = self.settings.clone();
+        for shown in self.panes.values_mut() {
+            shown
+                .view
+                .set_settings(&mut shown.doc, shown.replica.tsp(), settings.clone());
+        }
+    }
+
+    /// The window gained or lost keyboard focus: the pane's views hear it, as the app's do.
+    pub fn set_focused(&mut self, pane: PaneId, focused: bool) {
+        let shown = self.panes.get_mut(&pane).expect("a shown pane");
+        shown
+            .view
+            .set_focused(&mut shown.doc, shown.replica.tsp(), focused);
+        self.draw(pane);
+    }
+
+    /// A primary-button click at a point of the pane's document; events go to the program.
+    pub fn click(&mut self, pane: PaneId, x: f32, y: f32) -> Vec<Outcome> {
+        let shown = self.panes.get_mut(&pane).expect("a shown pane");
+        let out = shown.view.click(
+            &mut shown.doc,
+            shown.replica.tsp(),
+            auk_views::PointerEvent {
+                x,
+                y,
+                clicks: 1,
+                ..Default::default()
+            },
+        );
+        out.into_iter().map(|o| self.outcome(pane, o)).collect()
+    }
+
     /// Submits a prompt atomically into field `id` (feature `send`). `None` when the field
     /// can't take one.
     pub fn send_prompt(&mut self, pane: PaneId, id: &str, text: &str) -> Option<Outcome> {

@@ -34,6 +34,9 @@ pub(crate) struct MeasureInputs {
     viewport: (f32, f32),
     view_rect: Option<(f32, f32, f32, f32)>,
     cell: (f32, f32),
+    /// The scroll offsets of the scrollers around virtualized containers (hashed): scrolling
+    /// one (an overlay card's body) moves the windows of the lists inside it.
+    scrolls: u64,
 }
 
 impl PaneView {
@@ -73,32 +76,74 @@ impl PaneView {
         doc.update();
         let mut work = LayoutWork::default();
         work.add(doc.last_update_stats());
-        let inputs = MeasureInputs {
-            viewport: doc.viewport(),
-            view_rect: self.view_rect.map(|r| (r.x, r.y, r.w, r.h)),
-            cell: self.settings.cell,
-        };
         let mut passes = 1;
-        if self.measured != Some((doc.generation(), inputs)) {
-            self.measured = None;
-            loop {
-                if passes >= 8 {
-                    break;
+        let mut again: Vec<(usize, auk_tsp::Reveal)> = Vec::new();
+        for round in 0..3 {
+            let inputs = MeasureInputs {
+                viewport: doc.viewport(),
+                view_rect: self.view_rect.map(|r| (r.x, r.y, r.w, r.h)),
+                cell: self.settings.cell,
+                scrolls: self.virtual_scrolls(doc),
+            };
+            if self.measured != Some((doc.generation(), inputs)) {
+                self.measured = None;
+                loop {
+                    if passes >= 8 {
+                        break;
+                    }
+                    if !self.measure(doc) {
+                        self.measured = Some((doc.generation(), inputs));
+                        break;
+                    }
+                    doc.update();
+                    work.add(doc.last_update_stats());
+                    passes += 1;
                 }
-                if !self.measure(doc) {
-                    self.measured = Some((doc.generation(), inputs));
-                    break;
-                }
-                doc.update();
-                work.add(doc.last_update_stats());
-                passes += 1;
+            }
+            if round == 2 {
+                break;
+            }
+            // A reveal or scroll that moved a scroller around a virtualized list measures
+            // again, so the list lays out what came into view this frame; a reveal of a row
+            // that was only estimated (out of the list's window) applies again once laid out.
+            for (i, r) in std::mem::take(&mut again) {
+                self.surfaces[i].st.reveal = Some(r);
+            }
+            again = self.apply_scrolls(doc);
+            if again.is_empty()
+                && self
+                    .measured
+                    .is_some_and(|(_, i)| i.scrolls == self.virtual_scrolls(doc))
+            {
+                break;
             }
         }
-        self.apply_scrolls(doc);
         work.passes = passes;
         work.measured = std::mem::take(&mut self.measure_visits);
         self.work = work;
         passes
+    }
+
+    /// A hash of the scroll offsets of every scroller around a virtualized container.
+    fn virtual_scrolls(&self, doc: &Document) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for sv in &self.surfaces {
+            for &(el, _) in sv.st.virt.values() {
+                if doc.try_node(el).is_none() {
+                    continue;
+                }
+                let mut cur = doc.parent(el);
+                while let Some(p) = cur {
+                    let (x, y) = doc.scroll_offset(p);
+                    if (x, y) != (0.0, 0.0) {
+                        (p, x.to_bits(), y.to_bits()).hash(&mut h);
+                    }
+                    cur = doc.parent(p);
+                }
+            }
+        }
+        h.finish()
     }
 
     /// What the last [`PaneView::layout`] did.
@@ -115,6 +160,23 @@ impl PaneView {
         self.measured = None;
     }
 
+    /// Where the window shows parts of the document: spans of it (document top, document
+    /// bottom) and where each span's top shows, from the top of the layer (the pane's visible
+    /// area), in points. Overlays anchored to a node or caret outside the layer are placed
+    /// from where it shows; one whose anchor shows nowhere hides (`.lost`). Returns whether
+    /// that changed a placement: lay out again.
+    pub fn set_shown(&mut self, spans: Vec<(f32, f32, f32)>) -> bool {
+        if self.shown == spans {
+            return false;
+        }
+        self.shown = spans;
+        let anchored = self.surfaces.iter().any(|sv| !sv.st.anchored.is_empty());
+        if anchored {
+            self.measured = None;
+        }
+        anchored
+    }
+
     /// Whether a window kept on a virtualized container's end (the view showed the end) no
     /// longer has the end in view at the view rect: the list grew under a view that stays
     /// where it is (scrolled up), so the window goes back to the view
@@ -126,6 +188,7 @@ impl PaneView {
         self.surfaces.iter().any(|sv| {
             sv.st.virt_window.iter().any(|(&el, w)| {
                 w.2 && doc.try_node(el).is_some()
+                    && !inside(doc, el, self.layers)
                     && doc
                         .border_box(el)
                         .is_some_and(|r| view.y + view.h < r.y + r.h - 0.5)
@@ -155,6 +218,7 @@ impl PaneView {
         let fresh = self.windows_from != Some(view);
         self.windows_from = Some(view);
         let ends = self.view_rect.is_some();
+        let layers = self.layers;
         for sv in &mut self.surfaces {
             for &(el, _) in sv.st.virt.values() {
                 if doc.try_node(el).is_none() {
@@ -174,11 +238,16 @@ impl PaneView {
                 let Some(r) = doc.border_box(el) else {
                     continue;
                 };
+                // In the layer (an overlay's list), the view is the layer's: the pane's visible
+                // area, not the flow's part of the document.
+                let in_layer = layer_view(doc, el, layers);
+                let view = in_layer.unwrap_or(view);
                 // With its end in view (a transcript the view follows), the window is kept as
                 // distances up from the end, so as the list grows its layout lays out the new
-                // end, not where the end was.
+                // end, not where the end was. Not in the layer: what moves a list there is its
+                // card's scroller, not the view rect, so its window always follows its view.
                 let bottom = r.y + r.h;
-                let at_end = ends && view.y + view.h >= bottom - 0.5;
+                let at_end = ends && in_layer.is_none() && view.y + view.h >= bottom - 0.5;
                 let want = if at_end {
                     (bottom - view.y, bottom - view.y - view.h, true)
                 } else {
@@ -214,6 +283,7 @@ impl PaneView {
         // Highlighting this frame may still finish on this thread (what the background hasn't
         // done yet of texts coming into view); the rest draws in on the clock as it finishes.
         let (hl_finish, hl_budget) = (&mut self.hl_finish, &mut self.hl_budget);
+        let shown = &self.shown;
         for sv in &mut self.surfaces {
             visits += sv.st.fit.len() + sv.st.anchored.len();
             // Highlighting that waited out of view draws in as its node comes into view, what
@@ -440,6 +510,32 @@ impl PaneView {
                 let Some(cr) = dom.doc.border_box(card) else {
                     continue;
                 };
+                // A target outside the layer is placed from where the window shows it.
+                let tr = if shown.is_empty() || inside(dom.doc, target, layers) {
+                    Some(tr)
+                } else {
+                    shown
+                        .iter()
+                        .find(|&&(a, b, _)| tr.y >= a && tr.y < b)
+                        .map(|&(a, _, at)| {
+                            auk_ui::Rect::new(tr.x, lr.y + at + tr.y - a, tr.w, tr.h)
+                        })
+                };
+                let lost = tr.is_none();
+                let c = dom.class_of(m.el).to_owned();
+                if lost != c.split(' ').any(|x| x == "lost") {
+                    let new = if lost {
+                        format!("{c} lost")
+                    } else {
+                        c.split(' ')
+                            .filter(|x| *x != "lost")
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    };
+                    dom.set_class(m.el, &new);
+                    changed = true;
+                }
+                let Some(tr) = tr else { continue };
                 let below = lr.y + lr.h - (tr.y + tr.h);
                 let above = tr.y - lr.y;
                 let flip = cr.h + 8.0 > below && above > below;
@@ -479,9 +575,11 @@ impl PaneView {
     }
 
     /// Scrolling after layout: follow-tail, field carets, `topline`, `reveal` and `scroll`.
-    fn apply_scrolls(&mut self, doc: &mut Document) {
+    /// Returns the reveals of rows virtualized out of view (their boxes estimates), by surface.
+    fn apply_scrolls(&mut self, doc: &mut Document) -> Vec<(usize, auk_tsp::Reveal)> {
         let lh = self.settings.cell.1;
-        for sv in &mut self.surfaces {
+        let mut estimated = Vec::new();
+        for (i, sv) in self.surfaces.iter_mut().enumerate() {
             for &clip in sv.st.follow.values() {
                 if doc.try_node(clip).is_none() {
                     continue;
@@ -521,6 +619,9 @@ impl PaneView {
                 && let Some(m) = sv.mounts.get(&r.id)
             {
                 let el = m.el;
+                if !doc.laid_out(el) {
+                    estimated.push((i, r.clone()));
+                }
                 match scroll_parent(doc, el) {
                     Some(sc) => {
                         if let (Some(sr), Some(er)) = (doc.border_box(sc), doc.border_box(el)) {
@@ -577,7 +678,44 @@ impl PaneView {
                 }
             }
         }
+        estimated
     }
+}
+
+/// The part of the layer `el` shows in, when it is in the layer: the layer's box (the pane's
+/// visible area) less what the scrolling ancestors between them (a card's body) clip.
+fn layer_view(doc: &Document, el: NodeId, layers: NodeId) -> Option<auk_ui::Rect> {
+    let mut clips = Vec::new();
+    let mut cur = doc.parent(el);
+    while let Some(p) = cur {
+        if p == layers {
+            let mut v = doc.border_box(layers)?;
+            for c in clips {
+                v = intersect(v, c);
+            }
+            return Some(v);
+        }
+        if is_scroller(doc, p)
+            && let Some(b) = doc.border_box(p)
+        {
+            clips.push(b);
+        }
+        cur = doc.parent(p);
+    }
+    None
+}
+
+fn inside(doc: &Document, el: NodeId, ancestor: NodeId) -> bool {
+    std::iter::successors(Some(el), |&e| doc.parent(e)).any(|e| e == ancestor)
+}
+
+/// Where two rects overlap (empty, with zero size, when they don't).
+fn intersect(a: auk_ui::Rect, b: auk_ui::Rect) -> auk_ui::Rect {
+    let x = a.x.max(b.x);
+    let y = a.y.max(b.y);
+    let r = (a.x + a.w).min(b.x + b.w);
+    let bo = (a.y + a.h).min(b.y + b.h);
+    auk_ui::Rect::new(x, y, (r - x).max(0.0), (bo - y).max(0.0))
 }
 
 fn is_scroller(doc: &Document, el: NodeId) -> bool {

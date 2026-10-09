@@ -51,8 +51,9 @@ pub(crate) struct SurfaceState {
     pub drawn_folds: HashMap<String, (bool, bool)>,
     /// The surface has been drawn once.
     pub drawn: bool,
-    /// Overlays by node id: whether each opened after the first draw (and pops in).
-    pub overlays: HashMap<String, bool>,
+    /// Overlays by node id: when each opened after the first draw (view clock, ms), and pops
+    /// in; `None` for one the first draw showed.
+    pub overlays: HashMap<String, Option<f64>>,
     /// `el` checkbox and radio flips, by node id.
     pub checks: HashMap<String, Flip>,
     /// Expanded previews ("N more lines"), by state key.

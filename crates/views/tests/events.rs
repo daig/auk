@@ -639,3 +639,57 @@ fn a_link_inside_a_clickable_node_opens_instead_of_running_click() {
         vec![json!({"ev": "action", "sf": "s1", "id": "go", "act": "run"})]
     );
 }
+
+#[test]
+fn a_modal_overlays_backdrop_takes_the_press_and_sends_nothing() {
+    let mut h = Harness::new();
+    h.hello(&[]);
+    h.surface(
+        "s1",
+        "inline",
+        json!([{"id": "under", "k": "text", "p": {"text": "under", "actions": {"click": "under"}}}]),
+    );
+    h.frame_ops(
+        "s1",
+        2,
+        json!([["add", "layer", "s1", null, {"id": "layer", "k": "col", "c": [
+            {"id": "ov", "k": "overlay", "p": {"modal": true, "head": "Pick", "actions": {"menu": ["pin"]}}, "c": [
+                {"id": "ok", "k": "text", "p": {"text": "ok", "actions": {"click": "ok"}}}
+            ]}
+        ]}]]),
+    );
+    h.frame();
+    // A press on a child of the card reaches it.
+    let ok = h.el("s1", "ok");
+    let out = click_el(&mut h, ok, 1, Mods::NONE);
+    assert_eq!(
+        deliver(&mut h, out),
+        vec![json!({"ev": "action", "sf": "s1", "id": "ok", "act": "ok"})]
+    );
+    // A press on the backdrop, over the clickable text beneath, is taken and sends nothing.
+    let ov = h.el("s1", "ov");
+    let dim = h.find_class(ov, "sf-ov-dim")[0];
+    let under = h.doc.border_box(h.el("s1", "under")).expect("laid out");
+    let at = (under.x + 2.0, under.y + under.h / 2.0);
+    assert_eq!(auk_ui::hit_test(&h.doc, at.0, at.1), Some(dim));
+    let out = h.view.click(
+        &mut h.doc,
+        &h.pane,
+        PointerEvent {
+            x: at.0,
+            y: at.1,
+            clicks: 1,
+            ..Default::default()
+        },
+    );
+    assert!(events(&out).is_empty(), "no event: {out:?}");
+    assert!(
+        !out.is_empty() && !out.iter().all(|o| matches!(o, Outcome::Keys)),
+        "taken: {out:?}"
+    );
+    assert!(deliver(&mut h, out).is_empty());
+    // A secondary press there opens no menu, not even the overlay's own; on the card it does.
+    assert!(h.view.menu(&h.doc, &h.pane, at.0, at.1).is_empty());
+    let card = h.doc.border_box(h.find_class(ov, "sf-ov-card")[0]).unwrap();
+    assert!(!h.view.menu(&h.doc, &h.pane, card.x + card.w / 2.0, card.y + 8.0).is_empty());
+}

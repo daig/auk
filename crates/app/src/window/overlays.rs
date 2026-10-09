@@ -112,6 +112,7 @@ impl WinState {
                 count: v.zoom.images.len(),
                 blob: img.blob.clone(),
                 size: self.viewer_size,
+                svg: self.viewer_svg,
                 open: img.open.clone(),
             }
         });
@@ -738,6 +739,21 @@ impl WinState {
         match picture {
             Some(Poll::Ready(Ok(p))) => {
                 self.viewer_size = (f64::from(p.size.0), f64::from(p.size.1));
+                self.viewer_svg = p.svg;
+                // An SVG scales up to fit: drawn again at that scale, so it stays sharp.
+                let window = self.size.map_or((0.0, 0.0), |s| (s.width, s.height));
+                let k = crate::chrome::viewer_fit(window, self.viewer_size, p.svg);
+                let p = if p.svg && k > 1.0 {
+                    let shared = self.conn.shared();
+                    shared
+                        .panes
+                        .get(&v.pane)
+                        .and_then(|pd| pd.replica.tsp().blobs().get(&blob).cloned())
+                        .and_then(|b| auk_views::image::load_blob(&b, scale * k as f32).ok())
+                        .unwrap_or(p)
+                } else {
+                    p
+                };
                 self.chrome
                     .set_viewer_image(p.frames.first().map(|f| f.content.clone()));
             }
@@ -747,6 +763,7 @@ impl WinState {
             }
             None | Some(Poll::Pending) => {
                 self.viewer_size = (1.0, 1.0);
+                self.viewer_svg = false;
                 self.chrome.set_viewer_image(None);
             }
         }

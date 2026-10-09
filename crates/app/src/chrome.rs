@@ -42,10 +42,23 @@ html.light .card { background-color: #fbfbfa; color: #1b1d20; }
 .ctxmenu .ctx-item.selected { background-color: #34507e; color: #ffffff; }
 html.light .ctxmenu { background-color: #fbfbfa; border-color: #d5d5d2; }
 html.light .ctxmenu .ctx-item { color: #1b1d20; }
-.viewer { position: absolute; left: 40px; top: 50px; display: flex; flex-direction: column; align-items: center; }
-.viewer .v-bar { display: flex; gap: 12px; align-items: center; color: #eceef0; padding: 6px 0; }
-.viewer .v-btn { padding: 2px 9px; border-radius: 5px; background-color: #34383d; color: #eceef0; }
-.viewer .v-title { color: #eceef0; }
+/* The image viewer (§7.10): the picture and its title on an opaque card over the scrim
+   (book: --card #161619 / #ffffff, --l1 hairline). Around the card, presses reach the scrim. */
+.viewer {
+  position: absolute; left: 0; top: 0; display: flex; align-items: center; justify-content: center;
+  padding: 24px 40px; box-sizing: border-box; pointer-events: none;
+}
+.viewer .v-card {
+  display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 6px 12px 12px;
+  max-width: 100%; max-height: 100%; box-sizing: border-box; border-radius: 12px;
+  background-color: #161619; border: 1px solid rgba(255, 255, 255, 0.06); pointer-events: auto;
+}
+.viewer .v-bar { display: flex; gap: 12px; align-items: center; color: #eceef0; padding: 4px 0 0; max-width: 100%; }
+.viewer .v-btn { padding: 2px 9px; border-radius: 5px; background-color: #2a2b30; color: #eceef0; }
+.viewer .v-title { color: #eceef0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.light .viewer .v-card { background-color: #ffffff; border-color: rgba(22, 23, 28, 0.06); }
+html.light .viewer .v-bar, html.light .viewer .v-title { color: #1b1c20; }
+html.light .viewer .v-btn { background-color: #ececea; color: #1b1c20; }
 .linkhint {
   position: absolute; left: 8px; max-width: 70%; padding: 2px 8px; box-sizing: border-box;
   border-radius: 5px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -139,7 +152,19 @@ pub struct ViewerView {
     pub blob: String,
     /// The picture's size in CSS px.
     pub size: (f64, f64),
+    /// Drawn from SVG: it scales up to fit (it is drawn again at that scale).
+    pub svg: bool,
     pub open: Option<String>,
+}
+
+/// The scale the viewer shows a picture of `size` (CSS px) at in a window `window` points big:
+/// it fits the card's room; a raster never grows past its own size, an SVG does (§7.10).
+pub fn viewer_fit(window: (f64, f64), size: (f64, f64), svg: bool) -> f64 {
+    // The viewer's padding, the card's padding and border, and the title bar above the picture.
+    let (aw, ah) = ((window.0 - 106.0).max(1.0), (window.1 - 130.0).max(1.0));
+    let (w, h) = (size.0.max(1.0), size.1.max(1.0));
+    let k = (aw / w).min(ah / h);
+    if svg { k } else { k.min(1.0) }
 }
 
 /// The chrome document.
@@ -327,19 +352,15 @@ impl Chrome {
                 .doc
                 .set_inline_style(back, &format!("width: {w}px; height: {h}px"));
             let viewer = self.child(body, "div", "viewer", None);
-            self.bar.doc.set_inline_style(
-                viewer,
-                &format!(
-                    "width: {}px; height: {}px",
-                    (w - 80.0).max(1.0),
-                    (h - 90.0).max(1.0)
-                ),
-            );
-            self.bar.doc.set_attribute(viewer, "role", "dialog");
             self.bar
                 .doc
-                .set_attribute(viewer, "aria-label", "Image Viewer");
-            let bar = self.child(viewer, "div", "v-bar", None);
+                .set_inline_style(viewer, &format!("width: {w}px; height: {h}px"));
+            let card = self.child(viewer, "div", "v-card", None);
+            self.bar.doc.set_attribute(card, "role", "dialog");
+            self.bar
+                .doc
+                .set_attribute(card, "aria-label", "Image Viewer");
+            let bar = self.child(card, "div", "v-bar", None);
             if v.count > 1 {
                 let prev = self.child(bar, "div", "v-btn", Some("‹"));
                 self.bar
@@ -367,13 +388,11 @@ impl Chrome {
                     .set_attribute(open, "data-action", "viewer:open");
                 self.bar.doc.set_attribute(open, "role", "button");
             }
-            let img = self.child(viewer, "div", "v-img", None);
+            let img = self.child(card, "div", "v-img", None);
             self.bar.doc.set_attribute(img, "role", "img");
             self.bar.doc.set_attribute(img, "aria-label", &v.title);
-            // Fit the picture in the viewer, never past its own size.
-            let (aw, ah) = ((w - 80.0).max(1.0), (h - 130.0).max(1.0));
+            let k = viewer_fit((w, h), v.size, v.svg);
             let (w, h) = (v.size.0.max(1.0), v.size.1.max(1.0));
-            let k = (aw / w).min(ah / h).min(1.0);
             self.bar.doc.set_inline_style(
                 img,
                 &format!(
@@ -555,5 +574,138 @@ mod tests {
             assert!(acts.iter().any(|a| a == want), "{want} in {acts:?}");
         }
         assert_eq!(c.action_at(200.0, 300.0), Some(ChromeAction::Dismiss));
+    }
+
+    /// The chrome over bright pane content (pure yellow), rendered offscreen, 1 pixel a point.
+    fn render_over_yellow(c: &Chrome, w: u32, h: u32) -> auk_render::Image {
+        use auk_render::{Gpu, OFFSCREEN_FORMAT, OffscreenTarget, UiLayer, wgpu};
+        let gpu = Gpu::new_blocking().expect("a Metal adapter");
+        let mut scene = auk_render::vello::Scene::new();
+        auk_ui::paint::paint_with_transform(
+            c.doc(),
+            &mut scene,
+            auk_render::vello::kurbo::Affine::IDENTITY,
+        );
+        let mut ui = UiLayer::new(&gpu, OFFSCREEN_FORMAT).expect("a UI layer");
+        ui.render(&gpu, &scene, w, h).expect("the UI layer renders");
+        let target = OffscreenTarget::new(&gpu, w, h);
+        let mut encoder = gpu.device.create_command_encoder(&Default::default());
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("chrome over yellow"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target.view(),
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 1.0,
+                            g: 1.0,
+                            b: 0.0,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            ui.draw(&mut pass);
+        }
+        gpu.queue.submit([encoder.finish()]);
+        target.read(&gpu).expect("readback")
+    }
+
+    /// The box of the first element whose `attr` is `value`.
+    fn box_of(c: &Chrome, attr: &str, value: &str) -> auk_ui::Rect {
+        let doc = c.doc();
+        let mut stack = vec![doc.root()];
+        while let Some(n) = stack.pop() {
+            if doc.attribute(n, attr) == Some(value) {
+                return doc.border_box(n).expect("laid out");
+            }
+            stack.extend(doc.children(n).iter().copied());
+        }
+        panic!("no [{attr}={value}]")
+    }
+
+    /// Amendment A20: a transparent SVG zoomed over bright content shows on the opaque card,
+    /// scaled up to fit, with its title on the card too, over a scrim of the appearance's color.
+    #[test]
+    fn the_viewer_shows_a_transparent_svg_on_an_opaque_card() {
+        // A 200×100 chart: a blue square in its top-left corner, transparent elsewhere.
+        let svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"100\">\
+                   <rect width=\"40\" height=\"40\" fill=\"#0000ff\"/></svg>";
+        let (w, h) = (800u32, 500u32);
+        let near = |p: auk_render::Rgba, want: (u8, u8, u8)| {
+            let d = |a: u8, b: u8| a.abs_diff(b) <= 3;
+            d(p.0, want.0) && d(p.1, want.1) && d(p.2, want.2)
+        };
+        // `top` (alpha `a`) over yellow.
+        let over_yellow = |top: (f64, f64, f64), a: f64| {
+            let mix = |t: f64, u: f64| (t * a + u * (1.0 - a)).round() as u8;
+            (mix(top.0, 255.0), mix(top.1, 255.0), mix(top.2, 0.0))
+        };
+        for (dark, card, scrim) in [
+            (true, (0x16, 0x16, 0x19), over_yellow((0.0, 0.0, 0.0), 0.55)),
+            (
+                false,
+                (0xff, 0xff, 0xff),
+                over_yellow((244.0, 244.0, 241.0), 0.5),
+            ),
+        ] {
+            let mut model = model();
+            model.bar.dark = dark;
+            model.bar.dividers.clear();
+            model.bar.focus = None;
+            model.viewer = Some(ViewerView {
+                title: "Chart".into(),
+                index: 0,
+                count: 1,
+                blob: "chart".into(),
+                size: (200.0, 100.0),
+                svg: true,
+                open: None,
+            });
+            let k = viewer_fit((f64::from(w), f64::from(h)), (200.0, 100.0), true);
+            assert!(k > 1.5, "an SVG scales up to fit: {k}");
+            let picture = auk_views::image::decode(svg.as_bytes(), None, k as f32, "t-")
+                .expect("the SVG decodes");
+            let mut c = Chrome::new(1.0);
+            c.set_viewer_image(picture.frames.first().map(|f| f.content.clone()));
+            assert!(c.update(&model, 1.0));
+            let img = box_of(&c, "role", "img");
+            assert!(
+                (f64::from(img.w) - 200.0 * k).abs() < 1.0,
+                "drawn at the fit: {img:?}, k {k}"
+            );
+            let px = render_over_yellow(&c, w, h);
+            let at = |x: f32, y: f32| px.pixel(x as u32, y as u32);
+            // The picture's transparent part shows the card, not the pane.
+            let clear = at(img.x + img.w * 0.75, img.y + img.h * 0.75);
+            assert!(
+                near(clear, card),
+                "dark {dark}: transparent part {clear:?}, card {card:?}"
+            );
+            let blue = at(img.x + img.w * 0.05, img.y + img.h * 0.1);
+            assert!(near(blue, (0, 0, 255)), "dark {dark}: the square {blue:?}");
+            // The caption sits on the card: beside the title, the card's color.
+            let card_box = box_of(&c, "role", "dialog");
+            // The title bar: the card's top, above the picture.
+            let bar = auk_ui::Rect::new(card_box.x, card_box.y, card_box.w, img.y - card_box.y);
+            let beside = at(card_box.x + 4.0, bar.y + bar.h / 2.0);
+            assert!(
+                near(beside, card),
+                "dark {dark}: beside the caption {beside:?}"
+            );
+            // Around the card, the scrim over the pane.
+            let out = at(card_box.x / 2.0, card_box.y + card_box.h / 2.0);
+            assert!(
+                near(out, scrim),
+                "dark {dark}: the scrim {out:?}, want {scrim:?}"
+            );
+        }
     }
 }

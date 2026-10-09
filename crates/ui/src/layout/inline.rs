@@ -90,6 +90,9 @@ pub(crate) struct InlineLayout {
     pub content_origin: (f32, f32),
     pub width: f32,
     pub height: f32,
+    /// Under `text-overflow: ellipsis`: the font (and size) the root's own style gives "…",
+    /// for lines where no run's font has it.
+    pub ellipsis_font: Option<(parley::FontData, f32)>,
 }
 
 impl std::fmt::Debug for InlineLayout {
@@ -300,6 +303,9 @@ impl Document {
             }
             builder.build_into(&mut layout, &text);
         }
+        let ellipsis_font = (root_style.text_overflow == crate::style::TextOverflow::Ellipsis)
+            .then(|| self.fonts.ellipsis_font(&root_style))
+            .flatten();
         InlineLayout {
             text: b.text,
             layout,
@@ -311,6 +317,7 @@ impl Document {
             content_origin: (0.0, 0.0),
             width: 0.0,
             height: 0.0,
+            ellipsis_font,
         }
     }
 

@@ -147,6 +147,8 @@ pub(crate) struct SurfaceView {
     /// Nodes that need the clock.
     pub clocked: HashSet<String>,
     pub palette_style: String,
+    /// Whether its regions carry `.sf-covered` (as last written).
+    pub covered: bool,
 }
 
 /// Where a region element sits in the pane container.
@@ -209,6 +211,10 @@ pub struct PaneView {
     pub(crate) hl_finish: usize,
     /// The view rect the measure loop last gave virtualized containers their windows from.
     pub(crate) windows_from: Option<auk_ui::Rect>,
+    /// Where the window shows parts of the document, for overlays anchored to a node outside
+    /// the layer: (document top, document bottom, top in the layer), in points. Empty: the
+    /// document as laid out ([`PaneView::set_shown`]).
+    pub(crate) shown: Vec<(f32, f32, f32)>,
 }
 
 impl PaneView {
@@ -262,6 +268,7 @@ impl PaneView {
             hl_budget: crate::highlight::PASS_LINES,
             hl_finish: crate::highlight::FINISH_LINES,
             windows_from: None,
+            shown: Vec::new(),
         }
     }
 
@@ -351,7 +358,13 @@ impl PaneView {
                 self.fit_dirty = true;
             }
             self.sync_doc(doc, pane.blobs(), i, surface, &sc.doc, fresh, now);
-            if sc.meta || sc.palette || fresh || sc.doc.children.contains(surface.id()) {
+            // A sheet opening or closing in the layer covers or uncovers main and dock.
+            if sc.meta
+                || sc.palette
+                || fresh
+                || sc.doc.children.contains(surface.id())
+                || pane.covered(sc.key) != self.surfaces[i].covered
+            {
                 self.write_regions(doc, pane, i);
             }
             if let Some(r) = &sc.reveal {
@@ -412,6 +425,7 @@ impl PaneView {
             st: SurfaceState::default(),
             clocked: HashSet::new(),
             palette_style: String::new(),
+            covered: false,
         });
         self.surfaces.len() - 1
     }
@@ -491,6 +505,7 @@ impl PaneView {
         }
         sv.palette_style = style.clone();
         let covered = pane.covered(sv.key);
+        sv.covered = covered;
         let mut dom = Dom {
             doc,
             w: &mut self.written,

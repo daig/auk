@@ -86,9 +86,11 @@
 .sf-ck-rh { display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--warn); }
 .sf-ck-foot { color: var(--t3); }
 
-.sf-overlay { position: absolute; left: 0; right: 0; top: 0; bottom: 0; display: flex; justify-content: center; align-items: center; padding: 8px; pointer-events: none; }
-.sf-overlay.at-top { align-items: flex-start; }
-.sf-overlay.at-bottom { align-items: flex-end; }
+/* Insets in the layer (the pane's visible area): 12px centered, 40px from the top, 16px from the
+   bottom, 8px for a full sheet (book: overlay placement and size). */
+.sf-overlay { position: absolute; left: 0; right: 0; top: 0; bottom: 0; display: flex; justify-content: center; align-items: center; padding: 12px; pointer-events: none; }
+.sf-overlay.at-top { align-items: flex-start; padding-top: 40px; }
+.sf-overlay.at-bottom { align-items: flex-end; padding-bottom: 16px; }
 .sf-overlay.at-caret, .sf-overlay.at-node { display: block; }
 .sf-ov-dim { position: absolute; left: 0; right: 0; top: 0; bottom: 0; background-color: var(--dim); pointer-events: auto; }
 .sf-ov-card {
@@ -97,11 +99,15 @@
 }
 .sf-overlay.sz-sm .sf-ov-card { width: 320px; }
 .sf-overlay.sz-lg .sf-ov-card { width: 720px; }
-.sf-overlay.sz-full .sf-ov-card { width: 100%; height: 100%; }
+.sf-overlay.sz-full { padding: 8px; }
+.sf-overlay.sz-full .sf-ov-card { width: 100%; height: 100%; border-radius: var(--r-panel); }
 .sf-overlay.at-caret .sf-ov-card, .sf-overlay.at-node .sf-ov-card { position: absolute; }
+.sf-overlay.lost .sf-ov-card { visibility: hidden; pointer-events: none; }
 .sf-ov-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px 4px; font-weight: 600; }
 .sf-ov-body { display: flex; flex-direction: column; gap: 4px; padding: 6px 12px 10px; overflow-y: auto; min-height: 0; }
 .sf-covered { opacity: 0.85; }
+/* Under a sheet, animations hold their frame until it goes (book: .sf-covered). */
+.sf-covered, .sf-covered * { animation-play-state: paused; }
 
 .sf-toast { display: none; }
 .auk-toasts { position: absolute; left: 0; right: 0; bottom: 28px; display: flex; justify-content: center; pointer-events: none; }
