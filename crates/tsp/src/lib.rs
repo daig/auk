@@ -36,8 +36,8 @@ pub use events::{Delivery, Mods, Outgoing, Refused, ViewEvent};
 pub use grid::{AnchorError, AnchorKey, Grid, Line};
 pub use hash::{AGE_PROPS, AGENT_AGE_OBJECTS};
 pub use pane::{
-    ALL_FEATURES, Changes, Config, Facts, Gate, Hello, Outside, T0_KINDS, T1_KINDS, TitleSource,
-    TspPane,
+    ALL_FEATURES, ASIDE_COLS, Changes, Config, Facts, Gate, Hello, Outside, T0_KINDS, T1_KINDS,
+    TitleSource, TspPane, aside_reserve,
 };
 pub use snapshot::Rewrite;
 pub use style::{AcceptAll, Palette, SheetChecker, Sheets};

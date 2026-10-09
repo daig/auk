@@ -5,7 +5,7 @@
 use auk_ui::{Document, SheetKind};
 
 /// `(name, css)` in cascade order.
-pub const BUILTIN: [(&str, &str); 13] = [
+pub const BUILTIN: [(&str, &str); 14] = [
     ("base", include_str!("css/base.css")),
     ("theme", include_str!("css/theme.css")),
     ("highlight", include_str!("css/highlight.css")),
@@ -18,6 +18,7 @@ pub const BUILTIN: [(&str, &str); 13] = [
     ("surface-agent", include_str!("css/surface-agent.css")),
     ("surface-el", include_str!("css/surface-el.css")),
     ("surface-lens", include_str!("css/surface-lens.css")),
+    ("surface-prefs", include_str!("css/surface-prefs.css")),
     ("chrome", include_str!("css/chrome.css")),
 ];
 

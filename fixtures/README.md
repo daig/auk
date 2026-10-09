@@ -12,6 +12,7 @@ Each `.jsonl` file uses Tern's recording format (book:11579): one message per li
 | `docs-frames` | The book's two frames to a flow surface (book:11298-11314). The `o` is implied by the book and added. |
 | `python-{table,ask,progress,chat}` | The tern-sdk Python examples at `19658cb`, run under `tools/tsp_record.py` with the scenarios in `scenarios/`. |
 | `omp-session` | omp 18.8.5 (re-recorded 2026-10-08; the 18.8.4 recording is in git history at `75f3bb6`), three prompts (an overview, an edit with a diff, a shell command) in a scratch copy of tern-sdk, under `tools/tsp_record.py` with `scenarios/omp-session.json`. About 91 s and 541 frames. |
+| `omp-settings` | omp 18.8.5's `/settings` under the recorder's hello (every kind, `aside` among the features), no prompts: `tools/tsp_record.py --raw` with `scenarios/omp-settings.json`, `HOME` the user's own (omp's login; a fresh `HOME` lands in the sign-in screen). Two ↓ move the focus ring, ⏎ opens the Symbol Preset menu and ↓ moves its highlight, Esc closes it, a `page` action opens Shell, an `activate` edits a text row (an empty draft), Esc, Esc. Nothing was changed: `~/.omp/agent/config.yml` hashed the same before and after. 15 frames on `s:1`; the `prefs` node is `v` in `layer`. |
 | `omp-session-own` | omp's own log of the same session (`PI_TUI_TSP_RECORD`), for cross-checking the recorder. omp appends to that file, so empty it before re-recording. |
 
 Re-record with the commands in each `.meta.json` (`argv`, `cwd`, `env`). Recordings of model output aren't reproducible; keep the originals.

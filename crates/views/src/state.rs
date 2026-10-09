@@ -100,6 +100,11 @@ pub(crate) struct SurfaceState {
     /// The window last given to each virtualized container, and whether it's kept from the
     /// container's end.
     pub virt_window: HashMap<NodeId, (f32, f32, bool)>,
+    /// `prefs` pages, by node id: their kept skeleton and what they last showed.
+    pub prefs: HashMap<String, crate::kinds::prefs::Memo>,
+    /// One-shot scrolls after layout: `(scroller, element, to the top)`, else to the nearest
+    /// edge (a `prefs` focus ring).
+    pub reveal_els: Vec<(NodeId, NodeId, bool)>,
 }
 
 /// The key local view state is remembered by: the node's `key` under the same parent, or its id
@@ -202,6 +207,7 @@ impl SurfaceState {
         }
         self.forget_virtual_under(id);
         self.overlays.remove(id);
+        self.prefs.remove(id);
         if self.preedit.as_ref().is_some_and(|p| p.id == id) {
             self.preedit = None;
         }

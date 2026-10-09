@@ -1558,6 +1558,7 @@ impl WinState {
                 {
                     window.request_frame();
                 }
+                self.hover_events(window);
                 if let Some(pane) = self.tab_layout.pane_at(m.x, m.y)
                     && self.modes(pane).mouse == MouseMode::AnyMotion
                 {

@@ -56,6 +56,17 @@ pub const ALL_FEATURES: [&str; 10] = [
     "styles",
     "flow",
 ];
+/// The width of the settings sheet a docked `prefs` node takes at the pane's right edge, in
+/// columns: Tern's 440px sheet at the default 13px font (book: `prefs`, Regions). Kept in
+/// columns because the pane's facts carry the cell size in device pixels, not points.
+pub const ASIDE_COLS: u16 = 56;
+
+/// The columns a docked `prefs` sheet takes from a pane `cols` wide: [`ASIDE_COLS`], at most 60%
+/// of the pane.
+pub fn aside_reserve(cols: u16) -> u16 {
+    ASIDE_COLS.min((u32::from(cols) * 3 / 5) as u16)
+}
+
 /// The default retention budget per pane (§7.10).
 pub const RETENTION: u64 = 64 << 20;
 
@@ -90,16 +101,19 @@ impl Config {
 
 impl Default for Config {
     fn default() -> Self {
+        let kinds: Vec<String> = T0_KINDS
+            .iter()
+            .chain(&T1_KINDS)
+            .map(|k| (*k).to_owned())
+            .collect();
+        // `aside` is the docking of `prefs`: advertised with it (A23).
+        let prefs = kinds.iter().any(|k| k == "prefs");
         Config {
             enabled: true,
-            kinds: T0_KINDS
-                .iter()
-                .chain(&T1_KINDS)
-                .map(|k| (*k).to_owned())
-                .collect(),
+            kinds,
             features: ALL_FEATURES
                 .iter()
-                .filter(|f| **f != "aside")
+                .filter(|f| **f != "aside" || prefs)
                 .map(|f| (*f).to_owned())
                 .collect(),
             apc: 65_536,
@@ -495,7 +509,8 @@ impl TspPane {
             return;
         }
         if self.surfaces[i].delivery.reported.is_none() {
-            self.send_resize(i, grid.cols());
+            let cols = self.program_cols(grid);
+            self.send_resize(i, cols);
         }
         let surface = &mut self.surfaces[i];
         let mark = (s, surface.delivery.applied);
@@ -1053,6 +1068,8 @@ impl TspPane {
         }
         self.release_held(i);
         self.enforce_budget(grid);
+        // A `prefs` sheet docking or leaving narrows or widens the program's columns (aside).
+        self.report_size(grid);
     }
 
     fn close(&mut self, grid: &mut dyn Grid, body: &Map<String, Value>) {
@@ -1077,6 +1094,7 @@ impl TspPane {
             },
         }
         self.enforce_budget(grid);
+        self.report_size(grid);
     }
 
     fn blob(&mut self, msg: &Message) {
@@ -1345,12 +1363,46 @@ impl TspPane {
     }
 
     fn report_size(&mut self, grid: &dyn Grid) {
-        let cols = grid.cols();
+        let cols = self.program_cols(grid);
         for i in self.view_targets(grid.alt_screen()) {
             let reported = self.surfaces[i].delivery.reported;
             if reported.is_some_and(|r| r != (cols, self.facts.cell.0, self.facts.cell.1)) {
                 self.send_resize(i, cols);
             }
+        }
+    }
+
+    /// The `prefs` node docked beside the pane (feature `aside`, book: Regions): a `prefs` node in
+    /// the `layer` of a live inline surface on the active buffer, with no screen surface over it.
+    /// Returns the surface and the node's id.
+    pub fn aside(&self, alt: bool) -> Option<(SurfaceKey, String)> {
+        if !self.has_feature("aside") {
+            return None;
+        }
+        let active = Buffer::from_alt(alt);
+        if self
+            .surfaces
+            .iter()
+            .any(|s| s.is_live() && s.mode == Mode::Screen && s.buffer == active)
+        {
+            return None;
+        }
+        self.surfaces.iter().rev().find_map(|s| {
+            if !(s.is_live() && s.mode == Mode::Inline && s.buffer == active) {
+                return None;
+            }
+            let layer = s.doc.region("layer")?;
+            let node = layer.children().find(|c| c.kind() == "prefs")?;
+            Some((s.key, node.id().to_owned()))
+        })
+    }
+
+    /// The width the program lays out at: the grid's, less the docked `prefs` sheet's.
+    fn program_cols(&self, grid: &dyn Grid) -> u16 {
+        let cols = grid.cols();
+        match self.aside(grid.alt_screen()) {
+            Some(_) => cols - aside_reserve(cols),
+            None => cols,
         }
     }
 

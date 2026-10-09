@@ -684,6 +684,21 @@ impl WinState {
         changed
     }
 
+    /// Sends what the hover asks of the program: a `prefs` menu option previewed (`select`).
+    pub(super) fn hover_events(&mut self, window: &Window) {
+        let panes: Vec<PaneId> = self.surfaces.keys().copied().collect();
+        for pane in panes {
+            let Some(sf) = self.surfaces.get_mut(&pane) else {
+                continue;
+            };
+            let (doc, pv) = sf.parts();
+            let out = pv.hover_events(doc);
+            if !out.is_empty() {
+                self.outcomes(window, pane, out);
+            }
+        }
+    }
+
     // -----------------------------------------------------------------------------------------
     // Image viewer
 
