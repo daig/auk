@@ -1563,11 +1563,14 @@ fn a15_to_a19_omps_overlays_over_a_long_transcript_in_the_dark() {
         true
     );
 
-    // The resumed transcript is many viewports long.
+    // The resumed transcript is many viewports long (omp may still be sending it after `ready`).
     let viewport = omp.window.doc(pane).viewport();
+    omp.window.wait("the resumed transcript to lay out", UI, |w| {
+        let page = w.view(pane).element();
+        let long = w.doc(pane).border_box(page)?;
+        (long.h > viewport.1 * 2.0).then_some(())
+    });
     let page = omp.window.view(pane).element();
-    let long = omp.window.doc(pane).border_box(page).expect("laid out");
-    assert!(long.h > viewport.1 * 2.0, "a long transcript: {long:?} in {viewport:?}");
 
     // Clicking the composer's model control opens omp's Switch Model sheet: with `picker`
     // advertised (A23) a `picker` in the layer, where A15-A17 hold for it as for an overlay.
