@@ -2460,6 +2460,46 @@ fn hovering_a_node_with_a_title_shows_its_tooltip() {
     });
 }
 
+/// A tooltip follows what is under a pointer that stays still: a node whose title the program
+/// changes (omp's effort ring after a click), or a node that moves away from under it.
+#[test]
+fn a_tooltip_follows_the_node_under_a_still_pointer() {
+    let env = env("tooltip-still");
+    let app = App::start(&env, "a", &[]);
+    let probe = focused_probe(&env, &app);
+    let pane = probe.pane;
+    probe.write(&hello(&[]));
+    probe.write(&open_with(
+        "s1",
+        "inline",
+        json!([{"id": "ring", "k": "text", "p": {"text": "effort", "title": "Effort: high"}}]),
+    ));
+    acked(&probe, 1);
+    let ring = wait_for("the node drawn", || node_box(&app, pane, "ring"));
+    let at = (ring[0] + 10.0, ring[1] + ring[3] / 2.0);
+    app.request(&format!("mouse move {} {}", at.0, at.1));
+    wait_for("the tooltip", || {
+        (app.request("chrome")["tooltip_drawn"]["text"] == "Effort: high").then_some(())
+    });
+    // The program changes the title; the pointer doesn't move.
+    probe.write(&frame(
+        "s1",
+        2,
+        json!([["set", "ring", {"title": "Effort: xhigh"}]]),
+    ));
+    acked(&probe, 2);
+    wait_for("the new tooltip", || {
+        (app.request("chrome")["tooltip_drawn"]["text"] == "Effort: xhigh").then_some(())
+    });
+    // The title goes: so does the tooltip.
+    probe.write(&frame("s1", 3, json!([["set", "ring", {"title": null}]])));
+    acked(&probe, 3);
+    wait_for("no tooltip", || {
+        let c = app.request("chrome");
+        (c["tooltip"].is_null() && c["tooltip_drawn"].is_null()).then_some(())
+    });
+}
+
 /// §5.5: Edit ▸ Clear Scrollback (⌘K) is the in-band pane operation: the daemon records it, so
 /// every replica's scrollback clears (the other window's and the daemon's too), the screen stays,
 /// and nothing reaches the program.

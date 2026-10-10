@@ -185,6 +185,9 @@ pub struct WinState {
     /// The `title` tooltip of the surface node under the pointer, and where the pointer is, in
     /// window points (§8.1).
     pub hover_title: Option<(String, f64, f64)>,
+    /// Where the pointer last moved over the window, in window points (none once it left): the
+    /// hover readouts follow what changes under a pointer that stays still.
+    pointer_at: Option<(f64, f64)>,
     /// A drag selecting in a program field: the pane and the offset it started at (§7.9).
     field_drag: Option<(PaneId, u64)>,
     /// The pane whose `prefs` ordered list item is being dragged by its grip.
@@ -309,6 +312,7 @@ impl WinState {
             pointer_cmd: false,
             pointer_shape: auk_platform_macos::PointerShape::Arrow,
             hover_title: None,
+            pointer_at: None,
             field_drag: None,
             reorder_drag: None,
             ime_area: None,
@@ -790,6 +794,7 @@ impl WinState {
         let mut painted = false;
         let mut animating = false;
         let mut find_synced = false;
+        let mut surfaces_changed = false;
         // The grid link a click would open now draws solid (A13).
         let armed = self.armed_link();
         let link_style = self.settings.hyperlinks;
@@ -827,6 +832,7 @@ impl WinState {
                     .entry(*pane)
                     .or_insert_with(|| PaneSurfaces::new(settings.clone(), scale as f32));
                 if !changes.is_empty() {
+                    surfaces_changed = true;
                     sf.sync(tsp, &changes, now);
                     find_synced |= self.find.as_ref().is_some_and(|f| f.pane == *pane);
                 }
@@ -991,6 +997,15 @@ impl WinState {
         // laid out.
         if self.find_reveal_again() {
             window.request_frame();
+        }
+
+        // What is under a pointer that stays still can change with the surfaces: the hover, the
+        // link target and the tooltip follow it (a title the program changed after a click).
+        if surfaces_changed && let Some((x, y)) = self.pointer_at {
+            if self.hover_at(x, y) | self.hover_link_at(x, y) {
+                window.request_frame();
+            }
+            self.hover_events(window);
         }
 
         // The chrome, over the surfaces.
@@ -1587,6 +1602,7 @@ impl WinState {
                 self.press_anchor = None;
             }
             MouseKind::Moved => {
+                self.pointer_at = Some((m.x, m.y));
                 if self.hover_at(m.x, m.y)
                     | self.hover_link_at(m.x, m.y)
                     | self.track_grid_link(window, Some((m.x, m.y)), m.mods.meta)
@@ -1602,6 +1618,7 @@ impl WinState {
             }
             MouseKind::Exited => {
                 // Off the window, no link is under the pointer.
+                self.pointer_at = None;
                 let was_armed = self.armed_link().is_some();
                 self.hover_grid = None;
                 let cmd = self.pointer_cmd;
