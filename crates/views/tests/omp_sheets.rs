@@ -165,6 +165,7 @@ fn token(h: &mut Harness, el: NodeId, value: &str) -> [u8; 4] {
         .background_color
         .to_rgba8();
     h.doc.remove(probe);
+    h.doc.update();
     c
 }
 
