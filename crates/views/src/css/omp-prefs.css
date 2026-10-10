@@ -38,9 +38,3 @@
 /* Shape previews: a sample composer that takes no pointer, and an image in a hairline frame. */
 .sf-col[data-role='omp.preview.composer-shape'] > .sf-editor.readonly { pointer-events: none; }
 .sf-col[data-role='omp.preview.snapcompact-shape'] > .sf-image { border: 1px solid var(--l2); border-radius: 6px; }
-
-/* An unfocused pane gets no keys: no drawn caret, and the focus ring goes quiet. Under .sf-still
-   switches snap (the kit stops only the animations). */
-.sf-unfocused .pf-caret { visibility: hidden; }
-.sf-unfocused .pf-row.focus { box-shadow: inset 0 0 0 2px var(--l3); background-color: var(--l1); }
-.sf-still .pf-sw, .sf-still .pf-sw .knob { transition: none; }
