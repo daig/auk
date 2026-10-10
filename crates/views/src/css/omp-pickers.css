@@ -1,2 +1,43 @@
 /* omp's pickers (research/omp-stylesheets.md §5): role-scoped refinements of the kit picker for
-   omp's model hub, model dropdown and session and tree pickers. Amendment A24. */
+   omp's model hub, model dropdown and session and tree pickers. Amendment A24.
+   The picker look itself stays in surface-picker.css, so a plugin's picker looks the same with or
+   without omp; this sheet holds the preview's roles, the copy picker's blocks, the unfocused pane
+   and the card fallback. Never row heights or sheet sizes: picker.rs places rows by them.
+   Accents keep the theme's under .sf-pal (Q-X2). No transitions: hover is instant. */
+
+/* The preview's heading: its h1, in the sheet's UI face a step above the 13px body (Q-X3); the
+   mono id line under it tucks up to it. */
+.pk-pv-slot .sf-text[data-role='omp.picker.title'] {
+  font-family: var(--sans); font-size: 15px; line-height: 20px; font-weight: 600; color: var(--t1);
+  white-space: pre; overflow: hidden; text-overflow: ellipsis;
+}
+.pk-pv-slot .sf-text[data-role='omp.picker.title'] + .sf-text { margin-top: -6px; color: var(--t3); }
+.pk-pv-slot .sf-text.sf-act { border-radius: 4px; }
+.pk-pv-slot .sf-text.sf-act:hover { background-color: var(--l1); color: var(--t1); }
+
+/* The copy picker's blocks: pickable tiles, siblings, so no tree hairline; the focused one takes
+   the picker's focus ring. The program owns keys and clicks: no pressed or focus state. */
+.sf-section[data-role='omp.picker.block'], .sf-section[data-role='omp.picker.block.focused'] {
+  border: 1px solid var(--l2); border-radius: var(--r-ctl); padding: 6px 8px 8px; background-color: var(--well);
+}
+.sf-section[data-role='omp.picker.block']:hover { border-color: var(--l3); background-color: var(--l1); }
+.sf-section[data-role='omp.picker.block.focused'] {
+  border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent);
+  background-color: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+.sf-section[data-role^='omp.picker.block'] > .sf-section-head { font-size: 12px; font-weight: 600; color: var(--t2); }
+.sf-section[data-role='omp.picker.block.focused'] > .sf-section-head { color: var(--accent-ink); }
+.sf-section[data-role^='omp.picker.block'] > .sf-section-body { margin-left: 0; padding: 4px 0 0; border-left: 0; }
+
+/* The agents hub's system prompt scrolls inside the preview. */
+.sf-section[data-role='omp.agents.prompt'] > .sf-section-body { max-height: calc(14 * var(--sf-lh)); overflow-y: auto; }
+
+/* An unfocused pane gets no keys: no drawn caret, and the selection loses its accent edge, as an
+   inactive selection does on macOS. Any picker, a plugin's too. */
+.sf-layer.sf-unfocused .pk-search .caret { visibility: hidden; }
+.sf-layer.sf-unfocused .pk-sheet.f-list .pk-row.sel { box-shadow: none; background-color: var(--l2); }
+
+/* The card fallback model browser (omp's Switch Model card, sent even when picker is advertised):
+   a list tall enough to browse, and the detail set off under it. The card's frame is omp-panels'. */
+.sf-list[data-role='omp.model-browser.list'] { min-height: calc(10 * var(--sf-lh)); }
+.sf-col[data-role='omp.model-browser.detail'] { gap: 2px; padding: 8px 10px; border-top: 1px solid var(--l2); }

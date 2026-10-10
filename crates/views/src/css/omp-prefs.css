@@ -1,2 +1,46 @@
 /* omp's settings (research/omp-stylesheets.md §6): role-scoped refinements of the kit prefs
-   page and sheet for omp's /settings. Amendment A24. */
+   page and sheet for omp's /settings. Amendment A24.
+   The prefs look stays in surface-prefs.css, which also frames a picker in the editor card and
+   makes the kit's accents follow the program's under .sf-pal; this sheet doesn't restate either.
+   Rows, the nav and control geometry are the kit's: rows patch in place and switches slide. */
+
+/* The status-line preview: a sample of the dock's status strip, in the terminal font at the
+   strip's metrics, set in a well. */
+.pf-preview > .sf-col[data-role='omp.prefs.preview.status'] {
+  padding: 6px; border: 1px solid var(--l2); border-radius: var(--r-card); background-color: var(--page);
+  font-family: var(--tv-font, var(--mono)); font-size: 13px; line-height: var(--sf-lh, 17px);
+}
+.sf-col[data-role='omp.prefs.preview.status'] > .sf-status {
+  min-height: 24px; padding: 0 8px; font-size: var(--omp-meta-fs, 11.5px); color: var(--t3);
+  background-color: var(--sf-status-bg, var(--panel)); border-radius: 6px;
+}
+
+/* The editor column in the glass card: omp's components are terminal content (Q-X4), and the
+   card is their frame, so a card inside it drops its own. */
+.pf-editor > .sf-col[data-role='omp.prefs.editor'] {
+  gap: var(--sf-inner-gap); min-height: 0; font-family: var(--tv-font, var(--mono));
+}
+.sf-col[data-role='omp.prefs.editor'] > .sf-card { border-color: transparent; background-color: transparent; }
+
+/* The fallback settings list (prefs not advertised): headings are disabled items, drawn as
+   section heads rather than dimmed; the search row is a well. */
+.sf-col[data-role='omp.settings'] { gap: 6px; }
+.sf-item.disabled[data-role='omp.settings.heading'] { opacity: 1; cursor: default; padding-top: 8px; }
+.sf-item.disabled[data-role='omp.settings.heading']:hover { background-color: transparent; }
+.sf-item[data-role='omp.settings.heading'] .sf-item-label {
+  color: var(--t3); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+}
+.sf-row[data-role='omp.settings.search'] {
+  gap: 6px; height: 28px; padding: 0 8px; border-radius: var(--r-ctl);
+  background-color: var(--well); border: 1px solid var(--well-line);
+}
+
+/* Shape previews: a sample composer that takes no pointer, and an image in a hairline frame. */
+.sf-col[data-role='omp.preview.composer-shape'] > .sf-editor.readonly { pointer-events: none; }
+.sf-col[data-role='omp.preview.snapcompact-shape'] > .sf-image { border: 1px solid var(--l2); border-radius: 6px; }
+
+/* An unfocused pane gets no keys: no drawn caret, and the focus ring goes quiet. Under .sf-still
+   switches snap (the kit stops only the animations). */
+.sf-unfocused .pf-caret { visibility: hidden; }
+.sf-unfocused .pf-row.focus { box-shadow: inset 0 0 0 2px var(--l3); background-color: var(--l1); }
+.sf-still .pf-sw, .sf-still .pf-sw .knob { transition: none; }
