@@ -38,9 +38,14 @@
 .sf-badge {
   display: inline-block; padding: 0 6px; border-radius: 999px; font-size: 11px; line-height: 16px;
   white-space: nowrap; color: var(--tc); --tc: var(--t2);
-  background-color: color-mix(in srgb, var(--tc) 14%, transparent);
+  background-color: color-mix(in srgb, var(--tc) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tc) 22%, transparent);
 }
 .sf-badge[data-tone] { color: var(--tc); }
+/* Without a tone (or neutral) a gray chip (book:7230-7263). */
+.sf-badge:not([data-tone]), .sf-badge[data-tone='neutral'] {
+  color: var(--t2); background-color: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--l2);
+}
 .sf-kbd, .kbds { display: inline-flex; gap: 3px; align-items: center; }
 .kbd {
   display: inline-block; min-width: 18px; padding: 0 4px; border-radius: 4px; text-align: center;
@@ -71,8 +76,12 @@
 
 /* meter */
 .sf-meter { display: flex; align-items: center; gap: 6px; min-width: 0; --mt: var(--tc, var(--accent)); }
+/* The fill is the accent without a tone (or with neutral), --warn/--bad by level; any other
+   tone wins over the level (book:8649, 8723). */
+.sf-meter:not([data-tone]), .sf-meter[data-tone='neutral'] { --mt: var(--accent); }
 .sf-meter[data-level='warn'] { --mt: var(--warn); }
 .sf-meter[data-level='bad'] { --mt: var(--bad); }
+.sf-meter[data-tone]:not([data-tone='neutral']) { --mt: var(--tc); }
 .sf-mt-track { position: relative; flex: 1 1 auto; min-width: 24px; height: 6px; border-radius: 3px; background-color: var(--l2); }
 .sf-meter[data-size='sm'] .sf-mt-track { height: 4px; }
 .sf-meter[data-size='lg'] .sf-mt-track { height: 8px; }

@@ -35,11 +35,11 @@
 .sf-st-l, .sf-st-r { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .sf-st-l { flex: 1 1 auto; }
 .sf-st-r { flex: none; justify-content: flex-end; }
-.sf-seg { display: inline-flex; align-items: center; gap: 4px; color: var(--t3); white-space: pre; min-width: 0; flex: none; }
+.sf-seg { display: inline-flex; align-items: center; gap: 4px; color: var(--t3); white-space: pre; min-width: 0; flex: none; border-radius: 5px; }
 .sf-seg[data-tone] { color: var(--tc); }
 .sf-seg.shrinks { flex: 0 1 auto; }
 .sf-seg-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .sf-seg-k { display: inline-flex; align-items: center; }
 .sf-seg-ic { display: inline-flex; }
-.sf-seg.sf-act:hover { color: var(--t1); }
+.sf-seg.sf-act:hover { color: var(--t1); background-color: var(--l1); }
 .sf-fit-off { display: none; }

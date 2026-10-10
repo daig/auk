@@ -280,3 +280,145 @@ fn split_diff_draws_its_halves_and_the_blank_side() {
         "the blank side is visible: {got:?} vs {base:?}"
     );
 }
+
+fn kit_harness(dark: bool) -> common::Harness {
+    let mut h = common::Harness::with(
+        Default::default(),
+        ViewSettings {
+            dark,
+            ..Default::default()
+        },
+    );
+    h.hello(&[]);
+    h
+}
+
+/// K4 (research/omp-stylesheets.md §2.5): a toned badge draws its 10% fill inside a 22% ring,
+/// in light and dark.
+#[test]
+fn a_badge_draws_its_tone_ring() {
+    for dark in [false, true] {
+        let mut h = kit_harness(dark);
+        h.surface(
+            "s1",
+            "inline",
+            json!([{"id": "r", "k": "row", "c": [{"id": "b", "k": "badge", "p": {"text": "failed", "tone": "error"}}]}]),
+        );
+        h.frame();
+        let el = h.el("s1", "b");
+        let st = h.doc.computed_style(el).unwrap();
+        let (fill, ring) = (
+            st.background_color,
+            st.box_shadow.as_deref().unwrap()[0].color,
+        );
+        let r = h.doc.border_box(el).unwrap();
+        let (w, hgt) = (960, (r.y + r.h).ceil() as u32 + 4);
+        let px = render(&h.doc, w, hgt);
+        let under = pixel(&px, w, r.x + r.w + 4.0, r.y + r.h / 2.0);
+        let want_fill = over(fill, under);
+        let want_ring = over(ring, want_fill);
+        let got_fill = pixel(&px, w, r.x + 3.5, r.y + r.h / 2.0);
+        let got_ring = pixel(&px, w, r.x + r.w / 2.0, r.y + 0.5);
+        assert!(
+            near(got_fill, want_fill),
+            "dark {dark}: fill {got_fill:?}, want {want_fill:?}"
+        );
+        assert!(
+            near(got_ring, want_ring),
+            "dark {dark}: ring {got_ring:?}, want {want_ring:?}"
+        );
+        assert!(
+            got_ring
+                .iter()
+                .zip(got_fill)
+                .any(|(a, b)| a.abs_diff(b) >= 6),
+            "dark {dark}: the ring shows against the fill: {got_ring:?} vs {got_fill:?}"
+        );
+    }
+}
+
+/// K5: an inline tool's body draws its --l2 hairline, in light and dark.
+#[test]
+fn an_inline_tool_draws_its_hairline() {
+    for dark in [false, true] {
+        let mut h = kit_harness(dark);
+        h.surface(
+            "s1",
+            "inline",
+            json!([{"id": "t", "k": "tool", "p": {"name": "read", "title": "Read", "status": "done", "frame": "inline"},
+                "c": [{"id": "o", "k": "text", "p": {"text": "one\ntwo\nthree"}}]}]),
+        );
+        h.frame();
+        let body = h.find_class(h.el("s1", "t"), "sf-tool-body")[0];
+        let line = h.doc.computed_style(body).unwrap().border_color[3];
+        let r = h.doc.border_box(body).unwrap();
+        let (w, hgt) = (960, (r.y + r.h).ceil() as u32 + 4);
+        let px = render(&h.doc, w, hgt);
+        let y = r.y + r.h / 2.0;
+        let under = pixel(&px, w, r.x - 3.0, y);
+        let got = pixel(&px, w, r.x + 0.5, y);
+        assert!(
+            near(got, over(line, under)),
+            "dark {dark}: hairline {got:?} over {under:?}"
+        );
+        assert!(got != under, "dark {dark}: visible");
+        assert!(
+            near(pixel(&px, w, r.x + 3.0, y), under),
+            "dark {dark}: 1px wide"
+        );
+    }
+}
+
+/// K7: the overlay card casts its drop shadow below it, and in dark its --glass-hi top
+/// highlight lightens its first row.
+#[test]
+fn an_overlay_card_casts_its_glass_shadow() {
+    for dark in [false, true] {
+        let mut h = kit_harness(dark);
+        h.surface(
+            "s1",
+            "inline",
+            json!([{"id": "t", "k": "text", "p": {"text": "under"}}]),
+        );
+        h.frame_ops(
+            "s1",
+            2,
+            json!([["add", "layer", "s1", null, {"id": "layer", "k": "col", "c": [
+                {"id": "ov", "k": "overlay", "p": {"head": "Usage"}, "c": [
+                    {"id": "b", "k": "text", "p": {"text": "body"}}
+                ]}
+            ]}]]),
+        );
+        h.frame();
+        // Past the card's 220ms pop-in.
+        h.now += 300.0;
+        h.frame();
+        let card = h.find_class(h.el("s1", "ov"), "sf-ov-card")[0];
+        let r = h.doc.border_box(card).unwrap();
+        let w = 960;
+        let px = render(&h.doc, w, 800);
+        let y = r.y + r.h + 12.0;
+        let below = pixel(&px, w, r.x + r.w / 2.0, y);
+        let away = pixel(&px, w, 20.0, y);
+        let sum = |p: [u8; 3]| p.iter().map(|&c| c as u32).sum::<u32>();
+        assert!(
+            sum(below) + 6 < sum(away),
+            "dark {dark}: a shadow below {below:?} vs {away:?}"
+        );
+        if dark {
+            let [r8, g8, b8, _] = h
+                .doc
+                .computed_style(card)
+                .unwrap()
+                .background_color
+                .to_rgba8();
+            let top = pixel(&px, w, r.x + 24.0, r.y + 1.5);
+            let inside = pixel(&px, w, r.x + 24.0, r.y + 5.0);
+            assert!(near(inside, [r8, g8, b8]), "--pop-bg inside: {inside:?}");
+            assert!(
+                sum(top) > sum(inside) + 3,
+                "the top highlight: {top:?} vs {inside:?}"
+            );
+        }
+    }
+}
