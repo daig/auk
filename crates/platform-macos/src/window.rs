@@ -33,6 +33,15 @@ pub enum PointerShape {
     PointingHand,
 }
 
+impl PointerShape {
+    pub(crate) fn cursor(self) -> Retained<NSCursor> {
+        match self {
+            PointerShape::Arrow => NSCursor::arrowCursor(),
+            PointerShape::PointingHand => NSCursor::pointingHandCursor(),
+        }
+    }
+}
+
 /// A window. Main thread only; cheap to clone.
 #[derive(Clone)]
 pub struct Window {
@@ -125,13 +134,11 @@ impl Window {
         self.view.request_frame();
     }
 
-    /// Sets the pointer's shape. It stays until the next change.
+    /// Sets the pointer's shape over the view. It stays until the next change: the view puts it
+    /// back when AppKit resets the cursor.
     pub fn set_pointer(&self, shape: PointerShape) {
-        let cursor = match shape {
-            PointerShape::Arrow => NSCursor::arrowCursor(),
-            PointerShape::PointingHand => NSCursor::pointingHandCursor(),
-        };
-        cursor.set();
+        self.view.ivars().pointer.set(shape);
+        shape.cursor().set();
     }
 
     /// The pointer's current shape, as AppKit has it.

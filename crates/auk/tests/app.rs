@@ -3427,5 +3427,8 @@ fn a13_grid_links_draw_dotted_and_arm_with_cmd_or_plain_click_links() {
     wait_for("no underline at all", || {
         all(&cells(&app), &|x| x["underline"].is_null()).then_some(())
     });
-    assert_eq!(app.request("chrome")["pointer"], "PointingHand");
+    // AppKit resets the cursor when the reload rebuilds the menu bar; the view puts the hand back.
+    wait_for("the pointing hand after the reload", || {
+        (app.request("chrome")["pointer"] == "PointingHand").then_some(())
+    });
 }

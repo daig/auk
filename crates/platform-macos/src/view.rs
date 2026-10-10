@@ -66,6 +66,9 @@ pub(crate) struct ViewState {
     closed: Cell<bool>,
     /// AccessKit's adapter, once the app supplies a tree.
     pub a11y: RefCell<Option<crate::accessibility::Accessibility>>,
+    /// The pointer's shape over the view: `cursorUpdate:` puts it back whenever AppKit resets
+    /// the cursor (a menu bar rebuilt, the window or app activated).
+    pub pointer: Cell<crate::window::PointerShape>,
 }
 
 define_class!(
@@ -199,6 +202,11 @@ define_class!(
         #[unsafe(method(mouseMoved:))]
         fn mouse_moved(&self, event: &NSEvent) {
             self.mouse(event, MouseKind::Moved);
+        }
+
+        #[unsafe(method(cursorUpdate:))]
+        fn cursor_update(&self, _event: &NSEvent) {
+            self.ivars().pointer.get().cursor().set();
         }
 
         #[unsafe(method(mouseEntered:))]
@@ -419,6 +427,7 @@ impl AukView {
             waker: Waker::new(id),
             closed: Cell::new(false),
             a11y: RefCell::new(None),
+            pointer: Cell::new(crate::window::PointerShape::Arrow),
         };
         let this = Self::alloc(mtm).set_ivars(state);
         // SAFETY: NSView's designated initializer.
@@ -427,6 +436,7 @@ impl AukView {
         this.setLayerContentsRedrawPolicy(NSViewLayerContentsRedrawPolicy::DuringViewResize);
         let options = NSTrackingAreaOptions::MouseMoved
             | NSTrackingAreaOptions::MouseEnteredAndExited
+            | NSTrackingAreaOptions::CursorUpdate
             | NSTrackingAreaOptions::ActiveInKeyWindow
             | NSTrackingAreaOptions::InVisibleRect;
         // SAFETY: the view owns the tracking area, which is removed with it.
