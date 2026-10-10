@@ -236,13 +236,18 @@ impl PaneView {
         }
     }
 
-    /// The pane gained or lost keyboard focus (`.sf-unfocused`).
+    /// The pane gained or lost keyboard focus (`.sf-unfocused`). Unfocused, nothing in it
+    /// matches `:focus*` and a press under way loses `:active`.
     pub fn set_focused(&mut self, doc: &mut Document, pane: &TspPane, focused: bool) {
         if focused != self.focused {
             self.focused = focused;
             for i in 0..self.surfaces.len() {
                 self.write_regions_pub(doc, pane, i);
             }
+            if !focused {
+                self.release(doc);
+            }
+            self.update_focus(doc, pane);
         }
     }
 

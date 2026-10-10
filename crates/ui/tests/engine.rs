@@ -200,6 +200,72 @@ fn state_pseudo_classes_and_generated_content() {
     );
 }
 
+/// Amendment A24 (H-F): `:active`, `:focus`, `:focus-visible` and `:focus-within` each match
+/// their state, `:focus-within` also matches the focused element itself, and setting or clearing
+/// a state restyles the element and what its selectors reach (descendants, the next sibling).
+#[test]
+fn focus_and_active_pseudo_classes_match_and_restyle_on_change() {
+    let mut doc = doc_with(
+        ".b { color: black } .b:active { color: red } .b:focus { color: blue }
+         .b:focus-visible { color: green }
+         .p:focus-within > .c { color: red } .p:focus-within { color: blue }
+         .b:focus + .s { color: blue } .q { color: black } .q:focus-within { color: green }",
+    );
+    let root = doc.root();
+    let body = el(&mut doc, root, "body", "", None);
+    let p = el(&mut doc, body, "div", "p", None);
+    let b = el(&mut doc, p, "div", "b", Some("x"));
+    let s = el(&mut doc, p, "div", "s", Some("x"));
+    let c = el(&mut doc, p, "div", "c", Some("x"));
+    let q = el(&mut doc, body, "div", "q", Some("x"));
+    doc.update();
+    assert_eq!(color(&doc, b), BLACK);
+    assert_eq!(color(&doc, p), BLACK);
+    assert_eq!(color(&doc, c), BLACK);
+
+    doc.set_state(b, ElementState::ACTIVE, true);
+    doc.update();
+    assert_eq!(color(&doc, b), RED, ":active");
+    doc.set_state(b, ElementState::ACTIVE, false);
+    doc.update();
+    assert_eq!(color(&doc, b), BLACK, ":active cleared");
+
+    doc.set_state(b, ElementState::FOCUS, true);
+    doc.update();
+    assert_eq!(color(&doc, b), BLUE, ":focus");
+    assert_eq!(color(&doc, s), BLUE, ":focus + sibling");
+    doc.set_state(b, ElementState::FOCUS_VISIBLE, true);
+    doc.update();
+    assert_eq!(color(&doc, b), GREEN, ":focus-visible");
+    doc.set_state(b, ElementState::FOCUS_VISIBLE, false);
+    doc.update();
+    assert_eq!(color(&doc, b), BLUE, ":focus-visible cleared");
+
+    doc.set_state(p, ElementState::FOCUS_WITHIN, true);
+    doc.update();
+    assert_eq!(color(&doc, p), BLUE, ":focus-within");
+    assert_eq!(color(&doc, c), RED, "a child of a :focus-within ancestor");
+    doc.set_state(p, ElementState::FOCUS_WITHIN, false);
+    doc.set_state(b, ElementState::FOCUS, false);
+    doc.update();
+    assert_eq!(color(&doc, p), BLACK);
+    assert_eq!(color(&doc, c), BLACK);
+    assert_eq!(color(&doc, b), BLACK);
+    assert_eq!(color(&doc, s), BLACK);
+
+    // The focused element is within itself.
+    doc.set_state(q, ElementState::FOCUS, true);
+    doc.update();
+    assert_eq!(
+        color(&doc, q),
+        GREEN,
+        ":focus-within on the focused element"
+    );
+    doc.set_state(q, ElementState::FOCUS, false);
+    doc.update();
+    assert_eq!(color(&doc, q), BLACK);
+}
+
 #[test]
 fn mutation_is_incremental() {
     let mut doc = doc_with(".row { display: flex; gap: 4px } .cell { padding: 2px }");

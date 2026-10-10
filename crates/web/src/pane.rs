@@ -647,6 +647,16 @@ impl PaneDraw {
         }
     }
 
+    /// The primary button came up: the pressed node loses `:active`, in the surfaces and the
+    /// command blocks. Returns whether anything changed.
+    pub fn release(&mut self) -> bool {
+        let mut changed = self.surfaces.release();
+        for doc in self.lens.values_mut() {
+            changed |= doc.surfaces.release();
+        }
+        changed
+    }
+
     /// A press that may start dragging a `prefs` ordered list item by its grip (book: prefs).
     /// Returns whether it did; the press is then not a click.
     pub fn reorder_press(&mut self, replica: &Replica, press: Press, content_px: f32) -> bool {

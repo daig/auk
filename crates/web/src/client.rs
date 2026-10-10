@@ -859,10 +859,15 @@ impl App {
         }
     }
 
-    /// The button came up: a `prefs` grip drag drops its item. Returns whether a redraw is due.
+    /// The button came up: the pressed node loses `:active`, and a `prefs` grip drag drops its
+    /// item. Returns whether a redraw is due.
     fn mouse_up(&mut self, at: (f32, f32)) -> bool {
+        let mut released = false;
+        for view in self.views.values_mut() {
+            released |= view.draw.release();
+        }
         let Some(pane) = self.reorder.take() else {
-            return false;
+            return released;
         };
         let press = self.pane_press(pane, at.0, at.1);
         let content_h = press.map_or(0.0, |(_, h)| h);
