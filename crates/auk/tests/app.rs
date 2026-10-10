@@ -1585,6 +1585,62 @@ fn native_editing_drag_selects_in_a_field_and_copy_and_paste_go_through_it() {
     assert!(events(&tsp_bodies(&split_input(&got)), "edit").is_empty());
 }
 
+/// A double-click in a program field selects the word under it, and a triple-click the whole
+/// field, as in any macOS text field; what comes next replaces the selection.
+#[test]
+fn a_double_click_in_a_field_selects_a_word_and_a_triple_click_all() {
+    let env = env("field-words");
+    let app = App::start(&env, "a", &[]);
+    let probe = focused_probe(&env, &app);
+    probe.write(&hello(&["edit"]));
+    probe.write(&open_with(
+        "s1",
+        "inline",
+        json!([{"id": "ed", "k": "editor", "p": {"text": "fix the prnts typo", "cursor": 0}}]),
+    ));
+    probe.write(&auk_conformance::probe::frame(
+        "s1",
+        2,
+        json!([["focus", "ed"]]),
+    ));
+    acked(&probe, 2);
+    caught_up(&env, &app, probe.pane);
+    let pane = probe.pane;
+    let field = wait_for("the field's box", || {
+        let r = app.send(&format!("field-box {pane}"));
+        (r["ok"] == true).then(|| r["value"].clone())
+    });
+    let (bx, by) = (num(&field["box"][0]), num(&field["box"][1]));
+    let (cw, ch) = (num(&field["cell"][0]), num(&field["cell"][1]));
+    // On "prnts" (columns 8 to 13).
+    let (x, y) = (bx + 10.5 * cw, by + ch / 2.0);
+    app.request(&format!("mouse down {x} {y}"));
+    app.request(&format!("mouse up {x} {y}"));
+    app.request(&format!("mouse down {x} {y} --clicks 2"));
+    app.request(&format!("mouse up {x} {y} --clicks 2"));
+    wait_for("the word selected", || {
+        menu(&app, "Edit", "Copy");
+        (app.request("clipboard") == "prnts").then_some(())
+    });
+    app.request("clipboard-set prints");
+    menu(&app, "Edit", "Paste");
+    let edit = wait_for("the edit replacing the word", || {
+        let e = program_event(&probe, "edit");
+        (e["text"] == "prints").then_some(e)
+    });
+    assert_eq!(
+        (edit["from"].clone(), edit["to"].clone()),
+        (json!(8), json!(13)),
+        "{edit}"
+    );
+    app.request(&format!("mouse down {x} {y} --clicks 3"));
+    app.request(&format!("mouse up {x} {y} --clicks 3"));
+    wait_for("the whole field selected", || {
+        menu(&app, "Edit", "Copy");
+        (app.request("clipboard") == "fix the prnts typo").then_some(())
+    });
+}
+
 #[test]
 fn checklist_toggle_and_copy_of_md_and_ansi_from_the_window() {
     let env = env("actions");

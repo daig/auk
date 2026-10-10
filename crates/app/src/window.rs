@@ -1509,8 +1509,13 @@ impl WinState {
                 if matches!(button, MouseButton::Left | MouseButton::Right)
                     && self.surface_click(window, pane, &m, button)
                 {
-                    if button == MouseButton::Left && m.clicks <= 1 {
-                        self.field_press(pane, &m);
+                    if button == MouseButton::Left {
+                        match m.clicks {
+                            0 | 1 => self.field_press(pane, &m),
+                            // Native text-field clicks: the word, then the whole field.
+                            2 => self.field_select_word(window, pane, &m),
+                            _ => self.field_select_all(window, pane),
+                        }
                     }
                     return;
                 }

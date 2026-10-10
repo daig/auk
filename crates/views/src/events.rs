@@ -925,6 +925,17 @@ impl PaneView {
         Outcome::Redraw
     }
 
+    /// A double-click in the focused field at UTF-16 `offset`: selects the word there (letters,
+    /// digits and `_`), or the one character when it isn't part of a word.
+    pub fn select_word(&mut self, doc: &mut Document, pane: &TspPane, offset: u64) -> Outcome {
+        let Some((_, node)) = self.focused_field(pane) else {
+            return Outcome::Keys;
+        };
+        let text = input::field_text(node);
+        let (a, b) = word_bounds(&text, offset);
+        self.select(doc, pane, a, b)
+    }
+
     /// ⌘A in the focused field.
     pub fn select_all(&mut self, doc: &mut Document, pane: &TspPane) -> Outcome {
         let Some((_, node)) = self.focused_field(pane) else {
@@ -1510,5 +1521,69 @@ mod field_key_tests {
         assert_eq!(char_step(text, 6, false), 5);
         assert_eq!(chars_between(text, 3, 6), 3);
         assert_eq!(chars_into(text, 0, 2, 5), 2);
+    }
+}
+
+/// The UTF-16 range of the word at UTF-16 `offset` in `text` (a double-click's selection): a run
+/// of letters, digits and `_` touching the offset, else the character after it.
+fn word_bounds(text: &str, offset: u64) -> (u64, u64) {
+    let chars: Vec<(u64, char)> = text
+        .chars()
+        .scan(0u64, |at, c| {
+            let here = *at;
+            *at += c.len_utf16() as u64;
+            Some((here, c))
+        })
+        .collect();
+    let end_of = |i: usize| {
+        chars
+            .get(i)
+            .map_or_else(|| input::byte_to_utf16(text, text.len()), |(o, _)| *o)
+    };
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    // The character the offset is on, or the one before it at a word's end.
+    let Some(mut i) = chars.iter().rposition(|(o, _)| *o <= offset) else {
+        return (0, 0);
+    };
+    if !word(chars[i].1) && i > 0 && word(chars[i - 1].1) && chars[i].0 == offset {
+        i -= 1;
+    }
+    if !word(chars[i].1) {
+        return (chars[i].0, end_of(i + 1));
+    }
+    let mut a = i;
+    while a > 0 && word(chars[a - 1].1) {
+        a -= 1;
+    }
+    let mut b = i + 1;
+    while b < chars.len() && word(chars[b].1) {
+        b += 1;
+    }
+    (chars[a].0, end_of(b))
+}
+
+#[cfg(test)]
+mod word_tests {
+    use super::word_bounds;
+
+    #[test]
+    fn a_double_click_selects_the_word_under_it() {
+        let t = "Add a **--json** flag that prnts it";
+        let at = |w: &str| t.find(w).unwrap() as u64;
+        assert_eq!(
+            word_bounds(t, at("prnts") + 2),
+            (at("prnts"), at("prnts") + 5)
+        );
+        assert_eq!(word_bounds(t, at("prnts")), (at("prnts"), at("prnts") + 5));
+        // At a word's end (the caret after it), the word.
+        assert_eq!(
+            word_bounds(t, at("prnts") + 5),
+            (at("prnts"), at("prnts") + 5)
+        );
+        assert_eq!(word_bounds(t, at("json") + 1), (at("json"), at("json") + 4));
+        // Off a word: the one character.
+        assert_eq!(word_bounds(t, at("**")), (at("**"), at("**") + 1));
+        assert_eq!(word_bounds("héllo wörld", 8), (6, 11));
+        assert_eq!(word_bounds("", 0), (0, 0));
     }
 }

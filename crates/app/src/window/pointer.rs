@@ -339,6 +339,46 @@ impl WinState {
         self.field_drag = self.field_offset(pane, m.x, m.y).map(|off| (pane, off));
     }
 
+    /// A double-click in `pane`'s focused field selects the word under it.
+    pub(super) fn field_select_word(&mut self, window: &Window, pane: PaneId, m: &MouseEvent) {
+        self.field_drag = None;
+        let Some(at) = self.field_offset(pane, m.x, m.y) else {
+            return;
+        };
+        self.field_select(window, pane, |doc, pv, tsp| pv.select_word(doc, tsp, at));
+    }
+
+    /// A triple-click in `pane`'s focused field selects all of it.
+    pub(super) fn field_select_all(&mut self, window: &Window, pane: PaneId) {
+        self.field_drag = None;
+        self.field_select(window, pane, |doc, pv, tsp| pv.select_all(doc, tsp));
+    }
+
+    fn field_select(
+        &mut self,
+        window: &Window,
+        pane: PaneId,
+        f: impl FnOnce(&mut auk_ui::Document, &mut auk_views::PaneView, &auk_tsp::TspPane) -> Outcome,
+    ) {
+        let outcome = {
+            let Some(sf) = self.surfaces.get_mut(&pane) else {
+                return;
+            };
+            let conn = self.conn.clone();
+            let shared = conn.shared();
+            let Some(data) = shared.panes.get(&pane) else {
+                return;
+            };
+            let (doc, pv) = sf.parts();
+            f(doc, pv, data.replica.tsp())
+        };
+        if !matches!(outcome, Outcome::Keys) {
+            self.ui_dirty = true;
+            self.outcomes(window, pane, vec![outcome]);
+            window.request_frame();
+        }
+    }
+
     /// The UTF-16 offset in the focused field of `pane` under a window point.
     fn field_offset(&self, pane: PaneId, x: f64, y: f64) -> Option<u64> {
         let (dx, dy) = self.surface_point(pane, x, y)?;
