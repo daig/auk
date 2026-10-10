@@ -1,3 +1,138 @@
 /* omp's transcript (research/omp-stylesheets.md §7): the user message and its Copy/Rewind row,
    thinking, turn usage and markers, assistant prose, the error card, extension blocks, the welcome
-   card and the rewind screen. Amendment A24. */
+   card and the rewind screen. Amendment A24. Role refinements only: the card, section and tone
+   looks stay the kit's. :active and :focus-visible need element states (G4), so no resting look
+   depends on them. */
+
+/* Rhythm (§7.2): omp's cols send no gap, and a col has none by default. */
+.sf-col[data-role='omp.assistant'], .sf-col[data-role='omp.activity'],
+.sf-col[data-role='omp.transcript'] { gap: var(--sf-inner-gap); }
+.sf-col[data-role='omp.status-block'] { gap: 2px; font-size: var(--omp-meta-fs); color: var(--omp-meta); }
+
+/* User message (§7.3, Q-T1, Q-T3, Q-T5): a fill-only bubble at the right, width-capped (U1-U2),
+   with its time and Copy/Rewind at the foot, right-aligned (U3). The tools stay visible, faint,
+   until focus states let them hide (U7-U11). */
+.sf-card[data-role='omp.user'] {
+  align-self: flex-end; width: fit-content; max-width: var(--omp-bubble-max);
+  border-color: transparent; background-color: var(--sf-tint-user, var(--l1)); border-radius: var(--r-card);
+}
+.sf-card[data-role='omp.user'] > .sf-card-body { padding: 6px 10px; gap: 2px; }
+.sf-row[data-role='omp.user.tools'] {
+  order: 2; justify-content: flex-end; gap: 2px; height: var(--omp-ctl-h); margin: 2px -4px -2px 0;
+  font-size: var(--omp-meta-fs); color: var(--omp-faint);
+}
+.sf-row[data-role='omp.user.images'] { order: 0; gap: 6px; flex-wrap: wrap; }
+.sf-row[data-role='omp.user.images'] > .sf-image { border-radius: var(--r-chip); }
+.sf-row[data-role='omp.user.badges'] { order: 3; justify-content: flex-end; gap: 4px; }
+/* U6: the full date shows through the title. */
+.sf-text[data-role='omp.user.time'] { padding: 0 4px; color: var(--omp-faint); cursor: default; }
+.sf-text[data-role='omp.user.time']:hover { color: var(--omp-meta); }
+/* U7-U8: the quiet control (omp.css), faint, lifting while the bubble is hovered. */
+.sf-text[data-role='omp.user.tool'] { color: var(--omp-faint); }
+.sf-card[data-role='omp.user']:hover .sf-text[data-role='omp.user.tool'] { color: var(--omp-meta); }
+/* U9-U11: one step above the bubble's --l1. Led by the card so they outrank U8. */
+.sf-card[data-role='omp.user'] .sf-text.sf-act[data-role='omp.user.tool']:hover { background-color: var(--l2); color: var(--t1); }
+.sf-card[data-role='omp.user'] .sf-text.sf-act[data-role='omp.user.tool']:active { background-color: var(--l3); }
+.sf-card[data-role='omp.user'] .sf-text.sf-act[data-role='omp.user.tool']:focus-visible {
+  outline: var(--omp-focus); outline-offset: 1px; color: var(--t1);
+}
+/* U12: omp 18.8.5 sends no userMessageText, so the fallback applies. */
+.sf-card[data-role='omp.user'] > .sf-card-body > .sf-md { color: var(--sf-p-userMessageText, var(--t1)); }
+.sf-badge[data-role='omp.reaction'] { background-color: transparent; padding: 0 2px; font-size: 14px; }
+/* U14-U15: not the user's own typing, so not a bubble. */
+.sf-card[data-role='omp.user.synthetic'] { align-self: stretch; border-color: transparent; background-color: transparent; }
+.sf-card[data-role='omp.user.collab'] { align-self: stretch; max-width: none; }
+/* Q-T2: under titanium, userMessageBg at 60% sits about 1.02:1 against the page (paint.rs), so
+   under a palette the bubble keeps a whisper ring. */
+.sf-pal .sf-card[data-role='omp.user'] { box-shadow: inset 0 0 0 1px var(--l1); }
+/* U16: U1 hides the kit's pick bar (a border), so it draws as an inset shadow. Drop keeps the
+   kit's opacity. */
+.sf-card[data-role='omp.user'][data-mark='pick'] {
+  border-left-width: 0; padding-left: 0; box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* Thinking (§7.4): a quiet disclosure; the thought in italic thinkingText. */
+.sf-section[data-role^='omp.thinking'] > .sf-section-head {
+  min-height: 20px; gap: 6px; font-size: 12px; color: var(--omp-meta);
+}
+.sf-section[data-role^='omp.thinking'] > .sf-section-head:hover { color: var(--t2); }
+.sf-section[data-role^='omp.thinking'] > .sf-section-head:focus-visible {
+  outline: var(--omp-focus); outline-offset: 1px; border-radius: var(--r-chip);
+}
+.sf-section[data-role^='omp.thinking'] > .sf-section-body { border-left-color: var(--l2); }
+.sf-section[data-role^='omp.thinking'] .sf-md { color: var(--omp-think); font-style: italic; }
+.sf-spinner[data-role='omp.thinking.spin'] { --tc: var(--sf-p-thinkingText, var(--accent)); }
+.sf-section[data-role='omp.thinking.live'] .sf-elapsed { color: var(--omp-faint); }
+/* The thought summary decoration (K11) is not drawn yet; this waits for it. */
+.sf-section-head .sf-deco.sf-thought-sum { margin-left: 6px; color: var(--omp-meta); }
+
+/* Turn usage and meta lines (§7.5). */
+.sf-row[data-role='omp.turn.usage'] {
+  gap: 4px; font-size: var(--omp-meta-fs); color: var(--omp-meta); cursor: default;
+}
+.sf-row[data-role='omp.turn.usage'] > .sf-icon { width: 12px; height: 12px; color: var(--omp-faint); }
+.sf-row[data-role='omp.turn.usage']:hover { color: var(--t2); }
+.sf-text[data-role='omp.usage'], .sf-text[data-role='omp.compaction.caption'] { font-size: var(--omp-meta-fs); }
+.sf-row[data-role='omp.usage.turn'] { gap: 4px; font-size: var(--omp-meta-fs); }
+.sf-text[data-role='omp.advisor.note'] { color: var(--t2); }
+.sf-row[data-role='omp.recap'] { gap: 6px; font-size: 12px; color: var(--omp-meta); }
+.sf-row[data-role='omp.recap'] > .sf-icon { color: var(--omp-faint); }
+/* Markers and omp.divider: a centred label between two hairlines, as omp's TUI draws them. */
+.sf-row[data-role^='omp.marker.'], .sf-row[data-role='omp.divider'] {
+  gap: 6px; justify-content: center; font-size: var(--omp-meta-fs); color: var(--omp-meta);
+}
+.sf-row[data-role^='omp.marker.']::before, .sf-row[data-role^='omp.marker.']::after,
+.sf-row[data-role='omp.divider']::before, .sf-row[data-role='omp.divider']::after {
+  content: ''; flex: 1 1 auto; height: 0; border-top: 1px solid var(--l2);
+}
+.sf-row[data-role='omp.marker.served-model'] { color: var(--warn); }
+.sf-rule[data-role^='omp.marker.'] { font-size: var(--omp-meta-fs); }
+
+/* Assistant prose and its variants (§7.6): plain prose, no card. */
+.sf-col[data-role='omp.assistant.rewound'] { gap: var(--sf-inner-gap); opacity: 0.55; }
+.sf-badge[data-role='omp.assistant.rewound-tag'] { align-self: flex-start; }
+.sf-section[data-role='omp.assistant.recovered'] > .sf-section-head { font-size: 12px; color: var(--omp-meta); }
+.sf-text[data-role='omp.assistant.abort'] { font-size: 12px; }
+
+/* Error card (§7.7): the kit's error card; its actions are quiet controls, Retry the default. */
+.sf-text[data-role='omp.error.message'] { font-size: 12px; color: var(--t2); }
+.sf-row[data-role='omp.error.actions'] { gap: 4px; margin-top: 2px; }
+.sf-row[data-role='omp.error.action']:first-child { color: var(--t1); background-color: var(--l1); }
+
+/* Extension, custom and context-event blocks (§7.8). */
+.sf-card[data-role='omp.custom'], .sf-card[data-role='omp.hook'] {
+  background-color: var(--sf-tint-custom, var(--sf-card-bg));
+}
+.sf-card[data-role='omp.custom'] > .sf-card-head, .sf-card[data-role='omp.hook'] > .sf-card-head { color: var(--omp-label); }
+.sf-card[data-role='omp.skill'] { box-shadow: inset 2px 0 0 var(--omp-label); }
+.sf-section[data-role='omp.compaction'] > .sf-section-head, .sf-section[data-role='omp.handoff'] > .sf-section-head,
+.sf-section[data-role='omp.branch'] > .sf-section-head, .sf-section[data-role='omp.skill.prompt'] > .sf-section-head {
+  font-size: 12px; color: var(--omp-meta);
+}
+.sf-checklist[data-role='omp.notice.todo'] { align-self: flex-start; }
+.sf-col[data-role='omp.collab.qrcode'] { align-items: flex-start; gap: 6px; }
+
+/* Welcome card (§7.9): logo, wordmark, version and a tip. */
+.sf-row[data-role='omp.welcome.lockup'] { gap: 12px; }
+.sf-col[data-role='omp.welcome.mark'] { gap: 2px; }
+.sf-text[data-role='omp.welcome.wordmark'] { font-size: 16px; line-height: 20px; letter-spacing: 0.02em; }
+.sf-row[data-role='omp.welcome.tip'] { gap: 6px; padding-top: 4px; border-top: 1px solid var(--l1); color: var(--t2); }
+.sf-icon[data-role='omp.welcome.tip-icon'] { color: var(--warn); }
+
+/* Rewind screen (§7.10; not recorded yet): branches side by side, the active one in accent, the
+   cut marked, the bar in the dock. Role-scoped, so nothing else matches. */
+.sf-row[data-role='omp.rewind.strip'] { gap: 16px; align-items: flex-start; overflow-x: auto; }
+.sf-col[data-role='omp.rewind.branch'] {
+  flex: 1 1 0; min-width: calc(48 * var(--sf-cw)); gap: var(--sf-block-gap); opacity: 0.6;
+}
+.sf-col[data-role='omp.rewind.branch'][data-tone='accent'], .sf-col[data-role='omp.rewind.branch']:hover { opacity: 1; }
+.sf-text[data-role='omp.rewind.branch.head'] { padding-bottom: 4px; border-bottom: 1px solid var(--l2); font-size: 12px; }
+.sf-col[data-role='omp.rewind.branch'][data-tone='accent'] > .sf-text[data-role='omp.rewind.branch.head'] {
+  border-bottom-color: var(--accent);
+}
+.sf-text[data-role='omp.rewind.here'] {
+  padding: 4px 0; border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.sf-row[data-role='omp.rewind.earlier'] { justify-content: center; font-size: 12px; color: var(--omp-meta); }
+.sf-text[data-role='omp.rewind.empty'] { padding: 24px 0; text-align: center; font-size: 12px; color: var(--omp-meta); }
+.sf-row[data-role='omp.rewind.bar'] { gap: 10px; padding: 6px 10px; border-top: 1px solid var(--l1); }
