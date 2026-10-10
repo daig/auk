@@ -1,0 +1,101 @@
+/* omp (amendment A24; research/omp-stylesheets.md §3.2, §4): the base the other omp sheets share.
+   The omp tokens on omp's regions, the quiet control and button idioms, and the roles used on more
+   than one omp surface. This sheet alone owns the roles below; no other omp sheet restates them
+   (omp.divider draws as the transcript's markers, in omp-transcript).
+   Kind looks stay in the kit sheets: these rules only refine omp's roles. Every selector's
+   rightmost compound starts with a kind or structure class (the cascade buckets by it). No
+   transitions: hover is instant, as in the kit. :active and :focus-visible need element states. */
+
+.sf-region[data-surface^='omp.'] {
+  --omp-meta-fs: 11.5px; --omp-meta: var(--t3); --omp-faint: var(--t4);
+  --omp-ctl-h: 20px; --omp-ctl-px: 6px; --omp-ctl-r: var(--r-chip);
+  --omp-btn-h: 26px; --omp-btn-px: 10px;
+  --omp-focus: 1.5px solid var(--accent);
+  --omp-think: var(--sf-p-thinkingText, var(--t3));
+  --omp-label: var(--sf-p-customMessageLabel, var(--sf-c-accent));
+  --omp-tool-out: var(--sf-p-toolOutput, var(--t2));
+  --omp-bubble-max: min(85%, calc(96 * var(--sf-cw)));
+}
+
+/* Quiet control: a clickable seg's look (book: status strip segs) for omp's small controls.
+   Owning sheets set each member's colour or fill. */
+.sf-text[data-role='omp.user.tool'], .sf-row[data-role='omp.error.action'],
+.sf-row[data-role='omp.working.stop'], .sf-row[data-role='omp.queue.edit'],
+.sf-row[data-role='omp.composer.exit'], .sf-row[data-role='omp.composer.model'],
+.sf-row[data-role='omp.composer.effort'], .sf-text[data-role='omp.composer.usage'],
+.sf-text[data-role='omp.composer.stop'], .sf-row[data-role='omp.hud.pill'],
+.sf-row[data-role='omp.app.qbtn'], .sf-row[data-role^='omp.app.git.toggle'] {
+  display: inline-flex; align-items: center; gap: 4px; height: var(--omp-ctl-h);
+  padding: 0 var(--omp-ctl-px); border-radius: var(--omp-ctl-r); color: var(--t2); white-space: pre;
+}
+.sf-text.sf-act[data-role='omp.user.tool']:hover, .sf-row.sf-act[data-role='omp.error.action']:hover,
+.sf-row.sf-act[data-role='omp.working.stop']:hover, .sf-row.sf-act[data-role='omp.queue.edit']:hover,
+.sf-row.sf-act[data-role='omp.composer.exit']:hover, .sf-row.sf-act[data-role='omp.composer.model']:hover,
+.sf-row.sf-act[data-role='omp.composer.effort']:hover, .sf-text.sf-act[data-role='omp.composer.usage']:hover,
+.sf-text.sf-act[data-role='omp.composer.stop']:hover, .sf-row.sf-act[data-role='omp.hud.pill']:hover,
+.sf-row.sf-act[data-role='omp.app.qbtn']:hover, .sf-row.sf-act[data-role^='omp.app.git.toggle']:hover {
+  background-color: var(--l1); color: var(--t1);
+}
+.sf-text.sf-act[data-role='omp.user.tool']:active, .sf-row.sf-act[data-role='omp.error.action']:active,
+.sf-row.sf-act[data-role='omp.working.stop']:active, .sf-row.sf-act[data-role='omp.queue.edit']:active,
+.sf-row.sf-act[data-role='omp.composer.exit']:active, .sf-row.sf-act[data-role='omp.composer.model']:active,
+.sf-row.sf-act[data-role='omp.composer.effort']:active, .sf-text.sf-act[data-role='omp.composer.usage']:active,
+.sf-text.sf-act[data-role='omp.composer.stop']:active, .sf-row.sf-act[data-role='omp.hud.pill']:active,
+.sf-row.sf-act[data-role='omp.app.qbtn']:active, .sf-row.sf-act[data-role^='omp.app.git.toggle']:active {
+  background-color: var(--l2);
+}
+.sf-text.sf-act[data-role='omp.user.tool']:focus-visible, .sf-row.sf-act[data-role='omp.error.action']:focus-visible,
+.sf-row.sf-act[data-role='omp.working.stop']:focus-visible, .sf-row.sf-act[data-role='omp.queue.edit']:focus-visible,
+.sf-row.sf-act[data-role='omp.composer.exit']:focus-visible, .sf-row.sf-act[data-role='omp.composer.model']:focus-visible,
+.sf-row.sf-act[data-role='omp.composer.effort']:focus-visible, .sf-text.sf-act[data-role='omp.composer.usage']:focus-visible,
+.sf-text.sf-act[data-role='omp.composer.stop']:focus-visible, .sf-row.sf-act[data-role='omp.hud.pill']:focus-visible,
+.sf-row.sf-act[data-role='omp.app.qbtn']:focus-visible, .sf-row.sf-act[data-role^='omp.app.git.toggle']:focus-visible {
+  outline: var(--omp-focus); outline-offset: 1px;
+}
+
+/* Button (omp's eo(): text and an optional kbd, always clickable). */
+.sf-row[data-role='omp.btn'] {
+  height: var(--omp-btn-h); padding: 0 var(--omp-btn-px); gap: 6px; border-radius: var(--r-ctl);
+  font-size: 12px; font-weight: 500; color: var(--t1); background-color: var(--l1);
+  box-shadow: inset 0 0 0 1px var(--l2);
+}
+.sf-row.sf-act[data-role='omp.btn']:hover { background-color: var(--l2); }
+.sf-row.sf-act[data-role='omp.btn']:active { background-color: var(--l3); }
+.sf-row.sf-act[data-role='omp.btn']:focus-visible { outline: var(--omp-focus); outline-offset: 1px; }
+.sf-row[data-role='omp.btn'] .kbd { border-color: transparent; background-color: transparent; color: var(--t3); }
+/* The book gives accent fills, not their ink: white on the fill is deliberate. */
+.sf-row[data-role='omp.btn'][data-tone='accent'] { color: #fff; background-color: var(--accent-fill); box-shadow: none; }
+.sf-row.sf-act[data-role='omp.btn'][data-tone='accent']:hover { background-color: color-mix(in srgb, var(--accent-fill) 88%, #fff); }
+.sf-row[data-role='omp.btn'][data-tone='accent'] .kbd { color: color-mix(in srgb, #fff 75%, transparent); }
+.sf-row[data-role='omp.btn'][data-tone='error'] {
+  color: var(--bad); background-color: color-mix(in srgb, var(--bad) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bad) 22%, transparent);
+}
+.sf-row.sf-act[data-role='omp.btn'][data-tone='error']:hover { background-color: color-mix(in srgb, var(--bad) 16%, transparent); }
+/* omp never sends one; a button without its click reads as disabled. */
+.sf-row[data-role='omp.btn']:not(.sf-act) { color: var(--t4); background-color: transparent; }
+
+/* Shared roles. */
+.sf-row[data-role='omp.actions'] { gap: 8px; margin-top: 4px; }
+.sf-row[data-role='omp.overlay.hints'] {
+  gap: 4px 12px; margin-top: 4px; padding-top: 8px; box-shadow: inset 0 1px 0 var(--l1);
+  font-size: var(--omp-meta-fs); color: var(--omp-meta);
+}
+.sf-row[data-role='omp.overlay.hints'] > .sf-row { gap: 4px; }
+.sf-row[data-role='omp.overlay.hints'] .kbd { background-color: transparent; color: var(--t2); }
+.sf-row[data-role='omp.hint'], .sf-row[data-role='omp.hint.retry'], .sf-row[data-role='omp.loader'] {
+  gap: 6px; font-size: var(--omp-meta-fs); color: var(--omp-meta);
+}
+.sf-row[data-role='omp.sheet.head'] { gap: 6px; min-height: 24px; font-weight: 600; }
+.sf-text[data-role='omp.panel.footer'], .sf-text[data-role='omp.stats'] {
+  font-size: var(--omp-meta-fs); color: var(--omp-meta);
+}
+.sf-row[data-role='omp.errorBanner'] {
+  gap: 6px; padding: 6px 10px; border-radius: var(--r-ctl); color: var(--t1);
+  background-color: color-mix(in srgb, var(--tc) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tc) 22%, transparent);
+}
+.sf-col[data-role='omp.select'] { gap: 2px; }
+.sf-col[data-role='omp.select'] > .sf-text { padding: 2px 8px; font-size: var(--omp-meta-fs); color: var(--omp-meta); }
+.sf-row[data-role='omp.track'] { gap: 6px; font-size: var(--omp-meta-fs); color: var(--omp-meta); }
+.sf-text[data-role='omp.track.active'] { color: var(--t1); font-weight: 600; }

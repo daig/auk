@@ -1,6 +1,7 @@
 //! The terminal's built-in sheets (§8.4 cascade step 2): kit base, theme variables (dark and
-//! light), highlight, motion, the `surface*` sheets that give each kind its look, and the pane
-//! chrome. Program sheets cascade after them.
+//! light), highlight, motion, the `surface*` sheets that give each kind its look, omp's sheets
+//! (A24: role-scoped refinements, in Tern's slot), and the pane chrome. Program sheets cascade
+//! after them.
 
 use auk_ui::{Document, SheetKind};
 
@@ -20,6 +21,17 @@ pub const BUILTIN: &[(&str, &str)] = &[
     ("surface-el", include_str!("css/surface-el.css")),
     ("surface-lens", include_str!("css/surface-lens.css")),
     ("surface-prefs", include_str!("css/surface-prefs.css")),
+    ("omp", include_str!("css/omp.css")),
+    ("omp-pickers", include_str!("css/omp-pickers.css")),
+    ("omp-prefs", include_str!("css/omp-prefs.css")),
+    ("omp-transcript", include_str!("css/omp-transcript.css")),
+    ("omp-tools", include_str!("css/omp-tools.css")),
+    ("omp-composer", include_str!("css/omp-composer.css")),
+    ("omp-panels", include_str!("css/omp-panels.css")),
+    ("omp-apps", include_str!("css/omp-apps.css")),
+    ("omp-chat-reader", include_str!("css/omp-chat-reader.css")),
+    ("omp-chat-spine", include_str!("css/omp-chat-spine.css")),
+    ("omp-chat-console", include_str!("css/omp-chat-console.css")),
     ("chrome", include_str!("css/chrome.css")),
 ];
 
