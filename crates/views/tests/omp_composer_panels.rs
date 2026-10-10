@@ -31,7 +31,9 @@ fn omp_regions(main: Value, dock: Value, layer: Value, dark: bool) -> Harness {
     h
 }
 
-/// What `value` (a token, e.g. `var(--l1)`) resolves to as a background where `el` sits.
+/// What `value` (a token, e.g. `var(--l1)`) resolves to as a background where `el` sits. The
+/// probe is an in-flow child of `el` while it lives (in a flex container with a gap, one more
+/// gap), so the layout is brought back up to date after it goes.
 fn token(h: &mut Harness, el: NodeId, value: &str) -> [u8; 4] {
     let probe = h.doc.create_element("div");
     h.doc.append_child(el, probe);
@@ -45,6 +47,7 @@ fn token(h: &mut Harness, el: NodeId, value: &str) -> [u8; 4] {
         .background_color
         .to_rgba8();
     h.doc.remove(probe);
+    h.doc.update();
     c
 }
 
@@ -164,6 +167,10 @@ fn the_composer_is_a_ring_that_folds_when_the_pane_loses_focus() {
         let lh = var_px(h, c, "--sf-lh");
         let open = frame.h;
         let (bar, ctx) = (h.el("s:1", "3.bar"), h.el("s:1", "3.context"));
+        // The frame ends at the bar and its 4px bottom padding: the absolutely placed context
+        // hairline adds no gap.
+        let bar_box = h.doc.border_box(bar).unwrap();
+        assert_eq!(bar_box.y + bar_box.h + 4.0, frame.y + frame.h, "{bar_box:?} {frame:?}");
         h.view.set_focused(&mut h.doc, &h.pane, false);
         h.view.layout(&mut h.doc);
         assert_eq!(display(h, bar), "None");

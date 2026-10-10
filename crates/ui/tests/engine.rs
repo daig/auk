@@ -1122,3 +1122,45 @@ fn removing_an_element_frees_only_its_own_anonymous_boxes() {
         "q text, block, block2, more"
     );
 }
+
+/// Absolutely positioned children of a flex or grid container take no part in its layout:
+/// they add no gap, wherever they sit among the in-flow children, on the first layout and
+/// after a relayout alike.
+#[test]
+fn abspos_children_add_no_gap_to_flex_and_grid_containers() {
+    for display in ["flex", "grid"] {
+        for at in 0..=3 {
+            let mut doc = doc_with(&format!(
+                ".c {{ display: {display}; flex-direction: column; gap: 4px; position: relative; \
+                 width: 100px; padding: 8px 8px 4px }} .r {{ height: 10px }} \
+                 .a {{ position: absolute; top: -3px; left: 12px; right: 12px; height: 8px }}"
+            ));
+            let root = doc.root();
+            let body = el(&mut doc, root, "body", "", None);
+            let c = el(&mut doc, body, "div", "c", None);
+            let mut rows = Vec::new();
+            for i in 0..3 {
+                if i == at {
+                    el(&mut doc, c, "div", "a", None);
+                }
+                rows.push(el(&mut doc, c, "div", "r", None));
+            }
+            if at == 3 {
+                el(&mut doc, c, "div", "a", None);
+            }
+            // Padding, three rows and two gaps.
+            let want = 8.0 + 3.0 * 10.0 + 2.0 * 4.0 + 4.0;
+            doc.update();
+            let what = format!("{display}, the abspos child at {at}");
+            assert_eq!(doc.border_box(c).unwrap().h, want, "{what}: first layout");
+            assert_eq!(doc.border_box(rows[2]).unwrap().y, 8.0 + 2.0 * 14.0, "{what}");
+            doc.relayout(c);
+            doc.update();
+            assert_eq!(doc.border_box(c).unwrap().h, want, "{what}: relayout");
+            doc.relayout(rows[1]);
+            doc.update();
+            assert_eq!(doc.border_box(c).unwrap().h, want, "{what}: a row's relayout");
+            assert_eq!(doc.border_box(rows[2]).unwrap().y, 8.0 + 2.0 * 14.0, "{what}");
+        }
+    }
+}

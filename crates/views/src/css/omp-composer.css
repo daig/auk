@@ -7,11 +7,9 @@
 
 /* Frame: a ring, no fill (the mockup's composer), scoped to the dock; an ask dialog's
    omp.editor in the layer stays bare. The ring takes the accent while the composer's field has
-   focus, the live colour while omp runs, and the mode's colour in a shell mode. Rows are spaced
-   by margins, not gap: the engine's first layout counts the absolutely placed context meter
-   in the gap, and the frame would then change height on its next relayout. */
+   focus, the live colour while omp runs, and the mode's colour in a shell mode. */
 .sf-dock .sf-col[data-role^='omp.editor'] {
-  position: relative; gap: 0; padding: 8px 8px 4px; border-radius: var(--r-card);
+  position: relative; gap: 4px; padding: 8px 8px 4px; border-radius: var(--r-card);
   background-color: transparent; box-shadow: inset 0 0 0 1px var(--l2);
 }
 .sf-dock .sf-col[data-role='omp.editor']:focus-within {
@@ -70,7 +68,7 @@
 /* Bar: model, effort, rate, extras, usage, send or stop, in meta type. The controls are
    omp.css's quiet controls. */
 .sf-row[data-role='omp.composer.bar'] {
-  margin-top: 4px; min-height: 24px; gap: 4px; font-size: var(--omp-meta-fs); color: var(--omp-meta);
+  min-height: 24px; gap: 4px; font-size: var(--omp-meta-fs); color: var(--omp-meta);
 }
 .sf-row[data-role='omp.composer.model'] > .sf-icon:last-child { width: 12px; color: var(--t4); }
 .sf-row[data-role='omp.composer.model'][data-tone] > .sf-icon { color: var(--tc); }
@@ -97,12 +95,12 @@
   background-color: color-mix(in srgb, var(--tc) 14%, transparent);
 }
 .sf-row[data-role='omp.composer.focus'] {
-  margin-bottom: 4px; gap: 6px; padding: 0 4px; font-size: var(--omp-meta-fs); color: var(--omp-meta);
+  gap: 6px; padding: 0 4px; font-size: var(--omp-meta-fs); color: var(--omp-meta);
 }
 .sf-text[data-role='omp.composer.crumb'] { color: var(--t2); }
 .sf-text.sf-act[data-role='omp.composer.crumb']:hover { color: var(--t1); text-decoration: underline; }
 .sf-text[data-role='omp.composer.agent'] { color: var(--t1); font-weight: 500; }
-.sf-row[data-role='omp.composer.chips'] { margin-bottom: 4px; padding: 0 2px; }
+.sf-row[data-role='omp.composer.chips'] { padding: 0 2px; }
 .sf-card[data-role='omp.composer.chip'] {
   border-radius: var(--r-chip); background-color: color-mix(in srgb, var(--tc) 8%, transparent);
 }
