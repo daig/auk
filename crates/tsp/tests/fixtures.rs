@@ -102,7 +102,18 @@ fn fixtures_replay_without_errors() {
             .iter()
             .filter(|e| e["ev"] == "error" || e["ev"] == "gone")
             .collect();
-        assert!(errors.is_empty(), "{name}: {errors:?}");
+        if name == "omp-long-model.jsonl" {
+            // omp's bug, not ours: its Switch Model overlay (s 542) reuses the id `w` of an
+            // assistant column still in main, and ids are unique per surface (§7.6).
+            let msgs: Vec<&str> = errors.iter().filter_map(|e| e["msg"].as_str()).collect();
+            assert_eq!(
+                msgs,
+                ["duplicate id w", "unknown id w.list/xai-oauth%2Fgrok-4.7"],
+                "{name}: {errors:?}"
+            );
+        } else {
+            assert!(errors.is_empty(), "{name}: {errors:?}");
+        }
         // The program saw what Tern's recording shows it saw, by kind: one hello reply per hello,
         // and an ack for every recorded ack.
         let count =
