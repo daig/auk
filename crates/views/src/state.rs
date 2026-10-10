@@ -113,6 +113,16 @@ pub(crate) struct SurfaceState {
     /// One-shot scrolls after layout: `(scroller, element, to the top)`, else to the nearest
     /// edge (a `prefs` focus ring).
     pub reveal_els: Vec<(NodeId, NodeId, bool)>,
+    /// Decorations (book:11571-11585, [`crate::deco`]): the folded composer's caption, by its
+    /// `omp.editor*` col's id.
+    pub captions: HashMap<String, NodeId>,
+    /// Thinking sections' heads, by section id, and the chain summaries shown on them.
+    pub thought_heads: HashMap<String, NodeId>,
+    pub thought_sums: HashMap<String, String>,
+    /// The work fold in `main`: each run's head by its first block's id, and the blocks in a
+    /// run, by id: whether folded.
+    pub work_heads: HashMap<String, NodeId>,
+    pub work: HashMap<String, bool>,
 }
 
 /// The key local view state is remembered by: the node's `key` under the same parent, or its id
@@ -218,6 +228,9 @@ impl SurfaceState {
         self.overlays.remove(id);
         self.pickers.remove(id);
         self.prefs.remove(id);
+        self.captions.remove(id);
+        self.thought_heads.remove(id);
+        self.thought_sums.remove(id);
         if self.preedit.as_ref().is_some_and(|p| p.id == id) {
             self.preedit = None;
         }

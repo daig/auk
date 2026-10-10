@@ -160,9 +160,33 @@ impl PaneView {
         }
         if let Some(el) = under {
             self.press_state(doc, el);
+            // A work fold's head (not a node) folds or unfolds its run, locally.
+            if let Some(out) = self.press_work_head(doc, pane, el) {
+                return out;
+            }
         }
         let hits = self.hits(doc, ev.x, ev.y);
         self.press_hits(doc, pane, hits, ev)
+    }
+
+    /// A press inside a `div.sf-deco.sf-work-head` (book:9939-9945): its run folds or unfolds.
+    fn press_work_head(
+        &mut self,
+        doc: &mut Document,
+        pane: &TspPane,
+        el: NodeId,
+    ) -> Option<Vec<Outcome>> {
+        let head = std::iter::successors(Some(el), |&e| doc.parent(e))
+            .take_while(|&e| doc.attribute(e, "data-scope").is_none())
+            .find(|&e| self.class_has(e, "sf-work-head"))?;
+        let first = doc.attribute(head, "data-work")?.to_owned();
+        let key = self.surface_for_element(doc, head)?;
+        let sv = self.surfaces.iter_mut().find(|s| s.key == key)?;
+        let k = crate::deco::work_key(&first);
+        let cur = sv.st.folds.get(&k).map(|f| f.local).unwrap_or(false);
+        SurfaceState::toggle(&mut sv.st.folds, &k, cur);
+        self.refresh(doc, pane, key, &["main".to_owned()]);
+        Some(vec![Outcome::Redraw])
     }
 
     /// A press on these hits (innermost first): links, terminal-owned parts, then nodes.

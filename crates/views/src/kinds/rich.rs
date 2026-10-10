@@ -872,13 +872,19 @@ pub(crate) fn image(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
                 && crate::common::Actions::read(p, "image").click.is_none();
             look.class_if(zoom, "sf-zoom");
             let label = alt.unwrap_or("Image");
+            // omp's app mark (book:11585) sits in a decoration, `div.sf-deco.sf-brand`.
+            let brand = (builtin == Some("omp")).then(|| part(cx, m, "div", "sf-deco sf-brand"));
+            let mut picture = |cx: &mut Cx, tag: &str, class: &str| match brand {
+                Some(b) => cx.dom.child(b, tag, class),
+                None => part(cx, m, tag, class),
+            };
             let el = if pic.svg {
-                let el = part(cx, m, "svg", "sf-img-svg");
+                let el = picture(cx, "svg", "sf-img-svg");
                 cx.dom.attr(el, "role", "img");
                 cx.dom.attr(el, "aria-label", label);
                 el
             } else {
-                let el = part(cx, m, "img", "sf-img-frame");
+                let el = picture(cx, "img", "sf-img-frame");
                 cx.dom.attr(el, "alt", label);
                 el
             };

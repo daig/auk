@@ -80,6 +80,9 @@ pub(crate) fn field(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
     let max_lines = num_prop(p, "maxLines").filter(|n| *n > 0.0 && is_editor);
     let nowrap = bool_prop(p, "nowrap") || !is_editor;
     let mode = str_prop(p, "mode");
+    // omp's composer draws its Markdown inline (book:9198-9201); a code field stays code.
+    let markdown = is_editor && !code && in_omp_editor(node);
+    look.class_if(markdown, "markdown");
     look.class_if(focused, "focused");
     look.class_if(readonly, "readonly");
     look.class_if(text.is_empty(), "empty");
@@ -153,7 +156,7 @@ pub(crate) fn field(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
         h.update(&text);
     }
     let sig = format!(
-        "{text}\u{0}{caret_u}\u{0}{sel:?}\u{0}{focused}\u{0}{preedit:?}\u{0}{:?}\u{0}{:?}\u{0}{:?}\u{0}{:?}\u{0}{:?}\u{0}{:?}\u{0}{readonly}",
+        "{text}\u{0}{caret_u}\u{0}{sel:?}\u{0}{focused}\u{0}{preedit:?}\u{0}{:?}\u{0}{:?}\u{0}{:?}\u{0}{:?}\u{0}{:?}\u{0}{:?}\u{0}{readonly}\u{0}{markdown}",
         p.get("decor"),
         p.get("ghost"),
         p.get("placeholder"),
@@ -213,6 +216,11 @@ pub(crate) fn field(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
             .cloned()
             .unwrap_or_default();
         let lines: Vec<&str> = text.split('\n').collect();
+        let md_runs = if markdown {
+            super::edmd::runs(&text)
+        } else {
+            Vec::new()
+        };
         let mut line_start = 0usize;
         let show_caret = !readonly || focused;
         for (li, line) in lines.iter().enumerate() {
@@ -245,6 +253,11 @@ pub(crate) fn field(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
                     cuts.push(line_start + rr.start);
                     cuts.push(line_start + rr.end);
                 }
+            }
+            let md_line = md_runs.get(li).map(Vec::as_slice).unwrap_or(&[]);
+            for (rr, _) in md_line {
+                cuts.push(line_start + rr.start);
+                cuts.push(line_start + rr.end);
             }
             cuts.sort_unstable();
             cuts.dedup();
@@ -326,6 +339,12 @@ pub(crate) fn field(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
                 if let Some(tk) = seg.tk {
                     class.push(tk.to_owned());
                 }
+                if let Some((_, c)) = md_line
+                    .iter()
+                    .find(|(rr, _)| line_start + rr.start <= a && a < line_start + rr.end)
+                {
+                    class.push(c.clone());
+                }
                 if class.is_empty() && seg.color.is_none() {
                     spans::render_plain(&mut cx.dom, host, piece);
                 } else {
@@ -345,6 +364,10 @@ pub(crate) fn field(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
                 cx.dom.text(t, "\n");
             }
             line_start = line_end + 1;
+        }
+        // The folded composer's caption shows the draft.
+        if st.text != text {
+            crate::deco::field_changed(cx, node);
         }
         st.text = text;
         st.focused = focused;
@@ -384,6 +407,13 @@ pub(crate) fn field(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
         cx.st.caret_follow.remove(node.id());
     }
     tick(cx, node, m);
+}
+
+/// Whether a field sits in omp's composer: it or an ancestor has an `omp.editor*` role.
+pub(crate) fn in_omp_editor(node: NodeRef) -> bool {
+    std::iter::successors(Some(node), |n| n.parent()).any(|n| {
+        str_prop(n.props(), "role").is_some_and(|r| r.starts_with("omp.editor"))
+    })
 }
 
 /// Caret blink: only the focused field, steady under Reduce Motion, hidden or unfocused panes.

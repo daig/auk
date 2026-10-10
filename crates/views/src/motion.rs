@@ -167,8 +167,21 @@ pub(crate) fn spinner(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look
             },
         );
     }
+    // A starburst in omp's working row draws the Spindle mark instead (book:8324-8326): painted
+    // by the view on the clock, not by CSS keyframes.
+    let spindle = style == "starburst"
+        && node
+            .parent()
+            .and_then(|p| str_prop(p.props(), "role"))
+            .is_some_and(|r| r == "omp.working");
+    let style = if spindle { "spindle" } else { style };
     let mut parts = Vec::new();
     match style {
+        "spindle" => {
+            let s = part(cx, m, "span", "sf-spindle");
+            cx.dom.attr(s, "aria-hidden", "true");
+            parts.push(s);
+        }
         "dots" => {
             let d = part(cx, m, "span", "sf-dots");
             cx.dom.attr(d, "aria-hidden", "true");
@@ -199,6 +212,41 @@ pub(crate) fn spinner(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look
     });
     m.clock = true;
     tick(cx, node, m);
+}
+
+/// The Spindle mark's turn: one revolution per 1.2 s (the starburst's loop, book:8318), in
+/// [`SPINDLE_FRAMES`] steps.
+const SPINDLE_MS: f64 = 1200.0;
+pub const SPINDLE_FRAMES: usize = 24;
+
+/// The Spindle mark's inline style at `frame` (negative: the rest frame). The mark turns about
+/// its upright axis: its width follows the turn's cosine, never thinner than a fifth.
+pub fn spindle_style(frame: i64) -> String {
+    if frame < 0 {
+        return String::new();
+    }
+    let a = frame as f64 / SPINDLE_FRAMES as f64 * std::f64::consts::TAU;
+    let k = 0.2 + 0.8 * a.cos().abs();
+    format!("transform: scaleX({})", fmt_num((k * 100.0).round() / 100.0))
+}
+
+/// Whether the cascade gives the mark `--sf-spindle: still`.
+fn spindle_still(dom: &crate::dom::Dom, el: NodeId) -> bool {
+    dom.doc
+        .computed_style(el)
+        .and_then(|s| s.custom.get("--sf-spindle").map(|v| v.trim() == "still"))
+        .unwrap_or(false)
+}
+
+/// A Spindle mark the clock holds (under a sheet, `.sf-covered`): its rest frame.
+pub(crate) fn spindle_rest(cx: &mut Cx, m: &mut Mount) {
+    if let Extra::Spin(s) = &mut m.extra
+        && s.style == "spindle"
+        && s.frame != -2
+    {
+        s.frame = -2;
+        cx.dom.set_style(s.parts[0], "");
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -579,6 +627,24 @@ pub(crate) fn tick(cx: &mut Cx, node: NodeRef, m: &mut Mount) -> bool {
                 t.last = text;
             }
             t.next(now).is_some()
+        }
+        Extra::Spin(s) if s.style == "spindle" => {
+            let el = s.parts[0];
+            // `--sf-spindle: still` (Reduce Motion, `.sf-still`, `.sf-paused`, `.sf-covered`, or a
+            // program's sheet) holds the rest frame. Only Reduce Motion stops the clock: the
+            // cascade's value can lag a region class by a frame, and the mark turns again when
+            // it goes.
+            let rest = still || spindle_still(&cx.dom, el);
+            let frame = if rest {
+                -2
+            } else {
+                ((now.rem_euclid(SPINDLE_MS)) / SPINDLE_MS * SPINDLE_FRAMES as f64).floor() as i64
+            };
+            if frame != s.frame {
+                s.frame = frame;
+                cx.dom.set_style(el, &spindle_style(frame));
+            }
+            !still
         }
         Extra::Spin(s) => {
             let (period, frames) = match s.style.as_str() {
