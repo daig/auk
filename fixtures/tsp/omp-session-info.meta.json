@@ -1,0 +1,46 @@
+{
+  "argv": [
+    "/Users/dai/.local/bin/omp",
+    "--no-title",
+    "--model",
+    "anthropic/claude-sonnet-4-5",
+    "--session-dir",
+    "/private/tmp/claude-501/-Users-dai-code-tern-clone/31364f1a-19f4-408f-a94a-d692aa417101/scratchpad/a24rec/sessions",
+    "--resume",
+    "/private/tmp/claude-501/-Users-dai-code-tern-clone/31364f1a-19f4-408f-a94a-d692aa417101/scratchpad/a24rec/sessions/2026-10-08T07-42-26-395Z_01a11a76-a85b-7799-8c53-b4f435fb008f.jsonl"
+  ],
+  "cwd": "/private/tmp/claude-501/-Users-dai-code-tern-clone/31364f1a-19f4-408f-a94a-d692aa417101/scratchpad/omp-work/tern-sdk",
+  "cols": 120,
+  "rows": 40,
+  "env": [
+    "PI_CODING_AGENT_DIR=/private/tmp/claude-501/-Users-dai-code-tern-clone/31364f1a-19f4-408f-a94a-d692aa417101/scratchpad/a24rec/home/.omp/agent",
+    "ANTHROPIC_API_KEY=invalid-key-for-recording",
+    "ANTHROPIC_BASE_URL=http://127.0.0.1:18765"
+  ],
+  "recorded": "2026-10-10T09:56:12-0600",
+  "recorder": "tools/tsp_record.py",
+  "exit_status": 143,
+  "counts": {
+    "in e": 6,
+    "in r": 2,
+    "out b": 1,
+    "out f": 5,
+    "out o": 1,
+    "out osc": 4,
+    "out q": 2,
+    "out t": 1,
+    "out x": 1
+  },
+  "user_vars": {},
+  "unanswered_queries": {
+    "CSI ?2026$p": 1,
+    "CSI ?2048$p": 1,
+    "CSI ?2031$p": 1,
+    "CSI ?2004$p": 1,
+    "CSI ?1010$p": 1,
+    "CSI ?1011$p": 1,
+    "CSI 22;2t": 1,
+    "CSI 0 q": 2
+  },
+  "note": "omp 18.8.5 (installed binary), no prompts; isolated HOME and agent dir (no stored credentials), only an invalid Anthropic key aimed at a local 401 server; ~/.omp/agent/config.yml unchanged: a scratch copy of a saved session resumed by path; /session info, down, Esc"
+}

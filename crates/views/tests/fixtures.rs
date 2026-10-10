@@ -302,3 +302,53 @@ fn omp_session_replays_without_errors() {
     }
     assert!(checked > 50);
 }
+
+/// A24's omp recordings (no prompts; the error card's one request went to a local 401 server):
+/// each replays with no errors and every frame lays out with finite boxes.
+#[test]
+fn omp_a24_fixtures_replay_without_errors() {
+    for name in [
+        "omp-app.jsonl",
+        "omp-long-model.jsonl",
+        "omp-model-hub.jsonl",
+        "omp-rewind.jsonl",
+        "omp-agents.jsonl",
+        "omp-context.jsonl",
+        "omp-jobs.jsonl",
+        "omp-session-info.jsonl",
+        "omp-hotkeys.jsonl",
+        "omp-git.jsonl",
+        "omp-ps-top.jsonl",
+        "omp-debug.jsonl",
+        "omp-bash.jsonl",
+        "omp-python.jsonl",
+        "omp-error.jsonl",
+    ] {
+        let mut frames = 0;
+        let mut h = replay(name, |h, rec| {
+            if rec.verb == "f" {
+                frames += 1;
+                layout_sane(h);
+            }
+        });
+        assert!(frames > 0, "{name}: no frames");
+        if name == "omp-long-model.jsonl" {
+            // omp's own id clash, faithfully reported: its last frame (s 542) opens the model
+            // picker card whose list col is `w`, while the assistant col `w` added at s 8 is still
+            // in main. Auk refuses the duplicate and then the op that addresses `w.list/…`.
+            let errs: Vec<&str> = h
+                .sent
+                .iter()
+                .filter(|e| e["ev"] == "error" || e["ev"] == "gone")
+                .map(|e| e["msg"].as_str().unwrap_or(""))
+                .collect();
+            assert_eq!(errs.len(), 2, "{name}: {errs:?}");
+            assert_eq!(errs[0], "duplicate id w");
+            assert!(errs[1].starts_with("unknown id w.list/"), "{errs:?}");
+        } else {
+            no_errors(&h, name);
+        }
+        h.view.layout(&mut h.doc);
+        layout_sane(&h);
+    }
+}
