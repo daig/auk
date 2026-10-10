@@ -46,6 +46,7 @@
 //! | `catalog` | the host catalog's block types and styles, the sheets installed, the block card |
 //! | `find` | the find bar: query, matches in flow order, the current one |
 //! | `node-box PANE ID` | where a surface node of the pane was drawn, in window points |
+//! | `node-find PANE PATTERN` | the drawn nodes whose id ends with PATTERN or whose role is PATTERN, with their boxes |
 //! | `field-box PANE` | the pane's focused program field's text box, and the cell size |
 //! | `activate` | brings the app forward |
 //! | `quit` | quits the app |
@@ -646,6 +647,20 @@ fn main_command(cmd: &str, mut args: Vec<String>, win: usize) -> Result<Value, S
             .find
             .as_ref()
             .map_or_else(|| json!({"open": false, "count": 0}), |f| f.json())),
+        "node-find" => {
+            let pane = pane_arg(&args)?;
+            let pattern = args.get(1).ok_or("node-find: expected PANE PATTERN")?;
+            let s = state.borrow();
+            let found: Vec<Value> = s
+                .node_ids_matching(pane, pattern)
+                .into_iter()
+                .filter_map(|id| {
+                    let b = s.node_box(pane, &id)?;
+                    Some(json!({"id": id, "box": [b.x, b.y, b.w, b.h]}))
+                })
+                .collect();
+            Ok(json!(found))
+        }
         "node-box" => {
             let pane = pane_arg(&args)?;
             let id = args.get(1).ok_or("node-box: expected PANE ID")?;

@@ -408,6 +408,28 @@ impl WinState {
         None
     }
 
+    /// The ids of a pane's surface nodes whose id ends with `pattern` or whose `role` is it,
+    /// newest surface first: for automation that knows a control by its role or its id's tail
+    /// (`/model/effort`), not by the program's per-session id prefix.
+    pub fn node_ids_matching(&self, pane: PaneId, pattern: &str) -> Vec<String> {
+        let shared = self.conn.shared();
+        let Some(p) = shared.panes.get(&pane) else {
+            return Vec::new();
+        };
+        let mut ids = Vec::new();
+        for surface in p.replica.tsp().surfaces().iter().rev() {
+            let mut stack = vec![surface.document().root()];
+            while let Some(node) = stack.pop() {
+                let role = node.prop("role").and_then(|r| r.as_str());
+                if node.id().ends_with(pattern) || role == Some(pattern) {
+                    ids.push(node.id().to_owned());
+                }
+                stack.extend(node.children());
+            }
+        }
+        ids
+    }
+
     /// The window box of a node of one of a pane's surfaces (the newest surface holding the id).
     pub fn node_box(&self, pane: PaneId, id: &str) -> Option<WinRect> {
         let sf = self.surfaces.get(&pane)?;
