@@ -205,6 +205,13 @@ impl PaneSurfaces {
         self.lens.as_mut().map(|l| l.click(ev)).unwrap_or_default()
     }
 
+    /// The primary button came up, or the press was cancelled: `:active` goes, in the surfaces
+    /// and the command blocks. Returns whether anything changed.
+    pub fn release(&mut self) -> bool {
+        let lens = self.lens.as_mut().is_some_and(|l| l.release());
+        self.view.release(&mut self.doc) | lens
+    }
+
     /// Hover in the command blocks at a lens document point (`None`: nowhere over them).
     /// Returns whether the hover changed.
     pub fn lens_hover(&mut self, at: Option<(f32, f32)>) -> bool {

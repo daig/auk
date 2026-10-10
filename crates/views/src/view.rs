@@ -181,6 +181,8 @@ pub struct PaneView {
     pub(crate) visible: bool,
     pub(crate) focused: bool,
     pub(crate) hover: Vec<NodeId>,
+    /// `:focus*` and `:active` (amendment A24).
+    pub(crate) focus: crate::focus::FocusStates,
     /// An ordered `prefs` list item being dragged by its grip.
     pub(crate) reorder: Option<crate::kinds::prefs::Reorder>,
     pub(crate) toasts: crate::kinds::layout::ToastHost,
@@ -259,6 +261,7 @@ impl PaneView {
             visible: true,
             focused: true,
             hover: Vec::new(),
+            focus: Default::default(),
             reorder: None,
             toasts,
             last_now: 0.0,
@@ -423,6 +426,8 @@ impl PaneView {
         }
         self.place_surfaces(doc, pane);
         self.place_aside(doc, pane);
+        // Focus may have moved, and focused nodes may have gone or been rebuilt.
+        self.update_focus(doc, pane);
     }
 
     fn add_surface(&mut self, surface: &Surface) -> usize {
@@ -1077,6 +1082,20 @@ fn apply_look(cx: &mut Cx, m: &mut Mount, node: NodeRef, look: Look) {
         match attrs.iter_mut().find(|(n, _)| *n == k) {
             Some(slot) => slot.1 = v,
             None => attrs.push((k, v)),
+        }
+    }
+    // A clickable node that isn't a field or a form control is a button: a Tab stop with the
+    // button role (K3), unless its kind gave it a role.
+    if actions.clickable()
+        && !matches!(kind, "editor" | "input")
+        && kinds::el::control_type(node).is_none()
+    {
+        if !attrs.iter().any(|(n, _)| n == "tabindex") {
+            attrs.push(("tabindex".into(), "0".into()));
+        }
+        let native = kind == "el" && kinds::el::requested(node) == "button";
+        if !native && !attrs.iter().any(|(n, _)| n == "role") {
+            attrs.push(("role".into(), "button".into()));
         }
     }
     for old in std::mem::take(&mut m.attrs) {

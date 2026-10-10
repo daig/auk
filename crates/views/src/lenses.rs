@@ -410,6 +410,11 @@ impl LensLayer {
             .collect()
     }
 
+    /// The press ended: `:active` goes. Returns whether anything changed.
+    pub fn release(&mut self) -> bool {
+        self.view.release(&mut self.doc)
+    }
+
     /// Hover at a document point; returns whether the hovered elements changed.
     pub fn hover(&mut self, x: f32, y: f32) -> bool {
         let before = self.view.hovered().to_vec();

@@ -1556,6 +1556,15 @@ impl WinState {
             }
             MouseKind::Up(button) => {
                 self.field_drag = None;
+                // The pressed node loses `:active`.
+                let mut released = false;
+                for sf in self.surfaces.values_mut() {
+                    released |= sf.release();
+                }
+                if released {
+                    self.ui_dirty = true;
+                    window.request_frame();
+                }
                 if self.reorder_released(window, &m) {
                     return;
                 }

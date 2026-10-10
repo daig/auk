@@ -5,10 +5,10 @@
 //! incrementally from [`auk_tsp::TspPane::take_changes`]: each node becomes `.sf.sf-<kind>` with
 //! its data attributes, regions become `div.sf-region`, program sheets install scoped to their
 //! surface and palettes become `--sf-p-*` variables. The view owns everything that is local to a
-//! window and never replicated: folds and control flips, scroll positions, hover, native
-//! selection and IME preedit in fields, the motion clock, the toast layer and the accessibility
-//! tree. Pointer input maps to [`auk_tsp::ViewEvent`]s; keys stay keys except `edit`, `undo` and
-//! `send`.
+//! window and never replicated: folds and control flips, scroll positions, hover, focus and
+//! press states, native selection and IME preedit in fields, the motion clock, the toast layer
+//! and the accessibility tree. Pointer input maps to [`auk_tsp::ViewEvent`]s; keys stay keys
+//! except `edit`, `undo` and `send`.
 //!
 //! Hosts: install the built-in sheets once per document ([`install_sheets`]), create a
 //! [`PaneView`] per pane, call [`PaneView::sync`] after draining changes, tell it what part of
@@ -34,6 +34,7 @@ mod control;
 pub mod diff;
 mod dom;
 mod events;
+mod focus;
 pub mod highlight;
 pub mod html;
 mod icon_table;
@@ -57,6 +58,7 @@ pub use a11y::AxNode;
 pub use checker::{UiSheetChecker, sheet_checker};
 pub use dom::Written;
 pub use events::{Button, FieldKey, MenuEntry, Outcome, PointerEvent, Zoom, ZoomImage};
+pub use focus::NavKey;
 pub use kinds::KINDS;
 pub use sheets::{install_fonts, install_sheets};
 pub use state::{Preedit, Selection};

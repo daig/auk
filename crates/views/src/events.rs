@@ -80,7 +80,7 @@ pub struct MenuEntry {
 }
 
 /// The node under a point: its surface, id and the element path from the hit up.
-struct Hit {
+pub(crate) struct Hit {
     surface: SurfaceKey,
     id: String,
     /// Elements from the hit element up to the node element (inner parts first).
@@ -101,9 +101,14 @@ impl PaneView {
 
     /// Every node element containing the hit, innermost first.
     fn hits(&self, doc: &Document, x: f32, y: f32) -> Vec<Hit> {
-        let Some(mut el) = auk_ui::hit_test(doc, x, y) else {
-            return Vec::new();
-        };
+        match auk_ui::hit_test(doc, x, y) {
+            Some(el) => self.hits_from(doc, el),
+            None => Vec::new(),
+        }
+    }
+
+    /// Every node element containing `el` (itself included), innermost first.
+    pub(crate) fn hits_from(&self, doc: &Document, mut el: NodeId) -> Vec<Hit> {
         let Some(surface) = self.surface_for_element(doc, el) else {
             return Vec::new();
         };
@@ -131,7 +136,7 @@ impl PaneView {
         out
     }
 
-    fn class_has(&self, id: NodeId, class: &str) -> bool {
+    pub(crate) fn class_has(&self, id: NodeId, class: &str) -> bool {
         self.written
             .class
             .get(&id)
@@ -141,15 +146,33 @@ impl PaneView {
     /// A pointer press (§7.8). Local flips apply at once; the returned outcomes tell the host
     /// what to send or do.
     pub fn click(&mut self, doc: &mut Document, pane: &TspPane, ev: PointerEvent) -> Vec<Outcome> {
+        // A press takes keyboard focus off a node Tab reached; as in Safari, it doesn't focus
+        // what it presses.
+        self.blur_nav(doc, pane);
+        let under = auk_ui::hit_test(doc, ev.x, ev.y);
         // A modal backdrop takes the pointer: the press reaches nothing beneath and sends no
         // event (book: overlay "Keys").
-        if auk_ui::hit_test(doc, ev.x, ev.y).is_some_and(|el| self.class_has(el, "sf-ov-dim")) {
+        if under.is_some_and(|el| self.class_has(el, "sf-ov-dim")) {
             return vec![Outcome::Redraw];
         }
         if ev.button != Button::Primary {
             return Vec::new();
         }
+        if let Some(el) = under {
+            self.press_state(doc, el);
+        }
         let hits = self.hits(doc, ev.x, ev.y);
+        self.press_hits(doc, pane, hits, ev)
+    }
+
+    /// A press on these hits (innermost first): links, terminal-owned parts, then nodes.
+    pub(crate) fn press_hits(
+        &mut self,
+        doc: &mut Document,
+        pane: &TspPane,
+        hits: Vec<Hit>,
+        ev: PointerEvent,
+    ) -> Vec<Outcome> {
         for hit in hits {
             let Some(surface) = pane.surface(hit.surface) else {
                 continue;
