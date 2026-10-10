@@ -14,7 +14,7 @@
 use crate::common::{bool_prop, num_prop, str_prop};
 use crate::spans;
 use crate::state::SurfaceState;
-use crate::view::{Cx, Mount};
+use crate::view::{Cx, Mounts};
 use auk_tsp::NodeRef;
 use auk_ui::NodeId;
 use serde_json::Value;
@@ -281,12 +281,12 @@ pub(crate) fn work_key(first: &str) -> String {
 
 /// Folds the runs of work among `main`'s children: heads go into `direct` (main's child
 /// elements, in child order) before each run; blocks get their classes.
-pub(crate) fn fold_work(
-    cx: &mut Cx,
-    main: NodeRef,
-    mounts: &HashMap<String, Mount>,
-    direct: &mut Vec<NodeId>,
-) {
+pub(crate) fn fold_work(cx: &mut Cx, main: NodeRef, mounts: &Mounts, direct: &mut Vec<NodeId>) {
+    // With the setting off and no run left over from when it was on, there is nothing to fold
+    // or unfold: main's children needn't be looked at.
+    if !cx.set.fold_work && cx.st.work.is_empty() && cx.st.work_heads.is_empty() {
+        return;
+    }
     let kids: Vec<NodeRef> = main.children().collect();
     let mut runs: Vec<(Vec<usize>, bool)> = Vec::new();
     let mut blocks: Vec<Option<(Option<f64>, Option<String>)>> = Vec::with_capacity(kids.len());

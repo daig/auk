@@ -6,7 +6,7 @@ use crate::common::{bool_prop, num_prop, str_prop};
 use crate::motion::{anchor, format_duration};
 use crate::spans;
 use crate::state::{SurfaceState, state_key};
-use crate::view::{Cx, Extra, Look, Mount};
+use crate::view::{Cx, Extra, Look, Mount, Mounts};
 use auk_tsp::NodeRef;
 use auk_ui::NodeId;
 use serde_json::Value;
@@ -280,7 +280,7 @@ pub(crate) fn tool(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
 
 /// `.sf-tool-hr` on body children whose kind differs from the previous one; nested cards and
 /// tools draw unframed.
-pub(crate) fn mark_kind_changes(cx: &mut Cx, node: NodeRef, mounts: &HashMap<String, Mount>) {
+pub(crate) fn mark_kind_changes(cx: &mut Cx, node: NodeRef, mounts: &Mounts) {
     let mut prev: Option<&str> = None;
     for c in node.children() {
         let Some(cm) = mounts.get(c.id()) else {

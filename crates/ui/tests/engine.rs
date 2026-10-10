@@ -200,6 +200,56 @@ fn state_pseudo_classes_and_generated_content() {
     );
 }
 
+/// Selectors that need ancestors match as they would walking up the tree (restyle checks a
+/// filter of the ancestors' tags, ids and classes first): by tag, id and class, several levels
+/// up, from a universal subject, and for `::before` and `::after`. Only a rule giving `content`
+/// makes a pseudo-element; others only style one.
+#[test]
+fn ancestor_selectors_and_generated_content_follow_the_ancestors() {
+    let mut doc = doc_with(
+        "section .a .c { color: red } #i .d { color: blue } .x * { color: green }
+         .c::before { color: blue } .a .c::after { content: \"ab\" } .y *::before { content: \"a\" }",
+    );
+    let root = doc.root();
+    let body = el(&mut doc, root, "body", "", None);
+    let section = el(&mut doc, body, "section", "", None);
+    let a = el(&mut doc, section, "div", "a", None);
+    let mid = el(&mut doc, a, "div", "", None);
+    let c = el(&mut doc, mid, "span", "c", Some("x"));
+    let i = el(&mut doc, body, "div", "", None);
+    doc.set_attribute(i, "id", "i");
+    let i_mid = el(&mut doc, i, "div", "", None);
+    let d = el(&mut doc, i_mid, "span", "d", Some("x"));
+    let w = el(&mut doc, body, "div", "w", None);
+    let e = el(&mut doc, w, "span", "e", Some("x"));
+    doc.update();
+    assert_eq!(color(&doc, c), RED);
+    assert_eq!(color(&doc, d), BLUE);
+    assert_eq!(color(&doc, e), BLACK);
+    assert_eq!(
+        doc.border_box(c).unwrap().w,
+        30.0,
+        "text and ::after, no ::before"
+    );
+    assert_eq!(doc.border_box(e).unwrap().w, 10.0);
+    // An ancestor gains classes: its descendants restyle with it.
+    doc.set_attribute(w, "class", "w x y");
+    doc.update();
+    assert_eq!(color(&doc, e), GREEN);
+    assert_eq!(
+        doc.border_box(e).unwrap().w,
+        20.0,
+        "::before from `.y *::before`"
+    );
+    // And loses them.
+    doc.set_attribute(a, "class", "");
+    doc.set_attribute(i, "id", "j");
+    doc.update();
+    assert_eq!(color(&doc, c), BLACK);
+    assert_eq!(color(&doc, d), BLACK);
+    assert_eq!(doc.border_box(c).unwrap().w, 10.0, "the ::after went");
+}
+
 /// Amendment A24 (H-F): `:active`, `:focus`, `:focus-visible` and `:focus-within` each match
 /// their state, `:focus-within` also matches the focused element itself, and setting or clearing
 /// a state restyles the element and what its selectors reach (descendants, the next sibling).

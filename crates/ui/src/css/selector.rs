@@ -10,7 +10,7 @@ use selectors::context::{
     SelectorCaches,
 };
 use selectors::matching::ElementSelectorFlags;
-use selectors::parser::{ParseRelative, SelectorList, SelectorParseErrorKind};
+use selectors::parser::{AncestorHashes, ParseRelative, SelectorList, SelectorParseErrorKind};
 use selectors::{Element, OpaqueElement};
 use std::fmt;
 
@@ -404,11 +404,16 @@ impl<'a> Element for ElementRef<'a> {
     }
 }
 
-/// Match a selector against an element (or, with `pseudo`, against its pseudo-element).
+/// Match a selector against an element (or, with `pseudo`, against its pseudo-element). With
+/// `ancestors` (a filter holding at least the hashes [`add_ancestor_hashes`] gives each of the
+/// element's ancestors) and the selector's `hashes`, a selector that needs an ancestor none of
+/// them can be is rejected without walking up the tree.
 pub fn matches(
     sel: &Selector,
+    hashes: &AncestorHashes,
     el: ElementRef<'_>,
     pseudo: Option<PseudoKind>,
+    ancestors: Option<&BloomFilter>,
     caches: &mut SelectorCaches,
 ) -> bool {
     let mode = if pseudo.is_some() {
@@ -418,11 +423,40 @@ pub fn matches(
     };
     let mut cx = MatchingContext::new(
         mode,
-        None,
+        ancestors,
         caches,
         QuirksMode::NoQuirks,
         NeedsSelectorFlags::No,
         MatchingForInvalidation::No,
     );
-    selectors::matching::matches_selector(sel, 0, None, &el, &mut cx)
+    selectors::matching::matches_selector(sel, 0, Some(hashes), &el, &mut cx)
+}
+
+/// The selector's ancestor hashes, for [`matches`].
+pub fn ancestor_hashes(sel: &Selector) -> AncestorHashes {
+    AncestorHashes::new(sel, QuirksMode::NoQuirks)
+}
+
+/// Adds (or with `remove`, takes back) the hashes an element contributes as an ancestor: its tag,
+/// id and classes, as the selector crate collects them from selectors (`ancestor_hashes`).
+pub fn add_ancestor_hashes(filter: &mut BloomFilter, data: &crate::dom::ElementData, remove: bool) {
+    let mut each = |h: u32| {
+        if remove {
+            filter.remove_hash(h)
+        } else {
+            filter.insert_hash(h)
+        }
+    };
+    let tag = data.tag.as_str();
+    if tag.bytes().any(|b| b.is_ascii_uppercase()) {
+        each(Atom::new(&tag.to_ascii_lowercase()).1);
+    } else {
+        each(data.tag.1);
+    }
+    if let Some(id) = &data.id {
+        each(id.1);
+    }
+    for c in &data.classes {
+        each(c.1);
+    }
 }

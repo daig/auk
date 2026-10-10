@@ -41,6 +41,8 @@ merman = { version = "=0.8.0", default-features = false, features = ["svg", "dia
 # Glyph outlines of the KaTeX fonts, and advances of the face mermaid diagram text draws with
 # (already in the tree through the UI engine).
 skrifa = "0.44"
+# A fast hasher for the per-node maps a frame looks every child of a long list up in.
+foldhash = "0.2"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]

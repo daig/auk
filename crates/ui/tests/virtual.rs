@@ -106,6 +106,43 @@ fn children_out_of_the_window_are_styled_as_they_come_into_it() {
     assert_eq!(doc.border_box(entries[11]).unwrap().y, 11.0 * 30.0);
 }
 
+/// An entry styled only as it comes into view matches selectors that need its ancestors (by
+/// tag, class and id, from a universal subject too) as one styled with the whole document does.
+#[test]
+fn children_styled_coming_into_view_match_selectors_through_their_ancestors() {
+    let mut doc = doc_with(&format!(
+        "{CSS} body.on .main .entry {{ color: rgb(0, 128, 0) }} \
+         #m > .entry.odd {{ color: rgb(255, 0, 0) }} .dim * {{ opacity: 0.5 }}"
+    ));
+    let root = doc.root();
+    let body = el(&mut doc, root, "body", "", None);
+    let outer = el(&mut doc, body, "div", "", None);
+    let main = el(&mut doc, outer, "div", "main", None);
+    doc.set_attribute(main, "id", "m");
+    let entries: Vec<NodeId> = (0..2000)
+        .map(|i| {
+            let class = if i % 2 == 1 { "entry odd" } else { "entry" };
+            el(&mut doc, main, "div", class, Some(&format!("entry {i}")))
+        })
+        .collect();
+    doc.set_virtual(main, Some(20.0));
+    doc.set_virtual_window(main, Some((0.0, 600.0)));
+    doc.update();
+    assert_eq!(color(&doc, entries[0]), [0, 0, 255, 255]);
+    // Ancestors change while the far entries wait out of view.
+    doc.set_attribute(body, "class", "on");
+    doc.set_attribute(outer, "class", "dim");
+    doc.update();
+    assert_eq!(color(&doc, entries[0]), [0, 128, 0, 255]);
+    assert!(doc.computed_style(entries[1500]).is_none());
+    doc.set_virtual_window(main, Some((1500.0 * 30.0, 1500.0 * 30.0 + 600.0)));
+    doc.update();
+    assert!(doc.laid_out(entries[1500]));
+    assert_eq!(color(&doc, entries[1500]), [0, 128, 0, 255]);
+    assert_eq!(color(&doc, entries[1501]), [255, 0, 0, 255]);
+    assert_eq!(doc.computed_style(entries[1500]).unwrap().opacity, 0.5);
+}
+
 #[test]
 fn a_list_growing_at_the_end_builds_only_the_new_boxes() {
     let (mut doc, main, mut entries) = list(5000);
