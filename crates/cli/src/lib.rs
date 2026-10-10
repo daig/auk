@@ -238,7 +238,8 @@ pub enum Command {
         args: Vec<String>,
     },
     /// Open a plugin block pane (§9.5): `block KIND [ARG…]`, KIND being `<plugin>.<block>`.
-    /// Prints the new pane's id.
+    /// Prints the new pane's id. Run in a pane, the block opens beside it (a split to its right)
+    /// in the shell's directory; with `--window`, in a new session of that window.
     Block {
         kind: String,
         #[arg(long)]
@@ -706,10 +707,18 @@ fn run_verb(socket: &Path, g: &Globals, verb: Command) -> Result<ExitCode, VerbE
             args,
         } => {
             let mut words = vec!["block".to_owned(), kind];
-            if let Some(window) = &g.window {
-                words.extend(["--window".to_owned(), window.clone()]);
+            let here = std::env::var("AUK_PANE")
+                .ok()
+                .filter(|p| p.parse::<u64>().is_ok());
+            match (&g.window, here) {
+                (Some(window), _) => words.extend(["--window".to_owned(), window.clone()]),
+                (None, Some(pane)) => {
+                    words.extend(["--split".to_owned(), pane, "right".to_owned()]);
+                }
+                (None, None) => {}
             }
-            if let Some(cwd) = cwd {
+            // Relative file arguments name files where the command runs.
+            if let Some(cwd) = cwd.or_else(|| std::env::current_dir().ok()) {
                 words.extend([
                     "--cwd".to_owned(),
                     absolute(&cwd).to_string_lossy().into_owned(),

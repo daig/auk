@@ -1131,6 +1131,73 @@ fn a_block_survives_a_daemon_restart_with_the_same_args_and_its_save() {
     );
 }
 
+/// `auk block` run in a pane opens the block beside it (a split in the same tab, so the window
+/// shows it), in the shell's directory: `stack.json` names the file where the command ran.
+#[test]
+fn a_block_opened_from_a_pane_splits_it_in_its_directory() {
+    let env = env("block-beside");
+    let dir = env.root.join("plugins/where");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("plugin.toml"),
+        "schema = 1\nid = \"where\"\nname = \"Where\"\nversion = \"1\"\nhost = \"host.luau\"\n[[blocks]]\nid = \"b\"\ntitle = \"B\"\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("host.luau"),
+        r#"tern.block.define("b", {
+            init = function(cx, args) return { cwd = cx.cwd or "?" } end,
+            view = function(s) return { main = tern.ui.text("cwd=" .. s.cwd) } end,
+        })"#,
+    )
+    .unwrap();
+    assert!(
+        env.cli(&["plugin", "link", dir.to_str().unwrap()])
+            .status
+            .success()
+    );
+    let _daemon = env.start_daemon();
+    let out = env.cli(&["new"]);
+    let shell: u64 = String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse()
+        .expect("a pane id");
+    let work = env.root.join("work");
+    fs::create_dir_all(&work).unwrap();
+    let out = env
+        .command()
+        .env("AUK_PANE", shell.to_string())
+        .current_dir(&work)
+        .args(["block", "where.b"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let block: u64 = String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse()
+        .expect("a block pane id");
+    let ls: Value = serde_json::from_slice(&env.cli(&["ls", "--json"]).stdout).unwrap();
+    let session = |id: u64| {
+        ls["panes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["id"] == id)
+            .map(|p| p["session"].clone())
+    };
+    assert_eq!(session(block), session(shell), "{ls}");
+    let cwd = real(&work);
+    wait_for("the block's view", || {
+        block_text(&env, block)
+            .contains(&format!("cwd={}", cwd.display()))
+            .then_some(())
+    });
+}
+
 #[test]
 fn command_blocks_keep_their_line_cwd_raw_width_status_and_view_across_a_restart() {
     let env = env("lensrestore");
