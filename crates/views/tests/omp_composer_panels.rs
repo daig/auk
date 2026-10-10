@@ -439,7 +439,7 @@ fn pixel(px: &[u8], w: u32, x: f32, y: f32) -> [u8; 3] {
 #[test]
 fn an_overlay_card_draws_no_second_frame() {
     for dark in [true, false] {
-        replay_at("omp_app.jsonl", &[20], |h, _| {
+        replay_at("omp-app.jsonl", &[20], |h, _| {
             auk_views::sheets::set_theme(&mut h.doc, dark);
             // Past the sheet's pop-in.
             h.now += 1000.0;
@@ -486,7 +486,7 @@ fn an_overlay_card_draws_no_second_frame() {
 /// head icon, the provider in a well, and the share column 9 cells wide, right-aligned.
 #[test]
 fn the_usage_sheet_has_room_a_chart_icon_and_aligned_columns() {
-    replay_at("omp_app.jsonl", &[16], |h, _| {
+    replay_at("omp-app.jsonl", &[16], |h, _| {
         let ov = h.el("s:1", "layer.ov-u");
         let body = one(h, ov, "sf-ov-body");
         assert_eq!(
@@ -520,7 +520,7 @@ fn the_usage_sheet_has_room_a_chart_icon_and_aligned_columns() {
 /// line and where it was.
 #[test]
 fn hovering_the_usage_sheet_never_wraps_or_moves_a_window() {
-    replay_at("omp_app.jsonl", &[16], |h, _| {
+    replay_at("omp-app.jsonl", &[16], |h, _| {
         let ov = h.el("s:1", "layer.ov-u");
         let lh = var_px(h, ov, "--sf-lh");
         let windows: Vec<NodeId> = (0..3)
