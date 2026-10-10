@@ -250,12 +250,20 @@ impl Document {
         self.motion.remove(&id);
         self.finished_anims.remove(&id);
         let n = self.nodes[id.index()].take().expect("live node");
-        for c in n.children.iter().chain(n.anon_children.iter()) {
-            if self
-                .try_node(*c)
-                .is_some_and(|cn| cn.parent == Some(id) || matches!(cn.kind, NodeKind::Anonymous))
-            {
+        // Its own children and anonymous boxes only. An anonymous box's run lists its
+        // element's children (and pseudos), and until the element's boxes are rebuilt it can
+        // still list one freed since (a `::before` gone): that id may be another box's now.
+        for c in &n.children {
+            if self.try_node(*c).is_some_and(|cn| cn.parent == Some(id)) {
                 self.free_subtree(*c);
+            }
+        }
+        for a in &n.anon_children {
+            if self
+                .try_node(*a)
+                .is_some_and(|an| matches!(an.kind, NodeKind::Anonymous))
+            {
+                self.free_subtree(*a);
             }
         }
         for p in [n.before, n.after].into_iter().flatten() {

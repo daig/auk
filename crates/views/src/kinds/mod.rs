@@ -157,6 +157,13 @@ pub(crate) fn begin(cx: &mut Cx, m: &mut Mount) {
             if m.slots.contains(&g) {
                 cx.dom.doc.detach(g);
             } else {
+                // A part freed by something else may have its id reused by now: removing it
+                // would free another node.
+                debug_assert_eq!(
+                    cx.dom.doc.parent(g),
+                    Some(m.el),
+                    "generated {g:?} moved or reused"
+                );
                 cx.dom.doc.remove(g);
             }
         }

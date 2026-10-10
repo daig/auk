@@ -396,7 +396,7 @@ impl PaneView {
                 }
             }
             // Text cuts (`truncate` start/middle on one line).
-            for t in sv.st.truncs.values() {
+            for (id, t) in &sv.st.truncs {
                 if !dom.doc.laid_out_since(t.el, since) {
                     continue;
                 }
@@ -416,6 +416,11 @@ impl PaneView {
                 let shorter = want.chars().count() < have.chars().count();
                 if have != want && !(shorter && have != t.full && fits) {
                     dom.set_only_text(t.el, &want);
+                    // The cut text is what the node's next render takes away: the spans it
+                    // replaced are freed, and their ids go to whatever is made next.
+                    if let Some(m) = sv.mounts.get_mut(id) {
+                        m.generated = dom.doc.children(t.el).to_vec();
+                    }
                     changed = true;
                 }
             }

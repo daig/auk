@@ -5,6 +5,7 @@
 mod common;
 
 use auk_ui::Rect;
+use auk_views::ViewSettings;
 use common::Harness;
 use serde_json::{Value, json};
 
@@ -100,4 +101,42 @@ fn a_cut_path_that_fits_stays_cut() {
     }
     assert_eq!(h.text(t), cut);
     assert!(cut.chars().count() >= 10, "{cut:?}");
+}
+
+/// A cut replaces the text's spans with one text node: the node's next render removes what it
+/// drew then, not the spans the cut already freed (their ids belong to whatever was made since:
+/// here elements of the page's own).
+#[test]
+fn a_cut_text_rerenders_without_freeing_what_took_its_old_spans_ids() {
+    let mut h = Harness::new();
+    h.hello(&[]);
+    h.surface(
+        "s1",
+        "inline",
+        json!([{"id": "r", "k": "row", "p": {"max": {"w": 14}}, "c": [
+            {"id": "t", "k": "text", "p": {"spans": [{"t": "python/examples/", "s": "dim"}, {"t": "progress.py"}], "lines": 1, "truncate": "middle", "shrink": 1}},
+        ]}]),
+    );
+    h.frame();
+    let t = h.el("s1", "t");
+    assert!(h.text(t).starts_with('…'), "{:?}", h.text(t));
+    let root = h.doc.root();
+    let probes: Vec<_> = (0..8)
+        .map(|_| {
+            let p = h.doc.create_element("div");
+            h.doc.append_child(root, p);
+            p
+        })
+        .collect();
+    let s = ViewSettings {
+        dark: !h.view.settings().dark,
+        ..h.view.settings().clone()
+    };
+    h.view.set_settings(&mut h.doc, &h.pane, s);
+    h.frame();
+    for p in probes {
+        assert!(h.doc.try_node(p).is_some(), "{p:?} freed");
+        assert_eq!(h.doc.parent(p), Some(root));
+    }
+    assert!(h.text(h.el("s1", "t")).starts_with('…'));
 }

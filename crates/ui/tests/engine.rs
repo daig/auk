@@ -1075,3 +1075,50 @@ fn a_measurement_does_not_leave_its_line_breaks_behind_a_cached_final_layout() {
         assert_eq!(doc.line_count(text), 1, "tick {k}: lines as laid out, not as last measured");
     }
 }
+
+/// Removing an element whose anonymous box still lists a `::before` freed since (the element
+/// hidden, so its boxes weren't rebuilt) frees only its own boxes: the pseudo's id, taken by
+/// another element's new anonymous box meanwhile, stays that box's.
+#[test]
+fn removing_an_element_frees_only_its_own_anonymous_boxes() {
+    let mut doc = doc_with(
+        ".on::before { content: \"a\" } .gone { display: none } .q::before { content: \"q\" }",
+    );
+    let root = doc.root();
+    let body = el(&mut doc, root, "body", "", None);
+    // Q: text then a block, one anonymous box.
+    let q = el(&mut doc, body, "div", "", None);
+    let qt = doc.create_text("q text");
+    doc.append_child(q, qt);
+    el(&mut doc, q, "div", "", Some("block"));
+    // P: `::before`, text, a block: the pseudo is in P's anonymous box's run.
+    let w = el(&mut doc, body, "div", "", None);
+    let p = el(&mut doc, w, "div", "on", None);
+    let pt = doc.create_text("inline");
+    doc.append_child(p, pt);
+    el(&mut doc, p, "div", "", Some("block"));
+    doc.update();
+    // P loses its `::before` while hidden; Q needs a second anonymous box, which takes the
+    // pseudo's id.
+    doc.add_class(w, "gone");
+    doc.remove_class(p, "on");
+    el(&mut doc, q, "div", "", Some("block2"));
+    let qt2 = doc.create_text("more");
+    doc.append_child(q, qt2);
+    doc.update();
+    doc.remove(w);
+    doc.update();
+    // Q's boxes are rebuilt (a `::before` of its own), and new nodes take freed ids.
+    doc.add_class(q, "q");
+    doc.update();
+    let probe = el(&mut doc, body, "div", "", Some("probe"));
+    doc.set_attribute(probe, "style", "color: red");
+    doc.add_class(q, "on");
+    doc.update();
+    assert_eq!(color(&doc, probe), RED);
+    assert_eq!(
+        doc.border_box(q).unwrap().h,
+        40.0,
+        "q text, block, block2, more"
+    );
+}
