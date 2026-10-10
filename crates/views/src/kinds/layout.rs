@@ -74,6 +74,25 @@ pub(crate) fn role_icon(role: &str) -> Option<&'static str> {
     }
 }
 
+/// The head icon of an `overlay`: a role of `omp.overlay.<name>` names one of omp's panel sheets
+/// (book:9686), by its third segment; any other role as on a card.
+pub(crate) fn overlay_icon(role: &str) -> Option<&'static str> {
+    let Some(rest) = role.strip_prefix("omp.overlay.") else {
+        return role_icon(role);
+    };
+    Some(match rest.split('.').next().unwrap_or("") {
+        "usage" => "chart",
+        "jobs" => "activity",
+        "hotkeys" => "keyboard",
+        "sessionInfo" => "info",
+        "model-hub" | "model-picker" => "model",
+        "login" => "key",
+        "planReview" => "list-checks",
+        "console" => "terminal",
+        _ => "app-omp",
+    })
+}
+
 /// omp tool names to icons.
 pub(crate) fn tool_icon(tool: &str) -> &'static str {
     match tool {
@@ -364,7 +383,7 @@ pub(crate) fn overlay(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look
     if head_v.is_some_and(|h| !h.is_null()) || str_prop(p, "role").and_then(role_icon).is_some() {
         let head = cx.dom.child(card, "div", "sf-ov-head");
         let ic = cx.dom.child(head, "span", "sf-ov-ic");
-        match str_prop(p, "role").and_then(role_icon) {
+        match str_prop(p, "role").and_then(overlay_icon) {
             Some(n) => {
                 icon(cx, ic, n);
             }

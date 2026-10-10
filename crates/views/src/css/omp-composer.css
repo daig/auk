@@ -1,2 +1,146 @@
 /* omp's composer dock (research/omp-stylesheets.md §9): the editor frame, its bar (model, effort,
-   usage, stop), the HUD and queue. Amendment A24. */
+   usage, stop), the HUD and queue. Amendment A24.
+   The meter's own rules stay in the kit (surface-data); omp.btn, omp.errorBanner, omp.hint.retry
+   and omp.loader are omp.css's. The dock keeps the region's side padding, as the transcript does:
+   it follows the transcript's measure (Q-C1), which only the Chat skins set. The folded caption
+   (.sf-caption) needs the view to draw it and has no rule yet. */
+
+/* Frame: a ring, no fill (the mockup's composer), scoped to the dock; an ask dialog's
+   omp.editor in the layer stays bare. The ring takes the accent while the composer's field has
+   focus, the live colour while omp runs, and the mode's colour in a shell mode. Rows are spaced
+   by margins, not gap: the engine's first layout counts the absolutely placed context meter
+   in the gap, and the frame would then change height on its next relayout. */
+.sf-dock .sf-col[data-role^='omp.editor'] {
+  position: relative; gap: 0; padding: 8px 8px 4px; border-radius: var(--r-card);
+  background-color: transparent; box-shadow: inset 0 0 0 1px var(--l2);
+}
+.sf-dock .sf-col[data-role='omp.editor']:focus-within {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 38%, var(--l2));
+}
+.sf-dock .sf-col[data-role='omp.editor.bash'] {
+  --tc: var(--sf-p-bashMode, var(--ok)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tc) 50%, transparent);
+}
+.sf-dock .sf-col[data-role='omp.editor.python'] {
+  --tc: var(--sf-p-pythonMode, var(--warn)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tc) 50%, transparent);
+}
+.sf-dock .sf-col[data-role^='omp.editor'][data-tone='pending'] {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--live) 45%, var(--l2));
+}
+
+/* The field sits in the frame: no well of its own. Vim modes: insert is the resting state and
+   shows no chip; normal and visual tint theirs, and draw a block caret. */
+.sf-row[data-role='omp.composer.line'] > .sf-editor {
+  flex: 1 1 auto; padding: 2px 4px; border-color: transparent; background-color: transparent;
+}
+.sf-col[data-role^='omp.editor'] .sf-ed-mode.on[data-mode='insert'] { display: none; }
+.sf-col[data-role^='omp.editor'] .sf-ed-mode.on[data-mode='normal'] {
+  color: var(--accent-ink); background-color: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.sf-col[data-role^='omp.editor'] .sf-ed-mode.on[data-mode^='visual'] {
+  color: var(--warn); background-color: color-mix(in srgb, var(--warn) 16%, transparent);
+}
+.sf-col[data-role^='omp.editor'] .sf-editor[data-mode='normal'] .sf-caret,
+.sf-col[data-role^='omp.editor'] .sf-editor[data-mode^='visual'] .sf-caret {
+  width: var(--sf-cw, 8px); border-left-width: 0;
+  background-color: color-mix(in srgb, var(--tv-cur, var(--accent)) 70%, transparent);
+}
+
+/* Context: a 2px hairline along the frame's top edge, its share a legend cut into the edge
+   (Q-C2). The total and the compaction mark's icon are in the tooltip. */
+.sf-meter[data-role='omp.composer.context'] {
+  position: absolute; top: -3px; left: 12px; right: 12px; height: 8px; gap: 0;
+}
+.sf-meter[data-role='omp.composer.context'] .sf-mt-track {
+  height: 2px; min-width: 0; border-radius: 1px; background-color: transparent;
+}
+.sf-meter[data-role='omp.composer.context'] .sf-mt-fill,
+.sf-meter[data-role='omp.composer.context'] .sf-mt-part { border-radius: 1px; }
+.sf-meter[data-role='omp.composer.context'] .sf-mt-mark { top: -1px; bottom: -1px; width: 1px; background-color: var(--t4); }
+.sf-meter[data-role='omp.composer.context'] .sf-mt-mark.icon,
+.sf-meter[data-role='omp.composer.context'] .sf-mt-total { display: none; }
+.sf-meter[data-role='omp.composer.context'] .sf-mt-lbl {
+  position: absolute; right: 0; top: -4px; padding: 0 4px; font-size: 10.5px; line-height: 14px;
+  color: var(--t4); background-color: var(--tv-bg);
+}
+.sf-meter[data-role='omp.composer.context']:hover .sf-mt-track { height: 3px; }
+.sf-meter[data-role='omp.composer.context']:hover .sf-mt-lbl { color: var(--t2); }
+.sf-meter[data-role='omp.composer.context'][data-level='warn'] .sf-mt-lbl { color: var(--warn); }
+.sf-meter[data-role='omp.composer.context'][data-level='bad'] .sf-mt-lbl { color: var(--bad); }
+
+/* Bar: model, effort, rate, extras, usage, send or stop, in meta type. The controls are
+   omp.css's quiet controls. */
+.sf-row[data-role='omp.composer.bar'] {
+  margin-top: 4px; min-height: 24px; gap: 4px; font-size: var(--omp-meta-fs); color: var(--omp-meta);
+}
+.sf-row[data-role='omp.composer.model'] > .sf-icon:last-child { width: 12px; color: var(--t4); }
+.sf-row[data-role='omp.composer.model'][data-tone] > .sf-icon { color: var(--tc); }
+.sf-rate[data-role='omp.composer.rate'] { font-size: var(--omp-meta-fs); color: var(--omp-meta); }
+.sf-status[data-role='omp.composer.extras'] { min-height: 22px; background-color: transparent; }
+.sf-seg[data-role='omp.composer.fact'] {
+  height: var(--omp-ctl-h); padding: 0 var(--omp-ctl-px); border-radius: 5px;
+}
+.sf-kbd[data-role='omp.composer.send'] .kbd { min-width: 26px; line-height: 18px; }
+.sf-kbd[data-role='omp.composer.send']:hover .kbd {
+  color: var(--accent-ink); background-color: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.sf-text[data-role='omp.composer.stop'] {
+  color: var(--tc); background-color: color-mix(in srgb, var(--tc) 12%, transparent);
+}
+.sf-text.sf-act[data-role='omp.composer.stop']:hover {
+  color: var(--tc); background-color: color-mix(in srgb, var(--tc) 22%, transparent);
+}
+
+/* Shell mode chip, the "Viewing" focus row, attachment chips and the queue. */
+.sf-row[data-role='omp.composer.mode'] {
+  height: 20px; padding: 0 6px; gap: 4px; border-radius: 999px; color: var(--tc);
+  background-color: color-mix(in srgb, var(--tc) 14%, transparent);
+}
+.sf-row[data-role='omp.composer.focus'] {
+  margin-bottom: 4px; gap: 6px; padding: 0 4px; font-size: var(--omp-meta-fs); color: var(--omp-meta);
+}
+.sf-text[data-role='omp.composer.crumb'] { color: var(--t2); }
+.sf-text.sf-act[data-role='omp.composer.crumb']:hover { color: var(--t1); text-decoration: underline; }
+.sf-text[data-role='omp.composer.agent'] { color: var(--t1); font-weight: 500; }
+.sf-row[data-role='omp.composer.chips'] { margin-bottom: 4px; padding: 0 2px; }
+.sf-card[data-role='omp.composer.chip'] {
+  border-radius: var(--r-chip); background-color: color-mix(in srgb, var(--tc) 8%, transparent);
+}
+.sf-card[data-role='omp.composer.chip'] > .sf-card-head { min-height: 0; padding: 3px 8px; font-size: 12px; }
+.sf-card[data-role='omp.composer.chip'] > .sf-card-body { padding: 0 8px 6px; gap: 4px; }
+.sf-col[data-role='omp.queue'] { padding: 0 4px; }
+.sf-row[data-role='omp.queue.item'] { min-height: 22px; font-size: 12px; color: var(--t2); }
+.sf-row[data-role='omp.queue.item'] > .sf-icon { color: var(--t4); }
+.sf-row[data-role='omp.queue.edit'] { color: var(--t3); }
+
+/* Unfocused, the composer folds to its field's first line (book: .sf-unfocused); the HUD and
+   the working row stay (Q-C5). */
+.sf-dock.sf-unfocused .sf-meter[data-role='omp.composer.context'],
+.sf-dock.sf-unfocused .sf-row[data-role='omp.composer.bar'],
+.sf-dock.sf-unfocused .sf-row[data-role='omp.composer.chips'],
+.sf-dock.sf-unfocused .sf-row[data-role='omp.composer.focus'] { display: none; }
+.sf-dock.sf-unfocused .sf-col[data-role^='omp.editor'] { padding: 3px 8px; box-shadow: inset 0 0 0 1px var(--l1); }
+.sf-dock.sf-unfocused .sf-row[data-role='omp.composer.line'] > .sf-editor { padding-top: 0; padding-bottom: 0; }
+.sf-dock.sf-unfocused .sf-row[data-role='omp.composer.line'] .sf-ed-scroll { max-height: var(--sf-lh); overflow: hidden; }
+
+/* HUD: pills, the activity line (working row and todo), and the status panels. */
+.sf-row[data-role='omp.hud'] { gap: 6px; padding: 0 2px; }
+.sf-row[data-role='omp.hud.pill'] {
+  padding: 0 8px; gap: 6px; border-radius: 999px; background-color: var(--l1); font-size: var(--omp-meta-fs);
+}
+.sf-row.sf-act[data-role='omp.hud.pill']:hover { background-color: var(--l2); color: var(--t1); }
+.sf-row[data-role='omp.hud.activity'] { min-height: var(--sf-lh); gap: 10px; padding: 0 6px; }
+.sf-checklist[data-role='omp.hud.todo'], .sf-col[data-role='omp.hud.todo'] { margin-left: auto; }
+.sf-row[data-role='omp.working'] { gap: 6px; color: var(--omp-meta); }
+.sf-text[data-role='omp.working.sep'] { color: var(--omp-faint); }
+.sf-row[data-role='omp.working.stop'] { color: var(--omp-meta); }
+.sf-col[data-role='omp.hud.judge'], .sf-col[data-role='omp.hud.downloads'],
+.sf-col[data-role='omp.hud.deferred'] { gap: 2px; padding: 0 6px; }
+.sf-row[data-role='omp.hud.progress'] { gap: 6px; font-size: var(--omp-meta-fs); color: var(--omp-meta); }
+.sf-col[data-role='omp.status.panel'], .sf-col[data-role='omp.footer.panel'] {
+  gap: 2px; font-size: var(--omp-meta-fs); color: var(--omp-meta);
+}
+.sf-text[data-role='omp.status.hook'], .sf-text[data-role='omp.footer.extensions'] { color: var(--omp-meta); }
+
+/* Autocomplete: wider than a caret anchor's default, for the commands' details (Q-C3). */
+.sf-overlay[data-role='omp.autocomplete'] .sf-ov-card { width: 480px; }
