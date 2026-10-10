@@ -298,13 +298,14 @@ fn runs_something(path: &str) -> bool {
     use std::os::unix::fs::PermissionsExt;
     let p = Path::new(path.trim_end_matches('/'));
     let launches = p.extension().and_then(|e| e.to_str()).is_some_and(|e| {
-        ["app", "command", "tool", "terminal", "workflow", "action", "prefpane"]
-            .iter()
-            .any(|x| e.eq_ignore_ascii_case(x))
+        [
+            "app", "command", "tool", "terminal", "workflow", "action", "prefpane",
+        ]
+        .iter()
+        .any(|x| e.eq_ignore_ascii_case(x))
     });
     launches
-        || std::fs::metadata(p)
-            .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        || std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
 }
 
 /// The program word of a command line (no assignments or directories).
@@ -639,9 +640,19 @@ impl WinState {
                 (format!("plugin:{host}:{id}:styles"), css)
             })
             .collect();
-        let local = self.plugins.rt.as_ref().map(WindowPlugins::sheets).unwrap_or_default();
+        let local = self
+            .plugins
+            .rt
+            .as_ref()
+            .map(WindowPlugins::sheets)
+            .unwrap_or_default();
         if host != "local" {
-            sheets.extend(local.iter().filter(|(n, _)| n.ends_with(":styles")).cloned());
+            sheets.extend(
+                local
+                    .iter()
+                    .filter(|(n, _)| n.ends_with(":styles"))
+                    .cloned(),
+            );
         }
         sheets.extend(local.into_iter().filter(|(n, _)| !n.ends_with(":styles")));
         if self.chrome.set_plugin_sheets(&sheets) {
@@ -864,7 +875,10 @@ impl WinState {
                 self.apply_link_decision(target, d);
                 return;
             }
-            if target.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("file:")) {
+            if target
+                .get(..5)
+                .is_some_and(|s| s.eq_ignore_ascii_case("file:"))
+            {
                 match file_url_path(target) {
                     Some(path) => self.open_path_routed(&path, origin, How::Default, None),
                     None => self.refuse_link(target, "Only local file paths open from a link"),
@@ -1063,7 +1077,11 @@ impl WinState {
         // or a path, and never runs a command (§7.14).
         if origin == "link" {
             if is_url {
-                let scheme = target.split(':').next().unwrap_or_default().to_ascii_lowercase();
+                let scheme = target
+                    .split(':')
+                    .next()
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
                 if scheme == "file" {
                     match file_url_path(&target) {
                         Some(path) => target = path,
@@ -1092,7 +1110,9 @@ impl WinState {
 
     /// A link that §7.14 doesn't let open: a toast, and a note for the automation endpoint.
     fn refuse_link(&mut self, target: &str, why: &str) {
-        self.plugins.refused.push(json!({"target": target, "why": why}));
+        self.plugins
+            .refused
+            .push(json!({"target": target, "why": why}));
         self.toast(ToastLevel::Error, why, Some(target));
     }
 
@@ -1354,7 +1374,9 @@ impl WinState {
             .iter()
             .copied()
             .filter(|p| {
-                self.plugins.seen_panes.contains(p) || self.plugins.own_panes.contains(p) || !waiting
+                self.plugins.seen_panes.contains(p)
+                    || self.plugins.own_panes.contains(p)
+                    || !waiting
             })
             .collect();
         let tab_list: Vec<(TabId, Vec<PaneId>)> = sessions
@@ -1799,7 +1821,10 @@ impl WinState {
         let scale = self.size.map_or(2.0, |s| s.scale);
         let (cell_w, cell_h) = self.gfx.as_ref().map_or((8.0, 16.0), |g| {
             let m = g.metrics();
-            (f64::from(m.cell_width) / scale, f64::from(m.cell_height) / scale)
+            (
+                f64::from(m.cell_width) / scale,
+                f64::from(m.cell_height) / scale,
+            )
         });
         let (extent, cell) = match side.axis() {
             SplitDir::Right => (area.w, cell_w),
@@ -2133,7 +2158,11 @@ impl WindowHost for Host<'_> {
         if delta == 0 {
             return false;
         }
-        match self.w.conn.request(LayoutEdit::Resize { pane, side, delta }) {
+        match self
+            .w
+            .conn
+            .request(LayoutEdit::Resize { pane, side, delta })
+        {
             Ok(v) => v == true,
             Err(e) => {
                 eprintln!("auk: resize: {e}");
@@ -2175,9 +2204,18 @@ mod tests {
 
     #[test]
     fn file_links_are_limited_to_local_paths() {
-        assert_eq!(file_url_path("file:///tmp/a%20b.txt").as_deref(), Some("/tmp/a b.txt"));
-        assert_eq!(file_url_path("FILE://localhost/etc/hosts").as_deref(), Some("/etc/hosts"));
-        assert_eq!(file_url_path("file:/usr/share").as_deref(), Some("/usr/share"));
+        assert_eq!(
+            file_url_path("file:///tmp/a%20b.txt").as_deref(),
+            Some("/tmp/a b.txt")
+        );
+        assert_eq!(
+            file_url_path("FILE://localhost/etc/hosts").as_deref(),
+            Some("/etc/hosts")
+        );
+        assert_eq!(
+            file_url_path("file:/usr/share").as_deref(),
+            Some("/usr/share")
+        );
         // Another machine's file, parts that aren't a path, or no path at all: refused.
         for refused in [
             "file://server/share/x",
@@ -2204,7 +2242,10 @@ mod tests {
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         assert!(runs_something(&script.to_string_lossy()));
         assert!(!runs_something(&text.to_string_lossy()));
-        assert!(!runs_something(&dir.to_string_lossy()), "a directory opens in the Finder");
+        assert!(
+            !runs_something(&dir.to_string_lossy()),
+            "a directory opens in the Finder"
+        );
         assert!(runs_something("/Applications/Nothing.app/"));
         assert!(runs_something("/tmp/x.command"));
         std::fs::remove_dir_all(&dir).unwrap();

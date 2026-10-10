@@ -29,21 +29,52 @@ pub const WRAPPERS: &[&str] = &[
 fn option_takes_value(wrapper: &str, option: &str) -> bool {
     let list: &[&str] = match wrapper {
         "sudo" => &[
-            "-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U", "-T", "-R", "--user",
-            "--group", "--chdir", "--close-from", "--host", "--prompt", "--role", "--type",
-            "--other-user", "--command-timeout", "--chroot",
+            "-u",
+            "-g",
+            "-C",
+            "-D",
+            "-h",
+            "-p",
+            "-r",
+            "-t",
+            "-U",
+            "-T",
+            "-R",
+            "--user",
+            "--group",
+            "--chdir",
+            "--close-from",
+            "--host",
+            "--prompt",
+            "--role",
+            "--type",
+            "--other-user",
+            "--command-timeout",
+            "--chroot",
         ],
         "doas" => &["-u", "-C"],
         "exec" => &["-a"],
         "time" => &["-f", "-o", "--format", "--output"],
         "nice" => &["-n", "--adjustment"],
         "env" => &[
-            "-u", "-C", "-S", "--unset", "--chdir", "--split-string", "-P",
+            "-u",
+            "-C",
+            "-S",
+            "--unset",
+            "--chdir",
+            "--split-string",
+            "-P",
         ],
         "caffeinate" => &["-t", "-w"],
         "npx" | "pnpx" | "bunx" => &["-p", "--package", "-c", "--call"],
         "uvx" => &[
-            "--from", "--with", "-p", "--python", "--with-requirements", "--index", "--index-url",
+            "--from",
+            "--with",
+            "-p",
+            "--python",
+            "--with-requirements",
+            "--index",
+            "--index-url",
         ],
         "pipx" => &["--spec", "--python", "--index-url", "--pip-args"],
         _ => &[],
@@ -240,7 +271,11 @@ fn lex(line: &str) -> Result<Vec<Token>, NotSimple> {
             }
             '<' | '>' => {
                 // A word of digits glued to the operator is its file descriptor.
-                let fd = if in_word && !quoted && !word.is_empty() && word.chars().all(|d| d.is_ascii_digit()) {
+                let fd = if in_word
+                    && !quoted
+                    && !word.is_empty()
+                    && word.chars().all(|d| d.is_ascii_digit())
+                {
                     let fd = word.parse::<u32>().ok();
                     word.clear();
                     in_word = false;
@@ -530,9 +565,18 @@ mod tests {
     #[test]
     fn normalization_table() {
         // research/plugins.md §7.2 (book:1057-1076).
-        assert_eq!(text("sudo -u root du -sh /var").as_deref(), Some("du -sh /var"));
-        assert_eq!(text("LC_ALL=C du -sh \"my dir\"").as_deref(), Some("du -sh my dir"));
-        assert_eq!(text("du -sh src 2>/dev/null").as_deref(), Some("du -sh src"));
+        assert_eq!(
+            text("sudo -u root du -sh /var").as_deref(),
+            Some("du -sh /var")
+        );
+        assert_eq!(
+            text("LC_ALL=C du -sh \"my dir\"").as_deref(),
+            Some("du -sh my dir")
+        );
+        assert_eq!(
+            text("du -sh src 2>/dev/null").as_deref(),
+            Some("du -sh src")
+        );
         assert_eq!(text("du -sh src | sort -h"), None);
         assert_eq!(text("du -sh src > out.txt"), None);
     }
@@ -544,8 +588,14 @@ mod tests {
         assert_eq!(text("make 2> err.log").as_deref(), Some("make"));
         assert_eq!(text("wc -l < input.txt").as_deref(), Some("wc -l"));
         assert_eq!(text("nice -n 5 time make all").as_deref(), Some("make all"));
-        assert_eq!(text("env -u X FOO=1 terraform plan").as_deref(), Some("terraform plan"));
-        assert_eq!(text("npx -p pkg tsc --noEmit").as_deref(), Some("tsc --noEmit"));
+        assert_eq!(
+            text("env -u X FOO=1 terraform plan").as_deref(),
+            Some("terraform plan")
+        );
+        assert_eq!(
+            text("npx -p pkg tsc --noEmit").as_deref(),
+            Some("tsc --noEmit")
+        );
         assert_eq!(text("echo 'a b'  c\\ d").as_deref(), Some("echo a b c d"));
         assert_eq!(text("ls $(pwd)").as_deref(), Some("ls $(pwd)"));
         for never in [
@@ -574,7 +624,10 @@ mod tests {
         assert!(glob_match("du", "du"));
         assert!(!glob_match("kubectl get *", "kubectl get"));
         assert!(!glob_match("kubectl get *", "Kubectl get pods"));
-        assert!(glob_match("terraform -chdir=* plan *", "terraform -chdir=infra plan -out x"));
+        assert!(glob_match(
+            "terraform -chdir=* plan *",
+            "terraform -chdir=infra plan -out x"
+        ));
         assert!(glob_match("a?c", "abc"));
         assert!(!glob_match("a?c", "ac"));
         assert!(glob_match("*", ""));

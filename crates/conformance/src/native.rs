@@ -231,7 +231,9 @@ impl NativeWindow {
         shown.view.finish_background(&mut shown.doc);
         // The pane width in cells, as the app's surfaces give it (width-dependent kinds).
         let cols = shown.replica.terminal().cols();
-        shown.view.set_cols(&mut shown.doc, shown.replica.tsp(), cols);
+        shown
+            .view
+            .set_cols(&mut shown.doc, shown.replica.tsp(), cols);
         shown.view.tick(&mut shown.doc, shown.replica.tsp(), now);
         shown.view.layout(&mut shown.doc);
         if !primary {

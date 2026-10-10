@@ -860,7 +860,10 @@ mod tests {
             catalog: claim_catalog(&catalog),
         };
         r.apply(1, Item::Record(&record)).unwrap();
-        (r, b"$ lensme\r\n\x1b]133;C;cmdline_url=lensme\x07out\r\n".to_vec())
+        (
+            r,
+            b"$ lensme\r\n\x1b]133;C;cmdline_url=lensme\x07out\r\n".to_vec(),
+        )
     }
 
     #[test]

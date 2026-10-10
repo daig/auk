@@ -128,8 +128,7 @@ impl PaneView {
                 // Highlighting the background finished draws in (§8.5), when the node is in
                 // view; out of view, the measure loop draws it in once it's laid out.
                 let drawing_in = !m.hl.is_empty() && cx.dom.doc.laid_out(m.el) && {
-                    m.hl
-                        .retain_mut(|d| d.draw_in(&mut cx.dom, &mut 0, hl_budget));
+                    m.hl.retain_mut(|d| d.draw_in(&mut cx.dom, &mut 0, hl_budget));
                     if m.hl.is_empty() {
                         cx.st.hl_waiting.remove(&id);
                     }

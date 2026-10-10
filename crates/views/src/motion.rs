@@ -227,7 +227,10 @@ pub fn spindle_style(frame: i64) -> String {
     }
     let a = frame as f64 / SPINDLE_FRAMES as f64 * std::f64::consts::TAU;
     let k = 0.2 + 0.8 * a.cos().abs();
-    format!("transform: scaleX({})", fmt_num((k * 100.0).round() / 100.0))
+    format!(
+        "transform: scaleX({})",
+        fmt_num((k * 100.0).round() / 100.0)
+    )
 }
 
 /// Whether the cascade gives the mark `--sf-spindle: still`.
@@ -857,7 +860,11 @@ mod tests {
     fn shimmer_tokens_without_a_color_fall_back_to_the_palette_then_the_text() {
         assert_eq!(token_color("warning"), "var(--sf-c-warning)");
         for t in ["strong", "em", "mono", "mark", "typo", "icon", "hide"] {
-            assert_eq!(token_color(t), format!("var(--sf-p-{t}, currentColor)"), "{t}");
+            assert_eq!(
+                token_color(t),
+                format!("var(--sf-p-{t}, currentColor)"),
+                "{t}"
+            );
         }
     }
 

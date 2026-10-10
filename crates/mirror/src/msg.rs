@@ -146,19 +146,42 @@ pub struct Refusal {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "edit", rename_all = "snake_case")]
 pub enum LayoutEdit {
-    NewSession { name: Option<String> },
-    NewTab { session: SessionId },
-    Split { pane: PaneId, dir: SplitDir },
-    Close { pane: PaneId },
-    Zoom { tab: TabId, pane: Option<PaneId> },
-    RenameSession { session: SessionId, name: String },
-    RenameTab { tab: TabId, title: Option<String> },
+    NewSession {
+        name: Option<String>,
+    },
+    NewTab {
+        session: SessionId,
+    },
+    Split {
+        pane: PaneId,
+        dir: SplitDir,
+    },
+    Close {
+        pane: PaneId,
+    },
+    Zoom {
+        tab: TabId,
+        pane: Option<PaneId>,
+    },
+    RenameSession {
+        session: SessionId,
+        name: String,
+    },
+    RenameTab {
+        tab: TabId,
+        title: Option<String>,
+    },
     /// Locks or unlocks a session (`session lock` toggles: the window sends the opposite of
     /// what its layout shows).
-    LockSession { session: SessionId, locked: bool },
+    LockSession {
+        session: SessionId,
+        locked: bool,
+    },
     /// Opens an agent pane (§5.1): `agent_command` through the login shell, split right of
     /// `pane` (the window's focused pane), or in a new session when there is none.
-    Agent { pane: Option<PaneId> },
+    Agent {
+        pane: Option<PaneId>,
+    },
     /// Opens a plugin block pane (§9.5) of `kind` (`<plugin>.<block>`) with launch `args`: split
     /// off `split`'s pane, else a new tab in `session`, else a new session in the client's window
     /// key. A remote window opens its host's block types this way (§10.4); a local one may too.
@@ -172,7 +195,10 @@ pub enum LayoutEdit {
     /// Opens a pane running `launch` at `place` (§9.8 `layout:new_tab`, `split`, `tab` and
     /// `cx:new_block`). Sent as a [`ClientMsg::Request`], it is answered with `{pane}`, plus
     /// `failed` when a block couldn't start.
-    Open { place: OpenPlace, launch: Launch },
+    Open {
+        place: OpenPlace,
+        launch: Launch,
+    },
     /// Moves `pane` to `side` of `target`, or swaps the two when `side` is absent (§9.8
     /// `layout:move`). Answered with whether anything moved: not for a missing pane, or one in
     /// another window key.
@@ -307,7 +333,9 @@ pub enum Effect {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         origin: Option<String>,
     },
-    Copy { text: String },
+    Copy {
+        text: String,
+    },
 }
 
 fn info() -> String {

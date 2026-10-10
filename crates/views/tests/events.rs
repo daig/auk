@@ -459,8 +459,15 @@ fn a_fields_program_decor_decorations_are_drawn() {
     assert_eq!(error.len(), 1);
     assert_eq!(h.text(error[0]), "x");
     let plain = style(&h, ed);
-    assert!(style(&h, strong[0]).font_weight > plain.font_weight, "strong is bolder");
-    assert_ne!(style(&h, error[0]).color, plain.color, "error has its own color");
+    assert!(
+        style(&h, strong[0]).font_weight > plain.font_weight,
+        "strong is bolder"
+    );
+    assert_ne!(
+        style(&h, error[0]).color,
+        plain.color,
+        "error has its own color"
+    );
     // A program token (`syntaxString`) draws in its color; a new `decor` replaces the old.
     h.frame_ops(
         "s1",
@@ -468,7 +475,9 @@ fn a_fields_program_decor_decorations_are_drawn() {
         json!([["set", "ed", {"decor": [{"from": 8, "to": 9, "s": "syntaxString"}]}]]),
     );
     h.frame();
-    assert!(h.find_class(ed, "sf-t-strong").is_empty() && h.find_class(ed, "sf-t-error").is_empty());
+    assert!(
+        h.find_class(ed, "sf-t-strong").is_empty() && h.find_class(ed, "sf-t-error").is_empty()
+    );
     let text_el = h.find_class(ed, "sf-ed-text");
     let spans: Vec<NodeId> = h
         .doc
@@ -478,7 +487,11 @@ fn a_fields_program_decor_decorations_are_drawn() {
         .filter(|&c| h.doc.node(c).element().is_some() && h.text(c) == "=")
         .collect();
     assert_eq!(spans.len(), 1, "the decorated run is its own span");
-    assert_ne!(style(&h, spans[0]).color, plain.color, "drawn in the token's color");
+    assert_ne!(
+        style(&h, spans[0]).color,
+        plain.color,
+        "drawn in the token's color"
+    );
 }
 
 /// §7.8: "Copy is appended unless the list names it": a menu that names `copy` keeps it where it
@@ -517,7 +530,11 @@ fn a_menu_that_names_copy_keeps_its_own_entry_and_gets_no_second_copy() {
         .into_iter()
         .map(|m| m.label)
         .collect();
-    assert_eq!(labels, vec!["Open file", "Copy"], "appended last when not named");
+    assert_eq!(
+        labels,
+        vec!["Open file", "Copy"],
+        "appended last when not named"
+    );
 }
 
 /// §7.8 `toggle` folds or unfolds a collapsible card, section, tool, agent or checklist: the
@@ -691,5 +708,9 @@ fn a_modal_overlays_backdrop_takes_the_press_and_sends_nothing() {
     // A secondary press there opens no menu, not even the overlay's own; on the card it does.
     assert!(h.view.menu(&h.doc, &h.pane, at.0, at.1).is_empty());
     let card = h.doc.border_box(h.find_class(ov, "sf-ov-card")[0]).unwrap();
-    assert!(!h.view.menu(&h.doc, &h.pane, card.x + card.w / 2.0, card.y + 8.0).is_empty());
+    assert!(
+        !h.view
+            .menu(&h.doc, &h.pane, card.x + card.w / 2.0, card.y + 8.0)
+            .is_empty()
+    );
 }

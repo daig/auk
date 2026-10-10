@@ -396,7 +396,7 @@ impl PaneView {
                 }
             }
             // Text cuts (`truncate` start/middle on one line).
-            for (id, t) in &sv.st.truncs {
+            for (id, t) in &mut sv.st.truncs {
                 if !dom.doc.laid_out_since(t.el, since) {
                     continue;
                 }
@@ -404,11 +404,34 @@ impl PaneView {
                 let Some(r) = dom.doc.border_box(t.el) else {
                     continue;
                 };
+                let have = crate::events::text_content(dom.doc, t.el);
+                let room = dom
+                    .doc
+                    .parent(t.el)
+                    .and_then(|p| dom.doc.border_box(p))
+                    .map_or(r.w, |b| b.w);
+                if have != t.full {
+                    if room > t.room + 0.5 {
+                        // More room than when it was cut: show it whole, and cut again on the
+                        // next pass if it still overflows.
+                        dom.set_only_text(t.el, &t.full);
+                        if let Some(m) = sv.mounts.get_mut(id) {
+                            m.generated = dom.doc.children(t.el).to_vec();
+                        }
+                        t.room = room;
+                        changed = true;
+                        continue;
+                    }
+                    t.room = room;
+                } else if dom.doc.text_advance(t.el) <= r.w + 0.5 {
+                    // The whole text fits: nothing to cut (a box as wide as its text can measure
+                    // a hair under its cells).
+                    continue;
+                }
                 // Half a pixel of slack: a box exactly as wide as its text can come out a hair
                 // under it.
                 let cells = ((r.w + 0.5) / cw).floor().max(1.0) as usize;
                 let want = cut(&t.full, cells, &t.mode);
-                let have = crate::events::text_content(dom.doc, t.el);
                 // A box that shrinks to its text is as wide as its cut text, which can be a
                 // little narrower than its cells (the ellipsis): a cut that fits stays, or each
                 // pass would cut one more cell.
@@ -416,6 +439,7 @@ impl PaneView {
                 let shorter = want.chars().count() < have.chars().count();
                 if have != want && !(shorter && have != t.full && fits) {
                     dom.set_only_text(t.el, &want);
+                    t.room = room;
                     // The cut text is what the node's next render takes away: the spans it
                     // replaced are freed, and their ids go to whatever is made next.
                     if let Some(m) = sv.mounts.get_mut(id) {

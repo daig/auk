@@ -1760,7 +1760,10 @@ pub fn parse_longhand<'i>(prop: Prop, p: &mut Parser<'i>) -> PResult<SV> {
             // program sheets drop it earlier), and only `data:` URLs: plugin files are inlined
             // as `data:` when the sheet is installed (§9.8 CSS).
             if let Ok(url) = p.try_parse(|p| p.expect_url().map(|u| u.to_string())) {
-                return if url.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("data:")) {
+                return if url
+                    .get(..5)
+                    .is_some_and(|s| s.eq_ignore_ascii_case("data:"))
+                {
                     Ok(SV::Str(Arc::from(url.as_str())))
                 } else {
                     Err(ParseError::custom(ValueError::Url))

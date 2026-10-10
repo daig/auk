@@ -200,7 +200,9 @@ pub fn tsp_config(settings: &Settings) -> TspConfig {
         ..TspConfig::default()
     };
     if !settings.t2_kinds {
-        config.kinds.retain(|k| !auk_tsp::T2_KINDS.contains(&k.as_str()));
+        config
+            .kinds
+            .retain(|k| !auk_tsp::T2_KINDS.contains(&k.as_str()));
         config.features.retain(|f| f != "aside");
     }
     config

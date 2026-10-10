@@ -1355,13 +1355,19 @@ fn char_step(text: &str, at: u64, forward: bool) -> u64 {
 
 /// Characters between two UTF-16 offsets of a line.
 fn chars_between(text: &str, from: u64, to: u64) -> usize {
-    let (a, b) = (input::utf16_to_byte(text, from), input::utf16_to_byte(text, to));
+    let (a, b) = (
+        input::utf16_to_byte(text, from),
+        input::utf16_to_byte(text, to),
+    );
     text[a.min(b)..a.max(b)].chars().count()
 }
 
 /// The offset `n` characters into the line starting at `start`, clamped to its end.
 fn chars_into(text: &str, start: u64, end: u64, n: usize) -> u64 {
-    let (a, b) = (input::utf16_to_byte(text, start), input::utf16_to_byte(text, end));
+    let (a, b) = (
+        input::utf16_to_byte(text, start),
+        input::utf16_to_byte(text, end),
+    );
     let byte = text[a..b].char_indices().nth(n).map_or(b, |(i, _)| a + i);
     input::byte_to_utf16(text, byte)
 }
@@ -1386,7 +1392,10 @@ impl PaneView {
             .filter(|s| !s.is_empty())?;
         let text = input::field_text(node);
         let (a, b) = sel.range();
-        let (a, b) = (input::utf16_to_byte(&text, a), input::utf16_to_byte(&text, b));
+        let (a, b) = (
+            input::utf16_to_byte(&text, a),
+            input::utf16_to_byte(&text, b),
+        );
         Some(text[a..b].to_owned())
     }
 
@@ -1474,7 +1483,11 @@ impl PaneView {
                 }
             }
             FieldKey::LineStart | FieldKey::LineEnd => {
-                let to = if key == FieldKey::LineStart { start } else { end };
+                let to = if key == FieldKey::LineStart {
+                    start
+                } else {
+                    end
+                };
                 if shift {
                     self.select(doc, pane, anchor, to)
                 } else {

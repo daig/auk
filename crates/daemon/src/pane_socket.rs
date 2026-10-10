@@ -119,13 +119,19 @@ mod tests {
         assert_eq!(reply["fork"]["error"]["kind"], "unsupported");
         // The answer is keyed by the kind, not by an unknown member sorted before it.
         let reply = roundtrip(&mut s, json!({"aaa": 1, "browser": {"op": "x"}, "id": 5})).await;
-        assert_eq!(reply, json!({"id": 5, "browser": {"error": {"kind": "unsupported",
-            "message": "unknown op `browser`"}}}));
+        assert_eq!(
+            reply,
+            json!({"id": 5, "browser": {"error": {"kind": "unsupported",
+            "message": "unknown op `browser`"}}})
+        );
         // A request of an unknown kind is skipped: the next answer is the next request's.
         let bytes = serde_json::to_vec(&json!({"id": 6, "teleport": {}})).unwrap();
         s.write_u32_le(bytes.len() as u32).await.unwrap();
         s.write_all(&bytes).await.unwrap();
-        assert_eq!(roundtrip(&mut s, json!({"id": 7, "fork": {}})).await["id"], 7);
+        assert_eq!(
+            roundtrip(&mut s, json!({"id": 7, "fork": {}})).await["id"],
+            7
+        );
         // A frame over 256 MiB closes the connection.
         s.write_u32_le((MAX_FRAME + 1) as u32).await.unwrap();
         let mut rest = Vec::new();

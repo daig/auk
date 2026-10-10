@@ -47,10 +47,40 @@ pub struct Chord {
 }
 
 const NAMED: &[&str] = &[
-    "enter", "return", "tab", "backspace", "escape", "esc", "space", "up", "down", "left",
-    "right", "home", "end", "page_up", "page_down", "pageup", "pagedown", "insert", "delete",
-    "plus", "minus", "equal", "comma", "period", "slash", "backslash", "semicolon", "quote",
-    "backquote", "grave", "bracket_left", "bracket_right", "menu", "caps_lock",
+    "enter",
+    "return",
+    "tab",
+    "backspace",
+    "escape",
+    "esc",
+    "space",
+    "up",
+    "down",
+    "left",
+    "right",
+    "home",
+    "end",
+    "page_up",
+    "page_down",
+    "pageup",
+    "pagedown",
+    "insert",
+    "delete",
+    "plus",
+    "minus",
+    "equal",
+    "comma",
+    "period",
+    "slash",
+    "backslash",
+    "semicolon",
+    "quote",
+    "backquote",
+    "grave",
+    "bracket_left",
+    "bracket_right",
+    "menu",
+    "caps_lock",
 ];
 
 fn named_char(name: &str) -> Option<char> {
@@ -202,18 +232,33 @@ mod tests {
         assert_eq!(c.steps.len(), 1);
         assert!(c.steps[0].mods.ctrl && c.steps[0].mods.shift);
         assert_eq!(c.steps[0].key, Some(Key::Char('2')));
-        assert_eq!(Chord::parse("cmd+plus").expect("ok").steps[0].key, Some(Key::Char('+')));
-        assert_eq!(Chord::parse("ctrl++").expect("ok").steps[0].key, Some(Key::Char('+')));
+        assert_eq!(
+            Chord::parse("cmd+plus").expect("ok").steps[0].key,
+            Some(Key::Char('+'))
+        );
+        assert_eq!(
+            Chord::parse("ctrl++").expect("ok").steps[0].key,
+            Some(Key::Char('+'))
+        );
         assert_eq!(
             Chord::parse("cmd+digit_1").expect("ok").steps[0].key,
             Some(Key::Physical("digit_1".into()))
         );
         let seq = Chord::parse("ctrl+a>c").expect("ok");
         assert_eq!(seq.steps.len(), 2);
-        assert!(Chord::parse("cmd>cmd").expect("ok").steps.iter().all(|s| s.key.is_none()));
+        assert!(
+            Chord::parse("cmd>cmd")
+                .expect("ok")
+                .steps
+                .iter()
+                .all(|s| s.key.is_none())
+        );
         assert!(Chord::parse("alt+shift+cmd+r").is_ok());
         assert!(Chord::parse("f12").is_ok());
-        assert_eq!(Chord::parse("hyper+x"), Err("unknown modifier `hyper`".into()));
+        assert_eq!(
+            Chord::parse("hyper+x"),
+            Err("unknown modifier `hyper`".into())
+        );
         assert!(Chord::parse("cmd").is_err());
         assert!(Chord::parse("ctrl+a>shift").is_err());
     }
@@ -228,7 +273,10 @@ mod tests {
 
     #[test]
     fn actions() {
-        assert_eq!(plugin_action("plugin.longrun.show"), Some(("longrun", "show")));
+        assert_eq!(
+            plugin_action("plugin.longrun.show"),
+            Some(("longrun", "show"))
+        );
         assert_eq!(plugin_action("plugin.x.bind.0"), Some(("x", "bind.0")));
         assert_eq!(plugin_action("plugin..x"), None);
         assert_eq!(plugin_action("new_tab"), None);

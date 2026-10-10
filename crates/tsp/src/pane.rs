@@ -658,9 +658,7 @@ impl TspPane {
                     self.discard(grid, i);
                     continue;
                 }
-                Mode::Inline | Mode::Flow if self.surfaces[i].is_live() => {
-                    self.close_kept(grid, i)
-                }
+                Mode::Inline | Mode::Flow if self.surfaces[i].is_live() => self.close_kept(grid, i),
                 Mode::Inline | Mode::Flow => {}
             }
             let s = &mut self.surfaces[i];

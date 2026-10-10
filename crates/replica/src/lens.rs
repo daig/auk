@@ -77,10 +77,16 @@ impl LensBlock {
     /// plus its text. The view, a side message that replicas get at different times, doesn't
     /// count, so every replica evicts the same blocks.
     pub fn cost(&self) -> u64 {
-        let text = [&self.plugin, &self.lens, &self.line, &self.typed, &self.program]
-            .iter()
-            .map(|s| s.len())
-            .sum::<usize>()
+        let text = [
+            &self.plugin,
+            &self.lens,
+            &self.line,
+            &self.typed,
+            &self.program,
+        ]
+        .iter()
+        .map(|s| s.len())
+        .sum::<usize>()
             + self.args.iter().map(String::len).sum::<usize>()
             + self.cwd.as_ref().map_or(0, String::len)
             + self.raw.len();
@@ -378,7 +384,11 @@ impl crate::Replica {
 
     /// Feeds output to the running capture. Returns how many bytes it took; the rest belong to
     /// the grid.
-    pub(crate) fn feed_capture(&mut self, bytes: &[u8], events: &mut Vec<auk_term::Event>) -> usize {
+    pub(crate) fn feed_capture(
+        &mut self,
+        bytes: &[u8],
+        events: &mut Vec<auk_term::Event>,
+    ) -> usize {
         let authoritative = self.role == crate::Role::Authoritative;
         let Some((id, capture)) = self.lens.running.as_mut() else {
             return 0;

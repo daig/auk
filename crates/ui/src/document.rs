@@ -1154,6 +1154,28 @@ impl Document {
             .unwrap_or(0)
     }
 
+    /// The widest line of text in a box's inline formatting context, at its natural width
+    /// (before `text-overflow` cuts it, however wide the box is); 0 if it has none.
+    pub fn text_advance(&self, id: NodeId) -> f32 {
+        let n = self.node(id);
+        let ifc = match n.inner {
+            crate::dom::Inner::Ifc => Some(id),
+            _ => n
+                .layout_children
+                .iter()
+                .copied()
+                .find(|c| matches!(self.node(*c).kind, NodeKind::Anonymous)),
+        };
+        ifc.and_then(|i| self.node(i).inline.as_ref())
+            .map(|il| {
+                il.layout
+                    .lines()
+                    .map(|l| l.metrics().advance - l.metrics().trailing_whitespace)
+                    .fold(0.0, f32::max)
+            })
+            .unwrap_or(0.0)
+    }
+
     /// The font families that draw the text of an element and its descendants, as laid out by
     /// the last update, without duplicates, in the order the glyph runs come. Font fallback
     /// shows here: a run in a family other than the computed `font-family`'s first.

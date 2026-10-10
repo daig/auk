@@ -206,9 +206,13 @@ impl TestEnv {
 /// Deletes every socket under `dir`, so the daemons serving them stop.
 fn remove_sockets(dir: &Path) {
     use std::os::unix::fs::FileTypeExt;
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
-        let Ok(kind) = entry.file_type() else { continue };
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
         if kind.is_dir() {
             remove_sockets(&entry.path());
         } else if kind.is_socket() {
@@ -223,16 +227,22 @@ fn remove_sockets(dir: &Path) {
 fn sweep_stale_roots() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
-        let Ok(entries) = fs::read_dir(std::env::temp_dir()) else { return };
+        let Ok(entries) = fs::read_dir(std::env::temp_dir()) else {
+            return;
+        };
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
-            let Some(rest) = name.strip_prefix("auk-") else { continue };
+            let Some(rest) = name.strip_prefix("auk-") else {
+                continue;
+            };
             let mut parts = rest.rsplitn(3, '-');
             let (Some(_n), Some(pid), Some(_name)) = (parts.next(), parts.next(), parts.next())
             else {
                 continue;
             };
-            let Ok(pid) = pid.parse::<u32>() else { continue };
+            let Ok(pid) = pid.parse::<u32>() else {
+                continue;
+            };
             if pid != std::process::id() && !alive(pid) {
                 let _ = fs::remove_dir_all(entry.path());
             }
@@ -422,7 +432,11 @@ pub fn layout_shape(node: &Value, ratios: bool) -> String {
         _ => format!(
             "{}{}({},{})",
             if node["dir"] == "right" { "R" } else { "D" },
-            if ratios { node["ratio"].to_string() } else { String::new() },
+            if ratios {
+                node["ratio"].to_string()
+            } else {
+                String::new()
+            },
             layout_shape(&node["first"], ratios),
             layout_shape(&node["second"], ratios)
         ),

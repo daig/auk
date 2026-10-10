@@ -48,7 +48,9 @@ fn setup_window(name: &str) -> (TestEnv, Headless, Probe) {
 /// Waits until the window's replica has applied everything the daemon's has, so keys and pastes
 /// the window encodes see the modes the program just set.
 fn caught_up(env: &TestEnv, window: &Headless, probe: &Probe) {
-    let target = env.daemon(&format!("state-hash {}", probe.pane))["seq"].as_u64().expect("a seq");
+    let target = env.daemon(&format!("state-hash {}", probe.pane))["seq"]
+        .as_u64()
+        .expect("a seq");
     wait_for("the window to catch up with the daemon", || {
         let seq = window.request(&format!("state-hash {}", probe.pane))["seq"].as_u64()?;
         (seq >= target).then_some(())
@@ -730,7 +732,12 @@ fn b6_kinds_and_features_list_only_what_is_implemented() {
         (!reply["kinds"].as_array()?.contains(&json!("prefs"))).then_some(reply)
     });
     assert_eq!(reply["kinds"].as_array().unwrap().len(), 38);
-    assert!(!reply["features"].as_array().unwrap().contains(&json!("aside")));
+    assert!(
+        !reply["features"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("aside"))
+    );
     exchange(&probe, &open("s1", "flow"));
     let bodies = exchange(
         &probe,
@@ -1023,12 +1030,13 @@ fn c4_inline_and_flow_surfaces_anchor_below_a_nonempty_cursor_row() {
     probe.write(b"X");
     // The daemon reads the pty on its own schedule: wait for the X before reading positions.
     let lines: Vec<String> = wait_for("the X on screen", || {
-        let lines: Vec<String> = env.daemon(&format!("capture {} --scrollback", probe.pane))["text"]
-            .as_str()
-            .unwrap()
-            .lines()
-            .map(str::to_owned)
-            .collect();
+        let lines: Vec<String> =
+            env.daemon(&format!("capture {} --scrollback", probe.pane))["text"]
+                .as_str()
+                .unwrap()
+                .lines()
+                .map(str::to_owned)
+                .collect();
         lines.iter().any(|l| l.contains('X')).then_some(lines)
     });
     let abc = line_of(&lines, "abc");
@@ -1307,8 +1315,14 @@ fn c12_a_suspended_surface_keeps_its_anchor_row_across_suspend_and_resume() {
         let daemon = surface(&env, &probe, "s1")["anchor"].clone();
         let win = wait_for(what, || {
             let st = window_state(&window, &probe);
-            let s = st["surfaces"].as_array()?.iter().rev().find(|s| s["id"] == "s1")?.clone();
-            (s["suspended"] == surface(&env, &probe, "s1")["suspended"]).then(|| s["anchor"].clone())
+            let s = st["surfaces"]
+                .as_array()?
+                .iter()
+                .rev()
+                .find(|s| s["id"] == "s1")?
+                .clone();
+            (s["suspended"] == surface(&env, &probe, "s1")["suspended"])
+                .then(|| s["anchor"].clone())
         });
         (daemon, win)
     };
@@ -1333,8 +1347,14 @@ fn c12_a_suspended_surface_keeps_its_anchor_row_across_suspend_and_resume() {
     assert_eq!(after, before, "the anchor stays across resume");
     assert_eq!(win_after, before);
     // The document is the one it had, and it takes frames where it is.
-    exchange(&probe, &frame("s1", 4, json!([["set", "t", {"text": "after"}]])));
-    assert_eq!(doc_node(&env, &probe, "s1", "t").unwrap()["p"]["text"], "after");
+    exchange(
+        &probe,
+        &frame("s1", 4, json!([["set", "t", {"text": "after"}]])),
+    );
+    assert_eq!(
+        doc_node(&env, &probe, "s1", "t").unwrap()["p"]["text"],
+        "after"
+    );
     assert_eq!(surface(&env, &probe, "s1")["anchor"], before);
 }
 
@@ -1347,7 +1367,10 @@ fn c11_frames_to_an_inline_surface_under_a_screen_surface_still_apply() {
     exchange(&probe, &open_with("s1", "inline", text_doc()));
     exchange(&probe, &open_with("s2", "screen", text_doc()));
     let s1 = surface(&env, &probe, "s1");
-    assert_eq!((s1["covered"].clone(), s1["state"].clone()), (json!(true), json!("live")));
+    assert_eq!(
+        (s1["covered"].clone(), s1["state"].clone()),
+        (json!(true), json!("live"))
+    );
     let bodies = exchange(
         &probe,
         &frame(
@@ -1363,21 +1386,40 @@ fn c11_frames_to_an_inline_surface_under_a_screen_surface_still_apply() {
     let s1 = surface(&env, &probe, "s1");
     assert_eq!(s1["last_s"], 2);
     assert_eq!(s1["covered"], true, "still covered");
-    assert_eq!(node(&s1["doc"], "t").unwrap()["p"]["text"], "changed under cover");
+    assert_eq!(
+        node(&s1["doc"], "t").unwrap()["p"]["text"],
+        "changed under cover"
+    );
     assert_eq!(node(&s1["doc"], "u").unwrap()["p"]["text"], "added");
     // The screen surface is untouched, and the window's replica has the same documents.
-    assert_eq!(doc_node(&env, &probe, "s2", "t").unwrap()["p"]["text"], "hi");
-    let daemon_docs: Vec<Value> = surfaces(&env, &probe).iter().map(|s| s["doc"].clone()).collect();
-    wait_for("the window's replica to apply the covered surface's frame", || {
-        let st = window_state(&window, &probe);
-        let docs: Vec<Value> = st["surfaces"].as_array()?.iter().map(|s| s["doc"].clone()).collect();
-        (docs == daemon_docs).then_some(())
-    });
+    assert_eq!(
+        doc_node(&env, &probe, "s2", "t").unwrap()["p"]["text"],
+        "hi"
+    );
+    let daemon_docs: Vec<Value> = surfaces(&env, &probe)
+        .iter()
+        .map(|s| s["doc"].clone())
+        .collect();
+    wait_for(
+        "the window's replica to apply the covered surface's frame",
+        || {
+            let st = window_state(&window, &probe);
+            let docs: Vec<Value> = st["surfaces"]
+                .as_array()?
+                .iter()
+                .map(|s| s["doc"].clone())
+                .collect();
+            (docs == daemon_docs).then_some(())
+        },
+    );
     // Once the screen surface goes, the inline surface shows what its frames made it.
     exchange(&probe, &tsp_json("x", &json!({"id": "s2"})));
     let s1 = surface(&env, &probe, "s1");
     assert_eq!(s1["covered"], false);
-    assert_eq!(node(&s1["doc"], "t").unwrap()["p"]["text"], "changed under cover");
+    assert_eq!(
+        node(&s1["doc"], "t").unwrap()["p"]["text"],
+        "changed under cover"
+    );
 }
 
 #[test]
@@ -1623,24 +1665,50 @@ fn d5_ids_are_non_empty() {
     exchange(&probe, &open_with("s1", "flow", json!([])));
     let node_msg = "a node needs a non-empty string id";
     let cases = [
-        (json!(["add", "", "main", null, {"id": "", "k": "text", "p": {"text": "x"}}]), "add: id must be a non-empty string"),
-        (json!(["add", "x", "main", null, {"id": "", "k": "text", "p": {"text": "x"}}]), node_msg),
-        (json!(["add", "p", "main", null,
-            {"id": "p", "k": "col", "c": [{"id": "ok1", "k": "text"}, {"id": "", "k": "text"}]}]), node_msg),
-        (json!(["add", "p", "main", null, {"id": "p", "k": "col", "c": [{"k": "text"}]}]), node_msg),
-        (json!(["add", "p", "main", null, {"id": "p", "k": "col", "c": [{"id": 7, "k": "text"}]}]), node_msg),
+        (
+            json!(["add", "", "main", null, {"id": "", "k": "text", "p": {"text": "x"}}]),
+            "add: id must be a non-empty string",
+        ),
+        (
+            json!(["add", "x", "main", null, {"id": "", "k": "text", "p": {"text": "x"}}]),
+            node_msg,
+        ),
+        (
+            json!(["add", "p", "main", null,
+            {"id": "p", "k": "col", "c": [{"id": "ok1", "k": "text"}, {"id": "", "k": "text"}]}]),
+            node_msg,
+        ),
+        (
+            json!(["add", "p", "main", null, {"id": "p", "k": "col", "c": [{"k": "text"}]}]),
+            node_msg,
+        ),
+        (
+            json!(["add", "p", "main", null, {"id": "p", "k": "col", "c": [{"id": 7, "k": "text"}]}]),
+            node_msg,
+        ),
     ];
     for (s, (op, msg)) in (2..).zip(cases) {
         let bodies = exchange(
             &probe,
-            &frame("s1", s, json!([op, ["add", format!("good{s}"), "main", null, {"id": format!("good{s}"), "k": "text"}]])),
+            &frame(
+                "s1",
+                s,
+                json!([op, ["add", format!("good{s}"), "main", null, {"id": format!("good{s}"), "k": "text"}]]),
+            ),
         );
         let errs = errors(&bodies);
         assert_eq!(errs.len(), 1, "{op}: {bodies:?}");
         let e = errs[0];
-        assert_eq!((e["sf"].clone(), e["s"].clone(), e["op"].clone()), (json!("s1"), json!(s), json!(0)), "{e}");
+        assert_eq!(
+            (e["sf"].clone(), e["s"].clone(), e["op"].clone()),
+            (json!("s1"), json!(s), json!(0)),
+            "{e}"
+        );
         assert_eq!(e["msg"], msg, "{e}");
-        assert!(doc_node(&env, &probe, "s1", &format!("good{s}")).is_some(), "the next op applied");
+        assert!(
+            doc_node(&env, &probe, "s1", &format!("good{s}")).is_some(),
+            "the next op applied"
+        );
     }
     let doc = surface(&env, &probe, "s1")["doc"].clone();
     assert!(node(&doc, "").is_none(), "{doc}");
@@ -2001,7 +2069,10 @@ fn unknown_el_tags_are_reported_to_the_program_once_per_node_version() {
         ),
     );
     assert!(errors(&bodies).is_empty(), "{bodies:?}");
-    let bodies = exchange(&probe, &frame("s1", 3, json!([["set", "m", {"class": "x"}]])));
+    let bodies = exchange(
+        &probe,
+        &frame("s1", 3, json!([["set", "m", {"class": "x"}]])),
+    );
     assert_eq!(errors(&bodies).len(), 1, "{bodies:?}");
     // Inputs other than checkboxes and radios, typed or not.
     let bodies = exchange(
@@ -2019,7 +2090,10 @@ fn unknown_el_tags_are_reported_to_the_program_once_per_node_version() {
     let msgs: Vec<&Value> = errors(&bodies).iter().map(|e| &e["msg"]).collect();
     assert_eq!(
         msgs,
-        [&json!("unknown el tag input type text"), &json!("unknown el tag input")]
+        [
+            &json!("unknown el tag input type text"),
+            &json!("unknown el tag input")
+        ]
     );
     // A surface that doesn't listen hears nothing.
     let quiet = tsp_json("o", &json!({"id": "q", "mode": "inline", "listen": false}));
@@ -2116,14 +2190,21 @@ fn e5_a_palette_or_sheet_over_budget_evicts() {
             "s1",
             2,
             json!([
-                ["add", "c0", "main", null, filler("c0")], ["settle", "c0"],
-                ["add", "c1", "main", null, filler("c1")], ["settle", "c1"],
+                ["add", "c0", "main", null, filler("c0")],
+                ["settle", "c0"],
+                ["add", "c1", "main", null, filler("c1")],
+                ["settle", "c1"],
             ]),
         ),
     );
     assert!(events(&bodies, "gone").is_empty(), "{bodies:?}");
     let ids = |st: &Value| -> Vec<String> {
-        st["surfaces"].as_array().unwrap().iter().map(|s| s["id"].as_str().unwrap().to_owned()).collect()
+        st["surfaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["id"].as_str().unwrap().to_owned())
+            .collect()
     };
     let st = state(&env, &probe);
     assert_eq!(ids(&st), ["old", "s1"], "{st}");
@@ -2141,26 +2222,49 @@ fn e5_a_palette_or_sheet_over_budget_evicts() {
         "name": {"dark": "n".repeat(name_len as usize), "light": ""},
     });
     let bodies = exchange(&probe, &tsp_json("t", &palette));
-    assert!(errors(&bodies).is_empty() && events(&bodies, "gone").is_empty(), "{bodies:?}");
+    assert!(
+        errors(&bodies).is_empty() && events(&bodies, "gone").is_empty(),
+        "{bodies:?}"
+    );
     let st = state(&env, &probe);
-    assert_eq!(ids(&st), ["s1"], "the palette evicted the closed surface: {st}");
+    assert_eq!(
+        ids(&st),
+        ["s1"],
+        "the palette evicted the closed surface: {st}"
+    );
     let cost = st["cost"].as_u64().unwrap();
     assert!(cost <= BUDGET, "{st}");
-    assert!(doc_node(&env, &probe, "s1", "c0").is_some(), "one eviction was enough");
+    assert!(
+        doc_node(&env, &probe, "s1", "c0").is_some(),
+        "one eviction was enough"
+    );
 
     // A sheet that takes the pane OVER bytes past the budget again: the oldest settled child goes.
     let css = format!("/*{}*/", "c".repeat((BUDGET - cost + OVER - 4) as usize));
-    let bodies = exchange(&probe, &tsp_json("s", &json!({"sf": "s1", "name": "big", "css": css})));
+    let bodies = exchange(
+        &probe,
+        &tsp_json("s", &json!({"sf": "s1", "name": "big", "css": css})),
+    );
     assert!(errors(&bodies).is_empty(), "{bodies:?}");
     let gone = events(&bodies, "gone");
     assert_eq!(gone.len(), 1, "{bodies:?}");
-    assert_eq!((gone[0]["sf"].clone(), gone[0]["ids"].clone()), (json!("s1"), json!(["c0"])));
+    assert_eq!(
+        (gone[0]["sf"].clone(), gone[0]["ids"].clone()),
+        (json!("s1"), json!(["c0"]))
+    );
     let st = state(&env, &probe);
     assert!(st["cost"].as_u64().unwrap() <= BUDGET, "{st}");
     assert!(doc_node(&env, &probe, "s1", "c0").is_none());
-    assert!(doc_node(&env, &probe, "s1", "c1").is_some(), "only what the budget needed");
+    assert!(
+        doc_node(&env, &probe, "s1", "c1").is_some(),
+        "only what the budget needed"
+    );
     let bodies = exchange(&probe, &frame("s1", 3, json!([["set", "c0", {}]])));
-    assert_eq!(errors(&bodies).len(), 1, "an evicted id is unknown: {bodies:?}");
+    assert_eq!(
+        errors(&bodies).len(),
+        1,
+        "an evicted id is unknown: {bodies:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2976,17 +3080,28 @@ fn h1_an_arriving_age_restarts_elapsed_and_tool_but_nested_agent_ages_need_a_new
     );
     assert!(errors(&bodies).is_empty(), "{bodies:?}");
     // A set of other props leaves the restarted counts running.
-    exchange(&probe, &frame("a", 3, json!([["set", "el", {"format": "clock"}]])));
+    exchange(
+        &probe,
+        &frame("a", 3, json!([["set", "el", {"format": "clock"}]])),
+    );
     std::thread::sleep(Duration::from_millis(300));
     let msgs = snapshot_messages(&env, probe.pane);
     let age = |id: &str| snapshot_node(&msgs, "a", id)["p"]["age"].as_i64().unwrap();
     for id in ["el", "tl"] {
         let a = age(id);
         // Unrestarted, it would read at least 1000 + 2000 + 300.
-        assert!((1250..2800).contains(&a), "{id} restarted at the resend: {a}");
+        assert!(
+            (1250..2800).contains(&a),
+            "{id} restarted at the resend: {a}"
+        );
     }
-    let stats = snapshot_node(&msgs, "a", "ag")["p"]["stats"]["age"].as_i64().unwrap();
-    assert!(stats >= 3250, "the agent's nested age kept running: {stats}");
+    let stats = snapshot_node(&msgs, "a", "ag")["p"]["stats"]["age"]
+        .as_i64()
+        .unwrap();
+    assert!(
+        stats >= 3250,
+        "the agent's nested age kept running: {stats}"
+    );
 
     // Deleted and re-added under the same id with the same age: it anchors fresh.
     std::thread::sleep(Duration::from_millis(1000));
@@ -3003,7 +3118,9 @@ fn h1_an_arriving_age_restarts_elapsed_and_tool_but_nested_agent_ages_need_a_new
     );
     assert!(errors(&bodies).is_empty(), "{bodies:?}");
     let msgs = snapshot_messages(&env, probe.pane);
-    let a = snapshot_node(&msgs, "a", "el")["p"]["age"].as_i64().unwrap();
+    let a = snapshot_node(&msgs, "a", "el")["p"]["age"]
+        .as_i64()
+        .unwrap();
     assert!((1000..1700).contains(&a), "re-added: {a}");
 }
 
@@ -3281,9 +3398,10 @@ fn the_mode_gate_refuses_canonical_with_echo_off_and_non_canonical_with_echo_on(
         let mut bytes = hello(&[]);
         bytes.extend(tsp("f", &[], "{bad"));
         probe.write(&bytes);
-        wait_for(&format!("the gate to drop the answers under {mode}"), || {
-            (gate(mode).1 >= dropped + 2).then_some(())
-        });
+        wait_for(
+            &format!("the gate to drop the answers under {mode}"),
+            || (gate(mode).1 >= dropped + 2).then_some(()),
+        );
         assert_eq!(gate(mode).0, written, "{mode}: TSP input was written");
         probe.tty("raw");
         let items = probe.fence();
@@ -3621,7 +3739,10 @@ fn effects_reach_the_windows_showing_a_window_key() {
         let e = window.request("effects");
         (e.as_array()?.len() == 1).then_some(e)
     });
-    assert_eq!(got, json!([{"effect": "toast", "level": "info", "text": "build finished"}]));
+    assert_eq!(
+        got,
+        json!([{"effect": "toast", "level": "info", "text": "build finished"}])
+    );
     let got = wait_for("the copy", || {
         let e = other.request("effects");
         (e.as_array()?.len() == 1).then_some(e)

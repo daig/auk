@@ -212,15 +212,18 @@ fn frame_budget_loading_a_10000_entry_transcript() {
     let recording = env.root.join("transcript.jsonl");
     let jsonl = transcript_recording(10_000, 50, 16 << 10, STEP_MS);
     // The last entry's id: the window has caught up once it draws it.
-    let last_frame: Value = serde_json::from_str(jsonl.lines().last().expect("frames"))
-        .expect("a JSON line");
+    let last_frame: Value =
+        serde_json::from_str(jsonl.lines().last().expect("frames")).expect("a JSON line");
     let last_id = last_frame["body"]["ops"]
         .as_array()
         .and_then(|ops| ops.last())
         .and_then(|op| op[1].as_str())
         .expect("the last op adds an entry")
         .to_owned();
-    let frames = jsonl.lines().filter(|l| l.contains("\"verb\":\"f\"")).count();
+    let frames = jsonl
+        .lines()
+        .filter(|l| l.contains("\"verb\":\"f\""))
+        .count();
     let nominal = (frames as u64 - 1) * STEP_MS;
     eprintln!(
         "transcript recording: {:.1} MB, {frames} frames {STEP_MS} ms apart ({nominal} ms)",
@@ -269,7 +272,10 @@ fn frame_budget_loading_a_10000_entry_transcript() {
             .collect::<Vec<_>>()
             .join(" / ")
     };
-    eprintln!("CPU per frame by fifth of the load (median ms): {}", fifths(&cpu));
+    eprintln!(
+        "CPU per frame by fifth of the load (median ms): {}",
+        fifths(&cpu)
+    );
     if let Some(phases) = series["phases"].as_object() {
         for (name, v) in phases {
             let v: Vec<f64> = v

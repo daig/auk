@@ -61,11 +61,11 @@ pub use dom::Written;
 pub use events::{Button, FieldKey, MenuEntry, Outcome, PointerEvent, Zoom, ZoomImage};
 pub use focus::NavKey;
 pub use kinds::KINDS;
+pub use lenses::{LensInput, LensLayer};
+pub use measure::LayoutWork;
 pub use sheets::{install_fonts, install_sheets};
 pub use state::{Preedit, Selection};
-pub use lenses::{LensInput, LensLayer};
 pub use surfaces::{Arranged, PaneSurfaces, Place, ShownToast, SurfaceBlock};
-pub use measure::LayoutWork;
 pub use view::PaneView;
 
 /// The regions of a surface (§7.5).
@@ -113,7 +113,11 @@ impl ViewSettings {
     /// The media features sheets match (§8.4): reduced motion, reduced transparency, more
     /// contrast.
     pub fn media(&self) -> (bool, bool, bool) {
-        (self.reduce_motion, self.reduce_transparency, self.more_contrast)
+        (
+            self.reduce_motion,
+            self.reduce_transparency,
+            self.more_contrast,
+        )
     }
 
     /// Tells `doc` the media features.

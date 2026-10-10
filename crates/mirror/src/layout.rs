@@ -172,8 +172,17 @@ impl Node {
     pub fn at(&self, path: &[bool]) -> Option<&Node> {
         match (path.split_first(), self) {
             (None, node) => Some(node),
-            (Some((&second, rest)), Node::Split { first, second: s, .. }) => {
-                if second { s.at(rest) } else { first.at(rest) }
+            (
+                Some((&second, rest)),
+                Node::Split {
+                    first, second: s, ..
+                },
+            ) => {
+                if second {
+                    s.at(rest)
+                } else {
+                    first.at(rest)
+                }
             }
             (Some(_), Node::Pane { .. }) => None,
         }
@@ -182,7 +191,12 @@ impl Node {
     fn at_mut(&mut self, path: &[bool]) -> Option<&mut Node> {
         match (path.split_first(), self) {
             (None, node) => Some(node),
-            (Some((&second, rest)), Node::Split { first, second: s, .. }) => {
+            (
+                Some((&second, rest)),
+                Node::Split {
+                    first, second: s, ..
+                },
+            ) => {
                 if second {
                     s.at_mut(rest)
                 } else {
@@ -314,7 +328,11 @@ pub struct Window {
     pub sessions: Vec<Session>,
     /// Each pane's kind, for its badge. Panes missing here are shells. In JSON, an object keyed
     /// by pane id.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty", with = "kinds_map")]
+    #[serde(
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        with = "kinds_map"
+    )]
     pub kinds: BTreeMap<PaneId, PaneTag>,
 }
 
@@ -328,12 +346,18 @@ mod kinds_map {
     use super::PaneTag;
     use crate::PaneId;
 
-    pub fn serialize<S: Serializer>(map: &BTreeMap<PaneId, PaneTag>, s: S) -> Result<S::Ok, S::Error> {
-        let named: BTreeMap<String, PaneTag> = map.iter().map(|(k, v)| (k.to_string(), *v)).collect();
+    pub fn serialize<S: Serializer>(
+        map: &BTreeMap<PaneId, PaneTag>,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        let named: BTreeMap<String, PaneTag> =
+            map.iter().map(|(k, v)| (k.to_string(), *v)).collect();
         named.serialize(s)
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<BTreeMap<PaneId, PaneTag>, D::Error> {
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<BTreeMap<PaneId, PaneTag>, D::Error> {
         let named = BTreeMap::<String, PaneTag>::deserialize(d)?;
         named
             .into_iter()
@@ -476,7 +500,9 @@ impl Layout {
             return true;
         };
         // Out of its cell, keeping its kind, then beside the target.
-        let kind = self.window(self.window_of(pane).unwrap_or_default()).map(|w| w.kind(pane));
+        let kind = self
+            .window(self.window_of(pane).unwrap_or_default())
+            .map(|w| w.kind(pane));
         self.remove_pane(pane);
         if self.split_side(target, side, pane, None).is_err() {
             return false;
@@ -700,7 +726,10 @@ mod tests {
             assert!(!s.named);
         }
         let s = l.new_session("w", Some("work"), 900);
-        assert_eq!(l.session(s).map(|s| (s.name.as_str(), s.named)), Some(("work", true)));
+        assert_eq!(
+            l.session(s).map(|s| (s.name.as_str(), s.named)),
+            Some(("work", true))
+        );
         let other = l.window("w").unwrap().sessions[0].id;
         l.rename_session(other, "ops").unwrap();
         assert!(l.session(other).unwrap().named);
@@ -815,7 +844,12 @@ mod tests {
         );
         // A negative count moves it the other way; nothing moves past the limit or without a split.
         assert_eq!(l.resize(3, Side::Left, -50), Ok(true));
-        assert_eq!(root(&l, 0).at(&[]).map(|n| matches!(n, Node::Split { ratio: 650, .. })), Some(true));
+        assert_eq!(
+            root(&l, 0)
+                .at(&[])
+                .map(|n| matches!(n, Node::Split { ratio: 650, .. })),
+            Some(true)
+        );
         assert_eq!(l.resize(1, Side::Right, 5000), Ok(true));
         assert_eq!(l.resize(1, Side::Right, 1), Ok(false));
         assert_eq!(l.resize(2, Side::Up, 10), Ok(false));
@@ -840,13 +874,23 @@ mod tests {
         assert_eq!(w.kind(3), PaneTag::Agent);
         assert_eq!(
             root(&l, 0),
-            split(SplitDir::Right, 500, pane(2), split(SplitDir::Right, 500, pane(3), pane(1)))
+            split(
+                SplitDir::Right,
+                500,
+                pane(2),
+                split(SplitDir::Right, 500, pane(3), pane(1))
+            )
         );
         // Below another pane in the same tab.
         assert!(l.move_pane(2, 1, Some(Side::Down)));
         assert_eq!(
             root(&l, 0),
-            split(SplitDir::Right, 500, pane(3), split(SplitDir::Down, 500, pane(1), pane(2)))
+            split(
+                SplitDir::Right,
+                500,
+                pane(3),
+                split(SplitDir::Down, 500, pane(1), pane(2))
+            )
         );
         // Swaps across tabs.
         l.new_tab(s, 4).unwrap();

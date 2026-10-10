@@ -42,35 +42,65 @@ fn review_queue_block_lists_moves_opens_toggles_drafts_and_restores() {
 
     root.example("review-queue");
     let panes = Arc::new(PaneTable::default());
-    panes.upsert(PaneInfo { pane: 4, cwd: None, program: "review-queue.queue".into(), title: "Review Queue".into(), busy: false });
+    panes.upsert(PaneInfo {
+        pane: 4,
+        cwd: None,
+        program: "review-queue.queue".into(),
+        title: "Review Queue".into(),
+        busy: false,
+    });
     let mut host = root.host(Some(Arc::clone(&panes)));
     let mut pane = BlockPane::new(4, 100, 30);
-    host.start_block(pane.launch("review-queue.queue", &[], None, None)).expect("type");
+    host.start_block(pane.launch("review-queue.queue", &[], None, None))
+        .expect("type");
     let mut others = Vec::new();
     // Drafts are hidden at first: two of three, oldest first.
-    pane.until(&host, WAIT, &mut others, |p| p.title() == "Review Queue (2)");
+    pane.until(&host, WAIT, &mut others, |p| {
+        p.title() == "Review Queue (2)"
+    });
     let text = pane.text();
-    assert!(text.contains("acme/app#3") && text.contains("acme/app#12"), "{text}");
+    assert!(
+        text.contains("acme/app#3") && text.contains("acme/app#12"),
+        "{text}"
+    );
     assert!(!text.contains("WIP: new renderer"));
-    let selected = |p: &BlockPane| p.region("main")["c"][0]["p"]["selected"].as_str().map(str::to_owned);
+    let selected = |p: &BlockPane| {
+        p.region("main")["c"][0]["p"]["selected"]
+            .as_str()
+            .map(str::to_owned)
+    };
     assert_eq!(selected(&pane).as_deref(), Some("main.queue.acme/app#3"));
 
     // ↓ moves; Enter opens the pull request in the windows showing the pane.
     pane.keys(&host, b"\x1b[B");
-    pane.until(&host, WAIT, &mut others, |p| selected(p).as_deref() == Some("main.queue.acme/app#12"));
+    pane.until(&host, WAIT, &mut others, |p| {
+        selected(p).as_deref() == Some("main.queue.acme/app#12")
+    });
     pane.keys(&host, b"\r");
     let open = pane.next_effect(&host, WAIT, &mut others);
-    assert_eq!(open.effect, Effect::Open("https://github.com/acme/app/pull/12".into()));
+    assert_eq!(
+        open.effect,
+        Effect::Open("https://github.com/acme/app/pull/12".into())
+    );
     assert_eq!(open.target, auk_plugins::EffectTarget::Pane(4));
 
     // A click on a row selects it (the list's own event).
-    pane.event(&host, serde_json::json!({"ev": "select", "id": "main.queue", "item": "main.queue.acme/app#3"}));
-    pane.until(&host, WAIT, &mut others, |p| selected(p).as_deref() == Some("main.queue.acme/app#3"));
+    pane.event(
+        &host,
+        serde_json::json!({"ev": "select", "id": "main.queue", "item": "main.queue.acme/app#3"}),
+    );
+    pane.until(&host, WAIT, &mut others, |p| {
+        selected(p).as_deref() == Some("main.queue.acme/app#3")
+    });
 
     // `d` shows drafts; that's what `save` keeps.
     pane.keys(&host, b"d");
-    pane.until(&host, WAIT, &mut others, |p| p.title() == "Review Queue (3)");
-    pane.until(&host, WAIT, &mut others, |p| p.saved.as_deref() == Some(r#"{"drafts":true}"#));
+    pane.until(&host, WAIT, &mut others, |p| {
+        p.title() == "Review Queue (3)"
+    });
+    pane.until(&host, WAIT, &mut others, |p| {
+        p.saved.as_deref() == Some(r#"{"drafts":true}"#)
+    });
     // A key the block ignores returns false: no render.
     let frames = pane.frames;
     pane.keys(&host, b"\x1bz");

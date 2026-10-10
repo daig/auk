@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 mod common;
 
 use auk_plugins::{
-    Effect, EffectOutput, EffectTarget, HostConfig, HostEvent, HostOutput, LogSink, PluginHost, PluginSettings,
-    SpawnSpec, Status, ToastLevel,
+    Effect, EffectOutput, EffectTarget, HostConfig, HostEvent, HostOutput, LogSink, PluginHost,
+    PluginSettings, SpawnSpec, Status, ToastLevel,
 };
 
 struct Plugins {
@@ -69,7 +69,11 @@ impl Plugins {
 }
 
 fn next(host: &PluginHost, within: Duration) -> EffectOutput {
-    match host.outputs().recv_timeout(within).expect("an output in time") {
+    match host
+        .outputs()
+        .recv_timeout(within)
+        .expect("an output in time")
+    {
         HostOutput::Effect(e) => e,
         other => panic!("expected an effect, got {other:?}"),
     }
@@ -569,16 +573,22 @@ fn ac11_a_block_takes_timer_ticks_with_no_window_open() {
     );
     let mut host = root.host(None);
     let mut pane = common::BlockPane::new(1, 40, 10);
-    host.start_block(pane.launch("tick.b", &[], None, None)).expect("type");
+    host.start_block(pane.launch("tick.b", &[], None, None))
+        .expect("type");
     // Nothing acks frames (no window draws them), yet the ticks keep reaching the replica's
     // document, which is what a window attaching later reads.
     let mut others = Vec::new();
-    pane.until(&host, Duration::from_secs(5), &mut others, |p| p.text().contains("tick 10"));
+    pane.until(&host, Duration::from_secs(5), &mut others, |p| {
+        p.text().contains("tick 10")
+    });
     assert!(pane.frames >= 10);
-    pane.until(&host, Duration::from_secs(5), &mut others, |p| p.title() == "Ticker 10" || p.title().starts_with("Ticker 1"));
+    pane.until(&host, Duration::from_secs(5), &mut others, |p| {
+        p.title() == "Ticker 10" || p.title().starts_with("Ticker 1")
+    });
     let late = common::BlockPane::new(1, 40, 10);
     drop(late);
-    let saved: serde_json::Value = serde_json::from_str(host.blocks()[&1].saved.as_deref().expect("saved")).expect("json");
+    let saved: serde_json::Value =
+        serde_json::from_str(host.blocks()[&1].saved.as_deref().expect("saved")).expect("json");
     assert!(saved["n"].as_f64().expect("n") >= 10.0);
     assert!(others.is_empty(), "{others:?}");
 }
@@ -604,39 +614,78 @@ fn ac13_a_host_hook_past_2s_is_disabled_until_reload_and_others_keep_going() {
     let mut host = root.host(None);
     let mut seen = Vec::new();
     let started = Instant::now();
-    host.dispatch(HostEvent::Cwd { pane: 1, path: "/a".into() });
+    host.dispatch(HostEvent::Cwd {
+        pane: 1,
+        path: "/a".into(),
+    });
     let fast = common::next_effect(&host, Duration::from_secs(1), &mut seen);
     assert_eq!(fast.plugin, "fast");
-    assert!(started.elapsed() < Duration::from_millis(500), "the fast plugin didn't wait");
+    assert!(
+        started.elapsed() < Duration::from_millis(500),
+        "the fast plugin didn't wait"
+    );
     let trip = common::next_effect(&host, Duration::from_secs(4), &mut seen);
     assert_eq!(trip.plugin, "slow");
     assert_eq!(
         common::toast_text(&trip),
-        Some((ToastLevel::Error, "Plugin Slow: cwd failed".into(), Some("tern: cwd exceeded 2000 ms".into())))
+        Some((
+            ToastLevel::Error,
+            "Plugin Slow: cwd failed".into(),
+            Some("tern: cwd exceeded 2000 ms".into())
+        ))
     );
     let took = started.elapsed();
-    assert!(took >= Duration::from_secs(2) && took < Duration::from_secs(3), "{took:?}");
+    assert!(
+        took >= Duration::from_secs(2) && took < Duration::from_secs(3),
+        "{took:?}"
+    );
 
     // Disabled: the next cwd skips it (no toast, no stall); its other hooks still run.
     let again = Instant::now();
-    host.dispatch(HostEvent::Cwd { pane: 1, path: "/b".into() });
-    host.dispatch(HostEvent::Title { pane: 1, title: "t".into() });
+    host.dispatch(HostEvent::Cwd {
+        pane: 1,
+        path: "/b".into(),
+    });
+    host.dispatch(HostEvent::Title {
+        pane: 1,
+        title: "t".into(),
+    });
     let mut got = [
         common::next_effect(&host, Duration::from_secs(1), &mut seen),
         common::next_effect(&host, Duration::from_secs(1), &mut seen),
     ];
     got.sort_by(|a, b| a.plugin.cmp(&b.plugin));
-    assert_eq!(common::toast_text(&got[0]).map(|t| t.1), Some("fast /b".into()));
-    assert_eq!(common::toast_text(&got[1]).map(|t| t.1), Some("slow title t".into()));
+    assert_eq!(
+        common::toast_text(&got[0]).map(|t| t.1),
+        Some("fast /b".into())
+    );
+    assert_eq!(
+        common::toast_text(&got[1]).map(|t| t.1),
+        Some("slow title t".into())
+    );
     assert!(again.elapsed() < Duration::from_millis(500));
     assert!(common::drain(&host, Duration::from_millis(200)).is_empty());
 
     // A reload re-enables it.
-    std::fs::write(slow.join("host.luau"), r#"tern.on("cwd", function(ev, cx) cx:toast("info", "slow " .. ev.path) end)"#).expect("write");
+    std::fs::write(
+        slow.join("host.luau"),
+        r#"tern.on("cwd", function(ev, cx) cx:toast("info", "slow " .. ev.path) end)"#,
+    )
+    .expect("write");
     host.reload();
-    host.dispatch(HostEvent::Cwd { pane: 1, path: "/c".into() });
+    host.dispatch(HostEvent::Cwd {
+        pane: 1,
+        path: "/c".into(),
+    });
     let mut texts: Vec<_> = (0..2)
-        .map(|_| common::toast_text(&common::next_effect(&host, Duration::from_secs(1), &mut seen)).map(|t| t.1))
+        .map(|_| {
+            common::toast_text(&common::next_effect(
+                &host,
+                Duration::from_secs(1),
+                &mut seen,
+            ))
+            .map(|t| t.1)
+        })
         .collect();
     texts.sort();
     assert_eq!(texts, [Some("fast /c".into()), Some("slow /c".into())]);
@@ -690,25 +739,39 @@ fn ac14_window_code_cant_write_block_frames_and_host_code_cant_name_a_window() {
     let mut host = root.host(None);
     assert_eq!(host.catalog().plugins[0].status, Status::Ready);
     let mut pane = common::BlockPane::new(1, 40, 10);
-    host.start_block(pane.launch("both.b", &[], None, None)).expect("type");
+    host.start_block(pane.launch("both.b", &[], None, None))
+        .expect("type");
     let mut others = Vec::new();
-    pane.until(&host, Duration::from_secs(5), &mut others, |p| p.text().contains("host frame"));
+    pane.until(&host, Duration::from_secs(5), &mut others, |p| {
+        p.text().contains("host frame")
+    });
     let frames = pane.frames;
 
     let mut win = common::TestWindow::default();
     let mut plugins = WindowPlugins::load(root.window_config(&[]), &mut win);
     assert!(plugins.failures().is_empty(), "{:?}", plugins.failures());
-    plugins.run_action(&mut win, "plugin.both.try").expect("runs");
+    plugins
+        .run_action(&mut win, "plugin.both.try")
+        .expect("runs");
     let calls = win.calls();
     assert!(matches!(&calls[0], common::Call::Event(1, ev) if ev["ev"] == "action"));
     assert_eq!(calls[1], common::Call::Copy("false false false".into()));
     assert!(pane.settle(&host, Duration::from_millis(200)).is_empty());
-    assert_eq!(pane.frames, frames, "nothing from the window reached the block's frames");
+    assert_eq!(
+        pane.frames, frames,
+        "nothing from the window reached the block's frames"
+    );
 
-    host.dispatch(HostEvent::Title { pane: 1, title: "x".into() });
+    host.dispatch(HostEvent::Title {
+        pane: 1,
+        title: "x".into(),
+    });
     let effect = common::next_effect(&host, Duration::from_secs(1), &mut others);
     assert_eq!(effect.target, EffectTarget::Pane(1));
-    assert_eq!(common::toast_text(&effect).map(|t| t.1), Some("effect nil".into()));
+    assert_eq!(
+        common::toast_text(&effect).map(|t| t.1),
+        Some("effect nil".into())
+    );
 }
 
 #[test]
@@ -745,26 +808,40 @@ fn blocks_init_failure_exit_raw_frames_blobs_chunking_and_reload_without_the_typ
     );
     let mut host = root.host(None);
     let mut bad = common::BlockPane::new(9, 40, 10);
-    host.start_block(bad.launch("blk.bad", &[], None, None)).expect("type");
+    host.start_block(bad.launch("blk.bad", &[], None, None))
+        .expect("type");
     let mut others = Vec::new();
-    bad.until(&host, Duration::from_secs(5), &mut others, |p| p.exited.is_some());
+    bad.until(&host, Duration::from_secs(5), &mut others, |p| {
+        p.exited.is_some()
+    });
     let (status, message) = bad.exited.clone().expect("exited");
     assert_eq!(status, 1);
     assert!(message.expect("message").contains("cannot start"));
-    assert!(others.iter().any(|o| o.effect().is_some_and(|e| matches!(&e.effect, Effect::Toast { text, .. } if text == "Plugin Blk: bad.init failed"))));
+    assert!(others.iter().any(|o| o.effect().is_some_and(
+        |e| matches!(&e.effect, Effect::Toast { text, .. } if text == "Plugin Blk: bad.init failed")
+    )));
 
     let mut pane = common::BlockPane::new(1, 40, 10);
-    host.start_block(pane.launch("blk.ok", &["a", "b"], None, None)).expect("type");
-    pane.until(&host, Duration::from_secs(5), &mut others, |p| p.text().contains("small a,b") && p.text().contains("40x10"));
+    host.start_block(pane.launch("blk.ok", &["a", "b"], None, None))
+        .expect("type");
+    pane.until(&host, Duration::from_secs(5), &mut others, |p| {
+        p.text().contains("small a,b") && p.text().contains("40x10")
+    });
     // Resize: cx.cols/rows follow and the block re-renders.
     host.block_resize(1, 60, 20);
-    pane.until(&host, Duration::from_secs(5), &mut others, |p| p.text().contains("60x20"));
+    pane.until(&host, Duration::from_secs(5), &mut others, |p| {
+        p.text().contains("60x20")
+    });
     // A frame over 64 KiB is chunked, and the replica joins it.
     pane.keys(&host, b"b");
-    pane.until(&host, Duration::from_secs(5), &mut others, |p| p.text().contains(&"x".repeat(70000)));
+    pane.until(&host, Duration::from_secs(5), &mut others, |p| {
+        p.text().contains(&"x".repeat(70000))
+    });
     // Raw frames bypass the diff.
     pane.keys(&host, b"f");
-    pane.until(&host, Duration::from_secs(5), &mut others, |p| p.region("main")["c"][0]["p"]["role"] == "raw");
+    pane.until(&host, Duration::from_secs(5), &mut others, |p| {
+        p.region("main")["c"][0]["p"]["role"] == "raw"
+    });
     // A paste arrives as one key.
     pane.keys(&host, b"\x1b[200~two\nlines\x1b[201~");
     let copy = pane.next_effect(&host, Duration::from_secs(5), &mut others);
@@ -772,25 +849,47 @@ fn blocks_init_failure_exit_raw_frames_blobs_chunking_and_reload_without_the_typ
     // cx:blob returns the SHA-256 id and sends the bytes.
     pane.keys(&host, b"i");
     let copy = pane.next_effect(&host, Duration::from_secs(5), &mut others);
-    let Effect::Copy(id) = copy.effect else { panic!() };
+    let Effect::Copy(id) = copy.effect else {
+        panic!()
+    };
     assert_eq!(id.len(), 64);
     assert!(pane.tsp.blobs().has(&id));
-    assert_eq!(pane.tsp.blobs().get(&id).and_then(|b| b.mime.as_deref()), Some("image/png"));
+    assert_eq!(
+        pane.tsp.blobs().get(&id).and_then(|b| b.mime.as_deref()),
+        Some("image/png")
+    );
     // A mime that isn't a plain type/subtype is left out: unescaped, its `;` would corrupt the
     // parameters and its ESC \ end the string early, spilling the rest onto the grid.
     pane.keys(&host, b"e");
     let copy = pane.next_effect(&host, Duration::from_secs(5), &mut others);
-    let Effect::Copy(evil) = copy.effect else { panic!() };
+    let Effect::Copy(evil) = copy.effect else {
+        panic!()
+    };
     let blob = pane.tsp.blobs().get(&evil).expect("the blob arrived whole");
-    assert_eq!((blob.bytes.as_slice(), blob.mime.as_deref()), (&b"evil-bytes"[..], None));
+    assert_eq!(
+        (blob.bytes.as_slice(), blob.mime.as_deref()),
+        (&b"evil-bytes"[..], None)
+    );
     let screen = pane.term.text(0..usize::MAX);
-    assert!(!screen.contains("evil"), "nothing spilled onto the grid: {screen:?}");
+    assert!(
+        !screen.contains("evil"),
+        "nothing spilled onto the grid: {screen:?}"
+    );
     // A reload whose manifest dropped the type ends the block.
     std::fs::write(dir.join("plugin.toml"), "schema = 1\nid = \"blk\"\nname = \"Blk\"\nversion = \"1\"\nhost = \"host.luau\"\n[[blocks]]\nid = \"bad\"\ntitle = \"Bad\"\n").expect("write");
-    std::fs::write(dir.join("host.luau"), r#"tern.block.define("bad", {init = function() end, view = function() end})"#).expect("write");
+    std::fs::write(
+        dir.join("host.luau"),
+        r#"tern.block.define("bad", {init = function() end, view = function() end})"#,
+    )
+    .expect("write");
     host.reload();
-    pane.until(&host, Duration::from_secs(5), &mut others, |p| p.exited.is_some());
-    assert_eq!(pane.exited, Some((1, Some("no block type blk.ok on this host".into()))));
+    pane.until(&host, Duration::from_secs(5), &mut others, |p| {
+        p.exited.is_some()
+    });
+    assert_eq!(
+        pane.exited,
+        Some((1, Some("no block type blk.ok on this host".into())))
+    );
     assert!(host.blocks().is_empty());
 }
 
@@ -821,11 +920,28 @@ fn block_exit_and_pane_api() {
     );
     let panes = std::sync::Arc::new(auk_plugins::PaneTable::default());
     panes.set(vec![
-        auk_plugins::PaneInfo { pane: 1, cwd: Some("/".into()), program: "zsh".into(), title: "zsh".into(), busy: false },
-        auk_plugins::PaneInfo { pane: 2, cwd: None, program: "pw.b".into(), title: "B".into(), busy: false },
+        auk_plugins::PaneInfo {
+            pane: 1,
+            cwd: Some("/".into()),
+            program: "zsh".into(),
+            title: "zsh".into(),
+            busy: false,
+        },
+        auk_plugins::PaneInfo {
+            pane: 2,
+            cwd: None,
+            program: "pw.b".into(),
+            title: "B".into(),
+            busy: false,
+        },
     ]);
     let mut host = root.host(Some(std::sync::Arc::clone(&panes)));
-    host.dispatch(HostEvent::CommandFinished { pane: 1, line: "ls".into(), status: 0, took_ms: 3.0 });
+    host.dispatch(HostEvent::CommandFinished {
+        pane: 1,
+        line: "ls".into(),
+        status: 0,
+        took_ms: 3.0,
+    });
     let mut seen = Vec::new();
     let writes = common::wait_for(&host, Duration::from_secs(2), &mut seen, |o| match o {
         HostOutput::PaneWrite { plugin, pane, text } => Some((plugin.clone(), *pane, text.clone())),
@@ -833,10 +949,15 @@ fn block_exit_and_pane_api() {
     });
     assert_eq!(writes, ("pw".into(), 1, "echo 2\r".into()));
     let mut pane = common::BlockPane::new(2, 20, 5);
-    host.start_block(pane.launch("pw.b", &[], None, None)).expect("type");
-    pane.until(&host, Duration::from_secs(5), &mut seen, |p| p.surface().is_some());
+    host.start_block(pane.launch("pw.b", &[], None, None))
+        .expect("type");
+    pane.until(&host, Duration::from_secs(5), &mut seen, |p| {
+        p.surface().is_some()
+    });
     pane.keys(&host, b"x");
-    pane.until(&host, Duration::from_secs(5), &mut seen, |p| p.exited.is_some());
+    pane.until(&host, Duration::from_secs(5), &mut seen, |p| {
+        p.exited.is_some()
+    });
     assert_eq!(pane.exited, Some((4, None)));
     assert!(pane.surface().is_none(), "the surface closed");
 }
@@ -859,7 +980,8 @@ fn a_render_loop_stops_after_8_rounds() {
     );
     let mut host = root.host(None);
     let mut pane = common::BlockPane::new(1, 20, 5);
-    host.start_block(pane.launch("loop.b", &[], None, None)).expect("type");
+    host.start_block(pane.launch("loop.b", &[], None, None))
+        .expect("type");
     let others = pane.settle(&host, Duration::from_millis(500));
     assert!(others.is_empty(), "{others:?}");
     // The first render, then 8 rounds of re-rendering; the 9th request is dropped.
@@ -880,26 +1002,49 @@ fn running_lens_captures_finish_on_the_old_worker_after_a_reload() {
             }})"#
         )
     };
-    let dir = root.package("l", &[("plugin.toml", manifest), ("host.luau", &host_src("old"))]);
+    let dir = root.package(
+        "l",
+        &[("plugin.toml", manifest), ("host.luau", &host_src("old"))],
+    );
     let mut host = root.host(None);
-    let pre = auk_plugins::Preconditions { shell_integration: true, lenses_on: true, main_screen: true, surface_open: false };
+    let pre = auk_plugins::Preconditions {
+        shell_integration: true,
+        lenses_on: true,
+        main_screen: true,
+        surface_open: false,
+    };
     let claim = host.catalog().claim("run a", pre).expect("claim");
     host.lens_open(1, 1, &claim, claim.run("run a", "run a", None));
     std::fs::write(dir.join("host.luau"), host_src("new")).expect("write");
     host.reload();
-    host.lens_lines(1, vec![auk_plugins::capture::LensLine { text: "x".into(), links: vec![] }]);
+    host.lens_lines(
+        1,
+        vec![auk_plugins::capture::LensLine {
+            text: "x".into(),
+            links: vec![],
+        }],
+    );
     host.lens_finish(1, 0);
     let mut seen = Vec::new();
     let text = |o: &HostOutput| match o {
-        HostOutput::LensView { view: Some(v), .. } => v["p"]["spans"][0]["t"].as_str().map(str::to_owned),
+        HostOutput::LensView { view: Some(v), .. } => {
+            v["p"]["spans"][0]["t"].as_str().map(str::to_owned)
+        }
         _ => None,
     };
-    let done = common::wait_for(&host, Duration::from_secs(5), &mut seen, |o| text(o).filter(|t| t.ends_with("done")));
-    assert_eq!(done, "old 1 done", "the capture finished under the old code");
+    let done = common::wait_for(&host, Duration::from_secs(5), &mut seen, |o| {
+        text(o).filter(|t| t.ends_with("done"))
+    });
+    assert_eq!(
+        done, "old 1 done",
+        "the capture finished under the old code"
+    );
     // New commands go to the new worker.
     host.lens_open(2, 1, &claim, claim.run("run b", "run b", None));
     host.lens_finish(2, 0);
-    let done = common::wait_for(&host, Duration::from_secs(5), &mut seen, |o| text(o).filter(|t| t.ends_with("done")));
+    let done = common::wait_for(&host, Duration::from_secs(5), &mut seen, |o| {
+        text(o).filter(|t| t.ends_with("done"))
+    });
     assert_eq!(done, "new 0 done");
 }
 
@@ -930,13 +1075,19 @@ fn a_retiring_worker_gets_3_s_to_let_go_of_its_blocks() {
         })"#,
     );
     let fifo = dir.join("fifo");
-    let made = std::process::Command::new("mkfifo").arg(&fifo).status().expect("mkfifo");
+    let made = std::process::Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .expect("mkfifo");
     assert!(made.success());
     let mut host = root.host(None);
     let mut pane = common::BlockPane::new(1, 20, 5);
-    host.start_block(pane.launch("stuck.b", &[], None, None)).expect("type");
+    host.start_block(pane.launch("stuck.b", &[], None, None))
+        .expect("type");
     let mut others = Vec::new();
-    pane.until(&host, Duration::from_secs(5), &mut others, |p| p.text().contains("up"));
+    pane.until(&host, Duration::from_secs(5), &mut others, |p| {
+        p.text().contains("up")
+    });
     // The worker is now stuck in its handler and can't let go of the block.
     pane.keys(&host, b"s");
     std::thread::sleep(Duration::from_millis(200));
@@ -944,7 +1095,8 @@ fn a_retiring_worker_gets_3_s_to_let_go_of_its_blocks() {
     host.reload();
     let took = started.elapsed();
     assert!(
-        took >= auk_plugins::RETIRE_WAIT - Duration::from_millis(50) && took < auk_plugins::RETIRE_WAIT + Duration::from_secs(2),
+        took >= auk_plugins::RETIRE_WAIT - Duration::from_millis(50)
+            && took < auk_plugins::RETIRE_WAIT + Duration::from_secs(2),
         "the reload waited {took:?}"
     );
     // The block moved to the new worker anyway, and re-ran `init`.
@@ -961,7 +1113,10 @@ fn hooks_timers_and_callbacks_die_with_the_old_vm_but_processes_run_to_completio
     let dir = root.package(
         "gen",
         &[
-            ("plugin.toml", "schema = 1\nid = \"gen\"\nname = \"Gen\"\nversion = \"1\"\nhost = \"host.luau\"\n"),
+            (
+                "plugin.toml",
+                "schema = 1\nid = \"gen\"\nname = \"Gen\"\nversion = \"1\"\nhost = \"host.luau\"\n",
+            ),
             (
                 "host.luau",
                 r#"
@@ -1013,7 +1168,12 @@ fn hooks_timers_and_callbacks_die_with_the_old_vm_but_processes_run_to_completio
         next(&host, Duration::from_secs(2)).effect,
         toast("v2 t", None, ToastLevel::Info)
     );
-    assert!(host.outputs().recv_timeout(Duration::from_millis(300)).is_err(), "only the new hook ran");
+    assert!(
+        host.outputs()
+            .recv_timeout(Duration::from_millis(300))
+            .is_err(),
+        "only the new hook ran"
+    );
 }
 
 /// Applies a block pane's output for `quiet`, keeping the saves it carried, in order.
@@ -1059,7 +1219,8 @@ fn a_raising_view_keeps_the_last_good_view_and_save_is_stored_only_when_it_chang
     );
     let mut host = root.host(None);
     let mut pane = common::BlockPane::new(1, 20, 5);
-    host.start_block(pane.launch("views.b", &[], None, None)).expect("type");
+    host.start_block(pane.launch("views.b", &[], None, None))
+        .expect("type");
     let (mut saves, mut others) = (Vec::new(), Vec::new());
     let quiet = Duration::from_millis(300);
     pump_saves(&mut pane, &host, quiet, &mut saves, &mut others);
@@ -1116,27 +1277,42 @@ fn after_the_block_ends_render_save_exit_frame_and_blob_are_ignored() {
     );
     let mut host = root.host(None);
     let mut pane = common::BlockPane::new(1, 20, 5);
-    host.start_block(pane.launch("ended.b", &[], None, None)).expect("type");
+    host.start_block(pane.launch("ended.b", &[], None, None))
+        .expect("type");
     let mut others = Vec::new();
-    pane.until(&host, Duration::from_secs(5), &mut others, |p| p.text() == "n=0\n");
+    pane.until(&host, Duration::from_secs(5), &mut others, |p| {
+        p.text() == "n=0\n"
+    });
     pane.keys(&host, b"q");
-    pane.until(&host, Duration::from_secs(5), &mut others, |p| p.exited.is_some());
+    pane.until(&host, Duration::from_secs(5), &mut others, |p| {
+        p.exited.is_some()
+    });
     assert_eq!(pane.exited, Some((0, None)));
     let frames = pane.frames;
     let saved = pane.saved.clone();
     // Everything after the end: only effects come out.
     let mut later = Vec::new();
     let deadline = Instant::now() + Duration::from_secs(5);
-    while !later.iter().any(|o: &HostOutput| o.effect().is_some_and(|e| matches!(&e.effect, Effect::Toast { text, .. } if text == "after the end"))) {
+    while !later.iter().any(|o: &HostOutput| {
+        o.effect().is_some_and(
+            |e| matches!(&e.effect, Effect::Toast { text, .. } if text == "after the end"),
+        )
+    }) {
         let left = deadline.saturating_duration_since(Instant::now());
         later.push(host.outputs().recv_timeout(left).expect("the late toast"));
     }
     later.extend(common::drain(&host, Duration::from_millis(300)));
     for out in &later {
-        assert!(!matches!(out, HostOutput::Block(_)), "block output after the end: {out:?}");
+        assert!(
+            !matches!(out, HostOutput::Block(_)),
+            "block output after the end: {out:?}"
+        );
         pane.apply(&host, out);
     }
-    assert_eq!((pane.frames, &pane.saved, &pane.exited), (frames, &saved, &Some((0, None))));
+    assert_eq!(
+        (pane.frames, &pane.saved, &pane.exited),
+        (frames, &saved, &Some((0, None)))
+    );
     let copied = later
         .iter()
         .find_map(|o| match o.effect().map(|e| &e.effect) {
@@ -1178,9 +1354,11 @@ fn numbered_lens(root: &common::Root) {
 
 fn lens_view_text(o: &HostOutput, of: u64) -> Option<String> {
     match o {
-        HostOutput::LensView { block, view: Some(v), .. } if *block == of => {
-            v["p"]["spans"][0]["t"].as_str().map(str::to_owned)
-        }
+        HostOutput::LensView {
+            block,
+            view: Some(v),
+            ..
+        } if *block == of => v["p"]["spans"][0]["t"].as_str().map(str::to_owned),
         _ => None,
     }
 }
@@ -1197,7 +1375,10 @@ fn record(line: &str, status: Option<i32>) -> auk_plugins::LensRecord {
 }
 
 fn pick(act: &str) -> serde_json::Map<String, serde_json::Value> {
-    serde_json::json!({"ev": "action", "act": act}).as_object().cloned().expect("an object")
+    serde_json::json!({"ev": "action", "act": act})
+        .as_object()
+        .cloned()
+        .expect("an object")
 }
 
 #[test]
@@ -1206,7 +1387,12 @@ fn the_worker_keeps_256_captures_dropping_finished_ones_first_then_rehydrates() 
     let root = common::Root::new();
     numbered_lens(&root);
     let mut host = root.host(None);
-    let pre = auk_plugins::Preconditions { shell_integration: true, lenses_on: true, main_screen: true, surface_open: false };
+    let pre = auk_plugins::Preconditions {
+        shell_integration: true,
+        lenses_on: true,
+        main_screen: true,
+        surface_open: false,
+    };
     let line = |b: u64| format!("run {b}");
     // Block 1 keeps running; blocks 2 to 257 finish: one capture too many.
     for b in 1..=257u64 {
@@ -1217,23 +1403,33 @@ fn the_worker_keeps_256_captures_dropping_finished_ones_first_then_rehydrates() 
         }
     }
     let mut seen = Vec::new();
-    common::wait_for(&host, Duration::from_secs(20), &mut seen, |o| lens_view_text(o, 257));
+    common::wait_for(&host, Duration::from_secs(20), &mut seen, |o| {
+        lens_view_text(o, 257)
+    });
     // The least recently used finished capture (block 2) went: an event rebuilds it through
     // `open`, `line` and `finish` (a new number), and it handles the event.
     host.lens_event(2, 1, pick("a"), record(&line(2), Some(0)));
-    let text = common::wait_for(&host, Duration::from_secs(5), &mut seen, |o| lens_view_text(o, 2));
+    let text = common::wait_for(&host, Duration::from_secs(5), &mut seen, |o| {
+        lens_view_text(o, 2)
+    });
     assert_eq!(text, "n258 a done");
     // The running capture stayed, though it is the oldest.
     host.lens_event(1, 1, pick("b"), record(&line(1), None));
-    let text = common::wait_for(&host, Duration::from_secs(5), &mut seen, |o| lens_view_text(o, 1));
+    let text = common::wait_for(&host, Duration::from_secs(5), &mut seen, |o| {
+        lens_view_text(o, 1)
+    });
     assert_eq!(text, "n1 b");
     // Rebuilding block 2 took a slot, so the next least recently used finished one (block 3)
     // went; block 4 is still there.
     host.lens_event(4, 1, pick("c"), record(&line(4), Some(0)));
-    let text = common::wait_for(&host, Duration::from_secs(5), &mut seen, |o| lens_view_text(o, 4));
+    let text = common::wait_for(&host, Duration::from_secs(5), &mut seen, |o| {
+        lens_view_text(o, 4)
+    });
     assert_eq!(text, "n4 c done");
     host.lens_event(3, 1, pick("d"), record(&line(3), Some(0)));
-    let text = common::wait_for(&host, Duration::from_secs(5), &mut seen, |o| lens_view_text(o, 3));
+    let text = common::wait_for(&host, Duration::from_secs(5), &mut seen, |o| {
+        lens_view_text(o, 3)
+    });
     assert_eq!(text, "n259 d done");
 }
 
@@ -1243,7 +1439,12 @@ fn the_host_remembers_4096_lens_owners_and_forgets_the_oldest() {
     let root = common::Root::new();
     numbered_lens(&root);
     let mut host = root.host(None);
-    let pre = auk_plugins::Preconditions { shell_integration: true, lenses_on: true, main_screen: true, surface_open: false };
+    let pre = auk_plugins::Preconditions {
+        shell_integration: true,
+        lenses_on: true,
+        main_screen: true,
+        surface_open: false,
+    };
     let claim = host.catalog().claim("run x", pre).expect("claim");
     let open = |host: &mut PluginHost, b: u64, finish: bool| {
         host.lens_open(b, 1, &claim, claim.run("run x", "run x", None));
@@ -1269,7 +1470,9 @@ fn the_host_remembers_4096_lens_owners_and_forgets_the_oldest() {
     for b in 4098..=8193 {
         open(&mut host, b, true);
     }
-    common::wait_for(&host, Duration::from_secs(30), &mut seen, |o| lens_view_text(o, 8193));
+    common::wait_for(&host, Duration::from_secs(30), &mut seen, |o| {
+        lens_view_text(o, 8193)
+    });
     host.lens_finish(4097, 0);
     let late = common::drain(&host, Duration::from_millis(800));
     assert!(
@@ -1278,7 +1481,9 @@ fn the_host_remembers_4096_lens_owners_and_forgets_the_oldest() {
     );
     // An event still finds the capture by the current claim: it was never finished.
     host.lens_event(4097, 1, pick("e"), record("run x", None));
-    let text = common::wait_for(&host, Duration::from_secs(5), &mut seen, |o| lens_view_text(o, 4097));
+    let text = common::wait_for(&host, Duration::from_secs(5), &mut seen, |o| {
+        lens_view_text(o, 4097)
+    });
     assert_eq!(text, "n4097 e");
 }
 

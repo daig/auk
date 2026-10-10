@@ -9,9 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use objc2::rc::{Retained, Weak};
 use objc2::runtime::{NSObjectProtocol, ProtocolObject};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
-use objc2_app_kit::{
-    NSBackingStoreType, NSCursor, NSWindow, NSWindowDelegate, NSWindowStyleMask,
-};
+use objc2_app_kit::{NSBackingStoreType, NSCursor, NSWindow, NSWindowDelegate, NSWindowStyleMask};
 use objc2_foundation::{NSNotification, NSObject, NSPoint, NSRect, NSSize, NSString};
 use raw_window_handle::{
     AppKitDisplayHandle, AppKitWindowHandle, DisplayHandle, HandleError, HasDisplayHandle,

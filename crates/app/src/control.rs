@@ -461,7 +461,13 @@ fn main_command(cmd: &str, mut args: Vec<String>, win: usize) -> Result<Value, S
                     term.and_then(|t| t.line(a.composed.first)).map(|row| {
                         row.cells
                             .iter()
-                            .map(|c| if c.text.is_empty() { " " } else { c.text.as_str() })
+                            .map(|c| {
+                                if c.text.is_empty() {
+                                    " "
+                                } else {
+                                    c.text.as_str()
+                                }
+                            })
                             .collect::<String>()
                             .trim_end()
                             .to_owned()
@@ -507,7 +513,11 @@ fn main_command(cmd: &str, mut args: Vec<String>, win: usize) -> Result<Value, S
             let mut stats = stats;
             // Each frame's CPU time and layout work, in order, to see how they change over a load.
             if args.iter().any(|a| a == "--series") {
-                let ms = |v: &Vec<Duration>| v.iter().map(|d| d.as_secs_f64() * 1000.0).collect::<Vec<_>>();
+                let ms = |v: &Vec<Duration>| {
+                    v.iter()
+                        .map(|d| d.as_secs_f64() * 1000.0)
+                        .collect::<Vec<_>>()
+                };
                 stats["series"] = json!({
                     "cpu": ms(&s.stats.cpu),
                     "phases": s.stats.phases.iter().map(|(k, v)| (k.to_string(), json!(ms(v)))).collect::<serde_json::Map<_, _>>(),
@@ -559,7 +569,9 @@ fn main_command(cmd: &str, mut args: Vec<String>, win: usize) -> Result<Value, S
         }
         "palette" => {
             if args.first().map(String::as_str) == Some("open") {
-                state.borrow_mut().command(&window, crate::commands::Cmd::CommandPalette);
+                state
+                    .borrow_mut()
+                    .command(&window, crate::commands::Cmd::CommandPalette);
                 window.request_frame();
             }
             let s = state.borrow();
@@ -577,7 +589,9 @@ fn main_command(cmd: &str, mut args: Vec<String>, win: usize) -> Result<Value, S
         "toasts" => Ok(json!(state.borrow().plugins.toast_log)),
         "opens" => {
             let s = state.borrow();
-            Ok(json!({"opened": s.plugins.opened, "routed": s.plugins.routed, "refused": s.plugins.refused}))
+            Ok(
+                json!({"opened": s.plugins.opened, "routed": s.plugins.routed, "refused": s.plugins.refused}),
+            )
         }
         "chrome" => {
             let s = state.borrow();
@@ -623,7 +637,10 @@ fn main_command(cmd: &str, mut args: Vec<String>, win: usize) -> Result<Value, S
         "chrome-style" => {
             // The computed style of a plugin's status segment, to check plugin sheets restyle
             // the chrome.
-            let plugin = args.first().ok_or("chrome-style: expected a plugin id")?.clone();
+            let plugin = args
+                .first()
+                .ok_or("chrome-style: expected a plugin id")?
+                .clone();
             let s = state.borrow();
             let doc = s.chrome.doc();
             let mut stack = vec![doc.root()];

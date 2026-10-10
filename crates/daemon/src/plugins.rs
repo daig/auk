@@ -407,7 +407,10 @@ fn show_failure(p: &mut Pane, reason: String) {
         "f",
         &json!({"sf": surface, "s": 1, "ops": [["add", "main", surface, null, card]]}),
     ));
-    eprintln!("auk daemon: pane {}: could not start the block: {reason}", p.id);
+    eprintln!(
+        "auk daemon: pane {}: could not start the block: {reason}",
+        p.id
+    );
     p.on_output(&out);
     p.block_failed = Some(FailedBlock {
         surface,
@@ -419,9 +422,13 @@ fn show_failure(p: &mut Pane, reason: String) {
 /// Where a new block pane goes.
 #[derive(Clone, Debug)]
 pub enum BlockPlace {
-    NewSession { window_key: Option<String> },
+    NewSession {
+        window_key: Option<String>,
+    },
     /// A new tab in a session.
-    NewTab { session: auk_mirror::layout::SessionId },
+    NewTab {
+        session: auk_mirror::layout::SessionId,
+    },
     /// Beside `pane` on `side`; `share` is `pane`'s share in thousandths (half by default).
     Split {
         pane: PaneId,
@@ -629,7 +636,9 @@ impl Daemon {
             return Err(format!("pane {} is not a plugin block", record.id));
         };
         if self.plugins.catalog().block_type(kind).is_none() {
-            return Err(format!("cannot restore plugin block: no block type {kind} on this host"));
+            return Err(format!(
+                "cannot restore plugin block: no block type {kind} on this host"
+            ));
         }
         let pane = Arc::new(Mutex::new(Pane::new(
             record.id,
@@ -805,7 +814,9 @@ impl Daemon {
         block: &str,
         event: &Value,
     ) -> Result<(), String> {
-        let n: u64 = block.parse().map_err(|_| format!("bad lens block `{block}`"))?;
+        let n: u64 = block
+            .parse()
+            .map_err(|_| format!("bad lens block `{block}`"))?;
         let p = self.pane(pane).ok_or_else(|| format!("no pane {pane}"))?;
         let p = lock(&p);
         if !p.has_viewer(client) {
@@ -826,7 +837,11 @@ impl Daemon {
             cwd: b.cwd.clone(),
             raw: p.replica.lens_raw(n).unwrap_or_default().to_vec(),
             cols: b.cols,
-            status: if b.done { Some(b.status.unwrap_or(-1)) } else { None },
+            status: if b.done {
+                Some(b.status.unwrap_or(-1))
+            } else {
+                None
+            },
         };
         if let Some(link) = &p.plugin {
             let _ = link.tx.send(Cmd::LensEvent(
@@ -888,7 +903,11 @@ impl Daemon {
     /// | `block-retry TARGET` | Retry on a "Could not start the block" card |
     /// | `lens TARGET` | the pane's command blocks and their views |
     /// | `pane-list` | what `tern.pane.list` returns |
-    pub(crate) fn plugin_command(self: &Arc<Self>, cmd: &str, args: &[String]) -> Result<Value, String> {
+    pub(crate) fn plugin_command(
+        self: &Arc<Self>,
+        cmd: &str,
+        args: &[String],
+    ) -> Result<Value, String> {
         match (cmd, args.first().map(String::as_str)) {
             ("plugin", Some("list")) => Ok(self.plugins.catalog_json()),
             ("plugin", Some("reload")) => tokio::task::block_in_place(|| Plugins::reload(self))
@@ -909,10 +928,13 @@ impl Daemon {
                     .blocks()
                     .into_iter()
                     .map(|(pane, r)| {
-                        (pane.to_string(), json!({
-                            "kind": r.kind, "args": r.args, "saved": r.saved, "cwd": r.cwd,
-                            "cols": r.cols, "rows": r.rows,
-                        }))
+                        (
+                            pane.to_string(),
+                            json!({
+                                "kind": r.kind, "args": r.args, "saved": r.saved, "cwd": r.cwd,
+                                "cols": r.cols, "rows": r.rows,
+                            }),
+                        )
                     })
                     .collect();
                 Ok(json!(blocks))
@@ -945,7 +967,11 @@ impl Daemon {
         let mut size = None;
         let mut it = words.iter();
         while let Some(w) = it.next() {
-            let mut value = |name: &str| it.next().cloned().ok_or_else(|| format!("{name} needs a value"));
+            let mut value = |name: &str| {
+                it.next()
+                    .cloned()
+                    .ok_or_else(|| format!("{name} needs a value"))
+            };
             match w.as_str() {
                 "--window" => window = Some(value("--window")?),
                 "--tab" => {
@@ -957,7 +983,9 @@ impl Daemon {
                     let s = value("--size")?;
                     size = Some(
                         s.split_once('x')
-                            .and_then(|(c, r)| Some((c.parse::<u16>().ok()?, r.parse::<u16>().ok()?)))
+                            .and_then(|(c, r)| {
+                                Some((c.parse::<u16>().ok()?, r.parse::<u16>().ok()?))
+                            })
                             .filter(|(c, r)| *c > 0 && *r > 0)
                             .ok_or_else(|| format!("bad --size `{s}`"))?,
                     );
@@ -968,10 +996,13 @@ impl Daemon {
                     let side = word.and_then(|w| crate::commands::side(w)).ok_or_else(|| {
                         format!("--split: expected right, down, left or up, got {word:?}")
                     })?;
-                    let pane: PaneId = target.parse().map_err(|_| format!("bad pane `{target}`"))?;
+                    let pane: PaneId =
+                        target.parse().map_err(|_| format!("bad pane `{target}`"))?;
                     split = Some((pane, side));
                 }
-                other if other.starts_with("--") => return Err(format!("block: unknown flag {other}")),
+                other if other.starts_with("--") => {
+                    return Err(format!("block: unknown flag {other}"));
+                }
                 other if kind.is_none() => kind = Some(other.to_owned()),
                 other => return Err(format!("block: unexpected `{other}`")),
             }
@@ -1016,13 +1047,20 @@ impl Pane {
             let host = match event {
                 auk_replica::Event::Mark(auk_term::Mark::CommandStart { cmdline, typed }) => {
                     changed = true;
-                    let line = typed.clone().or_else(|| cmdline.clone()).unwrap_or_default();
+                    let line = typed
+                        .clone()
+                        .or_else(|| cmdline.clone())
+                        .unwrap_or_default();
                     let cwd = self
                         .replica
                         .cwd()
                         .and_then(osc7_path)
                         .map(|p| p.to_string_lossy().into_owned());
-                    Some(HostEvent::CommandStarted { pane: id, line, cwd })
+                    Some(HostEvent::CommandStarted {
+                        pane: id,
+                        line,
+                        cwd,
+                    })
                 }
                 auk_replica::Event::Mark(auk_term::Mark::CommandEnd { status }) => {
                     changed = true;
@@ -1065,7 +1103,8 @@ impl Pane {
             }
         }
         // A block pane's resize reaches its worker.
-        if let (Some(Record::Resize { cols, rows }), PaneKind::Block { .. }) = (record, &self.kind) {
+        if let (Some(Record::Resize { cols, rows }), PaneKind::Block { .. }) = (record, &self.kind)
+        {
             let _ = link.tx.send(Cmd::BlockResize(id, *cols, *rows));
         }
         let notes = self.replica.take_lens_notes();

@@ -34,9 +34,9 @@ pub mod api;
 #[cfg(feature = "runtime")]
 mod blocks;
 #[cfg(feature = "runtime")]
-pub mod css_url;
-#[cfg(feature = "runtime")]
 mod budget;
+#[cfg(feature = "runtime")]
+pub mod css_url;
 #[cfg(feature = "runtime")]
 pub mod diagnostics;
 #[cfg(feature = "runtime")]

@@ -142,7 +142,8 @@ impl Master {
 
     /// Marks bytes read but not yet fed (see [`Master::output_pending`]).
     pub fn set_in_flight(&self, on: bool) {
-        self.in_flight.store(on, std::sync::atomic::Ordering::Release);
+        self.in_flight
+            .store(on, std::sync::atomic::Ordering::Release);
     }
 }
 
@@ -225,7 +226,10 @@ mod tests {
         read_until(&rx, &mut out, "done");
         assert!(out.contains("33 91"), "{out}");
         // macOS names ptys /dev/ttysN; Linux /dev/pts/N.
-        assert!(out.contains("/dev/tty") || out.contains("/dev/pts/"), "{out}");
+        assert!(
+            out.contains("/dev/tty") || out.contains("/dev/pts/"),
+            "{out}"
+        );
         // The child leads its own process group (setsid).
         assert!(out.contains(&pid.to_string()), "{out}");
         assert!(child.wait().await.unwrap().success());
@@ -247,12 +251,18 @@ mod tests {
         // A password prompt (`read -s`): canonical with echo off is refused.
         read_until(&rx, &mut out, "secret");
         let mode = master.tty_mode().unwrap();
-        assert!(mode.canonical && !mode.echo && !mode.accepts_tsp_input(), "{mode:?}");
+        assert!(
+            mode.canonical && !mode.echo && !mode.accepts_tsp_input(),
+            "{mode:?}"
+        );
         rustix::io::write(&*master, b"\n").unwrap();
         // Non-canonical with echo on is refused too.
         read_until(&rx, &mut out, "half");
         let mode = master.tty_mode().unwrap();
-        assert!(!mode.canonical && mode.echo && !mode.accepts_tsp_input(), "{mode:?}");
+        assert!(
+            !mode.canonical && mode.echo && !mode.accepts_tsp_input(),
+            "{mode:?}"
+        );
         rustix::io::write(&*master, b"\n").unwrap();
         read_until(&rx, &mut out, "raw");
         let mode = master.tty_mode().unwrap();

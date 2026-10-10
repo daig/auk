@@ -37,7 +37,9 @@ fn stream() -> Vec<Vec<u8>> {
     for i in 0..30 {
         items.push(format!("  # aws_thing.r{i} will be created\r\n").into_bytes());
     }
-    items.push(b"Plan: 30 to add\r\n\x1b]133;D;0\x07\x1b]7;file://h/tmp\x07\x1b]133;A\x07$ ".to_vec());
+    items.push(
+        b"Plan: 30 to add\r\n\x1b]133;D;0\x07\x1b]7;file://h/tmp\x07\x1b]133;A\x07$ ".to_vec(),
+    );
     items
 }
 
@@ -88,14 +90,19 @@ fn every_replica_claims_and_captures_alike() {
     assert_eq!(blocks.len(), 1);
     let b = &blocks[0];
     assert_eq!((b.plugin.as_str(), b.lens.as_str()), ("tf", "plan"));
-    assert_eq!((b.line.as_str(), b.typed.as_str()), ("terraform plan", "tp"));
+    assert_eq!(
+        (b.line.as_str(), b.typed.as_str()),
+        ("terraform plan", "tp")
+    );
     assert_eq!((b.done, b.status), (true, Some(0)));
     assert!(String::from_utf8_lossy(&b.raw).contains("aws_thing.r29"));
     assert_eq!(late.lens_blocks()[0].raw, b.raw);
 
     // Notes: open, lines, finish; all 31 output lines reached the host.
     let notes = daemon.take_lens_notes();
-    assert!(matches!(&notes[0], LensNote::Open { block: 0, run, .. } if run.program == "terraform"));
+    assert!(
+        matches!(&notes[0], LensNote::Open { block: 0, run, .. } if run.program == "terraform")
+    );
     let lines: Vec<String> = notes
         .iter()
         .filter_map(|n| match n {
@@ -106,18 +113,36 @@ fn every_replica_claims_and_captures_alike() {
         .collect();
     assert_eq!(lines.len(), 31, "{lines:?}");
     assert_eq!(lines[30], "Plan: 30 to add");
-    assert!(matches!(notes.last(), Some(LensNote::Finish { block: 0, status: Some(0) })));
-    assert!(follower.take_lens_notes().is_empty(), "followers tell nobody");
+    assert!(matches!(
+        notes.last(),
+        Some(LensNote::Finish {
+            block: 0,
+            status: Some(0)
+        })
+    ));
+    assert!(
+        follower.take_lens_notes().is_empty(),
+        "followers tell nobody"
+    );
 
     // The duration and the view: the first is stream state, the second a side message.
-    let took = Record::LensTook { block: 0, took_ms: 1234 };
+    let took = Record::LensTook {
+        block: 0,
+        took_ms: 1234,
+    };
     let (seq, _) = daemon.push(Item::Record(&took));
     follower.apply(seq, Item::Record(&took)).unwrap();
     assert_eq!(follower.lens_blocks()[0].took_ms, Some(1234));
     let before = hex(&follower);
-    assert!(follower.set_lens_view(0, Some(serde_json::json!({"k": "text", "p": {"text": "hi"}}))));
+    assert!(follower.set_lens_view(
+        0,
+        Some(serde_json::json!({"k": "text", "p": {"text": "hi"}}))
+    ));
     assert_eq!(hex(&follower), before, "views aren't hashed");
-    assert!(follower.snapshot().lens.blocks[0].view.is_some(), "but they travel in snapshots");
+    assert!(
+        follower.snapshot().lens.blocks[0].view.is_some(),
+        "but they travel in snapshots"
+    );
     assert!(!follower.set_lens_view(9, None));
 }
 
@@ -127,14 +152,20 @@ fn unclaimed_and_interactive_commands_stay_in_the_grid() {
     r.push(Item::Record(&Record::Catalog {
         catalog: claim_catalog(&catalog()),
     }));
-    r.push(Item::Output(b"\x1b]133;C;cmdline_url=ls\x07file.txt\r\n\x1b]133;D;0\x07"));
+    r.push(Item::Output(
+        b"\x1b]133;C;cmdline_url=ls\x07file.txt\r\n\x1b]133;D;0\x07",
+    ));
     assert!(r.lens_blocks().is_empty());
     assert!(r.text().contains("file.txt"));
     // A pipeline is never lensed.
-    r.push(Item::Output(b"\x1b]133;C;cmdline_url=terraform%20plan%20%7C%20cat\x07piped\r\n\x1b]133;D;0\x07"));
+    r.push(Item::Output(
+        b"\x1b]133;C;cmdline_url=terraform%20plan%20%7C%20cat\x07piped\r\n\x1b]133;D;0\x07",
+    ));
     assert!(r.lens_blocks().is_empty());
     // A claimed command that turns interactive: everything captured is replayed into the grid.
-    r.push(Item::Output(b"\x1b]133;C;cmdline_url=terraform%20plan\x07before\r\n"));
+    r.push(Item::Output(
+        b"\x1b]133;C;cmdline_url=terraform%20plan\x07before\r\n",
+    ));
     assert_eq!(r.lens_running(), Some(0));
     r.push(Item::Output(b"\x1b[6n"));
     assert_eq!(r.lens_running(), None);
@@ -153,7 +184,9 @@ fn unclaimed_and_interactive_commands_stay_in_the_grid() {
         ..Settings::default()
     };
     r.push(Item::Record(&Record::Settings { settings: off }));
-    r.push(Item::Output(b"\x1b]133;C;cmdline_url=terraform%20plan\x07x\r\n\x1b]133;D;0\x07"));
+    r.push(Item::Output(
+        b"\x1b]133;C;cmdline_url=terraform%20plan\x07x\r\n\x1b]133;D;0\x07",
+    ));
     assert!(r.lens_blocks().is_empty());
 }
 
@@ -163,7 +196,9 @@ fn an_exit_ends_a_running_capture_and_cleared_scrollback_drops_blocks() {
     r.push(Item::Record(&Record::Catalog {
         catalog: claim_catalog(&catalog()),
     }));
-    r.push(Item::Output(b"\x1b]133;C;cmdline_url=terraform%20plan\x07partial\r\n"));
+    r.push(Item::Output(
+        b"\x1b]133;C;cmdline_url=terraform%20plan\x07partial\r\n",
+    ));
     r.push(Item::Record(&Record::Exit { status: 1 }));
     let b = &r.lens_blocks()[0];
     assert!(b.done && b.status.is_none());
@@ -180,7 +215,9 @@ fn an_exit_ends_a_running_capture_and_cleared_scrollback_drops_blocks() {
 fn claimed_command(n: usize) -> Vec<u8> {
     let mut out = START.to_vec();
     for i in 0..n {
-        out.extend(format!("  # aws_thing.r{i:02} will be created, with a long tail of text\r\n").bytes());
+        out.extend(
+            format!("  # aws_thing.r{i:02} will be created, with a long tail of text\r\n").bytes(),
+        );
     }
     out.extend_from_slice(b"\x1b]133;D;0\x07\x1b]133;A\x07$ ");
     out
@@ -213,7 +250,11 @@ fn finished_command_blocks_share_the_retention_budget_and_go_oldest_first() {
     let docs = probe.tsp().retention_cost();
     probe.push(Item::Output(&claimed_command(10)));
     let block = probe.tsp().retention_cost() - docs;
-    assert_eq!(block, probe.lens_blocks()[0].cost(), "finished blocks count");
+    assert_eq!(
+        block,
+        probe.lens_blocks()[0].cost(),
+        "finished blocks count"
+    );
     probe.push(Item::Output(&closed_surface("s1")));
     let surface = probe.tsp().retention_cost() - docs - block;
     assert!(block > 500 && surface > 300, "{block} {surface}");
@@ -231,9 +272,13 @@ fn finished_command_blocks_share_the_retention_budget_and_go_oldest_first() {
         assert_eq!(hex(daemon), hex(client));
     }
     let (d, c) = (&mut daemon, &mut client);
-    feed(d, c, Item::Record(&Record::Catalog {
-        catalog: claim_catalog(&catalog()),
-    }));
+    feed(
+        d,
+        c,
+        Item::Record(&Record::Catalog {
+            catalog: claim_catalog(&catalog()),
+        }),
+    );
     feed(d, c, Item::Output(&claimed_command(10))); // block 0
     feed(d, c, Item::Output(&closed_surface("s1")));
     assert_eq!(daemon.lens_blocks().len(), 1);
@@ -243,7 +288,11 @@ fn finished_command_blocks_share_the_retention_budget_and_go_oldest_first() {
     feed(&mut daemon, &mut client, Item::Output(&claimed_command(10))); // block 1
     let ids: Vec<u64> = daemon.lens_blocks().iter().map(|b| b.id).collect();
     assert_eq!(ids, [1], "block 0 was the oldest");
-    assert_eq!(daemon.tsp().surfaces().len(), 1, "the surface is younger than block 0");
+    assert_eq!(
+        daemon.tsp().surfaces().len(),
+        1,
+        "the surface is younger than block 0"
+    );
     assert!(daemon.lens_raw(0).is_none(), "an evicted block is gone");
 
     // A replica built from a snapshot here weighs the same blocks from the start.

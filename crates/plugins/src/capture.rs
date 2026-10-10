@@ -81,7 +81,13 @@ pub struct Capture {
 impl Capture {
     /// A capture at `cols` columns (the pane's width when the command started).
     pub fn new(cols: u16) -> Self {
-        let mut term = Terminal::new(cols.max(2), SCRATCH_ROWS, Config { scrollback: STEP + 16 });
+        let mut term = Terminal::new(
+            cols.max(2),
+            SCRATCH_ROWS,
+            Config {
+                scrollback: STEP + 16,
+            },
+        );
         term.set_accept_anchor_sequences(false);
         Capture {
             term,
@@ -271,7 +277,10 @@ impl Capture {
         let mut last: Option<usize> = None;
         for r in 0..rows {
             if let Some(row) = self.term.line(history + r)
-                && row.cells.iter().any(|c| !c.text.is_empty() && c.text != " ")
+                && row
+                    .cells
+                    .iter()
+                    .any(|c| !c.text.is_empty() && c.text != " ")
             {
                 last = Some(r);
             }
@@ -313,7 +322,9 @@ fn is_cursor_report(replies: &[u8]) -> bool {
     while i + 1 < replies.len() {
         if replies[i] == 0x1b && replies[i + 1] == b'[' {
             let mut j = i + 2;
-            while j < replies.len() && (replies[j].is_ascii_digit() || replies[j] == b';' || replies[j] == b'?') {
+            while j < replies.len()
+                && (replies[j].is_ascii_digit() || replies[j] == b';' || replies[j] == b'?')
+            {
                 j += 1;
             }
             if replies.get(j) == Some(&b'R') {
@@ -333,7 +344,11 @@ fn append_row(term: &Terminal, row: &Row, line: &mut LensLine) {
         if cell.flags.has(Flags::SPACER) || cell.flags.has(Flags::LEADING_SPACER) {
             continue;
         }
-        let text = if cell.text.is_empty() { " " } else { cell.text.as_str() };
+        let text = if cell.text.is_empty() {
+            " "
+        } else {
+            cell.text.as_str()
+        };
         let from = line.text.len() + 1;
         line.text.push_str(text);
         let to = line.text.len();
@@ -377,7 +392,10 @@ mod tests {
         let mut c = Capture::new(20);
         let mut got = Vec::new();
         for i in 0..10 {
-            got.extend(c.feed(format!("line {i}\r\n").as_bytes()).expect("no abort"));
+            got.extend(
+                c.feed(format!("line {i}\r\n").as_bytes())
+                    .expect("no abort"),
+            );
         }
         // 10 lines and the cursor on an 8-row screen: three rows scrolled off.
         assert_eq!(texts(&got), ["line 0", "line 1", "line 2"]);
@@ -402,7 +420,8 @@ mod tests {
     #[test]
     fn links_are_byte_offsets() {
         let mut c = Capture::new(40);
-        c.feed(b"see \x1b]8;;https://x.test\x1b\\h\xc3\xa9re\x1b]8;;\x1b\\ ok\r\n").expect("ok");
+        c.feed(b"see \x1b]8;;https://x.test\x1b\\h\xc3\xa9re\x1b]8;;\x1b\\ ok\r\n")
+            .expect("ok");
         let lines = c.finish();
         assert_eq!(lines[0].text, "see h\u{e9}re ok");
         assert_eq!(

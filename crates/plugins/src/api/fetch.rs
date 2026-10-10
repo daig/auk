@@ -112,7 +112,9 @@ fn prepare(url: &str, opts: Option<&Table>) -> mlua::Result<Prepared> {
     }
     let method = ureq::http::Method::from_bytes(method.as_bytes()).map_err(|e| bad(&e))?;
     let mut builder = ureq::http::Request::builder().method(method).uri(url);
-    let has_agent = headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("user-agent"));
+    let has_agent = headers
+        .iter()
+        .any(|(k, _)| k.eq_ignore_ascii_case("user-agent"));
     for (k, v) in &headers {
         let name = ureq::http::HeaderName::from_bytes(k.as_bytes()).map_err(|e| bad(&e))?;
         let value = ureq::http::HeaderValue::from_str(v).map_err(|e| bad(&e))?;
@@ -207,14 +209,14 @@ pub(super) fn fetch(
 ) -> mlua::Result<Value> {
     const BAD: &str = "tern.fetch(url, opts?, cb): bad arguments";
     let args: Vec<Value> = args.into_iter().collect();
-    let (url, opts, cb): (mlua::LuaString, Option<Table>, Option<Function>) = match args.as_slice() {
+    let (url, opts, cb): (mlua::LuaString, Option<Table>, Option<Function>) = match args.as_slice()
+    {
         [Value::String(u)] | [Value::String(u), Value::Nil] => (u.clone(), None, None),
         [Value::String(u), Value::Table(o)] | [Value::String(u), Value::Table(o), Value::Nil] => {
             (u.clone(), Some(o.clone()), None)
         }
-        [Value::String(u), Value::Function(f)] | [Value::String(u), Value::Nil, Value::Function(f)] => {
-            (u.clone(), None, Some(f.clone()))
-        }
+        [Value::String(u), Value::Function(f)]
+        | [Value::String(u), Value::Nil, Value::Function(f)] => (u.clone(), None, Some(f.clone())),
         [Value::String(u), Value::Table(o), Value::Function(f)] => {
             (u.clone(), Some(o.clone()), Some(f.clone()))
         }

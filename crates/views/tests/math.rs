@@ -650,7 +650,12 @@ fn display_math_amid_text_is_a_span_and_alone_a_div() {
     assert_eq!(h.attr(block[0], "data-tex").as_deref(), Some("c+d"));
     // Drawn as a line of its own, centered like the block.
     let st = h.doc.computed_style(amid[0]).unwrap();
-    assert_eq!(format!("{:?}", st.display).to_lowercase().contains("block"), true, "{:?}", st.display);
+    assert_eq!(
+        format!("{:?}", st.display).to_lowercase().contains("block"),
+        true,
+        "{:?}",
+        st.display
+    );
 }
 
 /// A lone `$` (a price) doesn't swallow a `\(…\)` after it: only `$…$` as pulldown-cmark reads
@@ -679,5 +684,9 @@ fn a_formula_too_wide_to_draw_draws_coarser() {
     let f = math::typeset_uncached(&wide, false, 40).expect("drawn, not refused");
     assert!(f.content.data.width <= math::MAX_SIDE && f.content.data.height <= math::MAX_SIDE);
     let narrow = math::typeset_uncached("xx", false, 40).unwrap();
-    assert!(f.width > 200.0 * narrow.width / 2.0 * 0.9, "its size in em is kept: {}", f.width);
+    assert!(
+        f.width > 200.0 * narrow.width / 2.0 * 0.9,
+        "its size in em is kept: {}",
+        f.width
+    );
 }

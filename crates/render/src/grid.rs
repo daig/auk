@@ -343,12 +343,12 @@ impl GridRenderer {
         let ch = self.metrics.cell_height as f32;
         let rows = usize::from(self.rows).min(MAX_SLOT_ROWS);
         let table: Vec<[f32; 2]> = (0..rows)
-            .map(|r| {
-                match self.custom_slots.as_ref().and_then(|s| s.get(r)) {
+            .map(
+                |r| match self.custom_slots.as_ref().and_then(|s| s.get(r)) {
                     Some(slot) => [slot.top, slot.height],
                     None => [r as f32 * ch, ch],
-                }
-            })
+                },
+            )
             .collect();
         if table != self.uploaded_slots {
             gpu.queue

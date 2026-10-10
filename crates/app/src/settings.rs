@@ -292,6 +292,9 @@ mod tests {
     fn reads_the_fold_tool_calls_setting() {
         assert!(!Settings::default().fold_work);
         assert!(Settings::from_json(&json!({"fold_work": true})).fold_work);
-        assert_eq!(Settings::from_json(&json!({"fold_work": 1})).problems.len(), 1);
+        assert_eq!(
+            Settings::from_json(&json!({"fold_work": 1})).problems.len(),
+            1
+        );
     }
 }

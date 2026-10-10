@@ -224,7 +224,10 @@ impl PaneSurfaces {
 
     /// Whether a flow block is a command block (and which).
     fn lens_block(&self, b: &SurfaceBlock) -> Option<u64> {
-        let id: u64 = b.sf.strip_prefix(crate::lenses::LENS_PREFIX)?.parse().ok()?;
+        let id: u64 =
+            b.sf.strip_prefix(crate::lenses::LENS_PREFIX)?
+                .parse()
+                .ok()?;
         let l = self.lens.as_ref()?;
         (l.element(&format!("lens{id}")) == Some(b.el)).then_some(id)
     }

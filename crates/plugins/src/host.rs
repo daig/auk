@@ -496,7 +496,13 @@ impl PluginHost {
     /// An event from a lens view. When the worker lost the capture's state it is rebuilt from
     /// `record`, provided the current globs still claim the command; otherwise the event is
     /// dropped.
-    pub fn lens_event(&mut self, block: LensId, pane: PaneId, event: Map<String, Json>, record: LensRecord) {
+    pub fn lens_event(
+        &mut self,
+        block: LensId,
+        pane: PaneId,
+        event: Map<String, Json>,
+        record: LensRecord,
+    ) {
         let claim = self.catalog.claim_command(&record.line);
         let owner = self.lens_owners.get(&block).map(|(p, _)| p.clone());
         let plugin = match (&owner, &claim) {

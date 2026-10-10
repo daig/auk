@@ -54,7 +54,10 @@ fn ac01_shell_survives_window_exit_and_new_window_shows_scrollback() {
     // A new window shows the scrollback through snapshot replay, equal to the daemon's state.
     let second = env.start_headless("second", &[]);
     wait_for("the second window's replica to match the daemon's", || {
-        second.hash(pane).filter(|h| *h == env.daemon_hash(pane)).map(drop)
+        second
+            .hash(pane)
+            .filter(|h| *h == env.daemon_hash(pane))
+            .map(drop)
     });
     assert!(second.capture(pane, true).contains("marker-42"));
 
@@ -205,7 +208,9 @@ fn in_layout(env: &TestEnv, pane: u64) -> bool {
 
 /// Whether a split tree's JSON names `pane`.
 fn tree_has(node: &Value, pane: u64) -> bool {
-    node["pane"] == pane || tree_has_child(node, "first", pane) || tree_has_child(node, "second", pane)
+    node["pane"] == pane
+        || tree_has_child(node, "first", pane)
+        || tree_has_child(node, "second", pane)
 }
 
 fn tree_has_child(node: &Value, side: &str, pane: u64) -> bool {
@@ -253,12 +258,22 @@ fn a_command_pane_closes_when_its_command_exits_0_unless_kept_open() {
     wait_for("the finished pane to leave the layout", || {
         (!in_layout(&env, ok)).then_some(())
     });
-    assert!(env.daemon(&format!("capture {ok}"))["text"]
-        .as_str()
-        .unwrap()
-        .contains("done-42"));
+    assert!(
+        env.daemon(&format!("capture {ok}"))["text"]
+            .as_str()
+            .unwrap()
+            .contains("done-42")
+    );
     // Tern's CLI can keep it open (`--keep-open`), through the CLI verb too.
-    let out = env.cli(&["new", "tab", "--keep-open", "--cwd", &env.home.to_string_lossy(), "--", "true"]);
+    let out = env.cli(&[
+        "new",
+        "tab",
+        "--keep-open",
+        "--cwd",
+        &env.home.to_string_lossy(),
+        "--",
+        "true",
+    ]);
     assert!(out.status.success(), "{out:?}");
     let kept: u64 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
     assert_eq!(env.wait(kept, "exit")["exit"], 0);
@@ -334,7 +349,10 @@ fn without_auk_daemon_socket_the_daemon_listens_in_the_settings_dir() {
         auk_conformance::harness::ping(&control).then_some(())
     });
     assert!(socket.exists());
-    assert!(!env.socket.exists(), "nothing listens on the test's own socket");
+    assert!(
+        !env.socket.exists(),
+        "nothing listens on the test's own socket"
+    );
     // Clients find it the same way.
     let out = env
         .command()
@@ -372,7 +390,10 @@ fn with_xdg_runtime_dir_the_daemon_listens_in_its_auk_dir() {
         !env.state.join("daemon.sock").exists(),
         "the daemon listens in the settings dir too"
     );
-    assert!(!env.socket.exists(), "nothing listens on the test's own socket");
+    assert!(
+        !env.socket.exists(),
+        "nothing listens on the test's own socket"
+    );
     // Clients find it the same way, and its panes point `auk` back at it, with their pane
     // sockets beside it.
     let client = || {
@@ -392,12 +413,23 @@ fn with_xdg_runtime_dir_the_daemon_listens_in_its_auk_dir() {
     assert!(out.status.success(), "{out:?}");
     let pane: u64 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
     let waited = client()
-        .args(["wait", &pane.to_string(), "--until", "prompt", "--timeout", "20"])
+        .args([
+            "wait",
+            &pane.to_string(),
+            "--until",
+            "prompt",
+            "--timeout",
+            "20",
+        ])
         .output()
         .unwrap();
     assert!(waited.status.success(), "{waited:?}");
     let ran = client()
-        .args(["run", &pane.to_string(), "print -r -- \"[$AUK_DAEMON_SOCKET|$AUK_PANE_SOCKET]\""])
+        .args([
+            "run",
+            &pane.to_string(),
+            "print -r -- \"[$AUK_DAEMON_SOCKET|$AUK_PANE_SOCKET]\"",
+        ])
         .output()
         .unwrap();
     assert!(ran.status.success(), "{ran:?}");
@@ -475,7 +507,10 @@ fn panes_start_from_a_fresh_login_environment_not_the_daemons() {
         .lines()
         .find(|l| l.starts_with("[unset|") || l.starts_with("[leaked|"))
         .unwrap_or_else(|| panic!("no line in\n{screen}"));
-    assert!(line.starts_with("[unset|"), "the daemon's variable leaked: {line}");
+    assert!(
+        line.starts_with("[unset|"),
+        "the daemon's variable leaked: {line}"
+    );
     assert!(
         !line.contains("daemon-only-bin"),
         "the daemon's PATH leaked: {line}"
@@ -739,7 +774,10 @@ fn ac10_after_kill9_of_the_daemon_panes_come_back_over_their_scrollback_with_pas
     // A window attaching now gets the restored state.
     let window = env.start_headless("w", &[]);
     wait_for("the window's replica to match the daemon's", || {
-        window.hash(pane).filter(|h| *h == env.daemon_hash(pane)).map(drop)
+        window
+            .hash(pane)
+            .filter(|h| *h == env.daemon_hash(pane))
+            .map(drop)
     });
     assert!(window.errors().is_empty(), "{:?}", window.errors());
 }
@@ -955,7 +993,9 @@ fn a_restored_block_restarts_at_its_last_size_on_a_blank_screen_and_needs_its_ty
         .as_u64()
         .expect("a pane");
     wait_for("the block's first view", || {
-        block_text(&env, pane).contains("size 90x25 n=0").then_some(())
+        block_text(&env, pane)
+            .contains("size 90x25 n=0")
+            .then_some(())
     });
     for _ in 0..3 {
         env.daemon(&format!("send {pane} text k"));
@@ -968,7 +1008,9 @@ fn a_restored_block_restarts_at_its_last_size_on_a_blank_screen_and_needs_its_ty
     // A size a window gave it later is the one it keeps.
     env.daemon(&format!("resize {pane} 70 18"));
     wait_for("the block's new size", || {
-        block_text(&env, pane).contains("size 70x18 n=3").then_some(())
+        block_text(&env, pane)
+            .contains("size 70x18 n=3")
+            .then_some(())
     });
     let (_, seq_before) = env.daemon_hash(pane);
     wait_checkpoint(&env, &[pane]);
@@ -978,15 +1020,24 @@ fn a_restored_block_restarts_at_its_last_size_on_a_blank_screen_and_needs_its_ty
     // Back from its save, at its last size, on a blank screen: a new stream with one live
     // surface, not the old screen.
     wait_for("the restored block", || {
-        block_text(&env, pane).contains("size 70x18 n=3").then_some(())
+        block_text(&env, pane)
+            .contains("size 70x18 n=3")
+            .then_some(())
     });
     let info = env.pane_info(pane);
-    assert_eq!((info["cols"].as_u64(), info["rows"].as_u64()), (Some(70), Some(18)), "{info}");
+    assert_eq!(
+        (info["cols"].as_u64(), info["rows"].as_u64()),
+        (Some(70), Some(18)),
+        "{info}"
+    );
     let tsp = env.daemon(&format!("tsp {pane}"));
     let surfaces = tsp["surfaces"].as_array().unwrap();
     assert_eq!(surfaces.len(), 1, "only the new run's surface: {tsp:#}");
     let (_, seq_after) = env.daemon_hash(pane);
-    assert!(seq_after < seq_before, "a fresh stream: {seq_after} vs {seq_before}");
+    assert!(
+        seq_after < seq_before,
+        "a fresh stream: {seq_after} vs {seq_before}"
+    );
     wait_checkpoint(&env, &[pane]);
 
     // With its plugin disabled (`plugins_disabled` in the settings file, §9.1), no Ready plugin
@@ -1002,10 +1053,19 @@ fn a_restored_block_restarts_at_its_last_size_on_a_blank_screen_and_needs_its_ty
     assert_eq!(catalog["plugins"][0]["status"], "disabled", "{catalog}");
     let ls = env.daemon("ls");
     assert!(
-        !ls["panes"].as_array().unwrap().iter().any(|p| p["id"] == pane),
+        !ls["panes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["id"] == pane),
         "{ls}"
     );
-    assert!(ls["layout"].get("main").is_none_or(|w| !w.to_string().contains(&format!("\"pane\":{pane}"))), "{ls}");
+    assert!(
+        ls["layout"]
+            .get("main")
+            .is_none_or(|w| !w.to_string().contains(&format!("\"pane\":{pane}"))),
+        "{ls}"
+    );
 }
 
 #[test]
@@ -1034,24 +1094,41 @@ fn a_block_survives_a_daemon_restart_with_the_same_args_and_its_save() {
     let daemon = env.start_daemon();
     // Opened through the CLI with args, one of them with a space.
     let out = env.cli(&["block", "argsy.b", "alpha", "two words", "-x"]);
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    let pane: u64 = String::from_utf8_lossy(&out.stdout).trim().parse().expect("a block pane id");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let pane: u64 = String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse()
+        .expect("a block pane id");
     wait_for("the block's first view", || {
-        block_text(&env, pane).contains("args=[alpha|two words|-x] n=3 inits=1").then_some(())
+        block_text(&env, pane)
+            .contains("args=[alpha|two words|-x] n=3 inits=1")
+            .then_some(())
     });
     let kind = env.pane_info(pane)["kind"].clone();
     assert_eq!(kind["args"], json!(["alpha", "two words", "-x"]), "{kind}");
-    wait_for("the first save", || (env.pane_info(pane)["kind"]["saved"] == r#"{"inits":1}"#).then_some(()));
+    wait_for("the first save", || {
+        (env.pane_info(pane)["kind"]["saved"] == r#"{"inits":1}"#).then_some(())
+    });
     wait_checkpoint(&env, &[pane]);
 
     env.kill9(daemon);
     env.start_daemon();
     // The same pane id, restarted with the same args and its last save.
     wait_for("the restored block", || {
-        block_text(&env, pane).contains("args=[alpha|two words|-x] n=3 inits=2").then_some(())
+        block_text(&env, pane)
+            .contains("args=[alpha|two words|-x] n=3 inits=2")
+            .then_some(())
     });
     let kind = env.pane_info(pane)["kind"].clone();
-    assert_eq!((&kind["block"], &kind["args"]), (&json!("argsy.b"), &json!(["alpha", "two words", "-x"])), "{kind}");
+    assert_eq!(
+        (&kind["block"], &kind["args"]),
+        (&json!("argsy.b"), &json!(["alpha", "two words", "-x"])),
+        "{kind}"
+    );
 }
 
 #[test]
@@ -1061,10 +1138,14 @@ fn command_blocks_keep_their_line_cwd_raw_width_status_and_view_across_a_restart
         .join("../../third_party/tern-sdk/plugins/examples/terraform");
     assert!(examples.is_dir(), "the SDK example terraform is missing");
     copy_dir(&examples, &env.state.join("plugins/terraform"));
-    let plan = Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugins/tests/fixtures/terraform-plan.txt");
+    let plan =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugins/tests/fixtures/terraform-plan.txt");
     assert!(plan.is_file(), "the plan fixture is missing");
     let tf = env.root.join("bin/terraform");
-    executable(&tf, &format!("#!/bin/sh\ncat '{}'\nexit 2\n", plan.display()));
+    executable(
+        &tf,
+        &format!("#!/bin/sh\ncat '{}'\nexit 2\n", plan.display()),
+    );
     let daemon = env.start_daemon();
     let pane = env.new_pane(&["--size", "110x30"]);
     env.wait(pane, "prompt");
@@ -1084,7 +1165,9 @@ fn command_blocks_keep_their_line_cwd_raw_width_status_and_view_across_a_restart
     env.start_daemon();
     env.wait(pane, "prompt");
     let after = env.daemon(&format!("lens {pane}"))["blocks"][0].clone();
-    for key in ["line", "typed", "cwd", "raw", "cols", "status", "done", "plugin", "lens", "view"] {
+    for key in [
+        "line", "typed", "cwd", "raw", "cols", "status", "done", "plugin", "lens", "view",
+    ] {
         assert_eq!(after[key], before[key], "{key}: {after:#}");
     }
     // The view stays visible: windows that attach get it with the snapshot.
@@ -1095,7 +1178,8 @@ fn command_blocks_keep_their_line_cwd_raw_width_status_and_view_across_a_restart
     });
     assert_eq!(seen, before["view"]);
     // The lens state behind it is rebuilt on the next event: the view's action still works.
-    let ev = json!({"ev": "action", "id": "n1", "act": "copy-address", "value": "aws_instance.old"});
+    let ev =
+        json!({"ev": "action", "id": "n1", "act": "copy-address", "value": "aws_instance.old"});
     window.request(&format!("event {pane} lens:0 {}", quote(&ev.to_string())));
     wait_for("the rehydrated lens's copy effect", || {
         window
@@ -1426,7 +1510,11 @@ fn drawn_picture(window: &auk_conformance::harness::Headless, pane: u64, id: &st
         && els[at + 1..]
             .iter()
             .take_while(|e| e["id"].is_null())
-            .any(|e| e["class"].as_str().is_some_and(|c| c.contains("sf-img-svg")))
+            .any(|e| {
+                e["class"]
+                    .as_str()
+                    .is_some_and(|c| c.contains("sf-img-svg"))
+            })
 }
 
 #[test]
@@ -1469,7 +1557,11 @@ fn a_blob_survives_a_daemon_restart_and_a_restored_surface_still_shows_it() {
     env.wait(pane, "prompt");
     let after = env.daemon(&format!("tsp {pane}"));
     let s = surface(&after, "pic").unwrap_or_else(|| panic!("pic missing: {after}"));
-    assert_eq!((&s["state"], &s["restored"]), (&json!("closed"), &json!(true)), "{s}");
+    assert_eq!(
+        (&s["state"], &s["restored"]),
+        (&json!("closed"), &json!(true)),
+        "{s}"
+    );
     assert_eq!(fs::read(&file).unwrap(), svg.as_bytes());
 
     // A window attaching now is sent the blob from disk and draws the picture, and showing it
@@ -1504,9 +1596,13 @@ fn a_daemon_whose_socket_is_deleted_stops_with_its_shells() {
     fs::remove_file(&env.socket).expect("delete the socket");
     // The daemon is this test's child, so once it exits it is a zombie until reaped.
     let gone = |pid: u32| {
-        let out = Command::new("/bin/ps").args(["-o", "stat=", "-p", &pid.to_string()]).output();
-        out.map(|o| String::from_utf8_lossy(&o.stdout).trim().is_empty() || o.stdout.starts_with(b"Z"))
-            .unwrap_or(false)
+        let out = Command::new("/bin/ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .output();
+        out.map(|o| {
+            String::from_utf8_lossy(&o.stdout).trim().is_empty() || o.stdout.starts_with(b"Z")
+        })
+        .unwrap_or(false)
     };
     wait_for("the daemon to stop", || gone(daemon).then_some(()));
     wait_for("its shell to end", || gone(shell).then_some(()));

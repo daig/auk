@@ -411,9 +411,8 @@ pub(crate) fn field(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
 
 /// Whether a field sits in omp's composer: it or an ancestor has an `omp.editor*` role.
 pub(crate) fn in_omp_editor(node: NodeRef) -> bool {
-    std::iter::successors(Some(node), |n| n.parent()).any(|n| {
-        str_prop(n.props(), "role").is_some_and(|r| r.starts_with("omp.editor"))
-    })
+    std::iter::successors(Some(node), |n| n.parent())
+        .any(|n| str_prop(n.props(), "role").is_some_and(|r| r.starts_with("omp.editor")))
 }
 
 /// Caret blink: only the focused field, steady under Reduce Motion, hidden or unfocused panes.

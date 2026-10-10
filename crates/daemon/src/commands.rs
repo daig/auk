@@ -534,7 +534,10 @@ impl Daemon {
                 text,
                 sub: None,
             },
-            "open" => Effect::Open { target: text, origin: None },
+            "open" => Effect::Open {
+                target: text,
+                origin: None,
+            },
             "copy" => Effect::Copy { text },
             other => return Err(format!("effect: unknown effect `{other}`")),
         };
@@ -706,7 +709,9 @@ impl Opts {
                     {
                         opts.flags.push((name.into(), String::new()))
                     }
-                    None if SWITCHES.contains(&name) => opts.flags.push((name.into(), String::new())),
+                    None if SWITCHES.contains(&name) => {
+                        opts.flags.push((name.into(), String::new()))
+                    }
                     None => {
                         let value = it.next().ok_or_else(|| format!("--{name} needs a value"))?;
                         opts.flags.push((name.into(), value.clone()));
@@ -845,8 +850,12 @@ mod tests {
         assert_eq!(o.take("cwd").as_deref(), Some("/tmp"));
         assert_eq!(o.size().unwrap(), Some((100, 30)));
         assert_eq!(o.command().as_deref(), Some("echo hi"));
-        let o = Opts::parse(&["--agent".to_owned(), "--keep-open".to_owned(), "tab".to_owned()])
-            .unwrap();
+        let o = Opts::parse(&[
+            "--agent".to_owned(),
+            "--keep-open".to_owned(),
+            "tab".to_owned(),
+        ])
+        .unwrap();
         assert!(o.switch("agent") && o.switch("keep-open") && !o.switch("cwd"));
         assert_eq!(o.positional, ["tab"]);
         assert!(Opts::parse(&["--cwd".to_owned()]).is_err());

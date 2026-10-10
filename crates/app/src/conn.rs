@@ -278,8 +278,8 @@ impl Connection {
             Target::Ssh(ssh) => (ssh.destination.clone(), Some(ssh.destination.clone())),
         };
         let hello = Hello::new(ClientKind::App, facts);
-        let (link, welcome, reader) = Link::connect(target, hello)
-            .map_err(|e| io::Error::other(format!("{name}: {e}")))?;
+        let (link, welcome, reader) =
+            Link::connect(target, hello).map_err(|e| io::Error::other(format!("{name}: {e}")))?;
         let shared = Shared {
             catalog: welcome.catalog.clone(),
             catalog_generation: 1,

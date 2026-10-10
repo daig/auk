@@ -292,7 +292,10 @@ fn every_t0_and_t1_kind_renders() {
         .chain(auk_tsp::T2_KINDS.iter().copied())
         .collect();
     let have: BTreeSet<&str> = advertised.iter().copied().collect();
-    assert_eq!(have, want, "the hello lists exactly the T0, T1 and drawn T2 kinds");
+    assert_eq!(
+        have, want,
+        "the hello lists exactly the T0, T1 and drawn T2 kinds"
+    );
     assert_eq!(advertised.len(), want.len(), "no duplicates");
 
     // A surface with a node of every kind.
@@ -308,7 +311,9 @@ fn every_t0_and_t1_kind_renders() {
     // The one error is the surface's deliberate unknown `el` tag (§7.7).
     assert_eq!(
         errors,
-        [serde_json::json!({"ev": "error", "sf": "s1", "id": "el2", "msg": "unknown el tag marquee"})],
+        [
+            serde_json::json!({"ev": "error", "sf": "s1", "id": "el2", "msg": "unknown el tag marquee"})
+        ],
         "the program got errors"
     );
     window.converge(&env, probe.pane);

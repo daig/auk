@@ -108,7 +108,8 @@ pub(super) fn install(lua: &Lua, tern: &Table, state: &Rc<ApiState>) -> mlua::Re
             }
             let title: String = def.get("title")?;
             let run: Function = def.get("run")?;
-            let icon = crate::icons::resolve(def.get::<Option<String>>("icon")?.as_deref()).to_owned();
+            let icon =
+                crate::icons::resolve(def.get::<Option<String>>("icon")?.as_deref()).to_owned();
             let keys: Vec<String> = def.get::<Option<Vec<String>>>("keys")?.unwrap_or_default();
             let command = CommandDef {
                 id: id.clone(),

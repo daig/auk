@@ -55,7 +55,11 @@ impl BlockCx {
 }
 
 fn text(v: &Value) -> String {
-    if v.is_nil() { String::new() } else { display(v) }
+    if v.is_nil() {
+        String::new()
+    } else {
+        display(v)
+    }
 }
 
 impl UserData for BlockCx {
@@ -76,7 +80,10 @@ impl UserData for BlockCx {
             Ok(())
         });
         methods.add_method("exit", |_, this, code: Option<f64>| {
-            #[allow(clippy::cast_possible_truncation, reason = "exit codes are small integers")]
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "exit codes are small integers"
+            )]
             this.request(BlockRequest::Exit(code.unwrap_or(0.0) as i32));
             Ok(())
         });
@@ -93,12 +100,15 @@ impl UserData for BlockCx {
             this.request(BlockRequest::Frame(list));
             Ok(())
         });
-        methods.add_method("blob", |_, this, (bytes, mime): (mlua::LuaString, String)| {
-            let bytes = bytes.as_bytes().to_vec();
-            let id = tern_sdk::wire::blob_id(&bytes);
-            this.request(BlockRequest::Blob { bytes, mime });
-            Ok(id)
-        });
+        methods.add_method(
+            "blob",
+            |_, this, (bytes, mime): (mlua::LuaString, String)| {
+                let bytes = bytes.as_bytes().to_vec();
+                let id = tern_sdk::wire::blob_id(&bytes);
+                this.request(BlockRequest::Blob { bytes, mime });
+                Ok(id)
+            },
+        );
         methods.add_method(
             "toast",
             |_, this, (level, message, sub): (Value, Value, Value)| {

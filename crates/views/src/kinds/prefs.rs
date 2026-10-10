@@ -564,7 +564,10 @@ pub(crate) fn prefs(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
             }
         }
         switches = std::mem::take(&mut memo.switches);
-        if let Some(sec) = memo.status_sec.filter(|&e| cx.dom.doc.try_node(e).is_some()) {
+        if let Some(sec) = memo
+            .status_sec
+            .filter(|&e| cx.dom.doc.try_node(e).is_some())
+        {
             cx.dom.doc.append_child(sec, preview);
         }
     } else {
@@ -715,7 +718,8 @@ pub(crate) fn prefs(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
                         sheet,
                     );
                     memo.targets.insert(rid.to_owned(), el);
-                    memo.rows.insert(rid.to_owned(), (el, list, row_sig(r, rid)));
+                    memo.rows
+                        .insert(rid.to_owned(), (el, list, row_sig(r, rid)));
                 }
             }
             if sid == Some("status-line") {
@@ -933,8 +937,10 @@ fn draw_row(
                             "pf-menu"
                         },
                     );
-                    cx.dom
-                        .set_style(menu, &format!("--pf-room: {}px", fmt_num(f64::from(menu_room(cx, sheet)))));
+                    cx.dom.set_style(
+                        menu,
+                        &format!("--pf-room: {}px", fmt_num(f64::from(menu_room(cx, sheet)))),
+                    );
                     cx.dom.attr(menu, "role", "listbox");
                     for o in &opts {
                         let v = str_prop(o, "value").unwrap_or("");
@@ -1300,8 +1306,16 @@ pub(crate) fn reorder_values(
     let (v, _) = order.remove(from);
     let to = order.iter().position(|(t, _)| t == target)?;
     order.insert(if after { to + 1 } else { to }, (v, true));
-    let before: Vec<&str> = items.iter().filter(|(_, on)| *on).map(|(v, _)| v.as_str()).collect();
-    let now: Vec<String> = order.into_iter().filter(|(_, on)| *on).map(|(v, _)| v).collect();
+    let before: Vec<&str> = items
+        .iter()
+        .filter(|(_, on)| *on)
+        .map(|(v, _)| v.as_str())
+        .collect();
+    let now: Vec<String> = order
+        .into_iter()
+        .filter(|(_, on)| *on)
+        .map(|(v, _)| v)
+        .collect();
     (now.iter().map(String::as_str).collect::<Vec<_>>() != before).then_some(now)
 }
 
@@ -1315,7 +1329,10 @@ impl PaneView {
             return false;
         };
         let chain: Vec<NodeId> = std::iter::successors(Some(hit), |&e| doc.parent(e)).collect();
-        if !chain.iter().any(|&e| doc.attribute(e, "data-pf") == Some("grip")) {
+        if !chain
+            .iter()
+            .any(|&e| doc.attribute(e, "data-pf") == Some("grip"))
+        {
             return false;
         }
         let up = |k: &str| {
@@ -1323,9 +1340,12 @@ impl PaneView {
                 .iter()
                 .find_map(|&e| doc.attribute(e, k).map(|v| (e, v.to_owned())))
         };
-        let (Some((item, value)), Some((_, row)), Some((_, node)), Some((_, scope))) =
-            (up("data-v"), up("data-row"), up("data-id"), up("data-scope"))
-        else {
+        let (Some((item, value)), Some((_, row)), Some((_, node)), Some((_, scope))) = (
+            up("data-v"),
+            up("data-row"),
+            up("data-id"),
+            up("data-scope"),
+        ) else {
             return false;
         };
         // A disabled row's controls do nothing.
@@ -1335,7 +1355,11 @@ impl PaneView {
         let Some(surface) = pane.surface(sv.key) else {
             return false;
         };
-        let Some(n) = surface.document().get(&node).filter(|n| n.kind() == "prefs") else {
+        let Some(n) = surface
+            .document()
+            .get(&node)
+            .filter(|n| n.kind() == "prefs")
+        else {
             return false;
         };
         if find_row(n.props(), &row).is_none_or(|r| s(r, "disabled").is_some()) {
@@ -1376,7 +1400,10 @@ impl PaneView {
                 doc,
                 w: &mut self.written,
             };
-            dom.set_style(item, &format!("transform: translateY({}px);", fmt_num(f64::from(dy))));
+            dom.set_style(
+                item,
+                &format!("transform: translateY({}px);", fmt_num(f64::from(dy))),
+            );
         }
         true
     }
@@ -1404,14 +1431,22 @@ impl PaneView {
             .iter()
             .filter_map(|&e| {
                 let v = doc.attribute(e, "data-v")?.to_owned();
-                let on = self.written.class(e).is_some_and(|c| c.split(' ').any(|c| c == "on"));
+                let on = self
+                    .written
+                    .class(e)
+                    .is_some_and(|c| c.split(' ').any(|c| c == "on"));
                 Some((v, on))
             })
             .collect();
         // The item under the pointer's y, by the items' boxes (laid out without the drag).
         let target = items.iter().find_map(|&e| {
             let b = doc.border_box(e)?;
-            (y >= b.y && y < b.y + b.h).then(|| (doc.attribute(e, "data-v").map(str::to_owned), y >= b.y + b.h / 2.0))
+            (y >= b.y && y < b.y + b.h).then(|| {
+                (
+                    doc.attribute(e, "data-v").map(str::to_owned),
+                    y >= b.y + b.h / 2.0,
+                )
+            })
         });
         let Some((Some(target), after)) = target else {
             return Some(Vec::new());

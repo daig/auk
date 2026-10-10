@@ -509,7 +509,8 @@ fn the_accessibility_tree_has_the_pane_text_the_chrome_and_surface_roles() {
         .unwrap();
     let chip = format!("Session {}", shown["name"].as_str().unwrap());
     assert!(
-        flat.iter().any(|n| n["role"] == "AXButton" && n["title"] == chip.as_str()),
+        flat.iter()
+            .any(|n| n["role"] == "AXButton" && n["title"] == chip.as_str()),
         "{tree}"
     );
     assert!(flat.iter().any(|n| n["subrole"] == "AXTabButton"));
@@ -645,7 +646,10 @@ fn stroke_event(app: &App, probe: &Probe, stroke: &str, ev: &str) -> Value {
         .iter()
         .filter(|i| matches!(i, auk_conformance::probe::Input::Other(_)))
         .collect();
-    assert!(other.is_empty(), "{stroke} also reached the program as bytes: {other:?}");
+    assert!(
+        other.is_empty(),
+        "{stroke} also reached the program as bytes: {other:?}"
+    );
     events(&bodies, ev)[0].clone()
 }
 
@@ -661,7 +665,11 @@ fn program_field_editing_keys_go_through_the_view_as_edit_events() {
         "inline",
         json!([{"id": "ed", "k": "editor", "p": {"text": "hello world\nsecond line", "cursor": 5}}]),
     ));
-    probe.write(&auk_conformance::probe::frame("s1", 2, json!([["focus", "ed"]])));
+    probe.write(&auk_conformance::probe::frame(
+        "s1",
+        2,
+        json!([["focus", "ed"]]),
+    ));
     probe.read_until("the focus frame's ack", |b| {
         events(&tsp_bodies(&split_input(b)), "ack")
             .iter()
@@ -675,7 +683,10 @@ fn program_field_editing_keys_go_through_the_view_as_edit_events() {
         app.request("type shift+right");
     }
     let (bodies, bytes) = program_input(&probe, Duration::from_millis(400));
-    assert!(bodies.is_empty() && bytes.is_empty(), "{bodies:?} {bytes:?}");
+    assert!(
+        bodies.is_empty() && bytes.is_empty(),
+        "{bodies:?} {bytes:?}"
+    );
     // Backspace with a selection deletes it as an edit.
     let edit = stroke_event(&app, &probe, "backspace", "edit");
     assert_eq!(
@@ -685,7 +696,14 @@ fn program_field_editing_keys_go_through_the_view_as_edit_events() {
     // ↓ moves the caret to the same column of the next drawn line; End and Home to the ends of
     // the caret's line (the program kept its cursor at 5).
     let down = stroke_event(&app, &probe, "down", "edit");
-    assert_eq!((down["from"].clone(), down["to"].clone(), down["text"].clone()), (json!(17), json!(17), json!("")));
+    assert_eq!(
+        (
+            down["from"].clone(),
+            down["to"].clone(),
+            down["text"].clone()
+        ),
+        (json!(17), json!(17), json!(""))
+    );
     let end = stroke_event(&app, &probe, "end", "edit");
     assert_eq!(end["cursor"], 11, "{end}");
     let home = stroke_event(&app, &probe, "home", "edit");
@@ -693,14 +711,22 @@ fn program_field_editing_keys_go_through_the_view_as_edit_events() {
     // ⇧↓ then ⌘X: the selection goes to the clipboard and is deleted as an edit.
     app.request("type shift+down");
     let cut = stroke_event(&app, &probe, "cmd+x", "edit");
-    assert_eq!((cut["from"].clone(), cut["to"].clone()), (json!(5), json!(17)), "{cut}");
+    assert_eq!(
+        (cut["from"].clone(), cut["to"].clone()),
+        (json!(5), json!(17)),
+        "{cut}"
+    );
     assert_eq!(app.request("clipboard"), " world\nsecon");
     // ⌘Z is an undo.
     let undo = stroke_event(&app, &probe, "cmd+z", "undo");
     assert_eq!(undo["id"], "ed");
     // So is ⌃Z (§7.9), and the program never sees the ^Z byte (`stroke_event` checks).
     let undo = stroke_event(&app, &probe, "ctrl+z", "undo");
-    assert_eq!((undo["sf"].clone(), undo["id"].clone()), (json!("s1"), json!("ed")), "{undo}");
+    assert_eq!(
+        (undo["sf"].clone(), undo["id"].clone()),
+        (json!("s1"), json!("ed")),
+        "{undo}"
+    );
 
     // With no selection, ← is the program's key; so is ↑ on the first drawn line.
     app.request("type left");
@@ -715,13 +741,23 @@ fn program_field_editing_keys_go_through_the_view_as_edit_events() {
     // IME composition draws at the field's caret, not over the grid, and reaches no one.
     app.request("mark にほん");
     let state = app.state();
-    assert!(state["preedit"].is_null(), "the field took the composition: {state}");
+    assert!(
+        state["preedit"].is_null(),
+        "the field took the composition: {state}"
+    );
     let (bodies, bytes) = program_input(&probe, Duration::from_millis(300));
-    assert!(bodies.is_empty() && bytes.is_empty(), "{bodies:?} {bytes:?}");
+    assert!(
+        bodies.is_empty() && bytes.is_empty(),
+        "{bodies:?} {bytes:?}"
+    );
     app.request("unmark");
 
     // Without the edit feature the same keys are the program's.
-    probe.write(&auk_conformance::probe::frame("s1", 3, json!([["set", "ed", {"readonly": true}]])));
+    probe.write(&auk_conformance::probe::frame(
+        "s1",
+        3,
+        json!([["set", "ed", {"readonly": true}]]),
+    ));
     probe.read_until("the readonly frame's ack", |b| {
         events(&tsp_bodies(&split_input(b)), "ack")
             .iter()
@@ -757,13 +793,26 @@ fn context_menus_run_a_surface_nodes_menu_actions() {
         let m = app.request("chrome")["menu"].clone();
         m.is_array().then_some(m)
     });
-    let actions: Vec<&str> = menu.as_array().unwrap().iter().map(|e| e["action"].as_str().unwrap()).collect();
-    let labels: Vec<&str> = menu.as_array().unwrap().iter().map(|e| e["label"].as_str().unwrap()).collect();
+    let actions: Vec<&str> = menu
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["action"].as_str().unwrap())
+        .collect();
+    let labels: Vec<&str> = menu
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["label"].as_str().unwrap())
+        .collect();
     assert_eq!(actions, ["retry", "open-log=build", "copy"]);
     assert_eq!(labels, ["Retry", "Open log", "Copy"]);
     // The right press never reached the program, and the grid has no selection.
     let (bodies, bytes) = program_input(&probe, Duration::from_millis(200));
-    assert!(bodies.is_empty() && bytes.is_empty(), "{bodies:?} {bytes:?}");
+    assert!(
+        bodies.is_empty() && bytes.is_empty(),
+        "{bodies:?} {bytes:?}"
+    );
 
     // Choosing an entry with a click sends its action to the program, with its value.
     let pick = |i: usize| {
@@ -795,14 +844,22 @@ fn context_menus_run_a_surface_nodes_menu_actions() {
     // Copy copies the node's text; Escape closes a menu without running anything.
     app.request(&format!("mouse down {x} {y} --right"));
     app.request(&format!("mouse up {x} {y} --right"));
-    wait_for("the menu again", || app.request("chrome")["menu"].is_array().then_some(()));
+    wait_for("the menu again", || {
+        app.request("chrome")["menu"].is_array().then_some(())
+    });
     pick(2);
-    wait_for("the copied text", || (app.request("clipboard") == "row text").then_some(()));
+    wait_for("the copied text", || {
+        (app.request("clipboard") == "row text").then_some(())
+    });
     app.request(&format!("mouse down {x} {y} --right"));
     app.request(&format!("mouse up {x} {y} --right"));
-    wait_for("the menu again", || app.request("chrome")["menu"].is_array().then_some(()));
+    wait_for("the menu again", || {
+        app.request("chrome")["menu"].is_array().then_some(())
+    });
     app.request("type esc");
-    wait_for("the menu to close", || app.request("chrome")["menu"].is_null().then_some(()));
+    wait_for("the menu to close", || {
+        app.request("chrome")["menu"].is_null().then_some(())
+    });
     let (bodies, _) = program_input(&probe, Duration::from_millis(300));
     assert!(bodies.is_empty(), "{bodies:?}");
 }
@@ -823,7 +880,10 @@ fn the_zoom_action_opens_the_image_viewer_over_the_window() {
     };
     let (a, b) = (svg(60, 30, "#22aa55"), svg(30, 60, "#aa2255"));
     let id = |s: &str| -> String {
-        sha2::Sha256::digest(s.as_bytes()).iter().map(|x| format!("{x:02x}")).collect()
+        sha2::Sha256::digest(s.as_bytes())
+            .iter()
+            .map(|x| format!("{x:02x}"))
+            .collect()
     };
     let b64 = base64::engine::general_purpose::STANDARD;
     probe.write(&auk_conformance::probe::tsp("b", &[], &b64.encode(&a)));
@@ -848,18 +908,30 @@ fn the_zoom_action_opens_the_image_viewer_over_the_window() {
         v.is_object().then_some(v)
     });
     assert_eq!(viewer["index"], 0);
-    let titles: Vec<&str> = viewer["images"].as_array().unwrap().iter().map(|i| i["title"].as_str().unwrap()).collect();
+    let titles: Vec<&str> = viewer["images"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["title"].as_str().unwrap())
+        .collect();
     assert_eq!(titles, ["Green", "Red"]);
     assert_eq!(viewer["images"][0]["blob"], id(&a));
     // The picture decoded from the pane's blobs (a failure would toast).
     assert_eq!(app.request("toasts"), json!([]));
     // → steps to the next image; Escape closes. Nothing reached the program.
     app.request("type right");
-    wait_for("the next image", || (app.request("chrome")["viewer"]["index"] == 1).then_some(()));
+    wait_for("the next image", || {
+        (app.request("chrome")["viewer"]["index"] == 1).then_some(())
+    });
     app.request("type esc");
-    wait_for("the viewer to close", || app.request("chrome")["viewer"].is_null().then_some(()));
+    wait_for("the viewer to close", || {
+        app.request("chrome")["viewer"].is_null().then_some(())
+    });
     let (bodies, bytes) = program_input(&probe, Duration::from_millis(300));
-    assert!(bodies.is_empty() && bytes.is_empty(), "{bodies:?} {bytes:?}");
+    assert!(
+        bodies.is_empty() && bytes.is_empty(),
+        "{bodies:?} {bytes:?}"
+    );
 }
 
 /// Amendment A9: the viewer shows a big picture (over 512×512 pixels) once it is decoded in
@@ -1026,16 +1098,26 @@ fn find_sees_the_grid_and_surfaces_virtualized_content_too_and_steps_through_the
     // A column of 300 rows virtualizes (§8.3): rows far from the view aren't laid out.
     let rows: Vec<Value> = (0..300)
         .map(|i| {
-            let text = if i == 250 { "the needle-item here".to_owned() } else { format!("item {i}") };
+            let text = if i == 250 {
+                "the needle-item here".to_owned()
+            } else {
+                format!("item {i}")
+            };
             json!({"id": format!("t{i}"), "k": "text", "p": {"text": text}})
         })
         .collect();
-    probe.write(&open_with("s1", "inline", json!([{"id": "big", "k": "col", "c": rows}])));
+    probe.write(&open_with(
+        "s1",
+        "inline",
+        json!([{"id": "big", "k": "col", "c": rows}]),
+    ));
     acked(&probe, 1);
     probe.write(&auk_conformance::probe::tsp_json("x", &json!({"id": "s1"})));
     probe.write(b"tail needle-tail\r\n");
     caught_up(&env, &app, probe.pane);
-    pane_layout(&app, probe.pane, "the block", |l| l["blocks"].as_array().is_some_and(|b| b.len() == 1));
+    pane_layout(&app, probe.pane, "the block", |l| {
+        l["blocks"].as_array().is_some_and(|b| b.len() == 1)
+    });
 
     menu(&app, "Edit", "Find…");
     app.request("text needle");
@@ -1044,18 +1126,28 @@ fn find_sees_the_grid_and_surfaces_virtualized_content_too_and_steps_through_the
         (f["count"] == 4).then_some(f)
     });
     // In flow order: the two grid rows, the surface row at its anchor, the tail.
-    let kinds: Vec<&str> = find["matches"].as_array().unwrap().iter().map(|m| m["kind"].as_str().unwrap()).collect();
+    let kinds: Vec<&str> = find["matches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["kind"].as_str().unwrap())
+        .collect();
     assert_eq!(kinds, ["grid", "grid", "surface", "grid"], "{find}");
     assert_eq!(find["matches"][2]["id"], "t250", "{find}");
     assert_eq!(find["matches"][2]["sf"], "s1");
-    assert_eq!(find["current"], 3, "Find starts at the match nearest the tail");
+    assert_eq!(
+        find["current"], 3,
+        "Find starts at the match nearest the tail"
+    );
     assert_eq!(app.request("chrome")["find_bar"], true);
     // The current grid match is the selection (smart case: `needle` matched `Needle`).
     assert_eq!(app.request("selection"), "needle");
 
     // ⇧Return: the surface match, scrolled into view and marked.
     app.request("type shift+return");
-    wait_for("the surface match", || (app.request("find")["current"] == 2).then_some(()));
+    wait_for("the surface match", || {
+        (app.request("find")["current"] == 2).then_some(())
+    });
     let pane = probe.pane;
     wait_for("the found row in view", || {
         let l = app.request(&format!("pane-layout {pane}"));
@@ -1073,7 +1165,9 @@ fn find_sees_the_grid_and_surfaces_virtualized_content_too_and_steps_through_the
         (f["current"] == 1).then(|| f["match"].clone())
     });
     let line = m["line"].as_u64().unwrap();
-    pane_layout(&app, pane, "the grid match on screen", |l| line_top(l, line).is_some());
+    pane_layout(&app, pane, "the grid match on screen", |l| {
+        line_top(l, line).is_some()
+    });
     assert_eq!(app.request("selection"), "Needle");
     // Previous again, then past the first match it wraps to the last.
     app.request("type shift+return");
@@ -1082,21 +1176,34 @@ fn find_sees_the_grid_and_surfaces_virtualized_content_too_and_steps_through_the
         (f["current"] == 0).then(|| f["match"].clone())
     });
     let line0 = first["line"].as_u64().unwrap();
-    pane_layout(&app, pane, "the first match on screen", |l| line_top(l, line0).is_some());
+    pane_layout(&app, pane, "the first match on screen", |l| {
+        line_top(l, line0).is_some()
+    });
     app.request("type shift+return");
-    wait_for("the wrap", || (app.request("find")["current"] == 3).then_some(()));
+    wait_for("the wrap", || {
+        (app.request("find")["current"] == 3).then_some(())
+    });
     // ⌘G steps forward and wraps to the first.
     menu(&app, "Edit", "Find Next");
-    wait_for("the next match", || (app.request("find")["current"] == 0).then_some(()));
+    wait_for("the next match", || {
+        (app.request("find")["current"] == 0).then_some(())
+    });
     // Editing the query searches again.
     app.request("type backspace");
     app.request("text e-item");
-    wait_for("one match", || (app.request("find")["count"] == 1).then_some(()));
+    wait_for("one match", || {
+        (app.request("find")["count"] == 1).then_some(())
+    });
     // Escape closes the bar; nothing reached the program.
     app.request("type esc");
-    wait_for("the bar to close", || (app.request("chrome")["find_bar"] == false).then_some(()));
+    wait_for("the bar to close", || {
+        (app.request("chrome")["find_bar"] == false).then_some(())
+    });
     let (bodies, bytes) = program_input(&probe, Duration::from_millis(300));
-    assert!(bodies.is_empty() && bytes.is_empty(), "{bodies:?} {bytes:?}");
+    assert!(
+        bodies.is_empty() && bytes.is_empty(),
+        "{bodies:?} {bytes:?}"
+    );
 }
 
 #[test]
@@ -1118,14 +1225,23 @@ fn prompt_navigation_jumps_between_command_marks_in_every_window() {
     let layout = pane_layout(&app, pane, "the four prompts", |l| {
         l["prompts"].as_array().is_some_and(|p| p.len() == 4)
     });
-    let prompts: Vec<u64> = layout["prompts"].as_array().unwrap().iter().map(|p| p.as_u64().unwrap()).collect();
+    let prompts: Vec<u64> = layout["prompts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p.as_u64().unwrap())
+        .collect();
     // Drawn with the last prompt at the tail.
-    let layout = pane_layout(&app, pane, "the tail drawn", |l| line_top(l, prompts[3]).is_some());
+    let layout = pane_layout(&app, pane, "the tail drawn", |l| {
+        line_top(l, prompts[3]).is_some()
+    });
     assert_eq!(layout["following"], true);
 
     let jump = |item: &str, line: u64, text: &str| {
         menu(&app, "View", item);
-        let l = pane_layout(&app, pane, &format!("{item} to line {line}"), |l| l["first_line"] == line);
+        let l = pane_layout(&app, pane, &format!("{item} to line {line}"), |l| {
+            l["first_line"] == line
+        });
         assert_eq!(l["first_text"], text, "{l}");
         assert_eq!(l["following"], false);
     };
@@ -1136,12 +1252,16 @@ fn prompt_navigation_jumps_between_command_marks_in_every_window() {
     jump("Jump to Next Prompt", prompts[2], "$ cmd-3");
     // The last prompt is at the tail: the view follows it again.
     menu(&app, "View", "Jump to Next Prompt");
-    pane_layout(&app, pane, "the view to follow the tail", |l| l["following"] == true);
+    pane_layout(&app, pane, "the view to follow the tail", |l| {
+        l["following"] == true
+    });
 
     // The marks are pane state: a window that attaches later has them too.
     let late = App::start(&env, "b", &[]);
     show(&late, pane);
-    let l = pane_layout(&late, pane, "the late window's prompts", |l| l["prompts"].is_array());
+    let l = pane_layout(&late, pane, "the late window's prompts", |l| {
+        l["prompts"].is_array()
+    });
     assert_eq!(l["prompts"], json!(prompts));
 }
 
@@ -1181,7 +1301,9 @@ fn hover_shows_a_links_target_on_the_grid_and_on_surfaces_and_a_plain_click_open
     });
     // Off the links, the readout goes.
     app.request(&format!("mouse move {x} {}", ly + 200.0));
-    wait_for("no readout", || app.request("chrome")["hover_link"].is_null().then_some(()));
+    wait_for("no readout", || {
+        app.request("chrome")["hover_link"].is_null().then_some(())
+    });
 }
 
 #[test]
@@ -1195,7 +1317,11 @@ fn the_chrome_names_the_reporting_app_only_while_a_listening_surface_is_open() {
     let chrome = app.request("chrome");
     assert!(chrome["pane_app"].is_null(), "{chrome}");
     // A listening surface: the pane's tab and the status line name the program.
-    probe.write(&open_with("s1", "inline", json!([{"id": "t", "k": "text", "p": {"text": "hi"}}])));
+    probe.write(&open_with(
+        "s1",
+        "inline",
+        json!([{"id": "t", "k": "text", "p": {"text": "hi"}}]),
+    ));
     acked(&probe, 1);
     let chrome = wait_for("the app in the chrome", || {
         let c = app.request("chrome");
@@ -1294,7 +1420,11 @@ fn system_hour12() -> bool {
         ])
         .output()
         .expect("run osascript");
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let pattern = String::from_utf8_lossy(&out.stdout).trim().to_owned();
     assert!(!pattern.is_empty(), "no hour pattern");
     let mut quoted = false;
@@ -1316,9 +1446,14 @@ fn the_hello_reply_carries_the_systems_12_hour_clock() {
     let want = system_hour12();
     probe.write(&hello(&[]));
     let input = probe.read_until("the hello reply", |b| {
-        tsp_bodies(&split_input(b)).iter().any(|v| v.get("hour12").is_some())
+        tsp_bodies(&split_input(b))
+            .iter()
+            .any(|v| v.get("hour12").is_some())
     });
-    let reply = tsp_bodies(&split_input(&input)).into_iter().find(|v| v.get("hour12").is_some()).unwrap();
+    let reply = tsp_bodies(&split_input(&input))
+        .into_iter()
+        .find(|v| v.get("hour12").is_some())
+        .unwrap();
     assert_eq!(reply["hour12"], want, "{reply}");
     let tsp = env.daemon(&format!("tsp {}", probe.pane));
     assert_eq!(tsp["facts"]["hour12"], want, "{tsp}");
@@ -1328,10 +1463,20 @@ fn the_hello_reply_carries_the_systems_12_hour_clock() {
 #[test]
 fn an_agent_panes_tab_shows_the_agent_icon() {
     let env = env("agent-icon");
-    write_settings(&env, json!({"agent_command": "echo agent-ready; sleep 300"}));
+    write_settings(
+        &env,
+        json!({"agent_command": "echo agent-ready; sleep 300"}),
+    );
     let app = App::start(&env, "a", &[]);
     let shell_tab = app.state()["tab"].as_u64().expect("a shown tab");
-    let out = env.cli(&["--json", "new", "tab", "--agent", "--cwd", &env.home.to_string_lossy()]);
+    let out = env.cli(&[
+        "--json",
+        "new",
+        "tab",
+        "--agent",
+        "--cwd",
+        &env.home.to_string_lossy(),
+    ]);
     let made: Value = serde_json::from_slice(&out.stdout).expect("new prints JSON");
     let agent = made["pane"].as_u64().expect("the agent pane");
     let agent_tab = wait_for("the agent pane's tab in the app", || {
@@ -1342,7 +1487,10 @@ fn an_agent_panes_tab_shows_the_agent_icon() {
     });
     let chrome = wait_for("the agent icon in the tab bar", || {
         let c = app.request("chrome");
-        c["agent_badges"].as_array().is_some_and(|b| !b.is_empty()).then_some(c)
+        c["agent_badges"]
+            .as_array()
+            .is_some_and(|b| !b.is_empty())
+            .then_some(c)
     });
     let badges = chrome["agent_badges"].as_array().unwrap();
     assert_eq!(badges.len(), 1, "{chrome}");
@@ -1359,8 +1507,14 @@ fn an_agent_panes_tab_shows_the_agent_icon() {
         .expect("the agent tab's box");
     let f = |v: &Value, i: usize| v[i].as_f64().unwrap();
     assert!(f(r, 2) > 4.0 && f(r, 3) > 4.0, "{r}");
-    assert!(f(r, 0) >= f(&tab_rect, 0) && f(r, 0) + f(r, 2) <= f(&tab_rect, 0) + f(&tab_rect, 2), "{r} in {tab_rect}");
-    assert!(f(r, 1) >= 0.0 && f(r, 1) + f(r, 3) <= 30.0, "in the bar: {r}");
+    assert!(
+        f(r, 0) >= f(&tab_rect, 0) && f(r, 0) + f(r, 2) <= f(&tab_rect, 0) + f(&tab_rect, 2),
+        "{r} in {tab_rect}"
+    );
+    assert!(
+        f(r, 1) >= 0.0 && f(r, 1) + f(r, 3) <= 30.0,
+        "in the bar: {r}"
+    );
 }
 
 #[test]
@@ -1374,7 +1528,11 @@ fn native_editing_drag_selects_in_a_field_and_copy_and_paste_go_through_it() {
         "inline",
         json!([{"id": "ed", "k": "editor", "p": {"text": "hello world", "cursor": 0}}]),
     ));
-    probe.write(&auk_conformance::probe::frame("s1", 2, json!([["focus", "ed"]])));
+    probe.write(&auk_conformance::probe::frame(
+        "s1",
+        2,
+        json!([["focus", "ed"]]),
+    ));
     acked(&probe, 2);
     caught_up(&env, &app, probe.pane);
     let pane = probe.pane;
@@ -1382,19 +1540,32 @@ fn native_editing_drag_selects_in_a_field_and_copy_and_paste_go_through_it() {
         let r = app.send(&format!("field-box {pane}"));
         (r["ok"] == true).then(|| r["value"].clone())
     });
-    let (bx, by) = (field["box"][0].as_f64().unwrap(), field["box"][1].as_f64().unwrap());
-    let (cw, ch) = (field["cell"][0].as_f64().unwrap(), field["cell"][1].as_f64().unwrap());
+    let (bx, by) = (
+        field["box"][0].as_f64().unwrap(),
+        field["box"][1].as_f64().unwrap(),
+    );
+    let (cw, ch) = (
+        field["cell"][0].as_f64().unwrap(),
+        field["cell"][1].as_f64().unwrap(),
+    );
     let y = by + ch / 2.0;
     let (x0, x5) = (bx + 1.0, bx + 5.0 * cw + 1.0);
     // The press places the caret (an edit with no text); the drag selects natively, locally.
     app.request(&format!("mouse down {x0} {y}"));
     let caret = program_event(&probe, "edit");
-    assert_eq!((caret["from"].clone(), caret["to"].clone()), (json!(0), json!(0)), "{caret}");
+    assert_eq!(
+        (caret["from"].clone(), caret["to"].clone()),
+        (json!(0), json!(0)),
+        "{caret}"
+    );
     app.request(&format!("mouse drag {} {y}", (x0 + x5) / 2.0));
     app.request(&format!("mouse drag {x5} {y}"));
     app.request(&format!("mouse up {x5} {y}"));
     let (bodies, bytes) = program_input(&probe, Duration::from_millis(300));
-    assert!(bodies.is_empty() && bytes.is_empty(), "the drag stays local: {bodies:?} {bytes:?}");
+    assert!(
+        bodies.is_empty() && bytes.is_empty(),
+        "the drag stays local: {bodies:?} {bytes:?}"
+    );
     // ⌘C copies the field's selection.
     menu(&app, "Edit", "Copy");
     wait_for("the field's selection on the clipboard", || {
@@ -1446,13 +1617,17 @@ fn checklist_toggle_and_copy_of_md_and_ansi_from_the_window() {
     let an = wait_for("the ansi node", || node_box(&app, pane, "an"));
     click(&app, center(an));
     wait_for("the ansi text", || {
-        (app.request("clipboard").as_str().map(str::trim_end) == Some("red and plain")).then_some(())
+        (app.request("clipboard").as_str().map(str::trim_end) == Some("red and plain"))
+            .then_some(())
     });
     // Toggle folds the checklist to its phase heads and reports it.
     let ck = wait_for("the checklist", || node_box(&app, pane, "ck"));
     click(&app, (ck[0] + 30.0, ck[1] + ck[3] - 6.0));
     let toggle = program_event(&probe, "toggle");
-    assert_eq!(toggle, json!({"ev": "toggle", "sf": "s1", "id": "ck", "collapsed": true}));
+    assert_eq!(
+        toggle,
+        json!({"ev": "toggle", "sf": "s1", "id": "ck", "collapsed": true})
+    );
     wait_for("the folded checklist", || {
         let b = node_box(&app, pane, "ck")?;
         (b[3] < ck[3] - 10.0).then_some(())
@@ -1464,9 +1639,13 @@ fn checklist_toggle_and_copy_of_md_and_ansi_from_the_window() {
 fn logging_opener(env: &TestEnv) -> (std::path::PathBuf, std::path::PathBuf) {
     let log = env.root.join("opened.log");
     let opener = env.root.join("opener.sh");
-    std::fs::write(&opener, format!("#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n", log.display()))
-        .expect("write the opener");
-    std::fs::set_permissions(&opener, std::os::unix::fs::PermissionsExt::from_mode(0o755)).expect("chmod");
+    std::fs::write(
+        &opener,
+        format!("#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n", log.display()),
+    )
+    .expect("write the opener");
+    std::fs::set_permissions(&opener, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+        .expect("chmod");
     (opener, log)
 }
 
@@ -1507,11 +1686,25 @@ fn the_open_action_opens_href_or_path_copy_takes_the_href_and_the_checklist_hud_
         })
     };
     // open: the href (a plain click, not a link gesture: the action runs).
-    click(&app, center(wait_for("the href node", || node_box(&app, pane, "op-href"))));
+    click(
+        &app,
+        center(wait_for("the href node", || {
+            node_box(&app, pane, "op-href")
+        })),
+    );
     let o = opened(1);
-    assert_eq!((o[0]["target"].clone(), o[0]["origin"].clone()), (json!("https://example.com/open"), json!("link")), "{o}");
+    assert_eq!(
+        (o[0]["target"].clone(), o[0]["origin"].clone()),
+        (json!("https://example.com/open"), json!("link")),
+        "{o}"
+    );
     // open: the path.
-    click(&app, center(wait_for("the path node", || node_box(&app, pane, "op-path"))));
+    click(
+        &app,
+        center(wait_for("the path node", || {
+            node_box(&app, pane, "op-path")
+        })),
+    );
     let o = opened(2);
     assert_eq!(o[1]["target"], json!(notes.to_string_lossy()), "{o}");
     let logged = wait_for("the opener's log", || {
@@ -1525,7 +1718,12 @@ fn the_open_action_opens_href_or_path_copy_takes_the_href_and_the_checklist_hud_
     want.sort();
     assert_eq!(lines, want);
     // copy: the node's href.
-    click(&app, center(wait_for("the copy node", || node_box(&app, pane, "cp-href"))));
+    click(
+        &app,
+        center(wait_for("the copy node", || {
+            node_box(&app, pane, "cp-href")
+        })),
+    );
     wait_for("the href on the clipboard", || {
         (app.request("clipboard") == "https://example.com/copied").then_some(())
     });
@@ -1533,7 +1731,10 @@ fn the_open_action_opens_href_or_path_copy_takes_the_href_and_the_checklist_hud_
     let hud = wait_for("the checklist hud", || node_box(&app, pane, "ck"));
     click(&app, (hud[0] + 14.0, hud[1] + hud[3] / 2.0));
     let activate = program_event(&probe, "activate");
-    assert_eq!(activate, json!({"ev": "activate", "sf": "s1", "id": "ck", "item": "hud"}));
+    assert_eq!(
+        activate,
+        json!({"ev": "activate", "sf": "s1", "id": "ck", "item": "hud"})
+    );
     wait_for("the open hud's list", || {
         let b = node_box(&app, pane, "ck")?;
         (b[3] > hud[3] + 10.0).then_some(())
@@ -1585,7 +1786,11 @@ fn a_link_click_inside_a_clickable_node_opens_the_link_instead_of_running_click(
         })
     };
     let actions = |wait| -> Vec<Value> {
-        program_input(&probe, wait).0.into_iter().filter(|b| b["ev"] == "action").collect()
+        program_input(&probe, wait)
+            .0
+            .into_iter()
+            .filter(|b| b["ev"] == "action")
+            .collect()
     };
 
     // ⌘-click on the link: the link opens, and click doesn't run.
@@ -1595,14 +1800,21 @@ fn a_link_click_inside_a_clickable_node_opens_the_link_instead_of_running_click(
     assert_eq!(o[0]["target"], "https://example.com/linked", "{o}");
     assert_eq!(actions(Duration::from_millis(400)), Vec::<Value>::new());
     wait_for("the opener to run", || {
-        std::fs::read_to_string(&log).ok().filter(|l| l.contains("https://example.com/linked")).map(|_| ())
+        std::fs::read_to_string(&log)
+            .ok()
+            .filter(|l| l.contains("https://example.com/linked"))
+            .map(|_| ())
     });
 
     // A plain click: no link gesture, so the node's click runs, on the link or off it.
     for x in [link_x, plain_x] {
         click(&app, (x, y));
         let action = program_event(&probe, "action");
-        assert_eq!((&action["sf"], &action["id"]), (&json!("s1"), &json!("go")), "{action}");
+        assert_eq!(
+            (&action["sf"], &action["id"]),
+            (&json!("s1"), &json!("go")),
+            "{action}"
+        );
     }
     assert_eq!(app.request("opens")["opened"].as_array().unwrap().len(), 1);
 
@@ -1637,7 +1849,8 @@ fn file_links_open_only_local_paths_and_links_never_run_a_command() {
     let doc = std::fs::canonicalize(&doc).expect("canonical");
     let script = env.root.join("run.sh");
     std::fs::write(&script, "#!/bin/sh\ntouch ran\n").expect("write the script");
-    std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).expect("chmod");
+    std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+        .expect("chmod");
     let script = std::fs::canonicalize(&script).expect("canonical");
     let url = |p: &std::path::Path| format!("file://{}", p.to_string_lossy().replace(' ', "%20"));
     let app = App::start_with(&env, "a", &[], &[("AUK_OPENER", &opener.to_string_lossy())]);
@@ -1645,7 +1858,10 @@ fn file_links_open_only_local_paths_and_links_never_run_a_command() {
     probe.write(&hello(&[]));
     let links = [
         ("ok-path", url(&doc)),
-        ("other-host", format!("file://elsewhere.example{}", doc.display())),
+        (
+            "other-host",
+            format!("file://elsewhere.example{}", doc.display()),
+        ),
         ("query", format!("{}?x=1", url(&doc))),
         ("exe", url(&script)),
         ("ssh", "ssh://example.com".to_owned()),
@@ -1683,8 +1899,17 @@ fn file_links_open_only_local_paths_and_links_never_run_a_command() {
         ],
         "{opens}"
     );
-    let refused: Vec<&Value> = opens["refused"].as_array().unwrap().iter().map(|r| &r["target"]).collect();
-    assert_eq!(refused, [&json!(links[1].1), &json!(links[2].1), &json!(links[4].1)], "{opens}");
+    let refused: Vec<&Value> = opens["refused"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| &r["target"])
+        .collect();
+    assert_eq!(
+        refused,
+        [&json!(links[1].1), &json!(links[2].1), &json!(links[4].1)],
+        "{opens}"
+    );
     let toasts = app.request("toasts");
     let told: Vec<&Value> = toasts
         .as_array()
@@ -1701,10 +1926,16 @@ fn file_links_open_only_local_paths_and_links_never_run_a_command() {
     });
     let mut lines: Vec<String> = logged.lines().map(str::to_owned).collect();
     lines.sort();
-    let mut want = [doc.display().to_string(), format!("-R {}", script.display())];
+    let mut want = [
+        doc.display().to_string(),
+        format!("-R {}", script.display()),
+    ];
     want.sort();
     assert_eq!(lines, want);
-    assert!(!env.root.join("ran").exists() && !std::path::Path::new("ran").exists(), "the script never ran");
+    assert!(
+        !env.root.join("ran").exists() && !std::path::Path::new("ran").exists(),
+        "the script never ran"
+    );
 }
 
 #[test]
@@ -1721,7 +1952,9 @@ fn selection_links_mouse_reports_and_the_cursor_follow_rows_a_surface_block_shif
     ));
     acked(&probe, 1);
     probe.write(&auk_conformance::probe::tsp_json("x", &json!({"id": "s1"})));
-    probe.write(b"below \x1b]8;;https://example.com/below\x1b\\link\x1b]8;;\x1b\\\r\nsecond row\r\n> ");
+    probe.write(
+        b"below \x1b]8;;https://example.com/below\x1b\\link\x1b]8;;\x1b\\\r\nsecond row\r\n> ",
+    );
     caught_up(&env, &app, probe.pane);
     let pane = probe.pane;
     // Drawn once the closed surface lets the rows after it show (lines 2 to 4).
@@ -1780,8 +2013,15 @@ fn selection_links_mouse_reports_and_the_cursor_follow_rows_a_surface_block_shif
     // Mouse reports name the screen cell under the pointer, not a plain grid's row.
     probe.write(b"\x1b[?1000h\x1b[?1006h");
     caught_up(&env, &app, pane);
-    let screen = app.request(&format!("capture {pane}"))["text"].as_str().unwrap().to_owned();
-    let row = screen.lines().position(|l| l.starts_with("second row")).unwrap() + 1;
+    let screen = app.request(&format!("capture {pane}"))["text"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let row = screen
+        .lines()
+        .position(|l| l.starts_with("second row"))
+        .unwrap()
+        + 1;
     app.request(&format!("mouse down {} {}", ox + 3.5 * cw, mid(second_top)));
     app.request(&format!("mouse up {} {}", ox + 3.5 * cw, mid(second_top)));
     let got = probe.read_until_or(
@@ -1811,7 +2051,11 @@ fn a_screen_surface_over_an_inline_one_takes_pointer_caret_and_visible() {
             {"id": "ed1", "k": "editor", "p": {"text": "inline field", "cursor": 0}}
         ]),
     ));
-    probe.write(&auk_conformance::probe::frame("s1", 2, json!([["focus", "ed1"]])));
+    probe.write(&auk_conformance::probe::frame(
+        "s1",
+        2,
+        json!([["focus", "ed1"]]),
+    ));
     acked(&probe, 2);
     let pane = probe.pane;
     let inline_go = wait_for("the inline button", || node_box(&app, pane, "in-go"));
@@ -1824,7 +2068,11 @@ fn a_screen_surface_over_an_inline_one_takes_pointer_caret_and_visible() {
             {"id": "ed2", "k": "input", "p": {"text": "screen field", "cursor": 0}}
         ]),
     ));
-    probe.write(&auk_conformance::probe::frame("s2", 2, json!([["focus", "ed2"]])));
+    probe.write(&auk_conformance::probe::frame(
+        "s2",
+        2,
+        json!([["focus", "ed2"]]),
+    ));
     acked(&probe, 2);
     pane_layout(&app, pane, "the screen surface", |l| l["screen"] == true);
     let _ = program_input(&probe, Duration::from_millis(200));
@@ -1839,7 +2087,11 @@ fn a_screen_surface_over_an_inline_one_takes_pointer_caret_and_visible() {
     // Caret: native editing keys go to the screen surface's field.
     app.request("type shift+right");
     let edit = stroke_event(&app, &probe, "backspace", "edit");
-    assert_eq!((edit["sf"].clone(), edit["id"].clone()), (json!("s2"), json!("ed2")), "{edit}");
+    assert_eq!(
+        (edit["sf"].clone(), edit["id"].clone()),
+        (json!("s2"), json!("ed2")),
+        "{edit}"
+    );
     // Resize: a narrower window reports the new width to the screen surface, not the inline one.
     let _ = probe.read_for(Duration::from_millis(200));
     app.request("window-size 560 420");
@@ -1919,20 +2171,32 @@ fn the_dock_sits_at_the_pane_bottom_with_main_above_it_and_the_tail_in_view() {
             dock[1] + dock[3],
             oy + content
         );
-        assert!((dock[3] - dock_h).abs() < 1.0, "{what}: {dock:?} vs {dock_h}");
+        assert!(
+            (dock[3] - dock_h).abs() < 1.0,
+            "{what}: {dock:?} vs {dock_h}"
+        );
         for id in ["d1", "d2"] {
             let d = node_box(&app, pane, id).expect("docked text drawn");
-            assert!(d[1] >= dock[1] - 0.5 && d[1] + d[3] <= dock[1] + dock[3] + 0.5, "{what}: {id}");
+            assert!(
+                d[1] >= dock[1] - 0.5 && d[1] + d[3] <= dock[1] + dock[3] + 0.5,
+                "{what}: {id}"
+            );
         }
         // `main` lays out above it, and the tail (the surface's last line) is in view right
         // above the dock.
         let flow_bottom = oy + content - dock_h;
         let last = node_box(&app, pane, &format!("m{}", main_lines - 1)).unwrap();
-        assert!(last[1] + last[3] <= flow_bottom + 0.5, "{what}: main's last line {last:?} is above the dock at {flow_bottom}");
+        assert!(
+            last[1] + last[3] <= flow_bottom + 0.5,
+            "{what}: main's last line {last:?} is above the dock at {flow_bottom}"
+        );
         assert!(last[1] >= oy, "{what}: and in view");
         let block = &l["blocks"][0];
         let block_bottom = oy + num(&block["top"]) + num(&block["height"]);
-        assert!(block_bottom <= flow_bottom + 0.5, "{what}: {block_bottom} > {flow_bottom}");
+        assert!(
+            block_bottom <= flow_bottom + 0.5,
+            "{what}: {block_bottom} > {flow_bottom}"
+        );
         assert!(
             block_bottom >= flow_bottom - 2.0 * num(&l["cell"][1]),
             "{what}: the tail is kept at the bottom of the flow: {block_bottom} vs {flow_bottom}"
@@ -1954,10 +2218,16 @@ fn the_dock_sits_at_the_pane_bottom_with_main_above_it_and_the_tail_in_view() {
     let (ox, oy) = (num(&l2["origin"][0]), num(&l2["origin"][1]));
     let grid_y = oy + num(&l2["blocks"][0]["top"]) / 2.0;
     app.request(&format!("scroll 5 {} {grid_y}", ox + 40.0));
-    let up = pane_layout(&app, pane, "the flow scrolled up", |l| l["following"] == false);
+    let up = pane_layout(&app, pane, "the flow scrolled up", |l| {
+        l["following"] == false
+    });
     let from_bottom = num(&up["from_bottom"]);
     assert!(from_bottom > 0.0, "{up}");
-    assert_eq!(node_box(&app, pane, "dock"), Some(dock), "the dock stays put");
+    assert_eq!(
+        node_box(&app, pane, "dock"),
+        Some(dock),
+        "the dock stays put"
+    );
     probe.write(&auk_conformance::probe::frame(
         "s1",
         4,
@@ -1967,7 +2237,10 @@ fn the_dock_sits_at_the_pane_bottom_with_main_above_it_and_the_tail_in_view() {
     let after = pane_layout(&app, pane, "the frame drawn while scrolled up", |l| {
         l["blocks"][0]["height"].as_f64() > l2["blocks"][0]["height"].as_f64()
     });
-    assert_eq!(after["following"], false, "the tail isn't followed once the user scrolled up");
+    assert_eq!(
+        after["following"], false,
+        "the tail isn't followed once the user scrolled up"
+    );
     assert_eq!(node_box(&app, pane, "dock"), Some(dock));
 }
 
@@ -1988,10 +2261,20 @@ fn a_screen_surfaces_main_takes_the_pane_height_and_scrolls_itself() {
     probe.write(&open_with("s2", "screen", text_lines("r", 150)));
     acked(&probe, 1);
     let l = pane_layout(&app, pane, "the screen surface", |l| l["screen"] == true);
-    let (ox, oy, content) = (num(&l["origin"][0]), num(&l["origin"][1]), num(&l["content_height"]));
+    let (ox, oy, content) = (
+        num(&l["origin"][0]),
+        num(&l["origin"][1]),
+        num(&l["content_height"]),
+    );
     let main = wait_for("the screen surface's main", || node_box(&app, pane, "main"));
-    assert!((main[1] - oy).abs() < 1.0, "main starts at the pane top: {main:?} vs {oy}");
-    assert!((main[3] - content).abs() < 1.0, "main takes the pane's height: {main:?} vs {content}");
+    assert!(
+        (main[1] - oy).abs() < 1.0,
+        "main starts at the pane top: {main:?} vs {oy}"
+    );
+    assert!(
+        (main[3] - content).abs() < 1.0,
+        "main takes the pane's height: {main:?} vs {content}"
+    );
     let r0 = node_box(&app, pane, "r0").expect("the first line");
     assert!(r0[1] >= oy && r0[1] < oy + 20.0, "{r0:?}");
     let grid = (l["from_bottom"].clone(), l["first_line"].clone());
@@ -2001,8 +2284,14 @@ fn a_screen_surfaces_main_takes_the_pane_height_and_scrolls_itself() {
         let r = node_box(&app, pane, "r0")?;
         (r[1] < r0[1] - 20.0).then_some(r)
     });
-    let l2 = pane_layout(&app, pane, "the pane after the wheel", |l| l["screen"] == true);
-    assert_eq!((l2["from_bottom"].clone(), l2["first_line"].clone()), grid, "the grid didn't scroll");
+    let l2 = pane_layout(&app, pane, "the pane after the wheel", |l| {
+        l["screen"] == true
+    });
+    assert_eq!(
+        (l2["from_bottom"].clone(), l2["first_line"].clone()),
+        grid,
+        "the grid didn't scroll"
+    );
     assert_eq!(l2["following"], true);
     let main2 = node_box(&app, pane, "main").unwrap();
     assert_eq!(main2, main, "main itself stays put");
@@ -2041,20 +2330,35 @@ fn a_layer_overlays_the_pane_from_its_top_above_main() {
     let (ox, oy) = (num(&l["origin"][0]), num(&l["origin"][1]));
     let ly = wait_for("the layer's node", || node_box(&app, pane, "ly"));
     let inline = wait_for("main's node", || node_box(&app, pane, "in-go"));
-    assert!((ly[0] - ox).abs() < 1.0 && (ly[1] - oy).abs() < 1.0, "at the pane's top-left: {ly:?} vs ({ox}, {oy})");
+    assert!(
+        (ly[0] - ox).abs() < 1.0 && (ly[1] - oy).abs() < 1.0,
+        "at the pane's top-left: {ly:?} vs ({ox}, {oy})"
+    );
     // They overlap: the layer is on top.
-    let overlap = (ly[0] + ly[2].min(inline[2]) / 2.0, ly[1].max(inline[1]) + 2.0);
-    assert!(overlap.1 < inline[1] + inline[3] && overlap.1 < ly[1] + ly[3], "{ly:?} {inline:?}");
+    let overlap = (
+        ly[0] + ly[2].min(inline[2]) / 2.0,
+        ly[1].max(inline[1]) + 2.0,
+    );
+    assert!(
+        overlap.1 < inline[1] + inline[3] && overlap.1 < ly[1] + ly[3],
+        "{ly:?} {inline:?}"
+    );
     let _ = program_input(&probe, Duration::from_millis(200));
     click(&app, overlap);
     assert_eq!(program_event(&probe, "action")["id"], "ly");
     // Below the layer's node, the layer lets presses through to main.
-    assert!(ly[1] + ly[3] + 4.0 < inline[1] + inline[3], "{ly:?} {inline:?}");
+    assert!(
+        ly[1] + ly[3] + 4.0 < inline[1] + inline[3],
+        "{ly:?} {inline:?}"
+    );
     let _ = program_input(&probe, Duration::from_millis(200));
     click(&app, (inline[0] + 10.0, inline[1] + inline[3] - 4.0));
     assert_eq!(program_event(&probe, "action")["id"], "in-go");
     // With main far down the flow, a layer is still placed from the pane's top.
-    probe.write(&auk_conformance::probe::tsp_json("x", &json!({"id": "s3", "keep": false})));
+    probe.write(&auk_conformance::probe::tsp_json(
+        "x",
+        &json!({"id": "s3", "keep": false}),
+    ));
     let mut out = Vec::new();
     for i in 0..60 {
         out.extend(format!("pushed {i}\r\n").into_bytes());
@@ -2078,7 +2382,10 @@ fn a_layer_overlays_the_pane_from_its_top_above_main() {
         (b[1] > oy + 200.0).then_some(b)
     });
     let ly4 = wait_for("the second layer", || node_box(&app, pane, "ly4"));
-    assert!((ly4[1] - oy).abs() < 1.0, "the layer at the pane's top: {ly4:?}, main at {low:?}");
+    assert!(
+        (ly4[1] - oy).abs() < 1.0,
+        "the layer at the pane's top: {ly4:?}, main at {low:?}"
+    );
     // Closing the surface removes its layer.
     probe.write(&auk_conformance::probe::tsp_json("x", &json!({"id": "s4"})));
     pane_layout(&app, pane, "the layer gone", |l| l["layers"] == false);
@@ -2123,8 +2430,14 @@ fn hovering_a_node_with_a_title_shows_its_tooltip() {
     // The chrome draws it just below the pointer.
     let drawn = &chrome["tooltip_drawn"];
     let r: Vec<f64> = drawn["rect"].as_array().unwrap().iter().map(num).collect();
-    assert!(r[1] > at.1 && r[1] < at.1 + 40.0, "below the pointer: {drawn}");
-    assert!(r[0] >= at.0 && r[0] < at.0 + 20.0 && r[2] > 40.0 && r[3] > 8.0, "{drawn}");
+    assert!(
+        r[1] > at.1 && r[1] < at.1 + 40.0,
+        "below the pointer: {drawn}"
+    );
+    assert!(
+        r[0] >= at.0 && r[0] < at.0 + 20.0 && r[2] > 40.0 && r[3] > 8.0,
+        "{drawn}"
+    );
     // The nearest ancestor with a title gives it.
     let inner = node_box(&app, pane, "inner").unwrap();
     let at = (inner[0] + 20.0, inner[1] + inner[3] / 2.0);
@@ -2167,11 +2480,23 @@ fn clear_scrollback_from_the_window_clears_every_replicas_scrollback() {
     caught_up(&env, &a, pane);
     caught_up(&env, &b, pane);
     for (who, text) in [
-        ("a", a.request(&format!("capture {pane} --scrollback"))["text"].clone()),
-        ("b", b.request(&format!("capture {pane} --scrollback"))["text"].clone()),
-        ("the daemon", env.daemon(&format!("capture {pane} --scrollback"))["text"].clone()),
+        (
+            "a",
+            a.request(&format!("capture {pane} --scrollback"))["text"].clone(),
+        ),
+        (
+            "b",
+            b.request(&format!("capture {pane} --scrollback"))["text"].clone(),
+        ),
+        (
+            "the daemon",
+            env.daemon(&format!("capture {pane} --scrollback"))["text"].clone(),
+        ),
     ] {
-        assert!(text.as_str().unwrap().contains("scrolled line 0\n"), "{who}: {text}");
+        assert!(
+            text.as_str().unwrap().contains("scrolled line 0\n"),
+            "{who}: {text}"
+        );
     }
     let _ = program_input(&probe, Duration::from_millis(200));
 
@@ -2189,7 +2514,10 @@ fn clear_scrollback_from_the_window_clears_every_replicas_scrollback() {
         let text = app.request(&format!("capture {pane} --scrollback"))["text"].clone();
         assert!(cleared(&text), "{text}");
         let screen = app.request(&format!("capture {pane}"))["text"].clone();
-        assert!(screen.as_str().unwrap().contains("the last line"), "the screen stays: {screen}");
+        assert!(
+            screen.as_str().unwrap().contains("the last line"),
+            "the screen stays: {screen}"
+        );
     }
     // Every replica agrees with the daemon.
     let (hash, seq) = env.daemon_hash(pane);
@@ -2200,7 +2528,10 @@ fn clear_scrollback_from_the_window_clears_every_replicas_scrollback() {
     }
     // ⌘K is no keystroke: the program read nothing (no ^L).
     let (bodies, bytes) = program_input(&probe, Duration::from_millis(300));
-    assert!(bodies.is_empty() && bytes.is_empty(), "{bodies:?} {bytes:?}");
+    assert!(
+        bodies.is_empty() && bytes.is_empty(),
+        "{bodies:?} {bytes:?}"
+    );
 }
 
 #[test]
@@ -2248,9 +2579,14 @@ fn view_state_belongs_to_each_window_and_never_reaches_snapshots() {
     });
     assert_eq!(la["following"], true);
     menu(&a, "View", "Scroll to Top");
-    pane_layout(&a, pane, "a scrolled to the top", |l| l["following"] == false && l["first_line"] == 0);
+    pane_layout(&a, pane, "a scrolled to the top", |l| {
+        l["following"] == false && l["first_line"] == 0
+    });
     assert!(b.request("selection").is_null());
-    assert_eq!(pane_layout(&b, pane, "b's flow", |l| l["rows"].is_array())["following"], true);
+    assert_eq!(
+        pane_layout(&b, pane, "b's flow", |l| l["rows"].is_array())["following"],
+        true
+    );
 
     // None of it is pane state: the daemon's hash is unchanged, and a window attaching now
     // (from a snapshot) shows the card open, nothing selected, following the tail.
@@ -2260,13 +2596,17 @@ fn view_state_belongs_to_each_window_and_never_reaches_snapshots() {
     let open_c = wait_for("the card in c", || node_box(&c, pane, "card"));
     assert_eq!(open_c[3], open_b[3]);
     assert!(c.request("selection").is_null());
-    assert_eq!(pane_layout(&c, pane, "c's flow", |l| l["rows"].is_array())["following"], true);
+    assert_eq!(
+        pane_layout(&c, pane, "c's flow", |l| l["rows"].is_array())["following"],
+        true
+    );
 }
 
 /// Writes the settings file the app reads (`<config>/settings.json`; the harness's config dir
 /// is the state dir).
 fn write_settings(env: &TestEnv, settings: Value) {
-    std::fs::write(env.state.join("settings.json"), settings.to_string()).expect("write settings.json");
+    std::fs::write(env.state.join("settings.json"), settings.to_string())
+        .expect("write settings.json");
 }
 
 /// §7.8, §7.9, §7.12, §7.13: the settings file turns off program colors and native editing,
@@ -2281,7 +2621,8 @@ fn settings_drive_program_colors_native_editing_plain_click_links_and_reduce_mot
     );
     let opener = env.root.join("opener.sh");
     std::fs::write(&opener, "#!/bin/sh\nexit 0\n").expect("write the opener");
-    std::fs::set_permissions(&opener, std::os::unix::fs::PermissionsExt::from_mode(0o755)).expect("chmod");
+    std::fs::set_permissions(&opener, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+        .expect("chmod");
     let app = App::start_with(&env, "a", &[], &[("AUK_OPENER", &opener.to_string_lossy())]);
     let probe = focused_probe(&env, &app);
     let pane = probe.pane;
@@ -2298,9 +2639,14 @@ fn settings_drive_program_colors_native_editing_plain_click_links_and_reduce_mot
     // The program's hello says motion is reduced.
     probe.write(&hello(&["reduce-motion"]));
     let input = probe.read_until("the hello reply", |b| {
-        tsp_bodies(&split_input(b)).iter().any(|v| v.get("reduceMotion").is_some())
+        tsp_bodies(&split_input(b))
+            .iter()
+            .any(|v| v.get("reduceMotion").is_some())
     });
-    let reply = tsp_bodies(&split_input(&input)).into_iter().find(|v| v.get("reduceMotion").is_some()).unwrap();
+    let reply = tsp_bodies(&split_input(&input))
+        .into_iter()
+        .find(|v| v.get("reduceMotion").is_some())
+        .unwrap();
     assert_eq!(reply["reduceMotion"], true, "{reply}");
 
     // A plain click on a link opens it.
@@ -2309,7 +2655,10 @@ fn settings_drive_program_colors_native_editing_plain_click_links_and_reduce_mot
     let layout = pane_layout(&app, pane, "the link's row", |l| line_top(l, 0).is_some());
     let cw = layout["cell"][0].as_f64().unwrap();
     let (top, h) = line_top(&layout, 0).unwrap();
-    let (x, y) = (layout["origin"][0].as_f64().unwrap() + cw * 6.5, top + h / 2.0);
+    let (x, y) = (
+        layout["origin"][0].as_f64().unwrap() + cw * 6.5,
+        top + h / 2.0,
+    );
     click(&app, (x, y));
     let opened = wait_for("the plain click's open", || {
         let o = app.request("opens")["opened"].clone();
@@ -2321,7 +2670,11 @@ fn settings_drive_program_colors_native_editing_plain_click_links_and_reduce_mot
     // click opens nothing while a ⌘-click does.
     write_settings(&env, json!({"reduce_motion": false}));
     // (Events go to a program with a live listening surface.)
-    probe.write(&open_with("s1", "inline", json!([{"id": "t", "k": "text", "p": {"text": "x"}}])));
+    probe.write(&open_with(
+        "s1",
+        "inline",
+        json!([{"id": "t", "k": "text", "p": {"text": "x"}}]),
+    ));
     acked(&probe, 1);
     menu(&app, "View", "Reload Settings");
     let motion = program_event(&probe, "motion");
@@ -2335,7 +2688,11 @@ fn settings_drive_program_colors_native_editing_plain_click_links_and_reduce_mot
         let o = app.request("opens")["opened"].clone();
         (o.as_array()?.len() >= 2).then_some(o)
     });
-    assert_eq!(opened.as_array().unwrap().len(), 2, "the plain click opened nothing: {opened}");
+    assert_eq!(
+        opened.as_array().unwrap().len(),
+        2,
+        "the plain click opened nothing: {opened}"
+    );
     wait_for("the views' settings back to the defaults", || {
         let v = app.request("settings")["view"].clone();
         (v == json!({"program_colors": true, "native_editing": true, "links_plain_click": false, "reduce_motion": false}))
@@ -2371,7 +2728,8 @@ fn keymap_preset_and_user_keybinds_with_unbind() {
             leaves(&n["first"]) + leaves(&n["second"])
         }
     }
-    let panes = |app: &App| -> usize { tabs(&app.layout()).iter().map(|t| leaves(&t["root"])).sum() };
+    let panes =
+        |app: &App| -> usize { tabs(&app.layout()).iter().map(|t| leaves(&t["root"])).sum() };
 
     // The preset: ctrl+a then % splits right.
     app.request("type ctrl+a shift+5");
@@ -2386,14 +2744,23 @@ fn keymap_preset_and_user_keybinds_with_unbind() {
 
     // A user keybind takes a default's keys (cmd+d) from the menu; its list runs the first
     // action that applies.
-    assert_eq!(app.request("menu-key Shell 'Split Right'")["key"], "", "the menu gives cmd+d up");
+    assert_eq!(
+        app.request("menu-key Shell 'Split Right'")["key"],
+        "",
+        "the menu gives cmd+d up"
+    );
     app.request("type cmd+d");
-    wait_for("the new tab", || (tabs(&app.layout()).len() == 2).then_some(()));
+    wait_for("the new tab", || {
+        (tabs(&app.layout()).len() == 2).then_some(())
+    });
     // `unbind` removes a default without binding it again; the others keep theirs.
     assert_eq!(app.request("menu-key Shell 'Split Down'")["key"], "");
     assert_eq!(app.request("menu-key Shell 'New Tab'")["key"], "t");
     let settings = app.request("settings");
-    assert!(settings["user"].as_array().unwrap().len() == 2, "unbind binds nothing: {settings}");
+    assert!(
+        settings["user"].as_array().unwrap().len() == 2,
+        "unbind binds nothing: {settings}"
+    );
 }
 
 #[test]
@@ -2409,7 +2776,11 @@ fn with_native_editing_switched_off_field_keys_and_pastes_are_the_programs() {
         "inline",
         json!([{"id": "ed", "k": "editor", "p": {"text": "hello world", "cursor": 0}}]),
     ));
-    probe.write(&auk_conformance::probe::frame("s1", 2, json!([["focus", "ed"]])));
+    probe.write(&auk_conformance::probe::frame(
+        "s1",
+        2,
+        json!([["focus", "ed"]]),
+    ));
     acked(&probe, 2);
     caught_up(&env, &app, probe.pane);
     // The program granted `edit`, but the user's switch wins (§7.9): selecting keys are keys.
@@ -2464,14 +2835,29 @@ fn presence_shows_the_other_clients_attached_to_the_host() {
     let headless = env.start_headless("h", &[]);
     let shown = wait_for("the headless window in the app's presence", || {
         let p = app.request("presence");
-        p["shown"].as_str().filter(|s| s.contains("headless")).map(str::to_owned)
+        p["shown"]
+            .as_str()
+            .filter(|s| s.contains("headless"))
+            .map(str::to_owned)
     });
     assert!(shown.starts_with("Also here: "), "{shown}");
     let p = app.request("presence");
     let me = p["you"].clone();
-    assert!(p["clients"].as_array().unwrap().iter().any(|c| c["id"] == me && c["kind"] == "app"), "{p}");
-    std::process::Command::new("/bin/kill").arg(headless.pid.to_string()).status().expect("kill the headless window");
-    wait_for("the headless window to leave", || app.request("presence")["shown"].is_null().then_some(()));
+    assert!(
+        p["clients"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["id"] == me && c["kind"] == "app"),
+        "{p}"
+    );
+    std::process::Command::new("/bin/kill")
+        .arg(headless.pid.to_string())
+        .status()
+        .expect("kill the headless window");
+    wait_for("the headless window to leave", || {
+        app.request("presence")["shown"].is_null().then_some(())
+    });
 }
 
 /// §4.2, §10.1 "Who runs what", §10.4 "Remote window": `auk --host` opens the app's windows on a
@@ -2508,10 +2894,24 @@ fn remote_window_shows_remote_panes_to_local_window_halves_with_local_and_remote
     let app = App::start(
         &r.local,
         "app",
-        &["--host", &r.vm.host, "--ssh-config", &config, "--remote-command", &command],
+        &[
+            "--host",
+            &r.vm.host,
+            "--ssh-config",
+            &config,
+            "--remote-command",
+            &command,
+        ],
     );
-    assert_eq!(app.state()["focused"], pane, "the window shows the remote pane");
-    assert!(!auk_conformance::harness::ping(&r.local.control_path()), "no local daemon serves it");
+    assert_eq!(
+        app.state()["focused"],
+        pane,
+        "the window shows the remote pane"
+    );
+    assert!(
+        !auk_conformance::harness::ping(&r.local.control_path()),
+        "no local daemon serves it"
+    );
 
     // The local window half sees the remote pane: its directory on the VM.
     let home = format!("{}/home", r.root);
@@ -2529,35 +2929,74 @@ fn remote_window_shows_remote_panes_to_local_window_halves_with_local_and_remote
         (c["styles"].as_array()?.iter().any(|s| s == "rstyle")).then_some(c)
     });
     assert_eq!(catalog["host"], r.vm.host.as_str());
-    let sheets: Vec<&str> = catalog["sheets"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
-    assert!(sheets.contains(&format!("plugin:{}:rstyle:styles", r.vm.host).as_str()), "{sheets:?}");
-    assert!(sheets.contains(&"plugin:local:localwin:styles"), "{sheets:?}");
+    let sheets: Vec<&str> = catalog["sheets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert!(
+        sheets.contains(&format!("plugin:{}:rstyle:styles", r.vm.host).as_str()),
+        "{sheets:?}"
+    );
+    assert!(
+        sheets.contains(&"plugin:local:localwin:styles"),
+        "{sheets:?}"
+    );
     wait_for("the sheets in the remote pane's document", || {
         let s = app.request(&format!("surface-sheets {pane}"));
-        s.as_array()?.iter().any(|n| n.as_str().is_some_and(|n| n.ends_with(":rstyle:styles"))).then_some(())
+        s.as_array()?
+            .iter()
+            .any(|n| n.as_str().is_some_and(|n| n.ends_with(":rstyle:styles")))
+            .then_some(())
     });
 
     // Typing in the window reaches the remote shell.
     app.request("text 'echo remote-$((6*7))'");
     app.request("type return");
     wait_for("the remote output in the window", || {
-        app.request(&format!("capture {pane}"))["text"].as_str()?.contains("\nremote-42").then_some(())
+        app.request(&format!("capture {pane}"))["text"]
+            .as_str()?
+            .contains("\nremote-42")
+            .then_some(())
     });
 }
 
 /// Writes `content` to `path` on the VM (making its directory), executable when `exec`.
 fn vm_file(r: &auk_conformance::remote::RemoteEnv, path: &str, content: &str, exec: bool) {
     let dir = path.rsplit_once('/').map_or(".", |(d, _)| d);
-    let chmod = if exec { format!(" && chmod +x {path}") } else { String::new() };
-    let out = r.vm.ssh_with_input(&format!("mkdir -p {dir} && cat > {path}{chmod}"), content.as_bytes());
-    assert!(out.status.success(), "write {path} on the VM: {}", String::from_utf8_lossy(&out.stderr));
+    let chmod = if exec {
+        format!(" && chmod +x {path}")
+    } else {
+        String::new()
+    };
+    let out = r.vm.ssh_with_input(
+        &format!("mkdir -p {dir} && cat > {path}{chmod}"),
+        content.as_bytes(),
+    );
+    assert!(
+        out.status.success(),
+        "write {path} on the VM: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 /// A remote window's app, attached to `r`'s host over SSH.
 fn remote_app(r: &auk_conformance::remote::RemoteEnv, name: &str) -> App {
     let config = r.vm.ssh_config.to_string_lossy().into_owned();
     let command = r.remote_command();
-    App::start(&r.local, name, &["--host", &r.vm.host, "--ssh-config", &config, "--remote-command", &command])
+    App::start(
+        &r.local,
+        name,
+        &[
+            "--host",
+            &r.vm.host,
+            "--ssh-config",
+            &config,
+            "--remote-command",
+            &command,
+        ],
+    )
 }
 
 /// The host half of `rdemo`, installed on the VM: a `title` hook that toasts, a lens on
@@ -2642,37 +3081,66 @@ fn remote_window_draws_the_remote_hosts_surfaces_blocks_and_lens_views_from_its_
 
     let pane = r.new_pane(&[]);
     let app = remote_app(&r, "app");
-    assert_eq!(app.state()["focused"], pane, "the window shows the remote pane");
-    assert!(!auk_conformance::harness::ping(&r.local.control_path()), "no local daemon serves it");
+    assert_eq!(
+        app.state()["focused"],
+        pane,
+        "the window shows the remote pane"
+    );
+    assert!(
+        !auk_conformance::harness::ping(&r.local.control_path()),
+        "no local daemon serves it"
+    );
     wait_for("the remote catalog's block type", || {
         let c = app.request("catalog");
-        c["block_types"].as_array()?.iter().any(|b| b["kind"] == "rdemo.panel").then_some(())
+        c["block_types"]
+            .as_array()?
+            .iter()
+            .any(|b| b["kind"] == "rdemo.panel")
+            .then_some(())
     });
 
     // A host hook: the remote daemon's `title` hook toasts in the local window.
-    r.auk_ok(&["run", &pane.to_string(), "printf '\\e]2;%s\\a' hooked-$((40+2))"]);
+    r.auk_ok(&[
+        "run",
+        &pane.to_string(),
+        "printf '\\e]2;%s\\a' hooked-$((40+2))",
+    ]);
     wait_for("the remote title hook's toast", || {
-        app.request("toasts").as_array()?.iter().any(|t| t["text"] == "remote title hooked-42").then_some(())
+        app.request("toasts")
+            .as_array()?
+            .iter()
+            .any(|t| t["text"] == "remote title hooked-42")
+            .then_some(())
     });
     r.wait(pane, "prompt");
 
     // A TSP surface from a remote program: drawn here (the window acks it), and a click on its
     // node reaches the program on the VM.
     r.auk_ok(&["run", &pane.to_string(), &surface]);
-    let go = wait_for("the remote surface's node, drawn", || node_box(&app, pane, "go"));
+    let go = wait_for("the remote surface's node, drawn", || {
+        node_box(&app, pane, "go")
+    });
     click(&app, center(go));
     r.wait(pane, "prompt");
     let text = r.capture(pane);
-    assert!(text.contains("\nsurface-acked-21"), "the window's ack didn't reach the program: {text}");
-    assert!(text.contains("\nsurface-clicked-42"), "the click didn't reach the program: {text}");
+    assert!(
+        text.contains("\nsurface-acked-21"),
+        "the window's ack didn't reach the program: {text}"
+    );
+    assert!(
+        text.contains("\nsurface-clicked-42"),
+        "the click didn't reach the program: {text}"
+    );
 
     // A lens: the remote host half claims the command, its view draws here, and a click in the
     // view is a lens event the host answers with effects.
     r.auk_ok(&["run", &pane.to_string(), &format!("{cmd} go")]);
     let block = wait_for("the remote lens view, drawn", || {
         let b = app.request(&format!("lens {pane}"))["blocks"][0].clone();
-        (b["plugin"] == "rdemo" && b["shown"] == "native" && b["text"].as_str()?.contains("remote-lens 3 lines"))
-            .then_some(b)
+        (b["plugin"] == "rdemo"
+            && b["shown"] == "native"
+            && b["text"].as_str()?.contains("remote-lens 3 lines"))
+        .then_some(b)
     });
     let go = block["parts"]
         .as_array()
@@ -2690,20 +3158,35 @@ fn remote_window_draws_the_remote_hosts_surfaces_blocks_and_lens_views_from_its_
         (app.request("clipboard") == "copied-from-the-remote-lens").then_some(())
     });
     wait_for("the remote lens's toast", || {
-        app.request("toasts").as_array()?.iter().any(|t| t["text"] == "remote lens clicked").then_some(())
+        app.request("toasts")
+            .as_array()?
+            .iter()
+            .any(|t| t["text"] == "remote lens clicked")
+            .then_some(())
     });
 
     // A plugin block the host opens: its view draws here, and a click reaches the block.
-    let block: u64 = r.auk_ok(&["block", "rdemo.panel"]).parse().expect("a block pane id");
+    let block: u64 = r
+        .auk_ok(&["block", "rdemo.panel"])
+        .parse()
+        .expect("a block pane id");
     show(&app, block);
     // Block views get derived ids: the region, then each node's key (tern-sdk reconcile).
-    let bump = wait_for("the remote block's view, drawn", || node_box(&app, block, "main.bump"));
+    let bump = wait_for("the remote block's view, drawn", || {
+        node_box(&app, block, "main.bump")
+    });
     click(&app, center(bump));
     wait_for("the remote block's toast", || {
-        app.request("toasts").as_array()?.iter().any(|t| t["text"] == "remote bumped 1").then_some(())
+        app.request("toasts")
+            .as_array()?
+            .iter()
+            .any(|t| t["text"] == "remote bumped 1")
+            .then_some(())
     });
     wait_for("the block's re-render on the host", || {
-        r.auk_ok(&["capture", &block.to_string(), "--surfaces"]).contains("remote-panel 1").then_some(())
+        r.auk_ok(&["capture", &block.to_string(), "--surfaces"])
+            .contains("remote-panel 1")
+            .then_some(())
     });
 }
 
@@ -2711,7 +3194,9 @@ fn remote_window_draws_the_remote_hosts_surfaces_blocks_and_lens_views_from_its_
 /// type, Return.
 fn palette_run(app: &App, query: &str, action: &str) {
     app.request("menu View 'Command Palette…'");
-    wait_for("the palette", || (app.request("palette")["open"] == true).then_some(()));
+    wait_for("the palette", || {
+        (app.request("palette")["open"] == true).then_some(())
+    });
     app.request(&format!("text {}", auk_conformance::harness::quote(query)));
     let rows = wait_for("the palette's rows", || {
         let p = app.request("palette");
@@ -2719,7 +3204,9 @@ fn palette_run(app: &App, query: &str, action: &str) {
     });
     assert_eq!(rows[0]["action"], action, "{rows}");
     app.request("type return");
-    wait_for("the palette to close", || (app.request("palette")["open"] == false).then_some(()));
+    wait_for("the palette to close", || {
+        (app.request("palette")["open"] == false).then_some(())
+    });
 }
 
 /// §9.10 "Whose rights": a window half, running here, types into a remote pane with `cx:run`, and
@@ -2784,17 +3271,29 @@ fn remote_window_half_types_into_a_remote_pane_and_opens_the_hosts_block_types()
 
     let pane = r.new_pane(&[]);
     let app = remote_app(&r, "app");
-    assert_eq!(app.state()["focused"], pane, "the window shows the remote pane");
-    assert!(!auk_conformance::harness::ping(&r.local.control_path()), "no local daemon serves it");
+    assert_eq!(
+        app.state()["focused"],
+        pane,
+        "the window shows the remote pane"
+    );
+    assert!(
+        !auk_conformance::harness::ping(&r.local.control_path()),
+        "no local daemon serves it"
+    );
 
     // The window half's `cx:run` reaches the remote shell, which runs the line on the VM.
     palette_run(&app, "type into the focused", "plugin.typer.type-remote");
     r.wait(pane, "prompt");
     wait_for("the remote shell's output", || {
-        r.capture(pane).contains("\ntyped-by-the-window-half-42").then_some(())
+        r.capture(pane)
+            .contains("\ntyped-by-the-window-half-42")
+            .then_some(())
     });
     wait_for("the output in the window", || {
-        app.request(&format!("capture {pane}"))["text"].as_str()?.contains("\ntyped-by-the-window-half-42").then_some(())
+        app.request(&format!("capture {pane}"))["text"]
+            .as_str()?
+            .contains("\ntyped-by-the-window-half-42")
+            .then_some(())
     });
 
     // The host's block type is in the palette; the remote daemon opens it, and the window
@@ -2802,11 +3301,17 @@ fn remote_window_half_types_into_a_remote_pane_and_opens_the_hosts_block_types()
     palette_run(&app, "new remote panel", "block:rpanel.panel");
     let block = wait_for("the block pane on the host", || {
         r.ls()["panes"].as_array()?.iter().find_map(|p| {
-            (p["kind"]["block"] == "rpanel.panel").then(|| p["id"].as_u64()).flatten()
+            (p["kind"]["block"] == "rpanel.panel")
+                .then(|| p["id"].as_u64())
+                .flatten()
         })
     });
-    wait_for("the window to focus the block", || (app.state()["focused"] == block).then_some(()));
-    wait_for("the block's view, drawn", || node_box(&app, block, "main.hello"));
+    wait_for("the window to focus the block", || {
+        (app.state()["focused"] == block).then_some(())
+    });
+    wait_for("the block's view, drawn", || {
+        node_box(&app, block, "main.hello")
+    });
 
     // §9.8 on a remote window: `cx:new_block`, `layout:split` with a launch and `layout:tab` ask
     // the window's own host over its link and answer with the new panes' ids, placed on the
@@ -2815,7 +3320,9 @@ fn remote_window_half_types_into_a_remote_pane_and_opens_the_hosts_block_types()
     palette_run(&app, "open panes on the host", "plugin.typer.open-remote");
     let report = wait_for("the open's report", || {
         let c = app.request("clipboard");
-        c.as_str()?.starts_with("f=").then(|| c.as_str().unwrap().to_owned())
+        c.as_str()?
+            .starts_with("f=")
+            .then(|| c.as_str().unwrap().to_owned())
     });
     assert!(report.ends_with("err=nil"), "{report}");
     let ids: std::collections::BTreeMap<&str, u64> = report
@@ -2823,7 +3330,13 @@ fn remote_window_half_types_into_a_remote_pane_and_opens_the_hosts_block_types()
         .filter_map(|kv| kv.split_once('='))
         .filter_map(|(k, v)| Some((k, v.parse().ok()?)))
         .collect();
-    let (f, opened, split, first, second) = (ids["f"], ids["block"], ids["split"], ids["first"], ids["second"]);
+    let (f, opened, split, first, second) = (
+        ids["f"],
+        ids["block"],
+        ids["split"],
+        ids["first"],
+        ids["second"],
+    );
     assert_eq!(f, pane);
     assert_eq!(r.pane_info(opened)["kind"]["block"], "rpanel.panel");
     assert_eq!(r.pane_info(split)["kind"]["line"], "cat");
@@ -2836,7 +3349,10 @@ fn remote_window_half_types_into_a_remote_pane_and_opens_the_hosts_block_types()
         format!("D500(D500({split},{pane}),{opened})"),
         "{host}"
     );
-    assert_eq!(layout_shape(&tab_holding(&host, first)["root"], true), format!("R600({second},{first})"));
+    assert_eq!(
+        layout_shape(&tab_holding(&host, first)["root"], true),
+        format!("R600({second},{first})")
+    );
     // The window's replica of the layout comes over the link on its own schedule.
     wait_for("the window to show the host's tab", || {
         (tab_holding(&app.layout(), first) == tab_holding(&host, first)).then_some(())
@@ -2847,7 +3363,10 @@ fn remote_window_half_types_into_a_remote_pane_and_opens_the_hosts_block_types()
 #[test]
 fn the_first_window_starts_a_daemon_when_none_answers_and_it_outlives_the_window() {
     let env = TestEnv::new(env!("CARGO_BIN_EXE_auk"), "autostart");
-    assert!(!auk_conformance::harness::ping(&env.control_path()), "a daemon already answers");
+    assert!(
+        !auk_conformance::harness::ping(&env.control_path()),
+        "a daemon already answers"
+    );
     let app = App::start(&env, "a", &[]);
     // A daemon answers on the test's socket now: a process of its own, with the window's first
     // pane.
@@ -2858,7 +3377,9 @@ fn the_first_window_starts_a_daemon_when_none_answers_and_it_outlives_the_window
     let pane = app.state()["focused"].as_u64().expect("a focused pane");
     let ls = env.daemon("ls");
     assert!(
-        ls["panes"].as_array().is_some_and(|p| p.iter().any(|p| p["id"] == pane)),
+        ls["panes"]
+            .as_array()
+            .is_some_and(|p| p.iter().any(|p| p["id"] == pane)),
         "{ls}"
     );
     env.wait(pane, "prompt");
@@ -2881,7 +3402,9 @@ fn link_shown(app: &App) -> (Option<String>, Option<String>, Option<String>) {
     let state = seg("auk.link");
     (
         identity,
-        state.as_ref().and_then(|s| s["text"].as_str().map(str::to_owned)),
+        state
+            .as_ref()
+            .and_then(|s| s["text"].as_str().map(str::to_owned)),
         state.and_then(|s| s["tone"].as_str().map(str::to_owned)),
     )
 }
@@ -2890,15 +3413,18 @@ fn link_shown(app: &App) -> (Option<String>, Option<String>, Option<String>) {
 fn wait_link(app: &App, state: &str, tone: &str) -> Value {
     wait_for(&format!("the status line to show the link {state}"), || {
         let (_, shown, t) = link_shown(app);
-        (shown.as_deref() == Some(state) && t.as_deref() == Some(tone)).then(|| app.request("link")["status"].clone())
+        (shown.as_deref() == Some(state) && t.as_deref() == Some(tone))
+            .then(|| app.request("link")["status"].clone())
     })
 }
 
 /// Any string in an accessibility tree node that contains `needle`.
 fn a11y_has(tree: &Value, needle: &str) -> bool {
     flatten(tree).iter().any(|n| {
-        n.as_object()
-            .is_some_and(|o| o.values().any(|v| v.as_str().is_some_and(|s| s.contains(needle))))
+        n.as_object().is_some_and(|o| {
+            o.values()
+                .any(|v| v.as_str().is_some_and(|s| s.contains(needle)))
+        })
     })
 }
 
@@ -2917,11 +3443,17 @@ fn a_local_windows_status_line_shows_its_local_hop_and_the_link_state() {
     let acting = hop["acting"].as_str().unwrap();
     let origin = hop["origin"].as_str().unwrap();
     assert_eq!(acting, format!("{user}@{origin}"), "{status}");
-    let chain = format!("{} via local from {origin} as {acting}", hop["principal"].as_str().unwrap());
+    let chain = format!(
+        "{} via local from {origin} as {acting}",
+        hop["principal"].as_str().unwrap()
+    );
     let (identity, ..) = link_shown(&app);
     assert_eq!(identity.as_deref(), Some(chain.as_str()));
     let tree = app.request("a11y --depth 12");
-    assert!(a11y_has(&tree, &chain), "the chain isn't in the accessibility tree: {tree}");
+    assert!(
+        a11y_has(&tree, &chain),
+        "the chain isn't in the accessibility tree: {tree}"
+    );
     assert!(a11y_has(&tree, "connected"), "{tree}");
 }
 
@@ -2931,11 +3463,16 @@ fn a_local_windows_status_line_shows_its_local_hop_and_the_link_state() {
 /// holds what is typed; once the link resyncs it shows "connected" again and the typing reaches
 /// the remote shell once. A link that gives up shows "failed" and why, and the window stays.
 #[test]
-fn remote_window_shows_its_ssh_hop_and_the_link_reconnecting_then_connected_and_typing_arrives_once() {
+fn remote_window_shows_its_ssh_hop_and_the_link_reconnecting_then_connected_and_typing_arrives_once()
+ {
     let r = auk_conformance::remote::RemoteEnv::new(env!("CARGO_BIN_EXE_auk"), "app-remote-link");
     let pane = r.new_pane(&[]);
     let app = remote_app(&r, "app");
-    assert_eq!(app.state()["focused"], pane, "the window shows the remote pane");
+    assert_eq!(
+        app.state()["focused"],
+        pane,
+        "the window shows the remote pane"
+    );
     r.wait(pane, "prompt");
 
     let before = wait_link(&app, "connected", "muted");
@@ -2944,11 +3481,17 @@ fn remote_window_shows_its_ssh_hop_and_the_link_reconnecting_then_connected_and_
     let vm_user = r.vm.ssh_ok("id -un").trim().to_owned();
     let vm_host = r.vm.ssh_ok("hostname").trim().to_owned();
     assert_eq!(hop["acting"], format!("{vm_user}@{vm_host}"), "{before}");
-    let here = std::process::Command::new("/bin/hostname").output().expect("hostname").stdout;
+    let here = std::process::Command::new("/bin/hostname")
+        .output()
+        .expect("hostname")
+        .stdout;
     let here = String::from_utf8_lossy(&here).trim().to_owned();
     let here_short = here.split('.').next().unwrap_or(&here);
     let origin = hop["origin"].as_str().unwrap();
-    assert!(origin == here || origin == here_short, "origin {origin} isn't this machine ({here}): {before}");
+    assert!(
+        origin == here || origin == here_short,
+        "origin {origin} isn't this machine ({here}): {before}"
+    );
     let chain = format!(
         "{} via ssh-key from {origin} as {vm_user}@{vm_host}",
         hop["principal"].as_str().unwrap()
@@ -2958,7 +3501,9 @@ fn remote_window_shows_its_ssh_hop_and_the_link_reconnecting_then_connected_and_
 
     // Drop the link, and hold the next connection at the gate so the outage lasts.
     r.vm.ssh_ok(&format!("touch {}", r.gate()));
-    let killed = std::process::Command::new("/bin/kill").args(["-KILL", &ssh.to_string()]).status();
+    let killed = std::process::Command::new("/bin/kill")
+        .args(["-KILL", &ssh.to_string()])
+        .status();
     assert!(killed.is_ok_and(|s| s.success()), "kill the ssh process");
     let down = wait_link(&app, "reconnecting (attempt 1)", "warning");
     assert_eq!(down["reconnects"], 0, "{down}");
@@ -2979,31 +3524,57 @@ fn remote_window_shows_its_ssh_hop_and_the_link_reconnecting_then_connected_and_
     let after = wait_link(&app, "connected", "muted");
     assert_eq!(after["reconnects"], 1, "{after}");
     assert_ne!(after["ssh_pid"].as_u64(), Some(ssh));
-    let history: Vec<&str> = after["history"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
-    let at = history.iter().position(|s| *s == "reconnecting(1)").unwrap_or_else(|| panic!("{history:?}"));
+    let history: Vec<&str> = after["history"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    let at = history
+        .iter()
+        .position(|s| *s == "reconnecting(1)")
+        .unwrap_or_else(|| panic!("{history:?}"));
     assert_eq!(history.last(), Some(&"connected"), "{history:?}");
     assert!(at < history.len() - 1, "{history:?}");
     wait_for("the typing in the window", || {
-        app.request(&format!("capture {pane}"))["text"].as_str()?.contains("\ntyped-while-down-42").then_some(())
+        app.request(&format!("capture {pane}"))["text"]
+            .as_str()?
+            .contains("\ntyped-while-down-42")
+            .then_some(())
     });
     r.wait(pane, "prompt");
     let remote = r.capture(pane);
-    assert_eq!(remote.matches("\ntyped-while-down-42").count(), 1, "{remote}");
-    assert_eq!(remote.matches("echo typed-while-down-$((6*7))").count(), 1, "{remote}");
+    assert_eq!(
+        remote.matches("\ntyped-while-down-42").count(),
+        1,
+        "{remote}"
+    );
+    assert_eq!(
+        remote.matches("echo typed-while-down-$((6*7))").count(),
+        1,
+        "{remote}"
+    );
     assert_eq!(app.request("link")["status"]["held"], 0);
-    assert_eq!(link_shown(&app).0.as_deref(), Some(chain.as_str()), "the chain after the reconnect");
+    assert_eq!(
+        link_shown(&app).0.as_deref(),
+        Some(chain.as_str()),
+        "the chain after the reconnect"
+    );
 
     // A link that gives up: the host's `auk` is gone when it reconnects. The window stays and
     // says why.
     let ssh = after["ssh_pid"].as_u64().expect("the ssh pid");
     r.vm.ssh_ok(&format!("touch {}", r.gate()));
-    let killed = std::process::Command::new("/bin/kill").args(["-KILL", &ssh.to_string()]).status();
+    let killed = std::process::Command::new("/bin/kill")
+        .args(["-KILL", &ssh.to_string()])
+        .status();
     assert!(killed.is_ok_and(|s| s.success()), "kill the ssh process");
     wait_link(&app, "reconnecting (attempt 1)", "warning");
     r.vm.ssh_ok(&format!("mv {0} {0}.gone && rm {1}", r.auk, r.gate()));
     let failed = wait_for("the status line to show the link failed", || {
         let (_, shown, tone) = link_shown(&app);
-        (shown.as_deref()?.starts_with("failed: ") && tone.as_deref() == Some("error")).then_some(shown.unwrap())
+        (shown.as_deref()?.starts_with("failed: ") && tone.as_deref() == Some("error"))
+            .then_some(shown.unwrap())
     });
     assert!(failed.contains("wasn't found"), "{failed}");
     std::thread::sleep(Duration::from_secs(1));
@@ -3045,24 +3616,38 @@ fn the_window_keymap_takes_its_keys_before_a_focused_block() {
     let _us = InputSource::select(&app, US_LAYOUT);
     let first = wait_for("a focused pane", || app.state()["focused"].as_u64());
     env.wait(first, "prompt");
-    let block = env.daemon("block keylog.log")["pane"].as_u64().expect("a block pane");
+    let block = env.daemon("block keylog.log")["pane"]
+        .as_u64()
+        .expect("a block pane");
     show(&app, block);
-    wait_for("the block's view, drawn", || node_box(&app, block, "main.log"));
+    wait_for("the block's view, drawn", || {
+        node_box(&app, block, "main.log")
+    });
     let shown = || -> String {
         let out = env.cli(&["capture", &block.to_string(), "--surfaces"]);
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         String::from_utf8_lossy(&out.stdout).into_owned()
     };
 
     // An unbound key reaches the block.
     app.request("type x");
-    wait_for("the unbound key in the block", || shown().contains("keys: x").then_some(()));
+    wait_for("the unbound key in the block", || {
+        shown().contains("keys: x").then_some(())
+    });
 
     // The bound chord runs its action and never reaches the block.
     app.request("type ctrl+k");
-    wait_for("the palette", || (app.request("palette")["open"] == true).then_some(()));
+    wait_for("the palette", || {
+        (app.request("palette")["open"] == true).then_some(())
+    });
     app.request("type escape");
-    wait_for("the palette to close", || (app.request("palette")["open"] == false).then_some(()));
+    wait_for("the palette to close", || {
+        (app.request("palette")["open"] == false).then_some(())
+    });
     assert_eq!(app.state()["focused"], block);
 
     // A later unbound chord with ctrl still reaches it, after the bound one: nothing came between.
@@ -3071,7 +3656,10 @@ fn the_window_keymap_takes_its_keys_before_a_focused_block() {
         let t = shown();
         t.contains("ctrl+e").then_some(t)
     });
-    assert!(text.contains("keys: x ctrl+e"), "the bound chord reached the block: {text}");
+    assert!(
+        text.contains("keys: x ctrl+e"),
+        "the bound chord reached the block: {text}"
+    );
     assert!(!text.contains("ctrl+k") && !text.contains(" k"), "{text}");
 }
 
@@ -3220,7 +3808,11 @@ fn a11_the_session_chip_shows_with_two_sessions_switches_them_and_names_the_wind
         .then_some(())
     });
     assert!(has_action(&app, "session-menu").is_none());
-    assert!(!chrome_actions(&app).iter().any(|(a, _)| a.starts_with("session:") || a == "new-session"));
+    assert!(
+        !chrome_actions(&app)
+            .iter()
+            .any(|(a, _)| a.starts_with("session:") || a == "new-session")
+    );
 
     // A second session: the chip, and the window takes the new session's name.
     menu(&app, "Shell", "New Session");
@@ -3230,7 +3822,10 @@ fn a11_the_session_chip_shows_with_two_sessions_switches_them_and_names_the_wind
     });
     let second_id = second["id"].as_u64().unwrap();
     let second_name = second["name"].as_str().unwrap().to_owned();
-    assert!(two_words(&second_name) && second_name != first_name, "{second}");
+    assert!(
+        two_words(&second_name) && second_name != first_name,
+        "{second}"
+    );
     let chip = wait_for("the session chip", || has_action(&app, "session-menu"));
     wait_for("the window titled by the new session", || {
         (app.request("chrome")["title"] == second_name.as_str()).then_some(())
@@ -3242,8 +3837,15 @@ fn a11_the_session_chip_shows_with_two_sessions_switches_them_and_names_the_wind
 
     // The chip's menu lists both sessions, then New, Rename and Lock; a row switches.
     click(&app, chip);
-    let row = wait_for("the session menu", || has_action(&app, &format!("session:{first_id}")));
-    for want in [format!("session:{second_id}"), "new-session".into(), "rename-session".into(), "lock-session".into()] {
+    let row = wait_for("the session menu", || {
+        has_action(&app, &format!("session:{first_id}"))
+    });
+    for want in [
+        format!("session:{second_id}"),
+        "new-session".into(),
+        "rename-session".into(),
+        "lock-session".into(),
+    ] {
         assert!(has_action(&app, &want).is_some(), "{want}");
     }
     assert_eq!(app.request("chrome")["session_menu"], true);
@@ -3259,13 +3861,22 @@ fn a11_the_session_chip_shows_with_two_sessions_switches_them_and_names_the_wind
     // Switch Session… (⌃⌘S in the menu): the palette's sessions, the shown one first and marked
     // current, then the commands.
     let key = app.request("menu-key Window 'Switch Session…'");
-    assert_eq!(key, json!({"key": "s", "mask": (1u64 << 18) | (1u64 << 20)}), "⌃⌘S");
+    assert_eq!(
+        key,
+        json!({"key": "s", "mask": (1u64 << 18) | (1u64 << 20)}),
+        "⌃⌘S"
+    );
     menu(&app, "Window", "Switch Session…");
     let rows = wait_for("the session switcher", || {
         let p = app.request("palette");
         (p["open"] == true).then(|| p["rows"].clone())
     });
-    let actions: Vec<&str> = rows.as_array().unwrap().iter().map(|r| r["action"].as_str().unwrap()).collect();
+    let actions: Vec<&str> = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["action"].as_str().unwrap())
+        .collect();
     assert_eq!(
         actions,
         [
@@ -3278,7 +3889,10 @@ fn a11_the_session_chip_shows_with_two_sessions_switches_them_and_names_the_wind
         "{rows}"
     );
     assert_eq!(rows[0]["label"], first_name.as_str());
-    assert!(rows[0]["group"].as_str().unwrap().contains("current"), "{rows}");
+    assert!(
+        rows[0]["group"].as_str().unwrap().contains("current"),
+        "{rows}"
+    );
     app.request("type down");
     app.request("type return");
     wait_for("the second session shown", || {
@@ -3287,13 +3901,19 @@ fn a11_the_session_chip_shows_with_two_sessions_switches_them_and_names_the_wind
 
     // Rename Session…: the palette takes the name; the chip and the window title follow.
     menu(&app, "Shell", "Rename Session…");
-    wait_for("the rename prompt", || (app.request("palette")["open"] == true).then_some(()));
+    wait_for("the rename prompt", || {
+        (app.request("palette")["open"] == true).then_some(())
+    });
     app.request("text work");
     let rows = wait_for("the rename row", || {
         let p = app.request("palette");
         (p["query"] == "work").then(|| p["rows"].clone())
     });
-    assert_eq!(rows[0]["action"], format!("rename-session:{second_id}"), "{rows}");
+    assert_eq!(
+        rows[0]["action"],
+        format!("rename-session:{second_id}"),
+        "{rows}"
+    );
     app.request("type return");
     wait_for("the renamed session", || {
         let s = app.layout()["sessions"][1].clone();
@@ -3312,7 +3932,9 @@ fn a11_the_session_chip_shows_with_two_sessions_switches_them_and_names_the_wind
             .then_some(())
     });
     menu(&app, "Shell", "Lock Session");
-    wait_for("the locked session's chip", || has_action(&app, "session-menu"));
+    wait_for("the locked session's chip", || {
+        has_action(&app, "session-menu")
+    });
     assert!(a11y_shows(&app, &format!("Session {first_name}, locked")));
     menu(&app, "Shell", "Lock Session");
     wait_for("the chip to go with the lock", || {
@@ -3328,7 +3950,11 @@ fn a11_a_tab_whose_title_is_its_app_shows_the_badge_only() {
     let app = App::start(&env, "a", &[]);
     let probe = focused_probe(&env, &app);
     probe.write(&hello(&[]));
-    probe.write(&open_with("s1", "inline", json!([{"id": "t", "k": "text", "p": {"text": "hi"}}])));
+    probe.write(&open_with(
+        "s1",
+        "inline",
+        json!([{"id": "t", "k": "text", "p": {"text": "hi"}}]),
+    ));
     acked(&probe, 1);
     let tab = app.state()["tab"].as_u64().unwrap();
     let drawn = |title: &str| {
@@ -3337,14 +3963,20 @@ fn a11_a_tab_whose_title_is_its_app_shows_the_badge_only() {
             c["tabs"]
                 .as_array()?
                 .iter()
-                .find(|t| t["tab"] == tab && t["label"].as_str().is_some_and(|l| l.ends_with(title)))
+                .find(|t| {
+                    t["tab"] == tab && t["label"].as_str().is_some_and(|l| l.ends_with(title))
+                })
                 .cloned()
         })
     };
     // The program titles itself as its app (OSC 2): the badge alone.
     probe.write(b"\x1b]2;probe\x07");
     let t = drawn("probe");
-    assert_eq!((t["app"].as_str(), t["title"].as_str()), (Some("probe"), None), "{t}");
+    assert_eq!(
+        (t["app"].as_str(), t["title"].as_str()),
+        (Some("probe"), None),
+        "{t}"
+    );
     assert_eq!(t["label"], "probe \u{2014} probe");
     // A title that says more: badge and title.
     probe.write("\x1b]2;probe \u{2014} task\x07".as_bytes());
@@ -3369,15 +4001,26 @@ fn a13_grid_links_draw_dotted_and_arm_with_cmd_or_plain_click_links() {
     probe.write(b"see \x1b]8;;https://example.com/a13\x1b\\the link\x1b]8;;\x1b\\ here\r\n");
     caught_up(&env, &app, pane);
     let cells = |app: &App| app.request(&format!("grid-links {pane}"));
-    let all = |c: &Value, f: &dyn Fn(&Value) -> bool| c.as_array().is_some_and(|a| a.len() == 8 && a.iter().all(f));
+    let all = |c: &Value, f: &dyn Fn(&Value) -> bool| {
+        c.as_array()
+            .is_some_and(|a| a.len() == 8 && a.iter().all(f))
+    };
     let c = cells(&app);
-    assert!(all(&c, &|x| x["underline"] == "dotted" && x["accent"] == false && x["row"] == 0), "{c}");
+    assert!(
+        all(&c, &|x| x["underline"] == "dotted"
+            && x["accent"] == false
+            && x["row"] == 0),
+        "{c}"
+    );
     assert_eq!(c[0]["col"], 4);
 
     let layout = pane_layout(&app, pane, "the link's row", |l| line_top(l, 0).is_some());
     let cw = layout["cell"][0].as_f64().unwrap();
     let (top, h) = line_top(&layout, 0).unwrap();
-    let (x, y) = (layout["origin"][0].as_f64().unwrap() + cw * 6.5, top + h / 2.0);
+    let (x, y) = (
+        layout["origin"][0].as_f64().unwrap() + cw * 6.5,
+        top + h / 2.0,
+    );
     let (off_x, off_y) = (x, y + 200.0);
 
     // Hovered without ⌘: the target shows, the link stays dotted, the arrow stays.
@@ -3397,7 +4040,10 @@ fn a13_grid_links_draw_dotted_and_arm_with_cmd_or_plain_click_links() {
     assert_eq!(chrome["armed_link"]["pane"], pane);
     assert_eq!(chrome["pointer"], "PointingHand", "{chrome}");
     let c = cells(&app);
-    assert!(all(&c, &|x| x["underline"] == "solid" && x["accent"] == true), "{c}");
+    assert!(
+        all(&c, &|x| x["underline"] == "solid" && x["accent"] == true),
+        "{c}"
+    );
     // Off the link: dotted again, and the arrow.
     app.request(&format!("mouse move {off_x} {off_y} --cmd"));
     wait_for("the link disarmed", || {
@@ -3407,7 +4053,10 @@ fn a13_grid_links_draw_dotted_and_arm_with_cmd_or_plain_click_links() {
     assert!(all(&cells(&app), &|x| x["underline"] == "dotted"));
 
     // A plain click opens links: hovering arms them. With `hover`, nothing draws until then.
-    write_settings(&env, json!({"links_plain_click": true, "hyperlinks": "hover"}));
+    write_settings(
+        &env,
+        json!({"links_plain_click": true, "hyperlinks": "hover"}),
+    );
     menu(&app, "View", "Reload Settings");
     wait_for("the settings", || {
         let s = app.request("settings");
@@ -3421,9 +4070,13 @@ fn a13_grid_links_draw_dotted_and_arm_with_cmd_or_plain_click_links() {
         let c = app.request("chrome");
         (c["pointer"] == "PointingHand" && !c["armed_link"].is_null()).then_some(())
     });
-    assert!(all(&cells(&app), &|x| x["underline"] == "solid" && x["accent"] == true));
+    assert!(all(&cells(&app), &|x| x["underline"] == "solid"
+        && x["accent"] == true));
     // `off`: no underline even armed; the pointer still says a click opens it.
-    write_settings(&env, json!({"links_plain_click": true, "hyperlinks": "off"}));
+    write_settings(
+        &env,
+        json!({"links_plain_click": true, "hyperlinks": "off"}),
+    );
     menu(&app, "View", "Reload Settings");
     wait_for("no underline at all", || {
         all(&cells(&app), &|x| x["underline"].is_null()).then_some(())

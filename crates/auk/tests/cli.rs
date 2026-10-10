@@ -615,17 +615,27 @@ fn pane_socket_greets_and_answers_by_id() {
     assert_eq!(reply["id"], 7);
     assert_eq!(reply["fork"]["error"]["kind"], "unsupported", "{reply}");
     // The answer is keyed by the request's kind, even behind an unknown member that sorts first.
-    let reply = socket_frame(&mut s, &json!({"aaa": [1], "id": 8, "browser": {"op": "open"}}));
+    let reply = socket_frame(
+        &mut s,
+        &json!({"aaa": [1], "id": 8, "browser": {"op": "open"}}),
+    );
     assert_eq!(reply["id"], 8, "{reply}");
     assert_eq!(reply["browser"]["error"]["kind"], "unsupported", "{reply}");
     assert!(reply.get("aaa").is_none(), "{reply}");
     // An unknown kind is skipped: no answer, so the next answer is the next request's.
     socket_send(&mut s, &json!({"id": 9, "teleport": {}}));
-    assert_eq!(socket_frame(&mut s, &json!({"id": 10, "fork": {}}))["id"], 10);
+    assert_eq!(
+        socket_frame(&mut s, &json!({"id": 10, "fork": {}}))["id"],
+        10
+    );
     // Frames are capped at 256 MiB: a longer one closes the connection.
     s.write_all(&((256u32 << 20) + 1).to_le_bytes()).unwrap();
     let mut rest = Vec::new();
-    assert_eq!(s.read_to_end(&mut rest).unwrap_or(0), 0, "the connection closes");
+    assert_eq!(
+        s.read_to_end(&mut rest).unwrap_or(0),
+        0,
+        "the connection closes"
+    );
     // A fresh connection is served as before.
     let mut s = UnixStream::connect(&path).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
@@ -657,7 +667,8 @@ fn agent_panes_run_agent_command_through_the_login_shell_with_an_agent_badge() {
     // `agent_command` from the settings file (`$AUK_CONFIG_DIR/settings.json`).
     std::fs::write(
         env.state.join("settings.json"),
-        json!({"agent_command": "echo agent-$((6*7)); sleep 300; echo end", "theme": "System"}).to_string(),
+        json!({"agent_command": "echo agent-$((6*7)); sleep 300; echo end", "theme": "System"})
+            .to_string(),
     )
     .unwrap();
     let _d = env.start_daemon();
@@ -690,13 +701,27 @@ fn agent_panes_run_agent_command_through_the_login_shell_with_an_agent_badge() {
 
     // Without the setting, the default is `omp`; changing it doesn't touch running agents.
     std::fs::remove_file(env.state.join("settings.json")).unwrap();
-    let out = env.cli(&["--json", "new", "tab", "--agent", "--cwd", &env.home.to_string_lossy()]);
+    let out = env.cli(&[
+        "--json",
+        "new",
+        "tab",
+        "--agent",
+        "--cwd",
+        &env.home.to_string_lossy(),
+    ]);
     let omp: Value = serde_json::from_slice(&out.stdout).expect("new prints JSON");
     let omp = omp["pane"].as_u64().unwrap();
     let l = ls(&env);
     assert_eq!(pane_of(&l, omp).unwrap()["kind"]["line"], "omp", "{l:#}");
-    assert_eq!(pane_of(&l, agent).unwrap()["kind"]["line"], info["kind"]["line"]);
-    assert_eq!(l["layout"]["main"]["kinds"][omp.to_string()], "agent", "{l:#}");
+    assert_eq!(
+        pane_of(&l, agent).unwrap()["kind"]["line"],
+        info["kind"]["line"]
+    );
+    assert_eq!(
+        l["layout"]["main"]["kinds"][omp.to_string()],
+        "agent",
+        "{l:#}"
+    );
 
     // A window opens one with a layout edit: split right of its focused pane.
     use auk_mirror::{Client, ClientFacts, ClientKind, ClientMsg, Hello, LayoutEdit};
@@ -704,7 +729,9 @@ fn agent_panes_run_agent_command_through_the_login_shell_with_an_agent_badge() {
     let hello = Hello::new(ClientKind::Headless, ClientFacts::default());
     let (mut client, _) = Client::handshake(stream, &hello).unwrap();
     client
-        .send(&ClientMsg::LayoutEdit(LayoutEdit::Agent { pane: Some(first) }))
+        .send(&ClientMsg::LayoutEdit(LayoutEdit::Agent {
+            pane: Some(first),
+        }))
         .unwrap();
     let third = wait_for("the window's agent pane", || {
         let l = ls(&env);
@@ -734,14 +761,21 @@ fn a_locked_session_refuses_closing_its_panes_with_a_toast() {
     let session = ls(&env)["layout"]["main"]["sessions"][0]["id"]
         .as_u64()
         .unwrap();
-    assert_eq!(ls(&env)["layout"]["main"]["sessions"][0]["locked"], false, "new sessions start unlocked");
+    assert_eq!(
+        ls(&env)["layout"]["main"]["sessions"][0]["locked"],
+        false,
+        "new sessions start unlocked"
+    );
 
     cli(&env, &["lock", &session.to_string()]);
     assert_eq!(ls(&env)["layout"]["main"]["sessions"][0]["locked"], true);
     // Closing is refused, without failing the script, and the windows say why.
     let out = env.cli(&["close", &a.to_string()]);
     assert!(out.status.success(), "{out:?}");
-    assert!(String::from_utf8_lossy(&out.stdout).contains("locked"), "{out:?}");
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("locked"),
+        "{out:?}"
+    );
     let refused = cli_json(&env, &["close", &b.to_string()]);
     assert_eq!(refused["closed"], false, "{refused}");
     assert_eq!(refused["locked"], session, "{refused}");
@@ -754,15 +788,24 @@ fn a_locked_session_refuses_closing_its_panes_with_a_toast() {
             .cloned()
     });
     // New sessions get a generated two-word name (amendment A11).
-    let name = ls(&env)["layout"]["main"]["sessions"][0]["name"].as_str().unwrap().to_owned();
-    assert_eq!(toast["text"], format!("Session {name} is locked"), "{toast}");
+    let name = ls(&env)["layout"]["main"]["sessions"][0]["name"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        toast["text"],
+        format!("Session {name} is locked"),
+        "{toast}"
+    );
     // A window's close is refused too.
     use auk_mirror::{Client, ClientFacts, ClientKind, ClientMsg, Hello, LayoutEdit};
     let stream = UnixStream::connect(&env.socket).unwrap();
     let hello = Hello::new(ClientKind::Headless, ClientFacts::default());
     let (mut client, _) = Client::handshake(stream, &hello).unwrap();
     client
-        .send(&ClientMsg::Attach { window_key: "main".into() })
+        .send(&ClientMsg::Attach {
+            window_key: "main".into(),
+        })
         .unwrap();
     client
         .send(&ClientMsg::LayoutEdit(LayoutEdit::Close { pane: a }))
@@ -770,11 +813,17 @@ fn a_locked_session_refuses_closing_its_panes_with_a_toast() {
     std::thread::sleep(Duration::from_millis(500));
     let l = ls(&env);
     for p in [a, b] {
-        assert!(pane_of(&l, p).unwrap()["exit"].is_null(), "pane {p} closed: {l:#}");
+        assert!(
+            pane_of(&l, p).unwrap()["exit"].is_null(),
+            "pane {p} closed: {l:#}"
+        );
     }
     // The window's lock edit unlocks it (the layout reaches every window); now closing works.
     client
-        .send(&ClientMsg::LayoutEdit(LayoutEdit::LockSession { session, locked: false }))
+        .send(&ClientMsg::LayoutEdit(LayoutEdit::LockSession {
+            session,
+            locked: false,
+        }))
         .unwrap();
     wait_for("the session unlocked", || {
         (window.request("layout")["sessions"][0]["locked"] == false).then_some(())
@@ -782,7 +831,10 @@ fn a_locked_session_refuses_closing_its_panes_with_a_toast() {
     cli(&env, &["close", &b.to_string()]);
     wait_for("the closed pane to leave the layout", || {
         let l = ls(&env);
-        (!l["layout"]["main"].to_string().contains(&format!("\"pane\":{b}}}"))).then_some(())
+        (!l["layout"]["main"]
+            .to_string()
+            .contains(&format!("\"pane\":{b}}}")))
+        .then_some(())
     });
     // Locking again reaches the window with the layout.
     cli(&env, &["lock", &session.to_string()]);
@@ -1139,7 +1191,11 @@ fn css_lists_sheets_in_cascade_order_with_program_sheets_as_tsp_scope_name() {
     let listed = serve.ctl(&env, &["css"]);
     let sheets = listed["sheets"].as_array().expect("a sheets list");
     let names: Vec<&str> = sheets.iter().map(|s| s["name"].as_str().unwrap()).collect();
-    assert_eq!(names.first(), Some(&"ua"), "the user-agent sheet first: {names:?}");
+    assert_eq!(
+        names.first(),
+        Some(&"ua"),
+        "the user-agent sheet first: {names:?}"
+    );
     // The recording's sheet `main`, under its surface's scope token, after the built-in sheets.
     let (at, program) = sheets
         .iter()
@@ -1153,7 +1209,11 @@ fn css_lists_sheets_in_cascade_order_with_program_sheets_as_tsp_scope_name() {
         .unwrap_or_else(|| panic!("{name} is not tsp:<scope>:main"));
     assert!(scope.starts_with("sf"), "{name}");
     assert!(program["rules"].as_u64().unwrap() > 0, "{program}");
-    assert_eq!(at, sheets.len() - 1, "program sheets cascade last: {names:?}");
+    assert_eq!(
+        at,
+        sheets.len() - 1,
+        "program sheets cascade last: {names:?}"
+    );
 }
 
 #[test]
@@ -1197,13 +1257,23 @@ fn serve_plugins_fixtures_loads_the_sdk_examples_into_the_private_daemon() {
         .iter()
         .flat_map(|p| {
             let id = p["id"].as_str().unwrap_or_default().to_owned();
-            p["blocks"].as_array().cloned().unwrap_or_default().into_iter().map(move |b| {
-                (format!("{id}.{}", b["id"].as_str().unwrap_or_default()), b["title"].as_str().unwrap_or_default().to_owned())
-            })
+            p["blocks"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .map(move |b| {
+                    (
+                        format!("{id}.{}", b["id"].as_str().unwrap_or_default()),
+                        b["title"].as_str().unwrap_or_default().to_owned(),
+                    )
+                })
         })
         .collect();
     assert!(
-        blocks.iter().any(|(kind, title)| kind == "review-queue.queue" && !title.is_empty()),
+        blocks
+            .iter()
+            .any(|(kind, title)| kind == "review-queue.queue" && !title.is_empty()),
         "{blocks:?}"
     );
     // A fixture plugin runs in the private daemon: the terraform lens claims a plan.
@@ -1230,7 +1300,14 @@ fn remote_loopback_attaches_a_second_daemon_through_the_bridge() {
     serve.ctl(&env, &["run", "echo", "on the first host"]);
     // It takes no address (§11.3): the host is always `loopback`.
     let control = serve.control.to_string_lossy().into_owned();
-    let refused = env.cli(&["ctl", "--control", &control, "remote", "loopback", "example.com"]);
+    let refused = env.cli(&[
+        "ctl",
+        "--control",
+        &control,
+        "remote",
+        "loopback",
+        "example.com",
+    ]);
     let said = format!(
         "{}{}",
         String::from_utf8_lossy(&refused.stdout),
@@ -1288,7 +1365,8 @@ fn headless_mode_ignores_the_users_settings_and_never_writes_them() {
     let settings = config.join("settings.json");
     std::fs::write(
         &settings,
-        json!({"plugins": false, "plugins_disabled": ["terraform"], "agent_command": "false"}).to_string(),
+        json!({"plugins": false, "plugins_disabled": ["terraform"], "agent_command": "false"})
+            .to_string(),
     )
     .unwrap();
     let mine = config.join("plugins/mine");
@@ -1322,7 +1400,11 @@ fn headless_mode_ignores_the_users_settings_and_never_writes_them() {
     serve.ctl(&env, &["expect", "hi"]);
     serve.ctl(&env, &["shot", "s"]);
     drop(serve);
-    assert_eq!(snapshot_tree(&config), before, "headless mode changed the user's config dir");
+    assert_eq!(
+        snapshot_tree(&config),
+        before,
+        "headless mode changed the user's config dir"
+    );
 }
 
 #[test]
@@ -1338,7 +1420,12 @@ fn a_real_work_wait_gives_up_after_20_s() {
     let text = String::from_utf8_lossy(&reply.stdout).into_owned();
     let reply: Value = serde_json::from_str(text.trim()).unwrap_or_else(|e| panic!("{e}: {text}"));
     assert_eq!(reply["ok"], false, "{reply}");
-    assert!(reply["error"].as_str().is_some_and(|e| e.contains("never-printed")), "{reply}");
+    assert!(
+        reply["error"]
+            .as_str()
+            .is_some_and(|e| e.contains("never-printed")),
+        "{reply}"
+    );
     assert!(
         took >= Duration::from_secs(20) && took < Duration::from_secs(23),
         "the wait took {took:?}, not 20 s"

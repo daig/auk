@@ -109,28 +109,52 @@ mod tests {
 
     #[test]
     fn default_paths_per_platform_and_the_override() {
-        let home = vars(&[("HOME", "/Users/u"), ("XDG_CONFIG_HOME", "/x/c"), ("XDG_STATE_HOME", "/x/s")]);
+        let home = vars(&[
+            ("HOME", "/Users/u"),
+            ("XDG_CONFIG_HOME", "/x/c"),
+            ("XDG_STATE_HOME", "/x/s"),
+        ]);
         // macOS: Application Support for both; XDG is ignored.
         let mac = Path::new("/Users/u/Library/Application Support/Auk");
         assert_eq!(config_dir_for(Platform::MacOs, &home), mac);
         assert_eq!(state_dir_for(Platform::MacOs, &home), mac);
         // Linux: the XDG dirs.
-        assert_eq!(config_dir_for(Platform::Linux, &home), Path::new("/x/c/auk"));
+        assert_eq!(
+            config_dir_for(Platform::Linux, &home),
+            Path::new("/x/c/auk")
+        );
         assert_eq!(state_dir_for(Platform::Linux, &home), Path::new("/x/s/auk"));
         // Linux without XDG (or with it empty): ~/.config and ~/.local/state.
         let bare = vars(&[("HOME", "/home/u"), ("XDG_CONFIG_HOME", "")]);
-        assert_eq!(config_dir_for(Platform::Linux, &bare), Path::new("/home/u/.config/auk"));
-        assert_eq!(state_dir_for(Platform::Linux, &bare), Path::new("/home/u/.local/state/auk"));
+        assert_eq!(
+            config_dir_for(Platform::Linux, &bare),
+            Path::new("/home/u/.config/auk")
+        );
+        assert_eq!(
+            state_dir_for(Platform::Linux, &bare),
+            Path::new("/home/u/.local/state/auk")
+        );
         // $AUK_CONFIG_DIR overrides both, everywhere.
-        let over = vars(&[("HOME", "/home/u"), ("XDG_STATE_HOME", "/x/s"), ("AUK_CONFIG_DIR", "/o")]);
+        let over = vars(&[
+            ("HOME", "/home/u"),
+            ("XDG_STATE_HOME", "/x/s"),
+            ("AUK_CONFIG_DIR", "/o"),
+        ]);
         for p in [Platform::MacOs, Platform::Linux] {
             assert_eq!(config_dir_for(p, &over), Path::new("/o"));
             assert_eq!(state_dir_for(p, &over), Path::new("/o"));
         }
         // The daemon's state override names <state> (plugin-data) too, not <config>.
-        let state = vars(&[("HOME", "/home/u"), ("AUK_CONFIG_DIR", "/o"), ("AUK_STATE_DIR", "/s")]);
+        let state = vars(&[
+            ("HOME", "/home/u"),
+            ("AUK_CONFIG_DIR", "/o"),
+            ("AUK_STATE_DIR", "/s"),
+        ]);
         assert_eq!(state_dir_for(Platform::Linux, &state), Path::new("/s"));
         assert_eq!(config_dir_for(Platform::Linux, &state), Path::new("/o"));
-        assert_eq!(data_dir(Path::new("/s"), "demo"), Path::new("/s/plugin-data/demo"));
+        assert_eq!(
+            data_dir(Path::new("/s"), "demo"),
+            Path::new("/s/plugin-data/demo")
+        );
     }
 }

@@ -128,7 +128,8 @@ pub fn offline_catalog(plugins_dir: &Path, settings: &PluginSettings) -> Catalog
 pub fn format_list(catalog: &Catalog) -> String {
     let mut out = String::new();
     for p in &catalog.plugins {
-        let plural = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+        let plural =
+            |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
         let status = match &p.status {
             Status::Ready => "ready".to_owned(),
             Status::Disabled => "disabled".to_owned(),
@@ -244,10 +245,10 @@ fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
 
 /// Where `src` points: a local directory, or a clone (into `scratch`) and the path inside it.
 fn fetch_source(src: &str, scratch: &Path) -> Result<PathBuf, String> {
-    let (url, sub) = if let Some(rest) = src
-        .strip_prefix("github.com/")
-        .or_else(|| src.strip_prefix("https://github.com/").filter(|r| !r.ends_with(".git")))
-    {
+    let (url, sub) = if let Some(rest) = src.strip_prefix("github.com/").or_else(|| {
+        src.strip_prefix("https://github.com/")
+            .filter(|r| !r.ends_with(".git"))
+    }) {
         let parts: Vec<&str> = rest.splitn(3, '/').collect();
         if parts.len() < 2 {
             return Err(format!("no directory {src}: not OWNER/REPO"));
@@ -304,13 +305,22 @@ pub fn install(plugins_dir: &Path, src: &str, force: bool) -> Result<Installed, 
     result
 }
 
-fn install_staged(plugins_dir: &Path, src: &str, force: bool, scratch: &Path) -> Result<Installed, String> {
+fn install_staged(
+    plugins_dir: &Path,
+    src: &str,
+    force: bool,
+    scratch: &Path,
+) -> Result<Installed, String> {
     let source = fetch_source(src, scratch)?;
     let (m, _) = manifest::load_package(&source)
         .map_err(|why| format!("{} is not a plugin: {why}", source.display()))?;
     if let Some((entry, linked)) = find_entry(plugins_dir, &m.id) {
         if linked {
-            return Err(format!("{} is linked ({}); use unlink first", m.id, entry.display()));
+            return Err(format!(
+                "{} is linked ({}); use unlink first",
+                m.id,
+                entry.display()
+            ));
         }
         if !force {
             return Err(format!(
@@ -325,15 +335,22 @@ fn install_staged(plugins_dir: &Path, src: &str, force: bool, scratch: &Path) ->
     let target = plugins_dir.join(&m.id);
     if force {
         if let Some((entry, false)) = find_entry(plugins_dir, &m.id) {
-            std::fs::remove_dir_all(&entry).map_err(|e| format!("cannot replace {}: {e}", entry.display()))?;
+            std::fs::remove_dir_all(&entry)
+                .map_err(|e| format!("cannot replace {}: {e}", entry.display()))?;
         }
         if target.exists() {
-            std::fs::remove_dir_all(&target).map_err(|e| format!("cannot replace {}: {e}", target.display()))?;
+            std::fs::remove_dir_all(&target)
+                .map_err(|e| format!("cannot replace {}: {e}", target.display()))?;
         }
     } else if target.exists() {
-        return Err(format!("{} is already installed ({}); --force replaces it", m.id, target.display()));
+        return Err(format!(
+            "{} is already installed ({}); --force replaces it",
+            m.id,
+            target.display()
+        ));
     }
-    std::fs::rename(&staged, &target).map_err(|e| format!("cannot install into {}: {e}", target.display()))?;
+    std::fs::rename(&staged, &target)
+        .map_err(|e| format!("cannot install into {}: {e}", target.display()))?;
     Ok(Installed {
         id: m.id,
         version: m.version,
@@ -348,7 +365,8 @@ pub fn remove(plugins_dir: &Path, id: &str) -> Result<PathBuf, String> {
         None => Err(format!("no plugin {id} in {}", plugins_dir.display())),
         Some((_, true)) => Err(format!("{id} is linked; use unlink")),
         Some((dir, false)) => {
-            std::fs::remove_dir_all(&dir).map_err(|e| format!("cannot remove {}: {e}", dir.display()))?;
+            std::fs::remove_dir_all(&dir)
+                .map_err(|e| format!("cannot remove {}: {e}", dir.display()))?;
             Ok(dir)
         }
     }
@@ -364,14 +382,20 @@ pub fn link(plugins_dir: &Path, dir: &str) -> Result<Installed, String> {
         .to_str()
         .ok_or_else(|| format!("{} is not UTF-8", abs.display()))?
         .to_owned();
-    let (m, _) =
-        manifest::load_package(&abs).map_err(|why| format!("{} is not a plugin: {why}", abs.display()))?;
+    let (m, _) = manifest::load_package(&abs)
+        .map_err(|why| format!("{} is not a plugin: {why}", abs.display()))?;
     if let Some((entry, _)) = find_entry(plugins_dir, &m.id) {
-        return Err(format!("{} is already installed ({})", m.id, entry.display()));
+        return Err(format!(
+            "{} is already installed ({})",
+            m.id,
+            entry.display()
+        ));
     }
-    std::fs::create_dir_all(plugins_dir).map_err(|e| format!("cannot create {}: {e}", plugins_dir.display()))?;
+    std::fs::create_dir_all(plugins_dir)
+        .map_err(|e| format!("cannot create {}: {e}", plugins_dir.display()))?;
     let file = plugins_dir.join(format!("{}.path", m.id));
-    std::fs::write(&file, format!("{text}\n")).map_err(|e| format!("cannot write {}: {e}", file.display()))?;
+    std::fs::write(&file, format!("{text}\n"))
+        .map_err(|e| format!("cannot write {}: {e}", file.display()))?;
     Ok(Installed {
         id: m.id,
         version: m.version,
@@ -386,7 +410,8 @@ pub fn unlink(plugins_dir: &Path, id: &str) -> Result<PathBuf, String> {
         None => Err(format!("no plugin {id} in {}", plugins_dir.display())),
         Some((_, false)) => Err(format!("{id} is installed, not linked; use remove")),
         Some((file, true)) => {
-            std::fs::remove_file(&file).map_err(|e| format!("cannot remove {}: {e}", file.display()))?;
+            std::fs::remove_file(&file)
+                .map_err(|e| format!("cannot remove {}: {e}", file.display()))?;
             Ok(file)
         }
     }
@@ -417,19 +442,39 @@ mod tests {
     #[test]
     fn args() {
         let s = |v: &[&str]| v.iter().map(|x| (*x).to_owned()).collect::<Vec<_>>();
-        assert_eq!(parse_args(&s(&["list", "--json"])).expect("ok").verb, Verb::List);
+        assert_eq!(
+            parse_args(&s(&["list", "--json"])).expect("ok").verb,
+            Verb::List
+        );
         assert!(parse_args(&s(&["--json", "list"])).expect("ok").json);
         assert_eq!(
-            parse_args(&s(&["install", "x", "--force"])).expect("ok").verb,
-            Verb::Install { src: "x".into(), force: true }
+            parse_args(&s(&["install", "x", "--force"]))
+                .expect("ok")
+                .verb,
+            Verb::Install {
+                src: "x".into(),
+                force: true
+            }
         );
         assert_eq!(
-            parse_args(&s(&["list", "--window=k"])).expect("ok").window.as_deref(),
+            parse_args(&s(&["list", "--window=k"]))
+                .expect("ok")
+                .window
+                .as_deref(),
             Some("k")
         );
-        assert_eq!(parse_args(&s(&["list", "--nope"])), Err("unknown flag --nope".into()));
-        assert_eq!(parse_args(&s(&["frob"])), Err("plugin takes other arguments".into()));
-        assert_eq!(parse_args(&s(&["list", "--window"])), Err("--window takes a value".into()));
+        assert_eq!(
+            parse_args(&s(&["list", "--nope"])),
+            Err("unknown flag --nope".into())
+        );
+        assert_eq!(
+            parse_args(&s(&["frob"])),
+            Err("plugin takes other arguments".into())
+        );
+        assert_eq!(
+            parse_args(&s(&["list", "--window"])),
+            Err("--window takes a value".into())
+        );
         assert_eq!(parse_args(&s(&["-h"])).expect("ok").verb, Verb::Help);
     }
 
@@ -457,29 +502,52 @@ mod tests {
         );
         let not_plugin = root.path().join("empty");
         std::fs::create_dir_all(&not_plugin).expect("mkdir");
-        assert!(install(&plugins, not_plugin.to_str().expect("utf8"), false)
-            .expect_err("not a plugin")
-            .ends_with("is not a plugin: no plugin.toml"));
+        assert!(
+            install(&plugins, not_plugin.to_str().expect("utf8"), false)
+                .expect_err("not a plugin")
+                .ends_with("is not a plugin: no plugin.toml")
+        );
 
         let catalog = offline_catalog(&plugins, &PluginSettings::default());
-        assert_eq!(format_list(&catalog), "demo 2.0 demo — 1 block, 0 lenses  ready\n");
+        assert_eq!(
+            format_list(&catalog),
+            "demo 2.0 demo — 1 block, 0 lenses  ready\n"
+        );
 
-        assert_eq!(remove(&plugins, "nope").map(|_| ()), Err(format!("no plugin nope in {}", plugins.display())));
-        assert_eq!(remove(&plugins, "../x").map(|_| ()), Err("no plugin id ../x".into()));
+        assert_eq!(
+            remove(&plugins, "nope").map(|_| ()),
+            Err(format!("no plugin nope in {}", plugins.display()))
+        );
+        assert_eq!(
+            remove(&plugins, "../x").map(|_| ()),
+            Err("no plugin id ../x".into())
+        );
         remove(&plugins, "demo").expect("remove");
-        assert_eq!(format_list(&offline_catalog(&plugins, &PluginSettings::default())), "no plugins\n");
+        assert_eq!(
+            format_list(&offline_catalog(&plugins, &PluginSettings::default())),
+            "no plugins\n"
+        );
 
         let linked = link(&plugins, src.to_str().expect("utf8")).expect("link");
         assert_eq!(linked.id, "demo");
         assert!(plugins.join("demo.path").is_file());
-        assert_eq!(remove(&plugins, "demo").map(|_| ()), Err("demo is linked; use unlink".into()));
-        assert!(install(&plugins, src.to_str().expect("utf8"), true)
-            .expect_err("linked")
-            .contains("is linked"));
+        assert_eq!(
+            remove(&plugins, "demo").map(|_| ()),
+            Err("demo is linked; use unlink".into())
+        );
+        assert!(
+            install(&plugins, src.to_str().expect("utf8"), true)
+                .expect_err("linked")
+                .contains("is linked")
+        );
         unlink(&plugins, "demo").expect("unlink");
         assert!(!plugins.join("demo.path").exists());
 
         let file = types(&root.path().join("types")).expect("types");
-        assert!(std::fs::read_to_string(file).expect("read").contains("declare tern"));
+        assert!(
+            std::fs::read_to_string(file)
+                .expect("read")
+                .contains("declare tern")
+        );
     }
 }

@@ -568,7 +568,10 @@ pub struct WindowPlugins {
 impl std::fmt::Debug for WindowPlugins {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WindowPlugins")
-            .field("plugins", &self.plugins.iter().map(|p| &p.id).collect::<Vec<_>>())
+            .field(
+                "plugins",
+                &self.plugins.iter().map(|p| &p.id).collect::<Vec<_>>(),
+            )
             .field("failed", &self.failed)
             .finish_non_exhaustive()
     }
@@ -595,7 +598,9 @@ struct LayoutCx<'a> {
     host: &'a HostCell<'a>,
 }
 
-fn borrow<'b, 'a>(cell: &'b HostCell<'a>) -> mlua::Result<std::cell::RefMut<'b, &'a mut dyn WindowHost>> {
+fn borrow<'b, 'a>(
+    cell: &'b HostCell<'a>,
+) -> mlua::Result<std::cell::RefMut<'b, &'a mut dyn WindowHost>> {
     cell.try_borrow_mut()
         .map_err(|_| mlua::Error::runtime("cx is already in use"))
 }
@@ -699,11 +704,14 @@ impl UserData for Cx<'_> {
         methods.add_method("run", |_, this, (pane, text): (u64, String)| {
             borrow(this.host)?.run(pane, &text).map_err(err)
         });
-        methods.add_method("open", |_, this, (target, how, reveal): (String, Value, Value)| {
-            let how = how_arg(&how)?;
-            let reveal = reveal_arg(&reveal)?;
-            borrow(this.host)?.open(&target, how, reveal).map_err(err)
-        });
+        methods.add_method(
+            "open",
+            |_, this, (target, how, reveal): (String, Value, Value)| {
+                let how = how_arg(&how)?;
+                let reveal = reveal_arg(&reveal)?;
+                borrow(this.host)?.open(&target, how, reveal).map_err(err)
+            },
+        );
         methods.add_method(
             "new_block",
             |_, this, (kind, args, how, reveal): (String, Option<Vec<String>>, Value, Value)| {
@@ -857,7 +865,9 @@ impl UserData for LayoutCx<'_> {
             let vm = lua_vm(lua)?;
             let launch = launch_arg(&vm, &launch)?;
             let reveal = reveal_arg(&reveal)?;
-            Ok(borrow(this.host)?.new_tab(&launch, reveal).map(|p| p as f64))
+            Ok(borrow(this.host)?
+                .new_tab(&launch, reveal)
+                .map(|p| p as f64))
         });
         methods.add_method(
             "split",
@@ -882,15 +892,22 @@ impl UserData for LayoutCx<'_> {
         methods.add_method(
             "move",
             |_, this, (pane, target, dir, reveal): (u64, u64, String, Value)| {
-                let dir = if dir == "swap" { None } else { Some(dir_arg(&dir)?) };
+                let dir = if dir == "swap" {
+                    None
+                } else {
+                    Some(dir_arg(&dir)?)
+                };
                 let reveal = reveal_arg(&reveal)?;
                 Ok(borrow(this.host)?.move_pane(pane, target, dir, reveal))
             },
         );
-        methods.add_method("resize", |_, this, (pane, dir, cells): (u64, String, f64)| {
-            let dir = dir_arg(&dir)?;
-            Ok(borrow(this.host)?.resize(pane, dir, cells))
-        });
+        methods.add_method(
+            "resize",
+            |_, this, (pane, dir, cells): (u64, String, f64)| {
+                let dir = dir_arg(&dir)?;
+                Ok(borrow(this.host)?.resize(pane, dir, cells))
+            },
+        );
         methods.add_method("tab", |lua, this, (spec, reveal): (mlua::Table, Value)| {
             let vm = lua_vm(lua)?;
             let spec = tab_spec(&vm, &spec)?;
@@ -997,9 +1014,17 @@ fn decision(v: Value, vm: &Vm) -> Result<Option<RouteDecision>, String> {
             Value::Nil => None,
             Value::String(h) => {
                 let h = h.to_string_lossy();
-                Some(How::parse(&h).ok_or_else(|| format!("a route decision has an unknown how `{h}`"))?)
+                Some(
+                    How::parse(&h)
+                        .ok_or_else(|| format!("a route decision has an unknown how `{h}`"))?,
+                )
             }
-            other => return Err(format!("a route decision has an unknown how `{}`", other.type_name())),
+            other => {
+                return Err(format!(
+                    "a route decision has an unknown how `{}`",
+                    other.type_name()
+                ));
+            }
         };
         return Ok(Some(RouteDecision::Path {
             path: path.to_string_lossy(),
@@ -1068,7 +1093,8 @@ impl WindowPlugins {
             let vm = match Vm::new(options) {
                 Ok(vm) => vm,
                 Err(e) => {
-                    self.failed.push((m.id.clone(), CallError::Lua(e).message()));
+                    self.failed
+                        .push((m.id.clone(), CallError::Lua(e).message()));
                     continue;
                 }
             };
@@ -1244,7 +1270,11 @@ impl WindowPlugins {
     /// When the next callback is due: now when a completion (a process, a request, a `settle`)
     /// is waiting for its callback, else the next timer.
     pub fn next_wake(&self) -> Option<Instant> {
-        if self.plugins.iter().any(|p| !p.vm.completion_receiver().is_empty()) {
+        if self
+            .plugins
+            .iter()
+            .any(|p| !p.vm.completion_receiver().is_empty())
+        {
             return Some(Instant::now());
         }
         self.plugins.iter().filter_map(|p| p.vm.next_timer()).min()
@@ -1344,7 +1374,10 @@ impl WindowPlugins {
         };
         let target = {
             let reg = self.plugins[i].vm.window_registry();
-            if let Some(n) = rest.strip_prefix("bind.").and_then(|n| n.parse::<usize>().ok()) {
+            if let Some(n) = rest
+                .strip_prefix("bind.")
+                .and_then(|n| n.parse::<usize>().ok())
+            {
                 reg.binds.iter().find_map(|b| match &b.target {
                     BindTarget::Function(f, k) if *k == n => Some((format!("bind {n}"), f.clone())),
                     _ => None,
@@ -1431,13 +1464,21 @@ impl WindowPlugins {
 
     /// `route.open`: may claim a file open (`auk open PATH`, a clicked file path). `None` runs
     /// the built-in open.
-    pub fn route_open(&mut self, host: &mut dyn WindowHost, req: &OpenRequest) -> Option<RouteDecision> {
+    pub fn route_open(
+        &mut self,
+        host: &mut dyn WindowHost,
+        req: &OpenRequest,
+    ) -> Option<RouteDecision> {
         let json = serde_json::to_value(req).unwrap_or(Json::Null);
         self.route(host, false, json)
     }
 
     /// `route.link`: may claim a link click. `None` runs the built-in handling.
-    pub fn route_link(&mut self, host: &mut dyn WindowHost, req: &LinkRequest) -> Option<RouteDecision> {
+    pub fn route_link(
+        &mut self,
+        host: &mut dyn WindowHost,
+        req: &LinkRequest,
+    ) -> Option<RouteDecision> {
         let json = serde_json::to_value(req).unwrap_or(Json::Null);
         self.route(host, true, json)
     }
@@ -1465,12 +1506,18 @@ impl WindowPlugins {
                 continue;
             }
             let plugin = &self.plugins[i];
-            let result = plugin.vm.to_lua(&input).map_err(CallError::Lua).and_then(|table| {
-                plugin.vm.set_in_formatter(true);
-                let r = plugin.vm.call::<Value>(slot.hook(), Budget::Formatter, &f, table);
-                plugin.vm.set_in_formatter(false);
-                r
-            });
+            let result = plugin
+                .vm
+                .to_lua(&input)
+                .map_err(CallError::Lua)
+                .and_then(|table| {
+                    plugin.vm.set_in_formatter(true);
+                    let r = plugin
+                        .vm
+                        .call::<Value>(slot.hook(), Budget::Formatter, &f, table);
+                    plugin.vm.set_in_formatter(false);
+                    r
+                });
             let value = match result {
                 Ok(v) => plugin.vm.to_json(&v).map_err(|e| e.to_string()),
                 Err(CallError::Disabled { .. }) => Ok(Json::Null),
@@ -1514,7 +1561,10 @@ impl WindowPlugins {
     /// A tab's title from `tern.chrome.tab_title`: the first plugin, in id order, with a
     /// non-empty string wins; `None` keeps the default.
     pub fn tab_title(&mut self, tab: &TabInfo) -> Option<String> {
-        self.title(Slot::TabTitle, serde_json::to_value(tab).unwrap_or(Json::Null))
+        self.title(
+            Slot::TabTitle,
+            serde_json::to_value(tab).unwrap_or(Json::Null),
+        )
     }
 
     /// The window's title from `tern.chrome.window_title`.
@@ -1525,7 +1575,10 @@ impl WindowPlugins {
     /// Status segments for the focused pane: every plugin's, in id order.
     pub fn status(&mut self, pane: &StatusPane) -> Vec<StatusSegment> {
         let mut out = Vec::new();
-        for (id, v) in self.format(Slot::Status, serde_json::to_value(pane).unwrap_or(Json::Null)) {
+        for (id, v) in self.format(
+            Slot::Status,
+            serde_json::to_value(pane).unwrap_or(Json::Null),
+        ) {
             let items = match v {
                 Json::Null => continue,
                 Json::Array(items) => items,

@@ -110,7 +110,9 @@ pub struct Completer {
 
 impl std::fmt::Debug for Completer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Completer").field("id", &self.id).finish_non_exhaustive()
+        f.debug_struct("Completer")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
     }
 }
 
@@ -127,7 +129,13 @@ impl Completer {
     fn send(self, outcome: Outcome) {
         // The receiver lives as long as the VM; a send after it is gone is dropped (§9.3: the
         // work runs to completion, its callback never runs).
-        if self.tx.send(Completion { id: self.id, outcome }).is_ok()
+        if self
+            .tx
+            .send(Completion {
+                id: self.id,
+                outcome,
+            })
+            .is_ok()
             && let Some(wake) = &self.wake
         {
             wake();

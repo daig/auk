@@ -160,10 +160,7 @@ pub(super) fn install(lua: &Lua, tern: &Table, state: &Rc<ApiState>) -> mlua::Re
 
     let native = lua.create_table()?;
     native.set("json_tree", lua.create_function(super::json::json_tree)?)?;
-    let (ui, parse): (Table, Table) = lua
-        .load(PRELUDE)
-        .set_name("=tern.ui")
-        .call(native)?;
+    let (ui, parse): (Table, Table) = lua.load(PRELUDE).set_name("=tern.ui").call(native)?;
     ui.set_readonly(true);
     parse.set_readonly(true);
     tern.set("ui", ui)?;

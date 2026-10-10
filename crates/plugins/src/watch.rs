@@ -23,7 +23,9 @@ type Fingerprint = Vec<(PathBuf, u64, Option<SystemTime>)>;
 /// The plugins folder and the package directories it links to outside itself.
 fn roots(plugins_dir: &Path) -> Vec<PathBuf> {
     let mut roots = vec![plugins_dir.to_path_buf()];
-    let base = plugins_dir.canonicalize().unwrap_or_else(|_| plugins_dir.to_path_buf());
+    let base = plugins_dir
+        .canonicalize()
+        .unwrap_or_else(|_| plugins_dir.to_path_buf());
     if let Ok(entries) = std::fs::read_dir(plugins_dir) {
         for entry in entries.filter_map(Result::ok) {
             let path = entry.path();
@@ -93,7 +95,9 @@ pub struct Watcher {
 
 impl std::fmt::Debug for Watcher {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Watcher").field("native", &self.native).finish_non_exhaustive()
+        f.debug_struct("Watcher")
+            .field("native", &self.native)
+            .finish_non_exhaustive()
     }
 }
 

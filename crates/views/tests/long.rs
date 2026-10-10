@@ -38,10 +38,18 @@ fn a_long_transcript_measures_and_highlights_only_what_is_in_view() {
     let (first_md, last_md) = (h.el("s1", "m0"), h.el("s1", "m149"));
     // In view (the document viewport, the top): measured.
     assert!(h.doc.laid_out(first_card));
-    assert!(h.class(first_card).contains("clamped"), "{}", h.class(first_card));
+    assert!(
+        h.class(first_card).contains("clamped"),
+        "{}",
+        h.class(first_card)
+    );
     // Out of view: only an estimated box, not measured.
     assert!(!h.doc.laid_out(last_card));
-    assert!(!h.class(last_card).contains("clamped"), "{}", h.class(last_card));
+    assert!(
+        !h.class(last_card).contains("clamped"),
+        "{}",
+        h.class(last_card)
+    );
     let work = h.view.last_work();
     assert!(
         work.measured < 60,
@@ -70,7 +78,11 @@ fn a_long_transcript_measures_and_highlights_only_what_is_in_view() {
         h.frame();
     }
     assert!(h.doc.laid_out(last_card));
-    assert!(h.class(last_card).contains("clamped"), "{}", h.class(last_card));
+    assert!(
+        h.class(last_card).contains("clamped"),
+        "{}",
+        h.class(last_card)
+    );
     assert!(!h.find_class(last_md, "tk-keyword").is_empty());
     assert_eq!(h.text(last_md), h.text(first_md));
     assert!(h.view.last_work().measured < 60, "{:?}", h.view.last_work());
@@ -84,7 +96,7 @@ fn a_cut_path_that_fits_stays_cut() {
     h.surface(
         "s1",
         "inline",
-        json!([{"id": "r", "k": "row", "p": {"max": {"w": 14}}, "c": [
+        json!([{"id": "r", "k": "row", "p": {"max": {"w": "14ch"}}, "c": [
             {"id": "t", "k": "text", "p": {"text": path, "lines": 1, "truncate": "middle", "shrink": 1}},
         ]}]),
     );
@@ -113,7 +125,7 @@ fn a_cut_text_rerenders_without_freeing_what_took_its_old_spans_ids() {
     h.surface(
         "s1",
         "inline",
-        json!([{"id": "r", "k": "row", "p": {"max": {"w": 14}}, "c": [
+        json!([{"id": "r", "k": "row", "p": {"max": {"w": "14ch"}}, "c": [
             {"id": "t", "k": "text", "p": {"spans": [{"t": "python/examples/", "s": "dim"}, {"t": "progress.py"}], "lines": 1, "truncate": "middle", "shrink": 1}},
         ]}]),
     );
@@ -139,4 +151,62 @@ fn a_cut_text_rerenders_without_freeing_what_took_its_old_spans_ids() {
         assert_eq!(h.doc.parent(p), Some(root));
     }
     assert!(h.text(h.el("s1", "t")).starts_with('…'));
+}
+
+/// omp's file rows (an icon, then a one-line path cut in the middle): a short name with room to
+/// spare shows whole, in bold or not (a box as wide as its text can measure a hair under its
+/// cells, which cut "README.md" to "REA…E.md").
+#[test]
+fn a_short_path_with_room_is_not_cut() {
+    let mut h = Harness::new();
+    h.hello(&[]);
+    let row = |id: &str, name: &str| {
+        json!({"id": id, "k": "row", "c": [
+            {"id": format!("{id}.i"), "k": "icon", "p": {"name": "file"}},
+            {"id": format!("{id}.t"), "k": "text", "p": {"spans": [{"t": name, "s": "strong"}], "lines": 1, "truncate": "middle", "shrink": 1}},
+        ]})
+    };
+    h.surface(
+        "s1",
+        "inline",
+        json!([
+            row("a", "README.md"),
+            row("b", "wc.py"),
+            row("c", "src/lib.rs")
+        ]),
+    );
+    for _ in 0..3 {
+        h.frame();
+    }
+    assert_eq!(h.text(h.el("s1", "a.t")), "README.md");
+    assert_eq!(h.text(h.el("s1", "b.t")), "wc.py");
+    assert_eq!(h.text(h.el("s1", "c.t")), "src/lib.rs");
+}
+
+/// A path cut in a narrow window shows whole again when the window widens (its box shrank to
+/// the cut text, so the room it has now is the row's, not its own).
+#[test]
+fn a_cut_path_grows_back_when_the_window_widens() {
+    let mut h = Harness::new();
+    h.hello(&[]);
+    let path = "python/examples/progress.py";
+    h.surface(
+        "s1",
+        "inline",
+        json!([{"id": "r", "k": "row", "c": [
+            {"id": "i", "k": "icon", "p": {"name": "file"}},
+            {"id": "t", "k": "text", "p": {"text": path, "lines": 1, "truncate": "middle", "shrink": 1}},
+        ]}]),
+    );
+    h.doc.set_viewport(140.0, 800.0);
+    for _ in 0..3 {
+        h.frame();
+    }
+    let t = h.el("s1", "t");
+    assert!(h.text(t).contains('…'), "{:?}", h.text(t));
+    h.doc.set_viewport(960.0, 800.0);
+    for _ in 0..3 {
+        h.frame();
+    }
+    assert_eq!(h.text(t), path);
 }

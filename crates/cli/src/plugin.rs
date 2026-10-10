@@ -10,8 +10,8 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use auk_plugins::manage::{self, Verb};
 use auk_plugins::Catalog;
+use auk_plugins::manage::{self, Verb};
 use serde_json::{Value, json};
 
 use crate::control::{Control, ControlError};
@@ -122,7 +122,9 @@ fn run_verb(socket: &Path, args: &[String], out: &mut impl Write) -> Result<Exit
                 }
                 // `plugins` and `plugins_disabled` from the settings file, as the daemon reads
                 // them (§9.1).
-                None => manage::offline_catalog(&plugins_dir, &auk_daemon::settings::read().plugins),
+                None => {
+                    manage::offline_catalog(&plugins_dir, &auk_daemon::settings::read().plugins)
+                }
             };
             print(out, json, catalog.to_json(), &manage::format_list(&catalog))?;
         }

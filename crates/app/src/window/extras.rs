@@ -248,15 +248,14 @@ impl WinState {
             }
             State::Failed { reason } => (format!("failed: {reason}"), "error"),
         };
-        let segment = |plugin: &str, text: String, icon: &str, tone: &str| {
-            crate::chrome::StatusItem {
+        let segment =
+            |plugin: &str, text: String, icon: &str, tone: &str| crate::chrome::StatusItem {
                 plugin: plugin.to_owned(),
                 text,
                 icon: Some(icon.to_owned()),
                 tone: Some(tone.to_owned()),
                 command: None,
-            }
-        };
+            };
         let mut out = Vec::new();
         if !chain.is_empty() {
             out.push(segment("auk.identity", chain, "key", "muted"));

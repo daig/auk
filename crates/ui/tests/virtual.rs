@@ -64,7 +64,10 @@ fn color(doc: &Document, id: NodeId) -> [u8; 4] {
 fn children_out_of_the_window_are_styled_as_they_come_into_it() {
     let (mut doc, main, entries) = list(5000);
     let st = doc.last_update_stats();
-    assert!(st.restyled < 200, "only what's near the window is styled: {st:?}");
+    assert!(
+        st.restyled < 200,
+        "only what's near the window is styled: {st:?}"
+    );
     assert!(doc.laid_out(entries[0]));
     assert!(doc.computed_style(entries[4000]).is_none());
     assert!(!doc.laid_out(entries[4000]));
@@ -79,13 +82,20 @@ fn children_out_of_the_window_are_styled_as_they_come_into_it() {
     assert!(doc.laid_out(entries[4000]));
     assert_eq!(color(&doc, entries[4000]), [0, 0, 255, 255]);
     assert_eq!(doc.border_box(entries[4000]).unwrap().y, 4000.0 * 30.0);
-    assert!(!doc.laid_out(entries[0]), "the top is out of the window now");
+    assert!(
+        !doc.laid_out(entries[0]),
+        "the top is out of the window now"
+    );
 
     // A change to an entry out of the window waits for it; back in view, it shows.
     doc.set_attribute(entries[0], "class", "entry red");
     doc.update();
     assert_eq!(doc.last_update_stats().restyled, 0);
-    assert_eq!(color(&doc, entries[0]), [0, 0, 255, 255], "not restyled yet");
+    assert_eq!(
+        color(&doc, entries[0]),
+        [0, 0, 255, 255],
+        "not restyled yet"
+    );
     doc.set_virtual_window(main, Some((0.0, 600.0)));
     doc.update();
     assert_eq!(color(&doc, entries[0]), [255, 0, 0, 255]);
@@ -149,13 +159,22 @@ fn a_list_growing_at_the_end_builds_only_the_new_boxes() {
     doc.set_virtual_window(main, Some((5000.0 * 30.0 - 600.0, 5000.0 * 30.0)));
     doc.update();
     for i in 0..10 {
-        entries.push(el(&mut doc, main, "div", "entry", Some(&format!("new {i}"))));
+        entries.push(el(
+            &mut doc,
+            main,
+            "div",
+            "entry",
+            Some(&format!("new {i}")),
+        ));
     }
     let end = entries.len() as f32 * 30.0;
     doc.set_virtual_window(main, Some((end - 600.0, end)));
     doc.update();
     let st = doc.last_update_stats();
-    assert!(st.restyled <= 40, "the new entries and their neighbours: {st:?}");
+    assert!(
+        st.restyled <= 40,
+        "the new entries and their neighbours: {st:?}"
+    );
     let last = *entries.last().unwrap();
     assert!(doc.laid_out(last));
     assert_eq!(doc.border_box(last).unwrap().y, 5009.0 * 30.0);
@@ -249,7 +268,13 @@ fn a_window_kept_on_the_end_follows_the_end_as_the_list_grows() {
     assert!(!doc.laid_out(entries[1900]));
     // Grows by 500: the new end is laid out, the old one goes back to estimates.
     for i in 2000..2500 {
-        entries.push(el(&mut doc, main, "div", "entry", Some(&format!("entry {i}"))));
+        entries.push(el(
+            &mut doc,
+            main,
+            "div",
+            "entry",
+            Some(&format!("entry {i}")),
+        ));
     }
     doc.update();
     assert!(doc.laid_out(entries[2499]));

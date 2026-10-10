@@ -16,6 +16,9 @@ pub(crate) struct Trunc {
     pub el: NodeId,
     pub full: String,
     pub mode: String,
+    /// The width of the text's parent when the text was last cut: a parent grown past it may
+    /// have room for more (a box that shrinks to its text can't show that itself).
+    pub room: f32,
 }
 
 pub(crate) fn text(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
@@ -64,6 +67,7 @@ pub(crate) fn text(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
                 el: m.el,
                 full,
                 mode: truncate.unwrap().to_owned(),
+                room: 0.0,
             },
         );
     } else {

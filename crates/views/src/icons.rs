@@ -27,7 +27,6 @@ pub fn names() -> impl Iterator<Item = &'static str> {
     ICONS.iter().map(|(n, _, _)| *n)
 }
 
-
 /// A key name as a keycap glyph, and its spoken name when it has one (the `kbd` table).
 pub fn keycap(key: &str) -> (String, Option<&'static str>) {
     let lower = key.to_ascii_lowercase();

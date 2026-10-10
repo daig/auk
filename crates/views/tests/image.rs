@@ -820,7 +820,10 @@ fn small_pictures_svgs_and_builtins_never_wait() {
 fn a_big_animation_plays_after_its_background_decode() {
     let mut h = harness();
     let id = send_blob(&mut h, &big_animated_gif(600, 600), Some("image/gif"));
-    show(&mut h, json!([{"id": "g", "k": "image", "p": {"blob": id}}]));
+    show(
+        &mut h,
+        json!([{"id": "g", "k": "image", "p": {"blob": id}}]),
+    );
     pictures::settle();
     h.now += 16.0;
     h.frame();

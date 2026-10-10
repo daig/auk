@@ -710,8 +710,14 @@ fn prefs_sheet_docks_beside_an_inline_surface_and_narrows_the_program() {
         let c = h.doc.border_box(first(&h, r, "pf-ctl")).unwrap();
         let l = h.doc.border_box(first(&h, r, "pf-lbl")).unwrap();
         let id = h.attr(r, "data-row").unwrap();
-        assert!(rb.x >= sheet.x && rb.x + rb.w <= sheet.x + sheet.w + 0.5, "{id} {rb:?}");
-        assert!(c.x + c.w <= rb.x + rb.w + 0.5, "{id}: control {c:?} in row {rb:?}");
+        assert!(
+            rb.x >= sheet.x && rb.x + rb.w <= sheet.x + sheet.w + 0.5,
+            "{id} {rb:?}"
+        );
+        assert!(
+            c.x + c.w <= rb.x + rb.w + 0.5,
+            "{id}: control {c:?} in row {rb:?}"
+        );
         assert!(l.w >= 60.0, "{id}: label {l:?}");
     }
     // main ends beside it.
@@ -1076,19 +1082,38 @@ fn editor_card(h: &Harness, pf: NodeId) -> (String, auk_ui::Rect, auk_ui::Rect, 
 
 /// A picker in the card fills it: the card is md-sheet tall (or the page's room), the sheet
 /// covers it edge to edge, and rows show inside it.
-fn assert_picker_fills_the_card(page: auk_ui::Rect, card: auk_ui::Rect, sheet: auk_ui::Rect, rows: &[auk_ui::Rect]) {
+fn assert_picker_fills_the_card(
+    page: auk_ui::Rect,
+    card: auk_ui::Rect,
+    sheet: auk_ui::Rect,
+    rows: &[auk_ui::Rect],
+) {
     let want = 540f32.min(page.h - 80.0);
-    assert!((card.h - want).abs() < 1.0, "card {card:?} in page {page:?}");
+    assert!(
+        (card.h - want).abs() < 1.0,
+        "card {card:?} in page {page:?}"
+    );
     // The card keeps its 16px insets (at most 600px wide).
     assert!(card.w > 300.0 && card.w <= 600.5, "{card:?}");
-    assert!(card.x >= page.x + 15.0 && card.x + card.w <= page.x + page.w - 15.0, "{card:?} {page:?}");
+    assert!(
+        card.x >= page.x + 15.0 && card.x + card.w <= page.x + page.w - 15.0,
+        "{card:?} {page:?}"
+    );
     // The sheet covers the card inside its 1px border.
-    for (a, b) in [(sheet.x, card.x + 1.0), (sheet.y, card.y + 1.0), (sheet.w, card.w - 2.0), (sheet.h, card.h - 2.0)] {
+    for (a, b) in [
+        (sheet.x, card.x + 1.0),
+        (sheet.y, card.y + 1.0),
+        (sheet.w, card.w - 2.0),
+        (sheet.h, card.h - 2.0),
+    ] {
         assert!((a - b).abs() < 1.0, "sheet {sheet:?} vs card {card:?}");
     }
     assert!(rows.len() >= 8, "{rows:?}");
     for r in rows.iter().filter(|r| r.y + r.h <= card.y + card.h) {
-        assert!(r.x >= card.x - 0.5 && r.x + r.w <= card.x + card.w + 0.5, "row {r:?} in {card:?}");
+        assert!(
+            r.x >= card.x - 0.5 && r.x + r.w <= card.x + card.w + 0.5,
+            "row {r:?} in {card:?}"
+        );
     }
 }
 
@@ -1103,7 +1128,13 @@ fn omp_theme_submenu_picker_fills_the_editor_card() {
         }
         h.view.set_cols(&mut h.doc, &h.pane, 120);
         settle(h);
-        let key = h.pane.surfaces().iter().find(|x| x.id() == "s:1").unwrap().key();
+        let key = h
+            .pane
+            .surfaces()
+            .iter()
+            .find(|x| x.id() == "s:1")
+            .unwrap()
+            .key();
         let pf = h.view.node_element(key, "v").expect("the settings sheet");
         let page = h.doc.border_box(first(h, pf, "pf")).unwrap();
         let picker = h.view.node_element(key, "w").expect("the theme picker");
@@ -1141,7 +1172,10 @@ fn prefs_editor_column_holding_a_picker_fills_the_card() {
     let (class, card, sheet, rows) = editor_card(&h, pf);
     assert_eq!(class, "pf-editor on pk");
     assert_picker_fills_the_card(page, card, sheet, &rows);
-    assert!((card.w - 600.0).abs() < 1.0, "a page's card is 600 wide: {card:?}");
+    assert!(
+        (card.w - 600.0).abs() < 1.0,
+        "a page's card is 600 wide: {card:?}"
+    );
     // A plain editor child keeps the card sized by its content.
     h.frame_ops(
         "s1",
@@ -1164,21 +1198,38 @@ fn prefs_editor_column_holding_a_picker_fills_the_card() {
 fn prefs_accents_follow_the_program_palette() {
     let mut h = harness();
     open_page(&mut h, json!({}));
-    h.apc("t", r##"{"dark":{"accent":"#e0a000"},"light":{"accent":"#e0a000"}}"##);
+    h.apc(
+        "t",
+        r##"{"dark":{"accent":"#e0a000"},"light":{"accent":"#e0a000"}}"##,
+    );
     settle(&mut h);
     let pf = h.el("s1", "pf");
     let root = first(&h, pf, "pf");
     let var = |h: &Harness, el: NodeId, v: &str| -> String {
-        h.doc.computed_style(el).unwrap().custom.get(v).map(|s| s.trim().to_owned()).unwrap_or_default()
+        h.doc
+            .computed_style(el)
+            .unwrap()
+            .custom
+            .get(v)
+            .map(|s| s.trim().to_owned())
+            .unwrap_or_default()
     };
     assert_eq!(var(&h, root, "--accent"), "#e0a000");
     let ink = var(&h, root, "--accent-ink");
     let fill = var(&h, root, "--accent-fill");
     // On the dark page the amber already reads as text; as a fill it darkens for white.
     assert_eq!(ink, "#e0a000");
-    assert!(fill.starts_with('#') && fill != "#e0a000", "darkened for white: {fill}");
+    assert!(
+        fill.starts_with('#') && fill != "#e0a000",
+        "darkened for white: {fill}"
+    );
     let sw = first(&h, row(&h, "auto"), "pf-sw");
-    let bg = h.doc.computed_style(sw).unwrap().background_color.to_rgba8();
+    let bg = h
+        .doc
+        .computed_style(sw)
+        .unwrap()
+        .background_color
+        .to_rgba8();
     assert_eq!(format!("#{:02x}{:02x}{:02x}", bg[0], bg[1], bg[2]), fill);
     // Outside the page the theme's accent stays.
     let main = h.doc.parent(pf).unwrap();
@@ -1215,18 +1266,37 @@ fn prefs_ordered_list_reorders_by_dragging_a_grip() {
         .into_iter()
         .filter_map(|e| h.attr(e, "data-v"))
         .collect();
-    assert_eq!(drawn, ["b", "a", "c"], "enabled ones first, in values order");
+    assert_eq!(
+        drawn,
+        ["b", "a", "c"],
+        "enabled ones first, in values order"
+    );
     let drag = |h: &mut Harness, from: &str, onto: &str, lower: bool| -> Vec<Value> {
         let g = first(h, item(h, from), "pf-grip");
         let (gx, gy) = center(h, g);
         let t = h.doc.border_box(item(h, onto)).unwrap();
-        let ty = if lower { t.y + t.h * 0.75 } else { t.y + t.h * 0.25 };
-        assert!(h.view.reorder_press(&mut h.doc, &h.pane, gx, gy), "the grip starts a drag");
+        let ty = if lower {
+            t.y + t.h * 0.75
+        } else {
+            t.y + t.h * 0.25
+        };
+        assert!(
+            h.view.reorder_press(&mut h.doc, &h.pane, gx, gy),
+            "the grip starts a drag"
+        );
         assert!(h.class(item(h, from)).contains("drag"));
         assert!(h.view.reorder_drag(&mut h.doc, gx, ty));
-        let moved = h.view.written().style(item(h, from)).unwrap_or("").to_owned();
+        let moved = h
+            .view
+            .written()
+            .style(item(h, from))
+            .unwrap_or("")
+            .to_owned();
         assert!(moved.contains("translateY"), "{moved}");
-        let out = h.view.reorder_release(&mut h.doc, gx, ty).expect("a drag was under way");
+        let out = h
+            .view
+            .reorder_release(&mut h.doc, gx, ty)
+            .expect("a drag was under way");
         assert!(!h.class(item(h, from)).contains("drag"));
         out.into_iter()
             .filter_map(|o| match o {
@@ -1235,9 +1305,13 @@ fn prefs_ordered_list_reorders_by_dragging_a_grip() {
             })
             .collect()
     };
-    let change = |v: Value| json!({"ev": "change", "sf": "s1", "id": "pf", "item": "order", "value": v});
+    let change =
+        |v: Value| json!({"ev": "change", "sf": "s1", "id": "pf", "item": "order", "value": v});
     // The disabled Gamma dropped on Beta's upper half: first, and enabled.
-    assert_eq!(drag(&mut h, "c", "b", false), [change(json!(["c", "b", "a"]))]);
+    assert_eq!(
+        drag(&mut h, "c", "b", false),
+        [change(json!(["c", "b", "a"]))]
+    );
     // Beta dropped on Alpha's lower half: after it.
     assert_eq!(drag(&mut h, "b", "a", true), [change(json!(["a", "b"]))]);
     // Onto itself, or where it already is: nothing.
@@ -1276,8 +1350,14 @@ fn prefs_rows_patch_in_place_while_the_structure_holds() {
     sections[0]["rows"][3]["control"]["value"] = json!(4);
     set(&mut h, 2, json!({"sections": sections.clone()}));
     assert!(!kept(&h, "auto") && !kept(&h, "jobs"));
-    assert!(kept(&h, "env") && kept(&h, "host"), "unchanged rows keep their elements");
-    assert_eq!(h.attr(first(&h, pf, "pf-head"), "data-mark").as_deref(), Some("kept"));
+    assert!(
+        kept(&h, "env") && kept(&h, "host"),
+        "unchanged rows keep their elements"
+    );
+    assert_eq!(
+        h.attr(first(&h, pf, "pf-head"), "data-mark").as_deref(),
+        Some("kept")
+    );
     assert_eq!(h.text(first(&h, row(&h, "jobs"), "v")), "4");
     // The focus ring moves: only the two rows involved redraw.
     mark(&mut h, &["auto", "jobs"]);
@@ -1317,10 +1397,16 @@ fn prefs_search_marks_survive_case_changing_lengths() {
             {"id": "city", "label": "İstanbul office", "control": {"k": "switch", "on": true}}
         ]}]}),
     );
-    let marks: Vec<String> = h.find_class(row(&h, "city"), "t")
+    let marks: Vec<String> = h
+        .find_class(row(&h, "city"), "t")
         .into_iter()
         .flat_map(|t| h.doc.element_children(t))
-        .filter(|&e| h.doc.node(e).element().is_some_and(|el| el.tag.as_str() == "mark"))
+        .filter(|&e| {
+            h.doc
+                .node(e)
+                .element()
+                .is_some_and(|el| el.tag.as_str() == "mark")
+        })
         .map(|e| h.text(e))
         .collect();
     assert_eq!(marks, ["stanbul"]);
@@ -1355,7 +1441,10 @@ fn prefs_rail_threshold_and_menu_room_follow_the_zoom_and_width() {
         .parse()
         .unwrap_or_else(|_| panic!("{style}"));
     // 1280 px: nav 220, document 760 less its 56px of padding, the row's 32px and the label's.
-    assert!((room - (760.0 - 56.0 - 32.0 - 12.0 - 140.0)).abs() < 0.5, "{room}");
+    assert!(
+        (room - (760.0 - 56.0 - 32.0 - 12.0 - 140.0)).abs() < 0.5,
+        "{room}"
+    );
     let mut h = harness();
     h.view.set_cols(&mut h.doc, &h.pane, 100);
     open_page(&mut h, json!({"editing": {"row": "region"}}));

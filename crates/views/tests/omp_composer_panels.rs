@@ -170,7 +170,11 @@ fn the_composer_is_a_ring_that_folds_when_the_pane_loses_focus() {
         // The frame ends at the bar and its 4px bottom padding: the absolutely placed context
         // hairline adds no gap.
         let bar_box = h.doc.border_box(bar).unwrap();
-        assert_eq!(bar_box.y + bar_box.h + 4.0, frame.y + frame.h, "{bar_box:?} {frame:?}");
+        assert_eq!(
+            bar_box.y + bar_box.h + 4.0,
+            frame.y + frame.h,
+            "{bar_box:?} {frame:?}"
+        );
         h.view.set_focused(&mut h.doc, &h.pane, false);
         h.view.layout(&mut h.doc);
         assert_eq!(display(h, bar), "None");

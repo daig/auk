@@ -160,11 +160,14 @@ fn on_message(daemon: &Arc<Daemon>, id: ClientId, msg: ClientMsg) {
                 Ok(value) => (value, None),
                 Err(err) => (serde_json::Value::Null, Some(err)),
             };
-            daemon.reply(id, DaemonMsg::Reply {
-                id: request,
-                value,
-                error,
-            });
+            daemon.reply(
+                id,
+                DaemonMsg::Reply {
+                    id: request,
+                    value,
+                    error,
+                },
+            );
         }
         ClientMsg::Ack { pane, sf, s } => daemon.client_ack(id, pane, &sf, s),
         ClientMsg::ViewEvent { pane, sf, event } => {

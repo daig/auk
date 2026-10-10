@@ -471,7 +471,9 @@ fn web_client_in_safari_attaches_draws_over_webgpu_and_types() {
     let state = page_state(&safari, "the page's replica to match the daemon's", |s| {
         let (hash, seq) = env.daemon_hash(pane);
         pane_state(s, pane).is_some_and(|p| {
-            p["hash"] == hash.as_str() && p["seq"] == seq && p["screen"].as_str() == Some(&capture(&env, pane))
+            p["hash"] == hash.as_str()
+                && p["seq"] == seq
+                && p["screen"].as_str() == Some(&capture(&env, pane))
         })
     });
     let p = pane_state(&state, pane).expect("the pane");
@@ -746,7 +748,9 @@ fn safari_surfaces_lens_views_and_blocks(safari: &Safari, env: &TestEnv, pane: u
             .find(|p| p["id"] == block)?["session"]
             .as_u64()
     });
-    let state = page_state(safari, "the session chip", |s| chrome_rect(s, "session-menu").is_some());
+    let state = page_state(safari, "the session chip", |s| {
+        chrome_rect(s, "session-menu").is_some()
+    });
     // The bar is drawn: the strip above the panes isn't the page's background.
     let strip = serde_json::json!({"x": 0.0, "y": 0.0, "w": 400.0, "h": 28.0});
     let (ink, _, _) = screen_ink(safari, &strip);
@@ -758,7 +762,9 @@ fn safari_surfaces_lens_views_and_blocks(safari: &Safari, env: &TestEnv, pane: u
     assert_eq!(selected.as_u64(), Some(1), "one selected tab in the mirror");
     click_center(safari, &chrome_rect(&state, "session-menu").unwrap());
     let row = format!("session:{session}");
-    let state = page_state(safari, "the session menu", |s| chrome_rect(s, &row).is_some());
+    let state = page_state(safari, "the session menu", |s| {
+        chrome_rect(s, &row).is_some()
+    });
     assert!(
         chrome_rect(&state, "new-session").is_none() && chrome_rect(&state, "new-tab").is_none(),
         "the browser creates nothing: {state}"
@@ -1315,8 +1321,16 @@ fn web_session_gets_manifest_styles_lens_views_blocks_and_effects_through_the_so
     let mut chrome = auk_views::chrome::ChromeDoc::new(2.0, "");
     assert!(chrome.update(&bar));
     let acts: Vec<String> = chrome.actions().into_iter().map(|(a, _)| a).collect();
-    assert_eq!(acts, ["session-menu".to_owned(), format!("tab:{block_tab}")], "{acts:?}");
-    let (_, r) = chrome.actions().into_iter().find(|(a, _)| a.starts_with("tab:")).unwrap();
+    assert_eq!(
+        acts,
+        ["session-menu".to_owned(), format!("tab:{block_tab}")],
+        "{acts:?}"
+    );
+    let (_, r) = chrome
+        .actions()
+        .into_iter()
+        .find(|(a, _)| a.starts_with("tab:"))
+        .unwrap();
     assert_eq!(
         chrome.action_at(r.x + r.w / 2.0, r.y + r.h / 2.0),
         Some(auk_views::chrome::ChromeAction::Tab(block_tab))
@@ -1327,7 +1341,12 @@ fn web_session_gets_manifest_styles_lens_views_blocks_and_effects_through_the_so
     for id in &ids {
         assert!(acts.contains(&format!("session:{id}")), "{acts:?}");
     }
-    assert!(!acts.iter().any(|a| a.ends_with("-session") || a == "new-tab"), "{acts:?}");
+    assert!(
+        !acts
+            .iter()
+            .any(|a| a.ends_with("-session") || a == "new-tab"),
+        "{acts:?}"
+    );
     assert!(
         chrome
             .accessible()

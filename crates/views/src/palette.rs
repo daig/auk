@@ -249,8 +249,14 @@ mod tests {
         // The kit accents for prefs: the accent, its ink, and a fill white reads on.
         assert!(v.contains("--pf-accent: #00b4ff;"), "{v}");
         let fill = v.split("--pf-accent-fill: ").nth(1).unwrap()[..7].to_owned();
-        assert!(contrast(parse_hex(&fill).unwrap(), [255, 255, 255]) >= 4.5, "{fill}");
+        assert!(
+            contrast(parse_hex(&fill).unwrap(), [255, 255, 255]) >= 4.5,
+            "{fill}"
+        );
         let ink = v.split("--pf-accent-ink: ").nth(1).unwrap()[..7].to_owned();
-        assert!(contrast(parse_hex(&ink).unwrap(), PAGE_DARK) >= 4.5, "{ink}");
+        assert!(
+            contrast(parse_hex(&ink).unwrap(), PAGE_DARK) >= 4.5,
+            "{ink}"
+        );
     }
 }

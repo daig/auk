@@ -993,7 +993,10 @@ fn the_figure_paints_offscreen_on_its_card() {
 /// This thread's CPU time, in ms: the work done, which a loaded machine (other tests running
 /// alongside) doesn't stretch as it does the wall clock.
 fn cpu_ms() -> f64 {
-    let mut t = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+    let mut t = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
     // SAFETY: `t` is a valid timespec to write.
     let r = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut t) };
     assert_eq!(r, 0, "the thread's CPU clock");
@@ -1009,7 +1012,15 @@ fn diagrams_lay_out_and_draw_quickly() {
     // process, not per diagram.
     let _ = mermaid::svg(&src("pie"), true);
     let _ = pictures::svg_fonts();
-    for name in ["flowchart", "sequence", "class", "state", "er", "gantt", "pie"] {
+    for name in [
+        "flowchart",
+        "sequence",
+        "class",
+        "state",
+        "er",
+        "gantt",
+        "pie",
+    ] {
         let s = src(name);
         let t = cpu_ms();
         let svg = mermaid::svg(&s, true).unwrap();
@@ -1022,7 +1033,11 @@ fn diagrams_lay_out_and_draw_quickly() {
         let tree = usvg::Tree::from_str(&svg, &opt).unwrap();
         let (w, h) = (tree.size().width() * 2.0, tree.size().height() * 2.0);
         let mut pm = resvg::tiny_skia::Pixmap::new(w.ceil() as u32, h.ceil() as u32).unwrap();
-        resvg::render(&tree, resvg::tiny_skia::Transform::from_scale(2.0, 2.0), &mut pm.as_mut());
+        resvg::render(
+            &tree,
+            resvg::tiny_skia::Transform::from_scale(2.0, 2.0),
+            &mut pm.as_mut(),
+        );
         let drawn = cpu_ms() - t;
         eprintln!("{name}: layout+svg {laid:.1} ms, draw 2x {drawn:.1} ms (CPU)");
         assert!(laid + drawn < 250.0, "{name}: {laid:.1} + {drawn:.1} ms");

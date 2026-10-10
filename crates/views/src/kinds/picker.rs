@@ -998,15 +998,9 @@ pub(crate) fn picker(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
                         cx.dom.doc.remove(el);
                     }
                     let el = match e {
-                        Entry::Group { label, count, .. } => group_row(
-                            cx,
-                            *label,
-                            *count,
-                            any_head,
-                            &cols,
-                            &shown_cols,
-                            has_cur,
-                        ),
+                        Entry::Group { label, count, .. } => {
+                            group_row(cx, *label, *count, any_head, &cols, &shown_cols, has_cur)
+                        }
                         Entry::Item(iid, it) => {
                             let sel = selected.as_deref() == Some(iid.as_str());
                             let hit = hits.and_then(|h| h.get(iid.as_str()));
@@ -1079,8 +1073,12 @@ pub(crate) fn picker(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
         m.clock |= spans_into(cx, t, c.get("text"));
         let label = crate::events::text_content(cx.dom.doc, t);
         cx.dom.attr(el, "aria-label", &label);
-        let act = str_prop(c, "act").filter(|a| !a.is_empty()).unwrap_or("confirm");
-        let label = str_prop(c, "label").filter(|l| !l.is_empty()).unwrap_or("Delete");
+        let act = str_prop(c, "act")
+            .filter(|a| !a.is_empty())
+            .unwrap_or("confirm");
+        let label = str_prop(c, "label")
+            .filter(|l| !l.is_empty())
+            .unwrap_or("Delete");
         for (class, v, l) in [("pk-btn danger", act, label), ("pk-btn", "cancel", "Keep")] {
             let b = cx.dom.child(el, "div", class);
             cx.dom.attr(b, "role", "button");

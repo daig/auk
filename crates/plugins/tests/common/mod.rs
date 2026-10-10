@@ -14,8 +14,8 @@ use auk_plugins::window::{
     Dir, How, Launch, Reveal, TabInfo, TabSpec, WindowConfig, WindowHost, WindowPane,
 };
 use auk_plugins::{
-    BlockLaunch, BlockOutput, EffectOutput, HostConfig, HostOutput, LogSink, PaneTable,
-    PluginHost, PluginSettings, ToastLevel,
+    BlockLaunch, BlockOutput, EffectOutput, HostConfig, HostOutput, LogSink, PaneTable, PluginHost,
+    PluginSettings, ToastLevel,
 };
 use auk_term::{Config, Event, Terminal};
 use auk_tsp::{Config as TspConfig, ToProgram, TspPane};
@@ -138,7 +138,11 @@ pub fn wait_for<T>(
 }
 
 /// The next effect, skipping other outputs (kept in `seen`).
-pub fn next_effect(host: &PluginHost, within: Duration, seen: &mut Vec<HostOutput>) -> EffectOutput {
+pub fn next_effect(
+    host: &PluginHost,
+    within: Duration,
+    seen: &mut Vec<HostOutput>,
+) -> EffectOutput {
     wait_for(host, within, seen, |o| o.effect().cloned())
 }
 
@@ -153,7 +157,9 @@ pub fn drain(host: &PluginHost, quiet: Duration) -> Vec<HostOutput> {
 
 pub fn toast_text(e: &EffectOutput) -> Option<(ToastLevel, String, Option<String>)> {
     match &e.effect {
-        auk_plugins::Effect::Toast { level, text, sub } => Some((*level, text.clone(), sub.clone())),
+        auk_plugins::Effect::Toast { level, text, sub } => {
+            Some((*level, text.clone(), sub.clone()))
+        }
         _ => None,
     }
 }
@@ -181,7 +187,13 @@ impl BlockPane {
         }
     }
 
-    pub fn launch(&self, kind: &str, args: &[&str], saved: Option<String>, cwd: Option<&str>) -> BlockLaunch {
+    pub fn launch(
+        &self,
+        kind: &str,
+        args: &[&str],
+        saved: Option<String>,
+        cwd: Option<&str>,
+    ) -> BlockLaunch {
         BlockLaunch {
             pane: self.pane,
             kind: kind.into(),

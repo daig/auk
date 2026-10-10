@@ -554,7 +554,11 @@ fn md_gfm_strikethrough_tables_and_math_delimiters() {
     let mut h = Harness::new();
     h.hello(&[]);
     let text = "Some ~~old~~ new text.\n\n| Name | Size | Kind |\n| :--- | ---: | :---: |\n| alpha | 10 | dir |\n| beta | 200 | file |\n\nInline $a^2 + b^2$ math.\n\n$$\n\\int_0^1 x\\,dx\n$$\n";
-    h.surface("s1", "inline", json!([{"id": "md", "k": "md", "p": {"text": text}}]));
+    h.surface(
+        "s1",
+        "inline",
+        json!([{"id": "md", "k": "md", "p": {"text": text}}]),
+    );
     h.frame();
     let md = h.el("s1", "md");
     let tag = |h: &Harness, e| {
@@ -581,7 +585,9 @@ fn md_gfm_strikethrough_tables_and_math_delimiters() {
     assert_eq!(h.text(del[0]), "old");
     let style = h.doc.computed_style(del[0]).unwrap();
     assert!(
-        format!("{:?}", style.text_decoration).to_lowercase().contains("through"),
+        format!("{:?}", style.text_decoration)
+            .to_lowercase()
+            .contains("through"),
         "{:?}",
         style.text_decoration
     );
@@ -589,7 +595,10 @@ fn md_gfm_strikethrough_tables_and_math_delimiters() {
     assert_eq!(h.find_class(md, "md-table").len(), 1);
     let th = by_tag(&h, "th");
     let td = by_tag(&h, "td");
-    assert_eq!(th.iter().map(|&c| h.text(c)).collect::<Vec<_>>(), ["Name", "Size", "Kind"]);
+    assert_eq!(
+        th.iter().map(|&c| h.text(c)).collect::<Vec<_>>(),
+        ["Name", "Size", "Kind"]
+    );
     assert_eq!(
         td.iter().map(|&c| h.text(c)).collect::<Vec<_>>(),
         ["alpha", "10", "dir", "beta", "200", "file"]
@@ -605,14 +614,24 @@ fn md_gfm_strikethrough_tables_and_math_delimiters() {
     // Cells of a column share an x and a width; cells of a row share a y.
     for col in 0..3 {
         let (head, r1, r2) = (b(th[col]), b(td[col]), b(td[3 + col]));
-        assert!((head.x - r1.x).abs() < 0.5 && (r1.x - r2.x).abs() < 0.5, "column {col}");
-        assert!((head.w - r1.w).abs() < 0.5 && (r1.w - r2.w).abs() < 0.5, "column {col}");
+        assert!(
+            (head.x - r1.x).abs() < 0.5 && (r1.x - r2.x).abs() < 0.5,
+            "column {col}"
+        );
+        assert!(
+            (head.w - r1.w).abs() < 0.5 && (r1.w - r2.w).abs() < 0.5,
+            "column {col}"
+        );
     }
     assert!((b(td[0]).y - b(td[2]).y).abs() < 0.5 && b(td[3]).y > b(td[0]).y);
     assert!(b(th[1]).x > b(th[0]).x && b(th[2]).x > b(th[1]).x);
     // Right-aligned: the size column's text sits at the cell's end.
     let align = |e| format!("{:?}", h.doc.computed_style(e).unwrap().text_align).to_lowercase();
-    assert!(align(td[1]).contains("right") || align(td[1]).contains("end"), "{}", align(td[1]));
+    assert!(
+        align(td[1]).contains("right") || align(td[1]).contains("end"),
+        "{}",
+        align(td[1])
+    );
     assert!(align(td[2]).contains("center"), "{}", align(td[2]));
     // Math delimiters: the TeX kept in `data-tex` around the typeset formula (A23; tests/math.rs
     // covers the drawing), inline and display.
@@ -622,7 +641,10 @@ fn md_gfm_strikethrough_tables_and_math_delimiters() {
     assert_eq!(h.text(inline[0]), "", "a picture, not the TeX");
     let display = h.find_class(md, "math-display");
     assert_eq!(display.len(), 1);
-    assert_eq!(h.attr(display[0], "data-tex").as_deref().map(str::trim), Some("\\int_0^1 x\\,dx"));
+    assert_eq!(
+        h.attr(display[0], "data-tex").as_deref().map(str::trim),
+        Some("\\int_0^1 x\\,dx")
+    );
     assert!(!h.text(md).contains('$'), "the delimiters aren't shown");
 }
 
@@ -703,7 +725,11 @@ fn hidden_title_aria_shrink_and_a_fractional_basis_take_effect() {
         h.doc.computed_style(gone).unwrap().display,
         auk_ui::style::Display::None
     );
-    assert!(h.doc.border_box(gone).is_none_or(|b| b.w == 0.0 && b.h == 0.0));
+    assert!(
+        h.doc
+            .border_box(gone)
+            .is_none_or(|b| b.w == 0.0 && b.h == 0.0)
+    );
     let ax = h.view.accessibility(&h.doc);
     let mut all = Vec::new();
     ax.walk(&mut all);
@@ -737,7 +763,11 @@ fn hidden_title_aria_shrink_and_a_fractional_basis_take_effect() {
         .find(&|n| n.id.as_deref() == Some("tip"))
         .expect("the node in the accessibility tree");
     assert_eq!(node.name.as_deref(), Some("Hover target"));
-    h.frame_ops("s1", 3, json!([["set", "tip", {"title": null, "aria": null}]]));
+    h.frame_ops(
+        "s1",
+        3,
+        json!([["set", "tip", {"title": null, "aria": null}]]),
+    );
     h.frame();
     assert_eq!(h.attr(tip, "title"), None);
     assert_eq!(h.attr(tip, "aria-label"), None);
@@ -757,8 +787,18 @@ fn hidden_title_aria_shrink_and_a_fractional_basis_take_effect() {
     let tight = h.doc.border_box(h.el("s1", "tight")).unwrap();
     let stiff = h.doc.border_box(h.el("s1", "stiff")).unwrap();
     let soft = h.doc.border_box(h.el("s1", "soft")).unwrap();
-    assert!((stiff.w - tight.w * 0.75).abs() < 0.5, "{} of {}", stiff.w, tight.w);
-    assert!((soft.w - tight.w * 0.25).abs() < 0.5, "{} of {}", soft.w, tight.w);
+    assert!(
+        (stiff.w - tight.w * 0.75).abs() < 0.5,
+        "{} of {}",
+        stiff.w,
+        tight.w
+    );
+    assert!(
+        (soft.w - tight.w * 0.25).abs() < 0.5,
+        "{} of {}",
+        soft.w,
+        tight.w
+    );
 }
 
 /// One line of 13px surface text, as laid out alone.

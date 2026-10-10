@@ -679,7 +679,12 @@ impl PaneDraw {
 
     /// The release of such a drag: the new order, as an event to send. `None` when no drag was
     /// under way.
-    pub fn reorder_release(&mut self, pane: PaneId, press: Option<Press>, content_px: f32) -> Option<Vec<Action>> {
+    pub fn reorder_release(
+        &mut self,
+        pane: PaneId,
+        press: Option<Press>,
+        content_px: f32,
+    ) -> Option<Vec<Action>> {
         let (x, y) = match press.and_then(|p| self.target(p, content_px)) {
             Some(Target::Surfaces { x, y }) => (x, y),
             _ => (-1.0e6, -1.0e6),
@@ -693,7 +698,12 @@ impl PaneDraw {
     /// (`None`): the views' hover, as the app's (`:hover` styles, a command block's toolbar), and
     /// what it asks of the program (a `prefs` menu option previewed: `select`). Returns whether
     /// anything hovered changed, and the events to send.
-    pub fn hover(&mut self, pane: PaneId, at: Option<Press>, content_px: f32) -> (bool, Vec<Action>) {
+    pub fn hover(
+        &mut self,
+        pane: PaneId,
+        at: Option<Press>,
+        content_px: f32,
+    ) -> (bool, Vec<Action>) {
         let target = at.and_then(|p| self.target(p, content_px));
         let off = (-1.0e6, -1.0e6);
         let mut changed = false;
@@ -1009,7 +1019,9 @@ mod tests {
         let option = |v: &str| -> Press {
             let mut stack = vec![pf];
             while let Some(e) = stack.pop() {
-                if doc.attribute(e, "data-pf") == Some("mi") && doc.attribute(e, "data-v") == Some(v) {
+                if doc.attribute(e, "data-pf") == Some("mi")
+                    && doc.attribute(e, "data-v") == Some(v)
+                {
                     let b = doc.border_box(e).unwrap();
                     return Press {
                         x: pf_rect[0] + b.x - pf_box.x + b.w / 2.0,
@@ -1077,11 +1089,24 @@ mod tests {
         let mut stack = vec![m];
         let mut classes = Vec::new();
         while let Some(e) = stack.pop() {
-            classes.push(d.surfaces().view().written().class(e).unwrap_or("").to_owned());
+            classes.push(
+                d.surfaces()
+                    .view()
+                    .written()
+                    .class(e)
+                    .unwrap_or("")
+                    .to_owned(),
+            );
             stack.extend(doc.element_children(e));
         }
-        assert!(classes.iter().any(|c| c.contains("mfig")), "a figure: {classes:?}");
-        assert!(!classes.iter().any(|c| c.contains("mfig-open")), "{classes:?}");
+        assert!(
+            classes.iter().any(|c| c.contains("mfig")),
+            "a figure: {classes:?}"
+        );
+        assert!(
+            !classes.iter().any(|c| c.contains("mfig-open")),
+            "{classes:?}"
+        );
     }
 
     #[test]

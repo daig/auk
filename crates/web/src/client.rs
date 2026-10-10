@@ -871,10 +871,10 @@ impl App {
         };
         let press = self.pane_press(pane, at.0, at.1);
         let content_h = press.map_or(0.0, |(_, h)| h);
-        let actions = self
-            .views
-            .get_mut(&pane)
-            .and_then(|v| v.draw.reorder_release(pane, press.map(|(p, _)| p), content_h));
+        let actions = self.views.get_mut(&pane).and_then(|v| {
+            v.draw
+                .reorder_release(pane, press.map(|(p, _)| p), content_h)
+        });
         if let Some(actions) = actions {
             self.run_actions(actions);
         }

@@ -319,7 +319,9 @@ impl WinState {
         let Some(pane) = self.reorder_drag.take() else {
             return false;
         };
-        let at = self.surface_point(pane, m.x, m.y).unwrap_or((-1.0e6, -1.0e6));
+        let at = self
+            .surface_point(pane, m.x, m.y)
+            .unwrap_or((-1.0e6, -1.0e6));
         let out = match self.surfaces.get_mut(&pane) {
             Some(sf) => {
                 let (doc, pv) = sf.parts();

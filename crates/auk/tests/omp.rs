@@ -387,7 +387,8 @@ fn undrawn_effects(css: &str) -> Vec<String> {
             let undrawn = UNDRAWN.contains(&name.as_str())
                 || name.starts_with("mask")
                 || name.starts_with("-webkit-mask")
-                || (name == "transform" && (value.contains("3d(") || value.contains("perspective(")));
+                || (name == "transform"
+                    && (value.contains("3d(") || value.contains("perspective(")));
             undrawn.then(|| decl.trim().to_owned())
         })
         .collect()
@@ -779,8 +780,14 @@ fn ac09_replay_draws_transcript_tool_cards_and_diffs_natively() {
 #[test]
 fn omp_sends_none_of_the_css_effects_the_engine_leaves_undrawn() {
     assert_eq!(
-        undrawn_effects(".a { filter: blur(2px); box-shadow: 0 1px red; color: red } .b{transform: rotate3d(1,0,0,9deg)} .c { mask-image: none; transform: rotate(3deg) }"),
-        ["filter: blur(2px)", "transform: rotate3d(1,0,0,9deg)", "mask-image: none"],
+        undrawn_effects(
+            ".a { filter: blur(2px); box-shadow: 0 1px red; color: red } .b{transform: rotate3d(1,0,0,9deg)} .c { mask-image: none; transform: rotate(3deg) }"
+        ),
+        [
+            "filter: blur(2px)",
+            "transform: rotate3d(1,0,0,9deg)",
+            "mask-image: none"
+        ],
         "the check itself"
     );
     for name in ["omp-session.jsonl", "omp-session-own.jsonl"] {
@@ -792,7 +799,10 @@ fn omp_sends_none_of_the_css_effects_the_engine_leaves_undrawn() {
             .collect();
         let css = program_css(&records);
         let found: Vec<String> = css.iter().flat_map(|c| undrawn_effects(c)).collect();
-        assert!(found.is_empty(), "{name}: omp sends undrawn effects: {found:?}");
+        assert!(
+            found.is_empty(),
+            "{name}: omp sends undrawn effects: {found:?}"
+        );
     }
     omp();
     let env = TestEnv::new(env!("CARGO_BIN_EXE_auk"), "omp-effects");
@@ -1056,8 +1066,12 @@ fn ac09_live_transcript_send_and_tool_card() {
         // The thinking block's body is in a collapsed section when the model thought: drawn,
         // but not laid out until expanded.
         let doc = omp.window.doc(pane);
-        let collapsed = std::iter::successors(doc.parent(el), |&a| doc.parent(a))
-            .any(|a| omp.window.class(pane, a).split(' ').any(|c| c == "collapsed"));
+        let collapsed = std::iter::successors(doc.parent(el), |&a| doc.parent(a)).any(|a| {
+            omp.window
+                .class(pane, a)
+                .split(' ')
+                .any(|c| c == "collapsed")
+        });
         if collapsed {
             continue;
         }
@@ -1208,7 +1222,10 @@ fn omp_t2_fallback_under_t0_t1_hello() {
         report.errors
     );
     // §8.4: none of the CSS effects the engine leaves undrawn.
-    let undrawn: Vec<String> = program_css(&records).iter().flat_map(|c| undrawn_effects(c)).collect();
+    let undrawn: Vec<String> = program_css(&records)
+        .iter()
+        .flat_map(|c| undrawn_effects(c))
+        .collect();
     assert!(undrawn.is_empty(), "omp sends undrawn effects: {undrawn:?}");
     let logos: Vec<String> = added_kinds(&records)
         .into_iter()
@@ -1297,7 +1314,11 @@ fn omp_t2_fallback_under_t0_t1_hello() {
 
     let report = t2_report_for(&omp.records(), &config.kinds);
     assert!(report.sent_anyway.is_empty(), "{:?}", report.sent_anyway);
-    assert!(report.errors.is_empty(), "omp got errors: {:?}", report.errors);
+    assert!(
+        report.errors.is_empty(),
+        "omp got errors: {:?}",
+        report.errors
+    );
     assert!(omp.window.errors().is_empty(), "{:?}", omp.window.errors());
     omp.clear(&id);
     omp.quit();
@@ -1433,7 +1454,9 @@ fn long_session(dir: &Path, cwd: &Path, turns: usize) -> PathBuf {
     let mut parent = "m0000000".to_owned();
     for t in 0..turns {
         let (u, a) = (format!("u{t:07}"), format!("a{t:07}"));
-        let answer: Vec<String> = (0..8).map(|l| format!("- Point {l} of answer {t}.")).collect();
+        let answer: Vec<String> = (0..8)
+            .map(|l| format!("- Point {l} of answer {t}."))
+            .collect();
         lines.push(serde_json::json!({"type": "message", "id": u, "parentId": parent, "timestamp": at(2 * t + 1),
             "message": {"role": "user", "content": [{"type": "text", "text": format!("Question {t}?")}],
                         "attribution": "user", "timestamp": 1_791_445_349_000u64 + t as u64 * 2000}}));
@@ -1490,7 +1513,12 @@ fn render_part(doc: &auk_ui::Document, (x, y, w, h): (f32, f32, u32, u32)) -> au
 }
 
 /// The first element under `el` (itself included) whose written class list has `class`.
-fn first_with_class(w: &NativeWindow, pane: u64, el: auk_ui::NodeId, class: &str) -> auk_ui::NodeId {
+fn first_with_class(
+    w: &NativeWindow,
+    pane: u64,
+    el: auk_ui::NodeId,
+    class: &str,
+) -> auk_ui::NodeId {
     w.with_class(pane, el, class)
         .first()
         .copied()
@@ -1565,18 +1593,22 @@ fn a15_to_a19_omps_overlays_over_a_long_transcript_in_the_dark() {
 
     // The resumed transcript is many viewports long (omp may still be sending it after `ready`).
     let viewport = omp.window.doc(pane).viewport();
-    omp.window.wait("the resumed transcript to lay out", UI, |w| {
-        let page = w.view(pane).element();
-        let long = w.doc(pane).border_box(page)?;
-        (long.h > viewport.1 * 2.0).then_some(())
-    });
+    omp.window
+        .wait("the resumed transcript to lay out", UI, |w| {
+            let page = w.view(pane).element();
+            let long = w.doc(pane).border_box(page)?;
+            (long.h > viewport.1 * 2.0).then_some(())
+        });
     let page = omp.window.view(pane).element();
 
     // Clicking the composer's model control opens omp's Switch Model sheet: with `picker`
     // advertised (A23) a `picker` in the layer, where A15-A17 hold for it as for an overlay.
     let model = omp.with_role("omp.composer.model");
     assert_eq!(model.len(), 1, "omp's model control: {model:?}");
-    let s = omp.window.live_surface(pane, "s:1").expect("the session surface");
+    let s = omp
+        .window
+        .live_surface(pane, "s:1")
+        .expect("the session surface");
     let el = omp.window.element_of(pane, s, &model[0].0).expect("drawn");
     let b = omp.window.doc(pane).border_box(el).expect("laid out");
     let out = omp.window.click(pane, b.x + b.w / 2.0, b.y + b.h / 2.0);
@@ -1589,7 +1621,10 @@ fn a15_to_a19_omps_overlays_over_a_long_transcript_in_the_dark() {
         let kinds = kinds_under(s.document().region("layer")?);
         Some(kinds.iter().find(|(_, k)| k == "picker")?.0.clone())
     });
-    let s = omp.window.live_surface(pane, "s:1").expect("the session surface");
+    let s = omp
+        .window
+        .live_surface(pane, "s:1")
+        .expect("the session surface");
     let pk_el = omp.window.element_of(pane, s, &pk).expect("drawn");
     let card = first_with_class(&omp.window, pane, pk_el, "pk-sheet");
     // Its sheet-in finishes.
@@ -1604,7 +1639,10 @@ fn a15_to_a19_omps_overlays_over_a_long_transcript_in_the_dark() {
     let layers = first_with_class(&omp.window, pane, page, "auk-layers");
     let l = doc.border_box(layers).expect("the layer laid out");
     let c = doc.border_box(card).expect("the sheet laid out");
-    assert!((l.h - viewport.1).abs() < 1.0, "the layer is one viewport tall: {l:?}");
+    assert!(
+        (l.h - viewport.1).abs() < 1.0,
+        "the layer is one viewport tall: {l:?}"
+    );
     assert!(
         c.h > 0.0 && c.y >= l.y && c.y + c.h <= l.y + l.h,
         "the sheet {c:?} lies in the visible area {l:?}"
@@ -1625,7 +1663,10 @@ fn a15_to_a19_omps_overlays_over_a_long_transcript_in_the_dark() {
     let px = render_part(doc, (x0, y0, c.w.ceil() as u32 + 2, c.h.ceil() as u32 + 2));
     let p = px.pixel((f.x + f.w / 2.0 - x0) as u32, (f.y + 4.0 - y0) as u32);
     assert!(
-        [p.0, p.1, p.2].iter().zip(want).all(|(a, b)| a.abs_diff(b) <= 3),
+        [p.0, p.1, p.2]
+            .iter()
+            .zip(want)
+            .all(|(a, b)| a.abs_diff(b) <= 3),
         "the sheet's background {p:?} is its color {want:?}, not dimmed"
     );
     // Clicks land in the sheet, not the dim (A15's hit order).
@@ -1653,7 +1694,10 @@ fn a15_to_a19_omps_overlays_over_a_long_transcript_in_the_dark() {
     // makes it the active tab; the card built again with the new props doesn't pop again.
     let usage = omp.with_role("omp.composer.usage");
     assert_eq!(usage.len(), 1, "omp's cost control: {usage:?}");
-    let s = omp.window.live_surface(pane, "s:1").expect("the session surface");
+    let s = omp
+        .window
+        .live_surface(pane, "s:1")
+        .expect("the session surface");
     let el = omp.window.element_of(pane, s, &usage[0].0).expect("drawn");
     let b = omp.window.doc(pane).border_box(el).expect("laid out");
     omp.window.click(pane, b.x + b.w / 2.0, b.y + b.h / 2.0);
@@ -1667,7 +1711,10 @@ fn a15_to_a19_omps_overlays_over_a_long_transcript_in_the_dark() {
             .0;
         Some((ov, tabs))
     });
-    let s = omp.window.live_surface(pane, "s:1").expect("the session surface");
+    let s = omp
+        .window
+        .live_surface(pane, "s:1")
+        .expect("the session surface");
     let active = |s: &auk_tsp::Surface| {
         s.document()
             .get(&tabs)
@@ -1704,10 +1751,11 @@ fn a15_to_a19_omps_overlays_over_a_long_transcript_in_the_dark() {
         out.iter().any(|o| matches!(o, Outcome::Event { .. })),
         "the tab's click goes to omp: {out:?}"
     );
-    omp.window.wait("omp to make Details the active tab", UI, |w| {
-        let s = w.live_surface(pane, "s:1")?;
-        (active(s).as_deref() == Some("detail")).then_some(())
-    });
+    omp.window
+        .wait("omp to make Details the active tab", UI, |w| {
+            let s = w.live_surface(pane, "s:1")?;
+            (active(s).as_deref() == Some("detail")).then_some(())
+        });
     let card = first_with_class(&omp.window, pane, ov_el, "sf-ov-card");
     assert_eq!(
         omp.window.doc(pane).computed_style(card).map(|c| c.opacity),
@@ -1794,7 +1842,10 @@ fn a23_omps_model_hub_and_model_dropdown_are_picker_sheets() {
     let s = omp.window.live_surface(pane, "s:1").expect("the session");
     let pk_el = omp.window.element_of(pane, s, &pk).expect("drawn");
     let class = omp.window.class(pane, pk_el);
-    assert!(class.contains("sf-picker") && class.contains("sz-lg"), "{class}");
+    assert!(
+        class.contains("sf-picker") && class.contains("sz-lg"),
+        "{class}"
+    );
     let layers = first_with_class(&omp.window, pane, page, "auk-layers");
     let doc = omp.window.doc(pane);
     let l = doc.border_box(layers).expect("the layer");
@@ -1804,8 +1855,14 @@ fn a23_omps_model_hub_and_model_dropdown_are_picker_sheets() {
         sh.y >= l.y && sh.y + sh.h <= l.y + l.h + 0.5 && sh.w <= 1120.5,
         "the sheet {sh:?} in the visible area {l:?}"
     );
-    assert!(!omp.window.with_class(pane, pk_el, "pk-scope").is_empty(), "scopes");
-    assert!(!omp.window.with_class(pane, pk_el, "pk-tab").is_empty(), "tabs");
+    assert!(
+        !omp.window.with_class(pane, pk_el, "pk-scope").is_empty(),
+        "scopes"
+    );
+    assert!(
+        !omp.window.with_class(pane, pk_el, "pk-tab").is_empty(),
+        "tabs"
+    );
     let rows = omp.window.with_class(pane, pk_el, "pk-row");
     assert!(rows.len() >= 2, "rows: {}", rows.len());
 
@@ -1829,7 +1886,12 @@ fn a23_omps_model_hub_and_model_dropdown_are_picker_sheets() {
         .window
         .with_class(pane, pk_el, "sel")
         .into_iter()
-        .filter_map(|e| omp.window.doc(pane).attribute(e, "data-v").map(str::to_owned))
+        .filter_map(|e| {
+            omp.window
+                .doc(pane)
+                .attribute(e, "data-v")
+                .map(str::to_owned)
+        })
         .collect();
     assert_eq!(shown_sel, [sel.as_str().unwrap().to_owned()]);
 
@@ -1887,7 +1949,10 @@ fn a23_omps_model_hub_and_model_dropdown_are_picker_sheets() {
         .expect("an inactive tab");
     let r = omp.window.doc(pane).border_box(tab_el).unwrap();
     let out = omp.window.click(pane, r.x + r.w / 2.0, r.y + r.h / 2.0);
-    assert!(out.iter().any(|o| matches!(o, Outcome::Event { .. })), "{out:?}");
+    assert!(
+        out.iter().any(|o| matches!(o, Outcome::Event { .. })),
+        "{out:?}"
+    );
     omp.window.wait("omp to make the tab active", UI, |w| {
         (picker_prop(w, pane, &pk, "tab")? == tab_id.as_str()).then_some(())
     });
@@ -1908,7 +1973,10 @@ fn a23_omps_model_hub_and_model_dropdown_are_picker_sheets() {
             omp.window.frame();
         }
     }
-    assert!(open_picker(&omp.window, pane).is_none(), "Esc closes the hub");
+    assert!(
+        open_picker(&omp.window, pane).is_none(),
+        "Esc closes the hub"
+    );
     omp.ready();
 
     // The composer's model control: the md Switch model sheet.
@@ -1928,7 +1996,10 @@ fn a23_omps_model_hub_and_model_dropdown_are_picker_sheets() {
     let doc = omp.window.doc(pane);
     let sheet = first_with_class(&omp.window, pane, pk_el, "pk-sheet");
     let sh = doc.border_box(sheet).expect("the sheet");
-    assert!(sh.w <= 680.5 && (sh.y - l.y - 72.0).abs() < 1.0, "an md sheet: {sh:?} in {l:?}");
+    assert!(
+        sh.w <= 680.5 && (sh.y - l.y - 72.0).abs() < 1.0,
+        "an md sheet: {sh:?} in {l:?}"
+    );
     // A click on an unselected row selects it (omp moves `selected`).
     let selected = picker_prop(&omp.window, pane, &pk, "selected");
     let row = omp
@@ -1941,21 +2012,36 @@ fn a23_omps_model_hub_and_model_dropdown_are_picker_sheets() {
             !c.contains(&"grp") && !c.contains(&"sel") && !c.contains(&"off")
         })
         .expect("another model");
-    let item = omp.window.doc(pane).attribute(row, "data-v").unwrap().to_owned();
+    let item = omp
+        .window
+        .doc(pane)
+        .attribute(row, "data-v")
+        .unwrap()
+        .to_owned();
     let r = omp.window.doc(pane).border_box(row).unwrap();
     let out = omp.window.click(pane, r.x + r.w / 2.0, r.y + r.h / 2.0);
-    assert!(out.iter().any(|o| matches!(o, Outcome::Event { .. })), "{out:?}");
+    assert!(
+        out.iter().any(|o| matches!(o, Outcome::Event { .. })),
+        "{out:?}"
+    );
     omp.window.wait("omp to select the clicked row", UI, |w| {
         (picker_prop(w, pane, &pk, "selected")? == item.as_str()).then_some(())
     });
-    assert_ne!(selected.as_ref().and_then(Value::as_str), Some(item.as_str()));
+    assert_ne!(
+        selected.as_ref().and_then(Value::as_str),
+        Some(item.as_str())
+    );
     omp.window.press(pane, Key::Escape, Mods::default());
     omp.window.wait("the dropdown to close", UI, |w| {
         open_picker(w, pane).is_none().then_some(())
     });
     assert!(omp.window.errors().is_empty(), "{:?}", omp.window.errors());
     let report = t2_report(&omp.records());
-    assert!(report.errors.is_empty(), "omp got errors: {:?}", report.errors);
+    assert!(
+        report.errors.is_empty(),
+        "omp got errors: {:?}",
+        report.errors
+    );
     omp.ready();
     omp.quit();
     assert_eq!(
@@ -2258,25 +2344,53 @@ fn a23_omps_answer_draws_md_math_typeset() {
             })
             .map(|(id, _)| id)
     });
-    let s = omp.window.live_surface(pane, "s:1").expect("the session surface");
-    let text = s.document().get(&md).unwrap().prop("text").unwrap().as_str().unwrap().to_owned();
-    for part in ["$e^{i\\pi} + 1 = 0$", "\\(\\alpha_1 + \\beta\\)", "\\[", "\\begin{pmatrix}"] {
+    let s = omp
+        .window
+        .live_surface(pane, "s:1")
+        .expect("the session surface");
+    let text = s
+        .document()
+        .get(&md)
+        .unwrap()
+        .prop("text")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_owned();
+    for part in [
+        "$e^{i\\pi} + 1 = 0$",
+        "\\(\\alpha_1 + \\beta\\)",
+        "\\[",
+        "\\begin{pmatrix}",
+    ] {
         assert!(text.contains(part), "omp keeps {part}: {text}");
     }
     let el = omp.window.element_of(pane, s, &md).expect("drawn");
     omp.window.frame();
     let doc = omp.window.doc(pane);
     let tex = |e: auk_ui::NodeId| doc.attribute(e, "data-tex").unwrap_or("").to_owned();
-    let inline: Vec<String> = omp.window.with_class(pane, el, "math").into_iter().map(tex).collect();
+    let inline: Vec<String> = omp
+        .window
+        .with_class(pane, el, "math")
+        .into_iter()
+        .map(tex)
+        .collect();
     assert_eq!(inline, ["e^{i\\pi} + 1 = 0", "\\alpha_1 + \\beta"]);
     let display = omp.window.with_class(pane, el, "math-display");
     let shown: Vec<String> = display.iter().map(|&e| tex(e)).collect();
     assert_eq!(shown.len(), 3, "{shown:?}");
-    assert!(shown[0].contains("\\sum") && shown[1].contains("pmatrix") && shown[2].starts_with("\\begin{aligned}"));
+    assert!(
+        shown[0].contains("\\sum")
+            && shown[1].contains("pmatrix")
+            && shown[2].starts_with("\\begin{aligned}")
+    );
     let err = omp.window.with_class(pane, el, "math-err");
     assert_eq!(err.len(), 1);
     assert_eq!(omp.window.text_content(pane, err[0]), "\\frac{1}");
-    assert!(doc.attribute(err[0], "title").is_some_and(|t| !t.is_empty()));
+    assert!(
+        doc.attribute(err[0], "title")
+            .is_some_and(|t| !t.is_empty())
+    );
 
     // Each formula is a picture painted in the text color: light ink on the dark page.
     let formulas: Vec<auk_ui::NodeId> = omp
@@ -2287,7 +2401,11 @@ fn a23_omps_answer_draws_md_math_typeset() {
         .collect();
     for f in formulas {
         let svg = *doc.children(f).first().expect("the svg");
-        assert!(doc.image(svg).is_some() && doc.image_tint(svg), "{} is typeset", tex(f));
+        assert!(
+            doc.image(svg).is_some() && doc.image_tint(svg),
+            "{} is typeset",
+            tex(f)
+        );
         let b = doc.border_box(svg).expect("laid out");
         assert!(b.w > 8.0 && b.h > 8.0, "{b:?}");
         let color = doc.computed_style(svg).expect("styled").color;
@@ -2306,7 +2424,10 @@ fn a23_omps_answer_draws_md_math_typeset() {
         }
         let page = *counts.iter().max_by_key(|(_, n)| **n).unwrap().0;
         let dist = |p: &[u8; 3]| -> u32 {
-            p.iter().zip(page).map(|(a, b)| u32::from(a.abs_diff(b))).sum()
+            p.iter()
+                .zip(page)
+                .map(|(a, b)| u32::from(a.abs_diff(b)))
+                .sum()
         };
         let ink = *pixels.iter().max_by_key(|p| dist(p)).unwrap();
         let lum = |c: [u8; 3]| c.iter().map(|&v| u32::from(v)).sum::<u32>();
@@ -2357,7 +2478,10 @@ fn a23_omps_settings_open_as_prefs_and_footer_shows_effort() {
     });
     omp.window.frame();
     let s = omp.window.live_surface(pane, "s:1").expect("the session");
-    assert!(s.document().get("3.bar/effort").is_none(), "no fallback row");
+    assert!(
+        s.document().get("3.bar/effort").is_none(),
+        "no fallback row"
+    );
     let el = omp.window.element_of(pane, s, &effort).expect("drawn");
     let doc = omp.window.doc(pane);
     assert!(omp.window.class(pane, el).contains("sf-effort"));
@@ -2466,13 +2590,18 @@ fn a23_omps_settings_open_as_prefs_and_footer_shows_effort() {
         r[at..].contains(&u64::from(SIZE.0)).then_some(())
     });
     omp.window.frame();
-    assert!(!omp
-        .window
-        .class(pane, omp.window.view(pane).element())
-        .contains("auk-aside"));
+    assert!(
+        !omp.window
+            .class(pane, omp.window.view(pane).element())
+            .contains("auk-aside")
+    );
     assert!(omp.window.errors().is_empty(), "{:?}", omp.window.errors());
     let report = t2_report(&omp.records());
-    assert!(report.errors.is_empty(), "omp got errors: {:?}", report.errors);
+    assert!(
+        report.errors.is_empty(),
+        "omp got errors: {:?}",
+        report.errors
+    );
     assert!(report.sent_anyway.is_empty(), "{:?}", report.sent_anyway);
     omp.ready();
     omp.clear(&id);
@@ -2503,14 +2632,20 @@ fn a23_omps_theme_submenu_picker_fills_the_prefs_editor_card() {
     let pf = omp.window.wait("omp's settings sheet", UI, |w| {
         let s = w.live_surface(pane, "s:1")?;
         let layer = s.document().region("layer")?;
-        let pf = kinds_under(layer).into_iter().find(|(_, k)| k == "prefs")?.0;
+        let pf = kinds_under(layer)
+            .into_iter()
+            .find(|(_, k)| k == "prefs")?
+            .0;
         (s.document().get(&pf)?.prop("focus")?.as_str() == Some("theme.dark")).then_some(pf)
     });
     omp.window.press(pane, Key::Enter, Mods::default());
     let picker = omp.window.wait("omp's theme picker", UI, |w| {
         let s = w.live_surface(pane, "s:1")?;
         let node = s.document().get(&pf)?;
-        kinds_under(node).into_iter().find(|(_, k)| k == "picker").map(|(id, _)| id)
+        kinds_under(node)
+            .into_iter()
+            .find(|(_, k)| k == "picker")
+            .map(|(id, _)| id)
     });
     std::thread::sleep(Duration::from_millis(400));
     omp.window.frame();
@@ -2524,14 +2659,25 @@ fn a23_omps_theme_submenu_picker_fills_the_prefs_editor_card() {
         std::iter::successors(Some(pk_el), |&e| doc.parent(e)).any(|e| e == card),
         "the picker is in the card"
     );
-    let page = doc.border_box(omp.window.with_class(pane, pf_el, "pf")[0]).expect("laid out");
+    let page = doc
+        .border_box(omp.window.with_class(pane, pf_el, "pf")[0])
+        .expect("laid out");
     let c = doc.border_box(card).expect("laid out");
     let sheet = doc
         .border_box(omp.window.with_class(pane, pk_el, "pk-sheet")[0])
         .expect("laid out");
-    assert!((c.h - 540f32.min(page.h - 80.0)).abs() < 1.0, "card {c:?} in {page:?}");
-    assert!(c.x >= page.x + 15.0 && c.x + c.w <= page.x + page.w - 15.0, "{c:?} {page:?}");
-    assert!((sheet.h - (c.h - 2.0)).abs() < 1.0 && (sheet.w - (c.w - 2.0)).abs() < 1.0, "{sheet:?} {c:?}");
+    assert!(
+        (c.h - 540f32.min(page.h - 80.0)).abs() < 1.0,
+        "card {c:?} in {page:?}"
+    );
+    assert!(
+        c.x >= page.x + 15.0 && c.x + c.w <= page.x + page.w - 15.0,
+        "{c:?} {page:?}"
+    );
+    assert!(
+        (sheet.h - (c.h - 2.0)).abs() < 1.0 && (sheet.w - (c.w - 2.0)).abs() < 1.0,
+        "{sheet:?} {c:?}"
+    );
     let rows: Vec<_> = omp
         .window
         .with_class(pane, pk_el, "pk-row")
@@ -2555,7 +2701,11 @@ fn a23_omps_theme_submenu_picker_fills_the_prefs_editor_card() {
     });
     assert!(omp.window.errors().is_empty(), "{:?}", omp.window.errors());
     let report = t2_report(&omp.records());
-    assert!(report.errors.is_empty(), "omp got errors: {:?}", report.errors);
+    assert!(
+        report.errors.is_empty(),
+        "omp got errors: {:?}",
+        report.errors
+    );
     omp.ready();
     omp.clear(&id);
     omp.quit();

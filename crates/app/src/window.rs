@@ -361,7 +361,12 @@ impl WinState {
                 // A focused program field draws the composition at its caret (§7.9).
                 let in_field = self.focused_pane().is_some_and(|pane| {
                     let (text, cursor) = preedit.as_ref().map_or((String::new(), 0), |p| {
-                        (p.text.clone(), p.text[..p.selection.start.min(p.text.len())].chars().count())
+                        (
+                            p.text.clone(),
+                            p.text[..p.selection.start.min(p.text.len())]
+                                .chars()
+                                .count(),
+                        )
                     });
                     self.field_preedit(pane, &text, cursor)
                 });
@@ -550,7 +555,10 @@ impl WinState {
         };
         // A link that gave up keeps its window open, showing `failed` and why in the status line
         // (§10.1); a detach or a local daemon that went away closes it.
-        let failed = matches!(self.conn.link_status().state, auk_remote::State::Failed { .. });
+        let failed = matches!(
+            self.conn.link_status().state,
+            auk_remote::State::Failed { .. }
+        );
         if let Some(reason) = closed.filter(|_| !failed) {
             eprintln!("auk: window {}: {reason}", self.conn.window_key);
             self.closing = true;
@@ -904,9 +912,7 @@ impl WinState {
                     focused: pane_focused,
                     cursor_on: true,
                     links: link_style,
-                    hover_link: armed
-                        .filter(|(p, _)| *p == pane)
-                        .map(|(_, link)| link),
+                    hover_link: armed.filter(|(p, _)| *p == pane).map(|(_, link)| link),
                 };
                 let rows = composed.slots.len().clamp(1, usize::from(u16::MAX)) as u16;
                 let mut snap =
@@ -1180,11 +1186,15 @@ impl WinState {
             pane_app,
             hover_link: self.hover_link.clone(),
             tooltip: self.hover_title.clone(),
-            find: self.find.as_ref().filter(|f| f.open).map(|f| crate::chrome::FindView {
-                query: f.query.clone(),
-                current: f.current,
-                count: f.matches.len(),
-            }),
+            find: self
+                .find
+                .as_ref()
+                .filter(|f| f.open)
+                .map(|f| crate::chrome::FindView {
+                    query: f.query.clone(),
+                    current: f.current,
+                    count: f.matches.len(),
+                }),
             ..ChromeModel::default()
         }
     }
@@ -1808,7 +1818,11 @@ impl WinState {
                 window.request_frame();
                 return;
             }
-            if self.views.get(&pane).is_some_and(|v| v.arranged.screen.is_some()) {
+            if self
+                .views
+                .get(&pane)
+                .is_some_and(|v| v.arranged.screen.is_some())
+            {
                 return;
             }
         }

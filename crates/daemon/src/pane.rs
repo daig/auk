@@ -352,9 +352,13 @@ impl Pane {
     /// to reach the replica when the machine is loaded, so the clock also waits for 1 s with no
     /// output at all.
     pub fn chunk_expired(&self) -> bool {
-        self.chunk.is_some_and(|(_, at)| at.elapsed() >= CHUNK_TIMEOUT)
+        self.chunk
+            .is_some_and(|(_, at)| at.elapsed() >= CHUNK_TIMEOUT)
             && self.last_output.elapsed() >= CHUNK_TIMEOUT
-            && !self.io.as_ref().is_some_and(|io| io.master.output_pending())
+            && !self
+                .io
+                .as_ref()
+                .is_some_and(|io| io.master.output_pending())
     }
 
     /// The snapshot at the current position, ages rewritten to now (§15.3).

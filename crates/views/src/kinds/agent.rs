@@ -229,7 +229,14 @@ pub(crate) fn tool(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
     } else if running && p.get("age").is_some() {
         let te = cx.dom.child(head, "span", "sf-tool-time");
         cx.dom.attr(te, "role", "timer");
-        live(cx, m, te, crate::motion::anchor_key(node.id(), "age"), p.get("age"), "");
+        live(
+            cx,
+            m,
+            te,
+            crate::motion::anchor_key(node.id(), "age"),
+            p.get("age"),
+            "",
+        );
     }
     let stc = cx.dom.child(head, "span", "sf-tool-st");
     match status {
@@ -648,8 +655,8 @@ pub(crate) fn checklist(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Lo
                 .filter(|i| i.2 == "done" || i.2 == "dropped")
                 .count();
             let key = format!("{id}\u{1f}phase\u{1f}{pid}");
-            let folded = SurfaceState::flip(&mut cx.st.folds, &key, ph.get("collapsed"), false)
-                || collapsed;
+            let folded =
+                SurfaceState::flip(&mut cx.st.folds, &key, ph.get("collapsed"), false) || collapsed;
             let mut class = String::from("sf-ck-phase");
             if pdone == items.len() && !items.is_empty() {
                 class.push_str(" done");

@@ -62,11 +62,15 @@ impl WinState {
             }
         }
         model.status = self.plugins.status.clone();
-        model.card = self.plugins.block_card.as_ref().map(|c| crate::chrome::CardView {
-            title: "Could not start the block".to_owned(),
-            sub: c.error.clone(),
-            retry: "card:retry".to_owned(),
-        });
+        model.card = self
+            .plugins
+            .block_card
+            .as_ref()
+            .map(|c| crate::chrome::CardView {
+                title: "Could not start the block".to_owned(),
+                sub: c.error.clone(),
+                retry: "card:retry".to_owned(),
+            });
         // Presence (§10.1): who else is attached to the host.
         if let Some(text) = self.presence_shown.clone() {
             model.status.push(crate::chrome::StatusItem {
@@ -800,7 +804,11 @@ impl WinState {
         if !self.overlays.viewer.as_ref().is_some_and(|v| v.decoding) {
             return false;
         }
-        let blob = self.overlays.viewer.as_ref().map(|v| v.zoom.images[v.zoom.index].blob.clone());
+        let blob = self
+            .overlays
+            .viewer
+            .as_ref()
+            .map(|v| v.zoom.images[v.zoom.index].blob.clone());
         if blob.is_some_and(|b| auk_views::image::decoding_blob(&b.to_ascii_lowercase())) {
             return true;
         }

@@ -50,7 +50,10 @@ fn longrun_window_command_bind_and_ticking_status_segment() {
     assert!(auk_plugins::chord::Chord::parse(&binds[0].chord).is_ok());
 
     // No block yet and no host type: the command tries a new tab, then toasts.
-    assert_eq!(plugins.run_action(&mut win, "plugin.longrun.show"), Ok(true));
+    assert_eq!(
+        plugins.run_action(&mut win, "plugin.longrun.show"),
+        Ok(true)
+    );
     assert_eq!(
         win.calls(),
         [
@@ -64,17 +67,34 @@ fn longrun_window_command_bind_and_ticking_status_segment() {
     );
     // With a Slow Commands block in the window, it focuses that one.
     win.calls.borrow_mut().clear();
-    win.panes = vec![pane(1, "/src", "zsh", false), pane(7, "", "Slow Commands (3)", false)];
+    win.panes = vec![
+        pane(1, "/src", "zsh", false),
+        pane(7, "", "Slow Commands (3)", false),
+    ];
     win.focused = Some(1);
-    plugins.run_action(&mut win, "plugin.longrun.show").expect("runs");
+    plugins
+        .run_action(&mut win, "plugin.longrun.show")
+        .expect("runs");
     assert_eq!(win.calls(), [Call::Focus(7)]);
     assert_eq!(plugins.run_action(&mut win, "plugin.nope.show"), Ok(false));
 
     // The status segment shows the focused pane's running command after a second.
     plugins.window_start(&mut win);
     win.panes[0].busy = true;
-    plugins.deliver(&mut win, &[WindowEvent::CommandStarted { pane: 1, line: "cargo build --release".into() }]);
-    let input = StatusPane { pane: 1, cwd: "/src".into(), program: "zsh".into(), title: "zsh".into(), busy: true };
+    plugins.deliver(
+        &mut win,
+        &[WindowEvent::CommandStarted {
+            pane: 1,
+            line: "cargo build --release".into(),
+        }],
+    );
+    let input = StatusPane {
+        pane: 1,
+        cwd: "/src".into(),
+        program: "zsh".into(),
+        title: "zsh".into(),
+        busy: true,
+    };
     assert_eq!(plugins.status(&input), []);
     assert!(plugins.take_chrome_dirty());
     std::thread::sleep(Duration::from_millis(1100));
@@ -93,9 +113,20 @@ fn longrun_window_command_bind_and_ticking_status_segment() {
         }]
     );
     assert!(plugins.next_wake().is_some(), "the clock keeps ticking");
-    plugins.deliver(&mut win, &[WindowEvent::CommandFinished { pane: 1, line: "cargo build --release".into(), status: 0, took_ms: 1200.0 }]);
+    plugins.deliver(
+        &mut win,
+        &[WindowEvent::CommandFinished {
+            pane: 1,
+            line: "cargo build --release".into(),
+            status: 0,
+            took_ms: 1200.0,
+        }],
+    );
     win.panes[0].busy = false;
-    let idle = StatusPane { busy: false, ..input };
+    let idle = StatusPane {
+        busy: false,
+        ..input
+    };
     assert_eq!(plugins.status(&idle), []);
 }
 
@@ -130,12 +161,17 @@ fn workspaces_open_override_status_and_css() {
         )]
     );
     let actions: Vec<_> = plugins.commands().into_iter().map(|c| c.action).collect();
-    assert_eq!(actions, ["plugin.workspaces.open", "plugin.workspaces.edit"]);
+    assert_eq!(
+        actions,
+        ["plugin.workspaces.open", "plugin.workspaces.edit"]
+    );
 
     // Before anything is open, a new tab is the built-in one.
     assert!(!plugins.run_override(&mut win, "new_tab"));
 
-    plugins.run_action(&mut win, "plugin.workspaces.open").expect("runs");
+    plugins
+        .run_action(&mut win, "plugin.workspaces.open")
+        .expect("runs");
     let calls = win.calls();
     let tabs: Vec<_> = calls
         .iter()
@@ -149,7 +185,10 @@ fn workspaces_open_override_status_and_css() {
     assert_eq!(tabs[0].name.as_deref(), Some("code"));
     assert_eq!(tabs[0].split, Some(auk_plugins::window::Dir::Right));
     let editor = tabs[0].first.as_ref().expect("first side");
-    assert_eq!(editor.launch.as_ref().and_then(|l| l.command.as_deref()), Some("nvim ."));
+    assert_eq!(
+        editor.launch.as_ref().and_then(|l| l.command.as_deref()),
+        Some("nvim .")
+    );
     assert_eq!(editor.cwd.as_deref(), Some(root_dir.as_str()));
     let right = tabs[0].second.as_ref().expect("second side");
     assert_eq!(right.split, Some(auk_plugins::window::Dir::Down));
@@ -159,27 +198,55 @@ fn workspaces_open_override_status_and_css() {
     );
     let shell = &tabs[1];
     assert_eq!(
-        shell.second.as_ref().and_then(|s| s.launch.as_ref()).and_then(|l| l.block.clone()),
+        shell
+            .second
+            .as_ref()
+            .and_then(|s| s.launch.as_ref())
+            .and_then(|l| l.block.clone()),
         Some("longrun.slow".into())
     );
     assert_eq!(tabs[2].cwd, Some(format!("{root_dir}/infra")));
     assert_eq!(
         win.toasts().last(),
-        Some(&(ToastLevel::Success, "Opened webapp".into(), Some(format!("3 tabs · {root_dir}"))))
+        Some(&(
+            ToastLevel::Success,
+            "Opened webapp".into(),
+            Some(format!("3 tabs · {root_dir}"))
+        ))
     );
 
     // Opening again says so.
-    plugins.run_action(&mut win, "plugin.workspaces.open").expect("runs");
-    assert_eq!(win.toasts().last().map(|t| t.1.clone()), Some("webapp is already open".into()));
+    plugins
+        .run_action(&mut win, "plugin.workspaces.open")
+        .expect("runs");
+    assert_eq!(
+        win.toasts().last().map(|t| t.1.clone()),
+        Some("webapp is already open".into())
+    );
 
     // New tabs inside the workspace start at its root; the override replaces the built-in.
     win.calls.borrow_mut().clear();
     assert!(plugins.run_override(&mut win, "new_tab"));
-    assert_eq!(win.calls(), [Call::NewTab(Launch { cwd: Some(root_dir.clone()), ..Launch::default() })]);
-    assert!(!plugins.run_override(&mut win, "close_pane"), "only new_tab is overridden");
+    assert_eq!(
+        win.calls(),
+        [Call::NewTab(Launch {
+            cwd: Some(root_dir.clone()),
+            ..Launch::default()
+        })]
+    );
+    assert!(
+        !plugins.run_override(&mut win, "close_pane"),
+        "only new_tab is overridden"
+    );
 
     // The status segment names the workspace for panes inside it.
-    let status = |cwd: &str| StatusPane { pane: 1, cwd: cwd.into(), program: "zsh".into(), title: "zsh".into(), busy: false };
+    let status = |cwd: &str| StatusPane {
+        pane: 1,
+        cwd: cwd.into(),
+        program: "zsh".into(),
+        title: "zsh".into(),
+        busy: false,
+    };
     assert_eq!(
         plugins.status(&status(&inside)),
         [StatusSegment {
@@ -193,7 +260,10 @@ fn workspaces_open_override_status_and_css() {
     assert_eq!(plugins.status(&status("/elsewhere")), []);
 
     // Closing its tabs forgets it (tab ids 101..103 came from the window host).
-    plugins.deliver(&mut win, &[101, 102, 103].map(|tab| WindowEvent::TabClosed { tab }));
+    plugins.deliver(
+        &mut win,
+        &[101, 102, 103].map(|tab| WindowEvent::TabClosed { tab }),
+    );
     assert!(plugins.take_chrome_dirty());
     assert_eq!(plugins.status(&status(&inside)), []);
     assert!(!plugins.run_override(&mut win, "new_tab"));
@@ -215,37 +285,83 @@ fn jsonx_route_claims_json_opens_from_files_and_palette_until_toggled() {
     };
     assert_eq!(
         plugins.route_open(&mut win, &req("palette", How::Default, "/p/data.JSON")),
-        Some(RouteDecision::Block { kind: "jsonx.explorer".into(), args: vec!["/p/data.JSON".into()] })
+        Some(RouteDecision::Block {
+            kind: "jsonx.explorer".into(),
+            args: vec!["/p/data.JSON".into()]
+        })
     );
-    assert!(plugins.route_open(&mut win, &req("files", How::Default, "/p/a.json")).is_some());
-    assert_eq!(plugins.route_open(&mut win, &req("cli", How::Default, "/p/a.json")), None);
-    assert_eq!(plugins.route_open(&mut win, &req("palette", How::Beside, "/p/a.json")), None);
-    assert_eq!(plugins.route_open(&mut win, &req("palette", How::Default, "/p/a.txt")), None);
+    assert!(
+        plugins
+            .route_open(&mut win, &req("files", How::Default, "/p/a.json"))
+            .is_some()
+    );
+    assert_eq!(
+        plugins.route_open(&mut win, &req("cli", How::Default, "/p/a.json")),
+        None
+    );
+    assert_eq!(
+        plugins.route_open(&mut win, &req("palette", How::Beside, "/p/a.json")),
+        None
+    );
+    assert_eq!(
+        plugins.route_open(&mut win, &req("palette", How::Default, "/p/a.txt")),
+        None
+    );
 
-    plugins.run_action(&mut win, "plugin.jsonx.toggle_route").expect("runs");
+    plugins
+        .run_action(&mut win, "plugin.jsonx.toggle_route")
+        .expect("runs");
     assert_eq!(
         win.toasts(),
-        [(ToastLevel::Info, ".json files open in the editor".into(), Some("Open with › JSON Explorer still works".into()))]
+        [(
+            ToastLevel::Info,
+            ".json files open in the editor".into(),
+            Some("Open with › JSON Explorer still works".into())
+        )]
     );
-    assert_eq!(plugins.route_open(&mut win, &req("palette", How::Default, "/p/a.json")), None);
+    assert_eq!(
+        plugins.route_open(&mut win, &req("palette", How::Default, "/p/a.json")),
+        None
+    );
     // The switch is in kv.json, which every VM of the plugin shares: a second window agrees.
     let mut other = TestWindow::default();
     let mut second = WindowPlugins::load(root.window_config(BUILTIN), &mut other);
-    assert_eq!(second.route_open(&mut other, &req("palette", How::Default, "/p/a.json")), None);
-    second.run_action(&mut other, "plugin.jsonx.toggle_route").expect("runs");
-    assert!(plugins.route_open(&mut win, &req("palette", How::Default, "/p/a.json")).is_some());
+    assert_eq!(
+        second.route_open(&mut other, &req("palette", How::Default, "/p/a.json")),
+        None
+    );
+    second
+        .run_action(&mut other, "plugin.jsonx.toggle_route")
+        .expect("runs");
+    assert!(
+        plugins
+            .route_open(&mut win, &req("palette", How::Default, "/p/a.json"))
+            .is_some()
+    );
 }
 
 #[test]
 fn review_queue_window_command_and_bind() {
     let root = Root::new();
     root.example("review-queue");
-    let mut win = TestWindow { new_block_answer: Some(55), ..TestWindow::default() };
+    let mut win = TestWindow {
+        new_block_answer: Some(55),
+        ..TestWindow::default()
+    };
     let mut plugins = WindowPlugins::load(root.window_config(BUILTIN), &mut win);
     assert_eq!(plugins.binds()[0].chord, "alt+shift+cmd+r");
     assert_eq!(plugins.binds()[0].action, "plugin.review-queue.open");
-    plugins.run_action(&mut win, "plugin.review-queue.open").expect("runs");
-    assert_eq!(win.calls(), [Call::NewBlock("review-queue.queue".into(), vec![], How::Beside)]);
+    plugins
+        .run_action(&mut win, "plugin.review-queue.open")
+        .expect("runs");
+    assert_eq!(
+        win.calls(),
+        [Call::NewBlock(
+            "review-queue.queue".into(),
+            vec![],
+            How::Beside
+        )]
+    );
 }
 
 #[test]
@@ -287,11 +403,18 @@ fn registrations_errors_budgets_and_the_cx_lifetime() {
     assert_eq!(
         plugins.sheets(),
         [
-            ("plugin:local:probe:styles".to_owned(), ".x{color:red}".to_owned()),
+            (
+                "plugin:local:probe:styles".to_owned(),
+                ".x{color:red}".to_owned()
+            ),
             ("plugin:local:probe:extra".to_owned(), ".y{}".to_owned())
         ]
     );
-    let binds: Vec<_> = plugins.binds().into_iter().map(|b| (b.chord, b.action)).collect();
+    let binds: Vec<_> = plugins
+        .binds()
+        .into_iter()
+        .map(|b| (b.chord, b.action))
+        .collect();
     assert_eq!(
         binds,
         [
@@ -300,19 +423,27 @@ fn registrations_errors_budgets_and_the_cx_lifetime() {
             ("ctrl+shift+8".to_owned(), "new_tab".to_owned()),
         ]
     );
-    plugins.run_action(&mut win, "plugin.probe.bind.0").expect("runs");
+    plugins
+        .run_action(&mut win, "plugin.probe.bind.0")
+        .expect("runs");
     assert_eq!(win.calls(), [Call::Copy("bound".into())]);
 
     // A kept cx raises once its call returned.
-    plugins.run_action(&mut win, "plugin.probe.keep").expect("runs");
-    plugins.run_action(&mut win, "plugin.probe.use").expect("runs");
+    plugins
+        .run_action(&mut win, "plugin.probe.keep")
+        .expect("runs");
+    plugins
+        .run_action(&mut win, "plugin.probe.use")
+        .expect("runs");
     let (_, text, sub) = win.toasts().pop().expect("failure toast");
     assert_eq!(text, "Plugin Probe: command use failed");
     assert!(sub.is_some());
 
     // The window cx checks toast levels.
     win.calls.borrow_mut().clear();
-    plugins.run_action(&mut win, "plugin.probe.toast").expect("runs");
+    plugins
+        .run_action(&mut win, "plugin.probe.toast")
+        .expect("runs");
     assert_eq!(
         win.toasts()[0].2.as_deref(),
         Some("unknown toast level `warn` (success, info or error)")
@@ -321,8 +452,14 @@ fn registrations_errors_budgets_and_the_cx_lifetime() {
     // `available` gets 4 ms; an overrun hides the row and stays disabled until reload.
     win.calls.borrow_mut().clear();
     assert!(!plugins.available(&mut win, "plugin.probe.slow"));
-    assert_eq!(win.toasts()[0].1, "Plugin Probe: available plugin.probe.slow failed");
-    assert_eq!(win.toasts()[0].2.as_deref(), Some("tern: available plugin.probe.slow exceeded 4 ms"));
+    assert_eq!(
+        win.toasts()[0].1,
+        "Plugin Probe: available plugin.probe.slow failed"
+    );
+    assert_eq!(
+        win.toasts()[0].2.as_deref(),
+        Some("tern: available plugin.probe.slow exceeded 4 ms")
+    );
     assert!(!plugins.available(&mut win, "plugin.probe.slow"));
     assert!(plugins.available(&mut win, "plugin.probe.keep"));
 
@@ -332,22 +469,39 @@ fn registrations_errors_budgets_and_the_cx_lifetime() {
     assert_eq!(win.toasts()[0].1, "Plugin Probe: override new_tab failed");
 
     // Formatters: cached by input, wrong types and overruns reported after the frame.
-    let tab = auk_plugins::window::TabInfo { id: 1, title: "zsh".into(), ..Default::default() };
+    let tab = auk_plugins::window::TabInfo {
+        id: 1,
+        title: "zsh".into(),
+        ..Default::default()
+    };
     assert_eq!(plugins.tab_title(&tab).as_deref(), Some("zsh!"));
-    assert_eq!(plugins.window_title(&serde_json::json!({"space": "main"})), None);
+    assert_eq!(
+        plugins.window_title(&serde_json::json!({"space": "main"})),
+        None
+    );
     assert_eq!(
         plugins.take_toasts(),
-        [("Plugin Probe: window_title failed".to_owned(), "a title formatter returns a string or nil".to_owned())]
+        [(
+            "Plugin Probe: window_title failed".to_owned(),
+            "a title formatter returns a string or nil".to_owned()
+        )]
     );
     let sp = StatusPane::default();
     assert_eq!(plugins.status(&sp), []);
     assert_eq!(
         plugins.take_toasts(),
-        [("Plugin Probe: status failed".to_owned(), "tern: status exceeded 4 ms".to_owned())]
+        [(
+            "Plugin Probe: status failed".to_owned(),
+            "tern: status exceeded 4 ms".to_owned()
+        )]
     );
 
     // Route decisions are checked.
-    let link = auk_plugins::window::LinkRequest { url: "x:bad".into(), pane: 1, mods: Default::default() };
+    let link = auk_plugins::window::LinkRequest {
+        url: "x:bad".into(),
+        pane: 1,
+        mods: Default::default(),
+    };
     win.calls.borrow_mut().clear();
     assert_eq!(plugins.route_link(&mut win, &link), None);
     assert_eq!(
@@ -359,7 +513,11 @@ fn registrations_errors_budgets_and_the_cx_lifetime() {
     plugins.reload(&mut win);
     win.calls.borrow_mut().clear();
     assert!(!plugins.available(&mut win, "plugin.probe.slow"));
-    assert_eq!(win.toasts().len(), 1, "it ran (and tripped) again after the reload");
+    assert_eq!(
+        win.toasts().len(),
+        1,
+        "it ran (and tripped) again after the reload"
+    );
 }
 
 #[test]
@@ -377,10 +535,22 @@ fn a_failed_window_entry_toasts_once_and_keeps_its_styles() {
     let mut plugins = WindowPlugins::load(root.window_config(BUILTIN), &mut win);
     assert_eq!(win.toasts().len(), 1);
     assert_eq!(win.toasts()[0].1, "Plugin Broken failed to load");
-    assert!(win.toasts()[0].2.as_deref().is_some_and(|s| s.ends_with("no good")));
-    assert_eq!(plugins.sheets(), [("plugin:local:broken:styles".to_owned(), ".b{}".to_owned())]);
+    assert!(
+        win.toasts()[0]
+            .2
+            .as_deref()
+            .is_some_and(|s| s.ends_with("no good"))
+    );
+    assert_eq!(
+        plugins.sheets(),
+        [("plugin:local:broken:styles".to_owned(), ".b{}".to_owned())]
+    );
     plugins.reload(&mut win);
-    assert_eq!(win.toasts().len(), 1, "an identical failure isn't toasted again");
+    assert_eq!(
+        win.toasts().len(),
+        1,
+        "an identical failure isn't toasted again"
+    );
 }
 
 #[test]
@@ -407,15 +577,29 @@ fn sheet_urls_inline_plugin_files_as_data_and_refuse_the_rest() {
     );
     let sheets = plugins.sheets();
     let names: Vec<&str> = sheets.iter().map(|(n, _)| n.as_str()).collect();
-    assert_eq!(names, ["plugin:local:pics:styles", "plugin:local:pics:extra"]);
+    assert_eq!(
+        names,
+        ["plugin:local:pics:styles", "plugin:local:pics:extra"]
+    );
     let (styles, extra) = (&sheets[0].1, &sheets[1].1);
-    assert!(styles.contains(&format!(".a {{ background: {data} }}")), "{styles}");
-    assert!(styles.contains("url(../s.css)"), "`..` is refused and left for the engine to drop");
-    assert!(styles.contains("url(data:image/gif;base64,R0lG)"), "data: URLs pass");
-    assert!(extra.contains(&format!(".x {{ background-image: {data} }}")), "{extra}");
+    assert!(
+        styles.contains(&format!(".a {{ background: {data} }}")),
+        "{styles}"
+    );
+    assert!(
+        styles.contains("url(../s.css)"),
+        "`..` is refused and left for the engine to drop"
+    );
+    assert!(
+        styles.contains("url(data:image/gif;base64,R0lG)"),
+        "data: URLs pass"
+    );
+    assert!(
+        extra.contains(&format!(".x {{ background-image: {data} }}")),
+        "{extra}"
+    );
     assert!(extra.contains("url(https://example.com/a.png)"));
 }
-
 
 /// One window plugin for the order test: its dir name sorts before or after its id's.
 fn order_plugin(root: &Root, dir: &str, id: &str) {
@@ -481,13 +665,25 @@ fn window_plugins_go_in_id_then_registration_order_each_with_a_fresh_cx() {
     assert!(!plugins.run_override(&mut win, "new_tab"));
     assert_eq!(
         copies(&win),
-        ["alpha override 1", "alpha override 2", "zeta override 1", "zeta override 2"]
+        [
+            "alpha override 1",
+            "alpha override 2",
+            "zeta override 1",
+            "zeta override 2"
+        ]
     );
     // Routes: the same for links and opens (each passes with nil).
     win.calls.borrow_mut().clear();
-    let link = auk_plugins::window::LinkRequest { url: "https://x".into(), pane: 1, mods: Default::default() };
+    let link = auk_plugins::window::LinkRequest {
+        url: "https://x".into(),
+        pane: 1,
+        mods: Default::default(),
+    };
     assert_eq!(plugins.route_link(&mut win, &link), None);
-    assert_eq!(copies(&win), ["alpha link 1", "alpha link 2", "zeta link 1", "zeta link 2"]);
+    assert_eq!(
+        copies(&win),
+        ["alpha link 1", "alpha link 2", "zeta link 1", "zeta link 2"]
+    );
     win.calls.borrow_mut().clear();
     let open = OpenRequest {
         path: "/tmp/x".into(),
@@ -500,7 +696,11 @@ fn window_plugins_go_in_id_then_registration_order_each_with_a_fresh_cx() {
     assert_eq!(plugins.route_open(&mut win, &open), None);
     assert_eq!(copies(&win), ["alpha open 1", "zeta open 1"]);
     // Formatters: the first title in id order wins; status segments in id order.
-    let tab = auk_plugins::window::TabInfo { id: 1, title: "zsh".into(), ..Default::default() };
+    let tab = auk_plugins::window::TabInfo {
+        id: 1,
+        title: "zsh".into(),
+        ..Default::default()
+    };
     assert_eq!(plugins.tab_title(&tab).as_deref(), Some("alpha title"));
     let segs: Vec<(String, String)> = plugins
         .status(&StatusPane::default())
@@ -521,11 +721,18 @@ fn window_plugins_go_in_id_then_registration_order_each_with_a_fresh_cx() {
     plugins.deliver(&mut win, &[WindowEvent::Focus { pane: 1, tab: 1 }]);
     assert_eq!(
         copies(&win),
-        ["alpha focus 1 first", "alpha focus 2 fresh", "zeta focus 1 first", "zeta focus 2 fresh"]
+        [
+            "alpha focus 1 first",
+            "alpha focus 2 fresh",
+            "zeta focus 1 first",
+            "zeta focus 2 fresh"
+        ]
     );
     // A window timer's callback gets a fresh cx too.
     win.calls.borrow_mut().clear();
-    plugins.run_action(&mut win, "plugin.alpha.later").expect("runs");
+    plugins
+        .run_action(&mut win, "plugin.alpha.later")
+        .expect("runs");
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     while copies(&win).is_empty() && std::time::Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(5));
@@ -555,8 +762,12 @@ fn a_completion_makes_the_window_runtime_due_and_its_callback_gets_a_cx() {
     let mut plugins = WindowPlugins::load(root.window_config(BUILTIN), &mut win);
     assert!(plugins.failures().is_empty(), "{:?}", plugins.failures());
     assert_eq!(plugins.next_wake(), None, "nothing pending");
-    plugins.run_action(&mut win, "plugin.settle.go").expect("runs");
-    let due = plugins.next_wake().expect("the settled task makes the runtime due");
+    plugins
+        .run_action(&mut win, "plugin.settle.go")
+        .expect("runs");
+    let due = plugins
+        .next_wake()
+        .expect("the settled task makes the runtime due");
     assert!(due <= std::time::Instant::now());
     plugins.pump(&mut win);
     assert_eq!(win.calls(), [Call::Copy("settled output".into())]);

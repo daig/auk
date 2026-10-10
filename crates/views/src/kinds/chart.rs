@@ -253,7 +253,11 @@ mod tests {
         assert_eq!(fill(Some("success")), "var(--sf-c-success)");
         // Semantic tokens without a color have no `--sf-c-*`: the palette's, else the accent.
         for t in ["strong", "em", "mono", "mark", "typo", "icon", "hide"] {
-            assert_eq!(fill(Some(t)), format!("var(--sf-p-{t}, var(--accent))"), "{t}");
+            assert_eq!(
+                fill(Some(t)),
+                format!("var(--sf-p-{t}, var(--accent))"),
+                "{t}"
+            );
         }
         assert_eq!(
             fill(Some("statusLineCost")),

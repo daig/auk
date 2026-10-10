@@ -247,7 +247,10 @@ mod tests {
         assert_eq!(l.rect(2), Some(Rect::new(201.0, 0.0, 600.0, 300.0)));
         assert_eq!(l.rect(3), Some(Rect::new(201.0, 301.0, 600.0, 100.0)));
         assert_eq!(node_area(&root, area, 1.0, &[]), Some(area));
-        assert_eq!(node_area(&root, area, 1.0, &[true]), Some(Rect::new(201.0, 0.0, 600.0, 401.0)));
+        assert_eq!(
+            node_area(&root, area, 1.0, &[true]),
+            Some(Rect::new(201.0, 0.0, 600.0, 401.0))
+        );
         assert_eq!(node_area(&root, area, 1.0, &[true, true]), l.rect(3));
         assert_eq!(node_area(&root, area, 1.0, &[false, true]), None);
     }

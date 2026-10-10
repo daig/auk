@@ -372,13 +372,21 @@ impl RawClient {
     }
 
     /// The last presence message, once one satisfies `done`.
-    fn presence(&self, done: impl Fn(&[auk_mirror::ClientInfo]) -> bool) -> Vec<auk_mirror::ClientInfo> {
+    fn presence(
+        &self,
+        done: impl Fn(&[auk_mirror::ClientInfo]) -> bool,
+    ) -> Vec<auk_mirror::ClientInfo> {
         wait_for("a presence message", || {
-            self.got.lock().unwrap().iter().rev().find_map(|m| match m {
-                DaemonMsg::Presence { clients } => Some(clients.clone()),
-                _ => None,
-            })
-            .filter(|c| done(c))
+            self.got
+                .lock()
+                .unwrap()
+                .iter()
+                .rev()
+                .find_map(|m| match m {
+                    DaemonMsg::Presence { clients } => Some(clients.clone()),
+                    _ => None,
+                })
+                .filter(|c| done(c))
         })
     }
 }
@@ -391,22 +399,28 @@ impl Drop for RawClient {
 
 /// Waits until the daemon names `client` as the pane's primary.
 fn wait_primary(env: &TestEnv, pane: u64, client: u64) {
-    wait_for(&format!("client {client} to be pane {pane}'s primary"), || {
-        env.daemon("clients")
-            .as_array()?
-            .iter()
-            .any(|c| {
-                c["id"] == client
-                    && c["primary_for"]
-                        .as_array()
-                        .is_some_and(|p| p.contains(&json!(pane)))
-            })
-            .then_some(())
-    });
+    wait_for(
+        &format!("client {client} to be pane {pane}'s primary"),
+        || {
+            env.daemon("clients")
+                .as_array()?
+                .iter()
+                .any(|c| {
+                    c["id"] == client
+                        && c["primary_for"]
+                            .as_array()
+                            .is_some_and(|p| p.contains(&json!(pane)))
+                })
+                .then_some(())
+        },
+    );
 }
 
 fn acks(bodies: &[Value]) -> Vec<u64> {
-    events(bodies, "ack").iter().filter_map(|a| a["s"].as_u64()).collect()
+    events(bodies, "ack")
+        .iter()
+        .filter_map(|a| a["s"].as_u64())
+        .collect()
 }
 
 #[test]
@@ -427,18 +441,33 @@ fn only_the_primary_clients_acks_count_and_client_facts_follow_the_primary() {
     x.send(&ClientMsg::Focus { pane });
     wait_primary(&env, pane, x.id);
     probe.write(&tsp_hello(&[]));
-    probe.write(&open_with("s1", "flow", json!([{"id": "t", "k": "text", "p": {"text": "hi"}}])));
+    probe.write(&open_with(
+        "s1",
+        "flow",
+        json!([{"id": "t", "k": "text", "p": {"text": "hi"}}]),
+    ));
     // The hello's reply, then nothing more: neither client has drawn frame 1.
     let bodies = probe.fence_tsp();
     assert!(acks(&bodies).is_empty(), "{bodies:?}");
 
     // A client that isn't the pane's primary acks: the program hears nothing (§4.5, §7.10).
-    y.send(&ClientMsg::Ack { pane, sf: "s1".into(), s: 1 });
+    y.send(&ClientMsg::Ack {
+        pane,
+        sf: "s1".into(),
+        s: 1,
+    });
     std::thread::sleep(Duration::from_millis(500));
     let bodies = probe.fence_tsp();
-    assert!(acks(&bodies).is_empty(), "a non-primary ack reached the program: {bodies:?}");
+    assert!(
+        acks(&bodies).is_empty(),
+        "a non-primary ack reached the program: {bodies:?}"
+    );
     // The primary's ack does.
-    x.send(&ClientMsg::Ack { pane, sf: "s1".into(), s: 1 });
+    x.send(&ClientMsg::Ack {
+        pane,
+        sf: "s1".into(),
+        s: 1,
+    });
     let input = probe.read_until("the primary's ack", |b| {
         let items = auk_conformance::probe::split_input(b);
         !acks(&auk_conformance::probe::tsp_bodies(&items)).is_empty()
@@ -454,14 +483,28 @@ fn only_the_primary_clients_acks_count_and_client_facts_follow_the_primary() {
         events(&bodies, "theme").iter().any(|t| t["dark"] == true)
     });
     let bodies = auk_conformance::probe::tsp_bodies(&auk_conformance::probe::split_input(&input));
-    assert!(events(&bodies, "theme").contains(&&json!({"ev": "theme", "dark": true})), "{bodies:?}");
+    assert!(
+        events(&bodies, "theme").contains(&&json!({"ev": "theme", "dark": true})),
+        "{bodies:?}"
+    );
     // ...and only Y's acks count.
     probe.write(&frame("s1", 2, json!([["set", "t", {"text": "two"}]])));
-    x.send(&ClientMsg::Ack { pane, sf: "s1".into(), s: 2 });
+    x.send(&ClientMsg::Ack {
+        pane,
+        sf: "s1".into(),
+        s: 2,
+    });
     std::thread::sleep(Duration::from_millis(500));
     let bodies = probe.fence_tsp();
-    assert!(acks(&bodies).is_empty(), "the old primary's ack reached the program: {bodies:?}");
-    y.send(&ClientMsg::Ack { pane, sf: "s1".into(), s: 2 });
+    assert!(
+        acks(&bodies).is_empty(),
+        "the old primary's ack reached the program: {bodies:?}"
+    );
+    y.send(&ClientMsg::Ack {
+        pane,
+        sf: "s1".into(),
+        s: 2,
+    });
     probe.read_until("the new primary's ack", |b| {
         let bodies = auk_conformance::probe::tsp_bodies(&auk_conformance::probe::split_input(b));
         acks(&bodies) == [2]
@@ -479,7 +522,9 @@ fn only_the_primary_clients_acks_count_and_client_facts_follow_the_primary() {
 /// The TSP bodies the terminal wrote to the program, once `done` holds for them.
 fn program_reads(probe: &Probe, what: &str, done: impl Fn(&[Value]) -> bool) -> Vec<Value> {
     let input = probe.read_until(what, |b| {
-        done(&auk_conformance::probe::tsp_bodies(&auk_conformance::probe::split_input(b)))
+        done(&auk_conformance::probe::tsp_bodies(
+            &auk_conformance::probe::split_input(b),
+        ))
     });
     auk_conformance::probe::tsp_bodies(&auk_conformance::probe::split_input(&input))
 }
@@ -505,24 +550,38 @@ fn cell_size_reduced_motion_and_the_12_hour_clock_follow_the_primary_client() {
     wait_primary(&env, pane, x.id);
     // X's facts: the hello reply, and the first-draw resize when X acks the first frame.
     probe.write(&tsp_hello(&[]));
-    let bodies = program_reads(&probe, "the hello reply", |b| b.iter().any(|v| v["r"] == "hello"));
+    let bodies = program_reads(&probe, "the hello reply", |b| {
+        b.iter().any(|v| v["r"] == "hello")
+    });
     let reply = bodies.iter().find(|v| v["r"] == "hello").unwrap();
     assert_eq!(
         (&reply["cell"], &reply["reduceMotion"], &reply["hour12"]),
         (&json!({"w": 8, "h": 16}), &json!(false), &json!(false)),
         "{reply}"
     );
-    probe.write(&open_with("s1", "flow", json!([{"id": "t", "k": "text", "p": {"text": "hi"}}])));
-    x.send(&ClientMsg::Ack { pane, sf: "s1".into(), s: 1 });
+    probe.write(&open_with(
+        "s1",
+        "flow",
+        json!([{"id": "t", "k": "text", "p": {"text": "hi"}}]),
+    ));
+    x.send(&ClientMsg::Ack {
+        pane,
+        sf: "s1".into(),
+        s: 1,
+    });
     program_reads(&probe, "X's first-draw resize", |b| {
-        events(b, "resize").iter().any(|r| r["cell"] == json!({"w": 8, "h": 16}))
+        events(b, "resize")
+            .iter()
+            .any(|r| r["cell"] == json!({"w": 8, "h": 16}))
     });
 
     // Y becomes the primary: the program is told of its cell size and reduced motion...
     y.send(&ClientMsg::Focus { pane });
     wait_primary(&env, pane, y.id);
     let bodies = program_reads(&probe, "Y's cell size and motion", |b| {
-        events(b, "resize").iter().any(|r| r["cell"] == json!({"w": 10, "h": 20}))
+        events(b, "resize")
+            .iter()
+            .any(|r| r["cell"] == json!({"w": 10, "h": 20}))
             && !events(b, "motion").is_empty()
     });
     assert!(
@@ -557,7 +616,9 @@ fn cell_size_reduced_motion_and_the_12_hour_clock_follow_the_primary_client() {
     x.send(&ClientMsg::Focus { pane });
     wait_primary(&env, pane, x.id);
     let bodies = program_reads(&probe, "X's cell size and motion", |b| {
-        events(b, "resize").iter().any(|r| r["cell"] == json!({"w": 8, "h": 16}))
+        events(b, "resize")
+            .iter()
+            .any(|r| r["cell"] == json!({"w": 8, "h": 16}))
             && !events(b, "motion").is_empty()
     });
     assert!(
@@ -719,7 +780,11 @@ fn clear_scrollback_from_a_window_reaches_every_replica_and_ends_its_surfaces() 
     probe.write(&tsp_hello(&[]));
     probe.fence_tsp();
     // A flow surface, then enough lines to push it and the first lines into scrollback.
-    probe.write(&open_with("c", "flow", json!([{"id": "t", "k": "text", "p": {"text": "anchored"}}])));
+    probe.write(&open_with(
+        "c",
+        "flow",
+        json!([{"id": "t", "k": "text", "p": {"text": "anchored"}}]),
+    ));
     let mut lines = Vec::new();
     for i in 0..60 {
         lines.extend(format!("old-line-{i:02}.\r\n").into_bytes());
@@ -730,7 +795,11 @@ fn clear_scrollback_from_a_window_reaches_every_replica_and_ends_its_surfaces() 
     converge(&env, &a, pane);
     converge(&env, &b, pane);
     assert!(a.capture(pane, true).contains("old-line-00."));
-    assert!(b.request(&format!("tsp {pane}"))["surfaces"].to_string().contains("\"c\""));
+    assert!(
+        b.request(&format!("tsp {pane}"))["surfaces"]
+            .to_string()
+            .contains("\"c\"")
+    );
 
     // Window A clears the pane's scrollback.
     a.request(&format!("clear-scrollback {pane}"));
@@ -746,11 +815,26 @@ fn clear_scrollback_from_a_window_reaches_every_replica_and_ends_its_surfaces() 
         .unwrap()
         .to_owned();
     for (who, text, tsp) in [
-        ("the daemon", daemon_text, env.daemon(&format!("tsp {pane}"))),
-        ("window a", a.capture(pane, true), a.request(&format!("tsp {pane}"))),
-        ("window b", b.capture(pane, true), b.request(&format!("tsp {pane}"))),
+        (
+            "the daemon",
+            daemon_text,
+            env.daemon(&format!("tsp {pane}")),
+        ),
+        (
+            "window a",
+            a.capture(pane, true),
+            a.request(&format!("tsp {pane}")),
+        ),
+        (
+            "window b",
+            b.capture(pane, true),
+            b.request(&format!("tsp {pane}")),
+        ),
     ] {
-        assert!(!text.contains("old-line-00."), "{who} kept the scrollback: {text}");
+        assert!(
+            !text.contains("old-line-00."),
+            "{who} kept the scrollback: {text}"
+        );
         // The screen stays.
         assert!(text.contains("old-line-59."), "{who}: {text}");
         assert_eq!(tsp["surfaces"], json!([]), "{who}: {tsp}");
@@ -780,7 +864,10 @@ fn an_older_client_is_refused_and_offered_an_upgrade() {
     let shown = err.to_string();
     let offer = format!("upgrade to Auk {}", Versions::current().auk);
     assert!(shown.contains(&offer), "{shown}");
-    assert!(shown.starts_with("the daemon refused this client"), "{shown}");
+    assert!(
+        shown.starts_with("the daemon refused this client"),
+        "{shown}"
+    );
     // The daemon is unchanged and keeps serving current clients.
     let stream = UnixStream::connect(&env.socket).unwrap();
     let hello = Hello::new(ClientKind::Headless, ClientFacts::default());
@@ -797,7 +884,10 @@ fn presence_lists_the_attached_clients_with_their_identity() {
     let seen = x.presence(|c| c.len() == 2 && c.iter().all(|c| c.window_key.is_some()));
     let ids: Vec<u64> = seen.iter().map(|c| c.id).collect();
     assert_eq!(ids, [x.id, y.id]);
-    let user = std::process::Command::new("id").arg("-un").output().unwrap();
+    let user = std::process::Command::new("id")
+        .arg("-un")
+        .output()
+        .unwrap();
     let user = String::from_utf8_lossy(&user.stdout).trim().to_owned();
     for c in &seen {
         assert_eq!(c.kind, ClientKind::Headless);

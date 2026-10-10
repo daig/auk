@@ -483,9 +483,8 @@ fn diff_body(dom: &mut Dom, el: NodeId, st: &DiffState) -> (NodeId, Vec<highligh
         if let Some(p) = prev {
             let old_len = p.lines.iter().filter(|l| l.op != Op::Add).count() as u64;
             let sep = dom.child(body, "div", "sf-dsep");
-            let gap =
-                (p.known && h.known && !h.new_file)
-                    .then(|| h.old_start.saturating_sub(p.old_start + old_len));
+            let gap = (p.known && h.known && !h.new_file)
+                .then(|| h.old_start.saturating_sub(p.old_start + old_len));
             match gap {
                 Some(g) if g > 0 => dom.text(
                     sep,

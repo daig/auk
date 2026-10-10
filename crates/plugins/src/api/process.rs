@@ -90,7 +90,11 @@ fn read_capped(mut r: impl Read) -> Vec<u8> {
 
 fn resolve(dir: &Path, path: &str) -> PathBuf {
     let p = Path::new(path);
-    if p.is_absolute() { p.into() } else { dir.join(p) }
+    if p.is_absolute() {
+        p.into()
+    } else {
+        dir.join(p)
+    }
 }
 
 /// Starts `argv` now (spawn failures raise) and finishes it on its own thread.
@@ -103,10 +107,10 @@ fn spawn(
     let program = &argv[0];
     let mut cmd = Command::new(program);
     cmd.args(&argv[1..]);
-    let cwd = opts
-        .cwd
-        .as_deref()
-        .map_or_else(|| state.plugin.dir.clone(), |c| resolve(&state.plugin.dir, c));
+    let cwd = opts.cwd.as_deref().map_or_else(
+        || state.plugin.dir.clone(),
+        |c| resolve(&state.plugin.dir, c),
+    );
     cmd.current_dir(cwd);
     cmd.env("TERN_PLUGIN_DATA", &state.plugin.data);
     cmd.env("AUK_PLUGIN_DATA", &state.plugin.data);
@@ -170,7 +174,11 @@ fn spawn(
 }
 
 /// `tern.process.run(argv, opts?, cb?)`.
-pub(super) fn run(lua: &Lua, state: &std::rc::Rc<ApiState>, args: mlua::MultiValue) -> mlua::Result<Value> {
+pub(super) fn run(
+    lua: &Lua,
+    state: &std::rc::Rc<ApiState>,
+    args: mlua::MultiValue,
+) -> mlua::Result<Value> {
     const BAD: &str = "tern.process.run(argv, opts?, cb): bad arguments";
     let args: Vec<Value> = args.into_iter().collect();
     let (argv, opts, cb): (Table, Option<Table>, Option<Function>) = match args.as_slice() {

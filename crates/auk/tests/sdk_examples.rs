@@ -146,21 +146,25 @@ impl Run {
 
     /// Waits until the live surface's document holds a node matching `pred`; returns its id.
     fn wait_node(&self, what: &str, pred: impl Fn(&Value) -> bool) -> (String, String) {
-        wait_for_or(what, || {
-            let st = self.state();
-            for s in st["surfaces"].as_array()? {
-                if let Some(n) = find(&s["doc"], &pred) {
-                    return Some((s["id"].as_str()?.to_owned(), n["id"].as_str()?.to_owned()));
+        wait_for_or(
+            what,
+            || {
+                let st = self.state();
+                for s in st["surfaces"].as_array()? {
+                    if let Some(n) = find(&s["doc"], &pred) {
+                        return Some((s["id"].as_str()?.to_owned(), n["id"].as_str()?.to_owned()));
+                    }
                 }
-            }
-            None
-        }, || {
-            format!(
-                "pane screen:\n{}\ntsp state:\n{}",
-                self.env.daemon(&format!("capture {}", self.pane))["text"],
-                self.state()
-            )
-        })
+                None
+            },
+            || {
+                format!(
+                    "pane screen:\n{}\ntsp state:\n{}",
+                    self.env.daemon(&format!("capture {}", self.pane))["text"],
+                    self.state()
+                )
+            },
+        )
     }
 
     fn click(&self, sf: &str, node: &str) -> Value {

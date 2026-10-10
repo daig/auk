@@ -72,7 +72,9 @@ fn main() -> std::process::ExitCode {
             .unwrap_or_else(auk_daemon::paths::daemon_socket),
         state_dir: auk_daemon::paths::state_dir(),
         exe: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("auk")),
-        control: top.control.or_else(|| env("AUK_APP_CONTROL").map(PathBuf::from)),
+        control: top
+            .control
+            .or_else(|| env("AUK_APP_CONTROL").map(PathBuf::from)),
         window_keys: top.window_keys,
         option_as_alt,
         remote: top.host.map(|destination| auk_app::RemoteHost {

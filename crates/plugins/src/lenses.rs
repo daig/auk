@@ -145,7 +145,10 @@ fn run_table(worker: &Worker, run: &LensRun) -> mlua::Result<Value> {
     t.set("typed", run.typed.as_str())?;
     t.set("cwd", run.cwd.as_deref())?;
     t.set("program", run.program.as_str())?;
-    t.set("args", lua.create_sequence_from(run.args.iter().map(String::as_str))?)?;
+    t.set(
+        "args",
+        lua.create_sequence_from(run.args.iter().map(String::as_str))?,
+    )?;
     Ok(Value::Table(t))
 }
 
@@ -159,9 +162,16 @@ fn open(worker: &mut Worker, block: LensId, pane: PaneId, lens: &str, run: &Lens
         return false;
     };
     let state = match run_table(worker, run) {
-        Ok(run) => worker
-            .call::<Value>(&format!("{lens}.open"), target, &handlers.open, (run, cx.clone()))
-            .0,
+        Ok(run) => {
+            worker
+                .call::<Value>(
+                    &format!("{lens}.open"),
+                    target,
+                    &handlers.open,
+                    (run, cx.clone()),
+                )
+                .0
+        }
         Err(e) => {
             worker.toast_failure(&format!("{lens}.open"), target, &CallError::Lua(e));
             None
@@ -196,7 +206,8 @@ fn feed_lines(worker: &mut Worker, block: LensId, lines: &[LensLine]) {
         let Ok(table) = line_table(worker, line) else {
             continue;
         };
-        let (_, go_on) = worker.call::<()>(&hook, EffectTarget::Pane(pane), &f, (state.clone(), table));
+        let (_, go_on) =
+            worker.call::<()>(&hook, EffectTarget::Pane(pane), &f, (state.clone(), table));
         if !go_on {
             break;
         }
@@ -213,7 +224,12 @@ fn finish(worker: &mut Worker, block: LensId, status: i32) {
     let Some(state) = c.state.clone() else { return };
     let hook = format!("{}.finish", c.lens);
     let (pane, f) = (c.pane, c.handlers.finish.clone());
-    worker.call::<()>(&hook, EffectTarget::Pane(pane), &f, (state, f64::from(status)));
+    worker.call::<()>(
+        &hook,
+        EffectTarget::Pane(pane),
+        &f,
+        (state, f64::from(status)),
+    );
     if let Some(c) = worker.lenses.map.get_mut(&block) {
         c.finished = true;
     }
@@ -305,11 +321,9 @@ pub(crate) fn handle(worker: &mut Worker, msg: LensMsg) {
         LensMsg::Lines { block, lines } => {
             worker.lenses.touch(block);
             feed_lines(worker, block, &lines);
-            let due = worker
-                .lenses
-                .map
-                .get(&block)
-                .is_some_and(|c| c.dirty && c.last_view.is_none_or(|t| t.elapsed() >= VIEW_INTERVAL));
+            let due = worker.lenses.map.get(&block).is_some_and(|c| {
+                c.dirty && c.last_view.is_none_or(|t| t.elapsed() >= VIEW_INTERVAL)
+            });
             if due {
                 view(worker, block);
             }

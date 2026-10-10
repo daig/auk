@@ -534,7 +534,9 @@ fn a_long_item_detail_truncates_before_the_label() {
     );
     let part = |h: &Harness, id: &str, class: &str| {
         let el = h.el("s1", id);
-        h.doc.border_box(h.find_class(el, class)[0]).expect("laid out")
+        h.doc
+            .border_box(h.find_class(el, class)[0])
+            .expect("laid out")
     };
     let natural = part(&h, "short", "sf-item-label").w;
     for id in ["long", "valued"] {
@@ -546,7 +548,10 @@ fn a_long_item_detail_truncates_before_the_label() {
         );
         let row = h.doc.border_box(h.el("s1", id)).unwrap();
         let detail = part(&h, id, "sf-item-detail");
-        assert!(detail.x + detail.w <= row.x + row.w, "{id}: the detail shrinks to fit");
+        assert!(
+            detail.x + detail.w <= row.x + row.w,
+            "{id}: the detail shrinks to fit"
+        );
     }
     let row = h.doc.border_box(h.el("s1", "short")).unwrap();
     let detail = part(&h, "short", "sf-item-detail");
@@ -556,6 +561,14 @@ fn a_long_item_detail_truncates_before_the_label() {
     );
     let row = h.doc.border_box(h.el("s1", "huge")).unwrap();
     let label = part(&h, "huge", "sf-item-label");
-    assert!(label.w <= row.w * 0.61, "a huge label is capped ({} of {})", label.w, row.w);
-    assert!(part(&h, "huge", "sf-item-detail").w > 20.0, "and its detail stays visible");
+    assert!(
+        label.w <= row.w * 0.61,
+        "a huge label is capped ({} of {})",
+        label.w,
+        row.w
+    );
+    assert!(
+        part(&h, "huge", "sf-item-detail").w > 20.0,
+        "and its detail stays visible"
+    );
 }

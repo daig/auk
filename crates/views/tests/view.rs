@@ -379,8 +379,12 @@ fn an_arriving_age_restarts_top_level_timers_and_nested_agent_ages_only_on_a_new
     h.frame();
     let t0 = h.now;
     let tool_time = |h: &Harness| h.text(h.find_class(h.el("s1", "tl"), "sf-tool-time")[0]);
-    let agent_times =
-        |h: &Harness| h.find_class(h.el("s1", "ag"), "time").iter().map(|&t| h.text(t)).collect::<Vec<_>>();
+    let agent_times = |h: &Harness| {
+        h.find_class(h.el("s1", "ag"), "time")
+            .iter()
+            .map(|&t| h.text(t))
+            .collect::<Vec<_>>()
+    };
     assert_eq!(h.text(h.el("s1", "el")), "1.0s");
     assert_eq!(tool_time(&h), "1.0s");
     assert_eq!(agent_times(&h), ["1.0s", "1.0s"]);
@@ -401,9 +405,17 @@ fn an_arriving_age_restarts_top_level_timers_and_nested_agent_ages_only_on_a_new
     );
     h.frame();
     assert_eq!(h.text(h.el("s1", "el")), "1.0s", "elapsed restarts");
-    assert_eq!(h.text(h.el("s1", "cd")), "0:03", "the countdown starts over");
+    assert_eq!(
+        h.text(h.el("s1", "cd")),
+        "0:03",
+        "the countdown starts over"
+    );
     assert_eq!(tool_time(&h), "1.0s", "tool restarts");
-    assert_eq!(agent_times(&h), ["3.0s", "3.0s"], "nested ages keep running");
+    assert_eq!(
+        agent_times(&h),
+        ["3.0s", "3.0s"],
+        "nested ages keep running"
+    );
     // A set of other props leaves the restarted count running.
     h.now = t0 + 2500.0;
     h.frame_ops("s1", 3, json!([["set", "el", {"format": "short"}]]));
@@ -483,7 +495,9 @@ fn reduce_motion_means_no_shimmer_no_pulse_and_meters_at_their_value() {
     let fx_chars = h.find_class(h.el("s1", "tx"), "sf-sh");
     let pulse = h.find_class(h.el("s1", "tx"), "sf-fx-pulse")[0];
     for step in 0..8 {
-        let next = h.view.tick(&mut h.doc, &h.pane, t0 + 300.0 * f64::from(step));
+        let next = h
+            .view
+            .tick(&mut h.doc, &h.pane, t0 + 300.0 * f64::from(step));
         assert!(next.is_none(), "nothing asks for frames");
         assert!(levels(&h, &kind_chars).iter().all(|&l| l == 0));
         assert!(levels(&h, &fx_chars).iter().all(|&l| l == 0));
@@ -495,7 +509,10 @@ fn reduce_motion_means_no_shimmer_no_pulse_and_meters_at_their_value() {
     let sh = h.el("s1", "sh");
     assert!(kind_chars.iter().all(|&c| color(c) == color(sh)));
     let fill = h.find_class(h.el("s1", "mt"), "fill");
-    let fill = fill.first().copied().unwrap_or_else(|| h.find_class(h.el("s1", "mt"), "sf-mt-fill")[0]);
+    let fill = fill
+        .first()
+        .copied()
+        .unwrap_or_else(|| h.find_class(h.el("s1", "mt"), "sf-mt-fill")[0]);
     assert_eq!(h.view.written().style(fill), Some("width: 40%"));
 }
 
@@ -521,7 +538,8 @@ fn the_media_preferences_reach_program_sheets() {
     );
     h.frame();
     assert!(h.errors().is_empty(), "{:?}", h.errors());
-    let widths = |h: &Harness| ["m", "t", "c"].map(|id| h.doc.border_box(h.el("s1", id)).unwrap().w);
+    let widths =
+        |h: &Harness| ["m", "t", "c"].map(|id| h.doc.border_box(h.el("s1", id)).unwrap().w);
     assert_eq!(widths(&h), [10.0, 10.0, 10.0]);
     for (s, want) in [
         ((true, false, false), [20.0, 10.0, 10.0]),
@@ -593,7 +611,9 @@ fn shimmer_and_span_fx_move_on_the_view_clock() {
     let mut fx_seen = Vec::new();
     let mut pulse_seen = Vec::new();
     for step in 0..12 {
-        let next = h.view.tick(&mut h.doc, &h.pane, t0 + 200.0 * f64::from(step));
+        let next = h
+            .view
+            .tick(&mut h.doc, &h.pane, t0 + 200.0 * f64::from(step));
         assert!(next.is_some(), "shimmer and fx keep asking for frames");
         kind_seen.push(levels(&h, &kind_chars));
         fx_seen.push(levels(&h, &fx_chars));
@@ -606,7 +626,10 @@ fn shimmer_and_span_fx_move_on_the_view_clock() {
         assert!(seen.iter().flatten().any(|&l| l == 0), "{seen:?}");
     }
     // The staggered characters aren't all at one level at once.
-    assert!(kind_seen.iter().any(|l| l.iter().any(|&x| x != l[0])), "{kind_seen:?}");
+    assert!(
+        kind_seen.iter().any(|l| l.iter().any(|&x| x != l[0])),
+        "{kind_seen:?}"
+    );
     // The pulse's opacity runs 1 → .45 → 1 over 1.6 s.
     let ops: Vec<f64> = pulse_seen
         .iter()
@@ -618,7 +641,10 @@ fn shimmer_and_span_fx_move_on_the_view_clock() {
                 .unwrap()
         })
         .collect();
-    assert!(ops.iter().any(|&o| o < 0.6) && ops.iter().any(|&o| o > 0.9), "{ops:?}");
+    assert!(
+        ops.iter().any(|&o| o < 0.6) && ops.iter().any(|&o| o > 0.9),
+        "{ops:?}"
+    );
     // The clock is the view's: the same time gives the same levels.
     h.view.tick(&mut h.doc, &h.pane, t0 + 400.0);
     assert_eq!(levels(&h, &kind_chars), kind_seen[2]);
@@ -1369,9 +1395,18 @@ fn scroll_on_an_inline_surfaces_main_leaves_every_scroll_offset_unchanged() {
     h.frame_ops("s1", 2, json!([["scroll", "ls", "page-down"]]));
     h.frame();
     let before = scroll_offsets(&h, main);
-    assert!(before.iter().any(|&(n, y)| n == sc && y > 0.0), "{before:?}");
+    assert!(
+        before.iter().any(|&(n, y)| n == sc && y > 0.0),
+        "{before:?}"
+    );
     let doc_before = h.doc.scroll_offset(h.view.element());
-    for (s, by) in [(3, "line-down"), (4, "page-down"), (5, "page-up"), (6, "end"), (7, "start")] {
+    for (s, by) in [
+        (3, "line-down"),
+        (4, "page-down"),
+        (5, "page-up"),
+        (6, "end"),
+        (7, "start"),
+    ] {
         h.frame_ops("s1", s, json!([["scroll", "main", by]]));
         h.frame();
         assert_eq!(scroll_offsets(&h, main), before, "main ignores {by}");
@@ -1407,16 +1442,12 @@ fn scroll_on_an_inline_surfaces_main_leaves_every_scroll_offset_unchanged() {
 #[test]
 fn virtualization_starts_just_past_64_col_children_400_code_lines_and_200_list_items() {
     type Make = fn(usize) -> serde_json::Value;
-    let col: Make = |n| {
-        json!({"id": "x", "k": "col", "c": (0..n).map(|i| json!({"id": format!("c{i}"), "k": "text", "p": {"text": format!("child {i}\nsecond line\nthird line")}})).collect::<Vec<_>>()})
-    };
+    let col: Make = |n| json!({"id": "x", "k": "col", "c": (0..n).map(|i| json!({"id": format!("c{i}"), "k": "text", "p": {"text": format!("child {i}\nsecond line\nthird line")}})).collect::<Vec<_>>()});
     let code: Make = |n| {
         let lines: Vec<String> = (0..n).map(|i| format!("line {i}")).collect();
         json!({"id": "x", "k": "code", "p": {"text": lines.join("\n"), "lang": "txt"}})
     };
-    let list: Make = |n| {
-        json!({"id": "x", "k": "list", "c": (0..n).map(|i| json!({"id": format!("i{i}"), "k": "item", "p": {"label": format!("item {i}")}})).collect::<Vec<_>>()})
-    };
+    let list: Make = |n| json!({"id": "x", "k": "list", "c": (0..n).map(|i| json!({"id": format!("i{i}"), "k": "item", "p": {"label": format!("item {i}")}})).collect::<Vec<_>>()});
     let cases: [(&str, usize, Make, &str); 3] = [
         ("col", 64, col, "sf-text"),
         ("code", 400, code, "sf-ln"),
@@ -1435,7 +1466,10 @@ fn virtualization_starts_just_past_64_col_children_400_code_lines_and_200_list_i
             let pane = h.doc.border_box(h.view.element()).unwrap();
             // Taller than the view and its overscan (half a view below it).
             assert!(pane.h > 1600.0, "{name} {n}: {} tall", pane.h);
-            assert!(text_laid_out(&h, rows[0]), "{name} {n}: the first row lays out");
+            assert!(
+                text_laid_out(&h, rows[0]),
+                "{name} {n}: the first row lays out"
+            );
             if n == limit {
                 assert!(
                     text_laid_out(&h, last),
@@ -1483,10 +1517,18 @@ fn blocks_sit_16px_apart_and_a_cards_parts_8px_at_13px_and_scale_with_the_font()
         let bx = |id: &str| h.doc.border_box(h.el("s1", id)).unwrap();
         let (a, b, card) = (bx("a"), bx("b"), bx("card"));
         let gap = |top: auk_ui::Rect, below: auk_ui::Rect| (below.y - (top.y + top.h)) / zoom;
-        assert!((gap(a, b) - 16.0).abs() < 0.5, "block gap at {font_px}px: {}", gap(a, b));
+        assert!(
+            (gap(a, b) - 16.0).abs() < 0.5,
+            "block gap at {font_px}px: {}",
+            gap(a, b)
+        );
         assert!((gap(b, card) - 16.0).abs() < 0.5, "{}", gap(b, card));
         let (p1, p2) = (bx("p1"), bx("p2"));
-        assert!((gap(p1, p2) - 8.0).abs() < 0.5, "inner gap at {font_px}px: {}", gap(p1, p2));
+        assert!(
+            (gap(p1, p2) - 8.0).abs() < 0.5,
+            "inner gap at {font_px}px: {}",
+            gap(p1, p2)
+        );
         // The values come from the theme's variables.
         let main = h.view.region(key(&h, "s1"), Region::Main).unwrap();
         let style = h.doc.computed_style(main).unwrap();

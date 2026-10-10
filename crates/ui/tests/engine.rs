@@ -784,7 +784,10 @@ fn light_dark_and_the_supported_media_features_match_and_prefers_color_scheme_is
              @media (prefers-contrast: less) { .pc { color: rgb(0, 128, 0) } }",
         );
         assert_eq!(errors.len(), 2, "{kind:?}: {errors:?}");
-        assert!(errors.iter().all(|e| e.contains("unsupported media query")), "{errors:?}");
+        assert!(
+            errors.iter().all(|e| e.contains("unsupported media query")),
+            "{errors:?}"
+        );
         doc.update();
         assert_eq!(color(&doc, ld), BLUE);
         assert_eq!(color(&doc, pc), RED);
@@ -803,30 +806,88 @@ fn plugin_and_program_sheets_cascade_in_first_install_order() {
     doc.set_attribute(region, "data-scope", "sf1");
     let x = el(&mut doc, region, "div", "x", Some("x"));
     // A plugin sheet, then a program sheet: the program's rule (same specificity) is later.
-    assert!(doc.set_stylesheet("plugin:a", SheetKind::Plugin, None, ".x { color: rgb(255, 0, 0) }").is_empty());
-    assert!(doc.set_stylesheet("app", SheetKind::Program, Some("sf1"), ".x { color: rgb(0, 0, 255) }").is_empty());
+    assert!(
+        doc.set_stylesheet(
+            "plugin:a",
+            SheetKind::Plugin,
+            None,
+            ".x { color: rgb(255, 0, 0) }"
+        )
+        .is_empty()
+    );
+    assert!(
+        doc.set_stylesheet(
+            "app",
+            SheetKind::Program,
+            Some("sf1"),
+            ".x { color: rgb(0, 0, 255) }"
+        )
+        .is_empty()
+    );
     doc.update();
     assert_eq!(color(&doc, x), BLUE, "the later-installed program sheet");
     // A second plugin sheet installed after the program's comes later still.
-    assert!(doc.set_stylesheet("plugin:b", SheetKind::Plugin, None, ".x { color: rgb(0, 128, 0) }").is_empty());
+    assert!(
+        doc.set_stylesheet(
+            "plugin:b",
+            SheetKind::Plugin,
+            None,
+            ".x { color: rgb(0, 128, 0) }"
+        )
+        .is_empty()
+    );
     doc.update();
     assert_eq!(color(&doc, x), GREEN);
     // Replacing the first plugin sheet's and the program sheet's text keeps their places.
-    doc.set_stylesheet("plugin:a", SheetKind::Plugin, None, ".x { color: rgb(255, 0, 0) } .y { color: red }");
-    doc.set_stylesheet("app", SheetKind::Program, Some("sf1"), ".x { color: rgb(0, 0, 255) } .z { color: red }");
+    doc.set_stylesheet(
+        "plugin:a",
+        SheetKind::Plugin,
+        None,
+        ".x { color: rgb(255, 0, 0) } .y { color: red }",
+    );
+    doc.set_stylesheet(
+        "app",
+        SheetKind::Program,
+        Some("sf1"),
+        ".x { color: rgb(0, 0, 255) } .z { color: red }",
+    );
     doc.update();
-    assert_eq!(color(&doc, x), GREEN, "replaced sheets keep their first-install order");
+    assert_eq!(
+        color(&doc, x),
+        GREEN,
+        "replaced sheets keep their first-install order"
+    );
     // Specificity still decides first; !important declarations go in the same order.
-    doc.set_stylesheet("plugin:a", SheetKind::Plugin, None, ".sf-main .x { color: rgb(255, 0, 0) }");
+    doc.set_stylesheet(
+        "plugin:a",
+        SheetKind::Plugin,
+        None,
+        ".sf-main .x { color: rgb(255, 0, 0) }",
+    );
     doc.update();
     assert_eq!(color(&doc, x), RED, "more specific beats a later sheet");
-    doc.set_stylesheet("plugin:a", SheetKind::Plugin, None, ".x { color: rgb(255, 0, 0) !important }");
-    doc.set_stylesheet("plugin:b", SheetKind::Plugin, None, ".x { color: rgb(0, 128, 0) !important }");
+    doc.set_stylesheet(
+        "plugin:a",
+        SheetKind::Plugin,
+        None,
+        ".x { color: rgb(255, 0, 0) !important }",
+    );
+    doc.set_stylesheet(
+        "plugin:b",
+        SheetKind::Plugin,
+        None,
+        ".x { color: rgb(0, 128, 0) !important }",
+    );
     doc.update();
     assert_eq!(color(&doc, x), GREEN, "!important in the same order");
     // Removed and installed again: a new install, so it goes last.
     doc.remove_stylesheet("plugin:a", None);
-    doc.set_stylesheet("plugin:a", SheetKind::Plugin, None, ".x { color: rgb(255, 0, 0) !important }");
+    doc.set_stylesheet(
+        "plugin:a",
+        SheetKind::Plugin,
+        None,
+        ".x { color: rgb(255, 0, 0) !important }",
+    );
     doc.update();
     assert_eq!(color(&doc, x), RED);
 }
@@ -896,7 +957,12 @@ fn program_sheets_refuse_sibling_tilde_has_grid_areas_and_auto_fill_with_terns_e
 
     // Plugin sheets follow the same rules; the terminal's own sheets may use `~` and the grid
     // features.
-    let plugin = doc.set_stylesheet("plug", SheetKind::Plugin, None, ".p ~ .q { color: red } .r { grid-area: x }");
+    let plugin = doc.set_stylesheet(
+        "plug",
+        SheetKind::Plugin,
+        None,
+        ".p ~ .q { color: red } .r { grid-area: x }",
+    );
     assert_eq!(
         plugin,
         [
@@ -1122,7 +1188,11 @@ fn a_measurement_does_not_leave_its_line_breaks_behind_a_cached_final_layout() {
         doc.set_text(t, &format!("{k}s"));
         doc.update();
         assert_eq!(doc.border_box(text).unwrap().h, 10.0, "tick {k}");
-        assert_eq!(doc.line_count(text), 1, "tick {k}: lines as laid out, not as last measured");
+        assert_eq!(
+            doc.line_count(text),
+            1,
+            "tick {k}: lines as laid out, not as last measured"
+        );
     }
 }
 
@@ -1203,14 +1273,26 @@ fn abspos_children_add_no_gap_to_flex_and_grid_containers() {
             doc.update();
             let what = format!("{display}, the abspos child at {at}");
             assert_eq!(doc.border_box(c).unwrap().h, want, "{what}: first layout");
-            assert_eq!(doc.border_box(rows[2]).unwrap().y, 8.0 + 2.0 * 14.0, "{what}");
+            assert_eq!(
+                doc.border_box(rows[2]).unwrap().y,
+                8.0 + 2.0 * 14.0,
+                "{what}"
+            );
             doc.relayout(c);
             doc.update();
             assert_eq!(doc.border_box(c).unwrap().h, want, "{what}: relayout");
             doc.relayout(rows[1]);
             doc.update();
-            assert_eq!(doc.border_box(c).unwrap().h, want, "{what}: a row's relayout");
-            assert_eq!(doc.border_box(rows[2]).unwrap().y, 8.0 + 2.0 * 14.0, "{what}");
+            assert_eq!(
+                doc.border_box(c).unwrap().h,
+                want,
+                "{what}: a row's relayout"
+            );
+            assert_eq!(
+                doc.border_box(rows[2]).unwrap().y,
+                8.0 + 2.0 * 14.0,
+                "{what}"
+            );
         }
     }
 }

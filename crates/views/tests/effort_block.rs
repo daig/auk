@@ -654,14 +654,30 @@ fn the_lens_picks_the_icon_and_native_raw_needs_both_children() {
     settle(&mut h);
     let icon = |h: &Harness, id: &str| h.text(h.find_class(h.el("s1", id), "sf-block-ic")[0]);
     // `role` overrides data-role but the icon stays the lens's.
-    assert_eq!(h.attr(h.el("s1", "g"), "data-role").as_deref(), Some("my.role"));
-    assert_eq!(icon(&h, "g"), icon(&h, "plain"), "git.log's icon either way");
-    let terminal = auk_views::icons::glyph("terminal").map(String::from).unwrap_or_default();
-    assert_eq!(icon(&h, "plug"), terminal, "a plugin lens gets the terminal icon");
+    assert_eq!(
+        h.attr(h.el("s1", "g"), "data-role").as_deref(),
+        Some("my.role")
+    );
+    assert_eq!(
+        icon(&h, "g"),
+        icon(&h, "plain"),
+        "git.log's icon either way"
+    );
+    let terminal = auk_views::icons::glyph("terminal")
+        .map(String::from)
+        .unwrap_or_default();
+    assert_eq!(
+        icon(&h, "plug"),
+        terminal,
+        "a plugin lens gets the terminal icon"
+    );
     assert_ne!(icon(&h, "g"), terminal);
     // Native/Raw with both; not with a native view alone (nothing raw to show).
     assert_eq!(h.find_class(h.el("s1", "g"), "sf-block-opt").len(), 2);
     assert!(h.find_class(h.el("s1", "plain"), "sf-block-seg").is_empty());
-    assert_eq!(h.attr(h.el("s1", "plain"), "data-view").as_deref(), Some("native"));
+    assert_eq!(
+        h.attr(h.el("s1", "plain"), "data-view").as_deref(),
+        Some("native")
+    );
     assert_eq!(h.text(h.el("s1", "plain")).contains("native only"), true);
 }

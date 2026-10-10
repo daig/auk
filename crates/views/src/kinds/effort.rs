@@ -155,9 +155,18 @@ mod tests {
         assert_eq!(l, " transition: transform 0.133s linear 0s;");
         assert_eq!(r, " transition: transform 0.267s linear 0.133s;");
         // No change, or a first show: no transition of its own.
-        assert_eq!(sweep((Some(60.0), Some(0.0)), (60.0, 0.0)), (String::new(), String::new()));
-        assert_eq!(sweep((None, None), (60.0, 0.0)), (String::new(), String::new()));
-        assert_eq!(rotation("transform: rotate(120deg); transition: x"), Some(120.0));
+        assert_eq!(
+            sweep((Some(60.0), Some(0.0)), (60.0, 0.0)),
+            (String::new(), String::new())
+        );
+        assert_eq!(
+            sweep((None, None), (60.0, 0.0)),
+            (String::new(), String::new())
+        );
+        assert_eq!(
+            rotation("transform: rotate(120deg); transition: x"),
+            Some(120.0)
+        );
     }
 
     #[test]

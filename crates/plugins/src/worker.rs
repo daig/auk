@@ -206,7 +206,11 @@ impl Starting {
 impl WorkerHandle {
     /// Starts the worker for `package`: it creates the data folder and the VM, then runs the
     /// host entry under its 2 s budget.
-    pub(crate) fn start(package: &Package, data: PathBuf, shared: Shared) -> Result<Starting, String> {
+    pub(crate) fn start(
+        package: &Package,
+        data: PathBuf,
+        shared: Shared,
+    ) -> Result<Starting, String> {
         let (tx, rx) = crossbeam_channel::unbounded();
         let (loaded_tx, loaded) = crossbeam_channel::bounded(1);
         let id = package.manifest.id.clone();
@@ -508,7 +512,12 @@ impl Worker {
     fn run_callbacks(&mut self) {
         while let Some(cb) = self.vm.next_callback(Instant::now()) {
             // A failing host callback toasts every window of the host.
-            self.run_handler::<()>(cb.hook, EffectTarget::Host, &cb.f, mlua::MultiValue::from_iter(cb.args));
+            self.run_handler::<()>(
+                cb.hook,
+                EffectTarget::Host,
+                &cb.f,
+                mlua::MultiValue::from_iter(cb.args),
+            );
         }
     }
 
@@ -642,10 +651,12 @@ impl Worker {
         };
         let hook = format!("{}.init", start.block);
         let target = EffectTarget::Pane(pane);
-        let state = match self
-            .vm
-            .call::<Value>(&hook, Budget::Host, &handlers.init, (cx.clone(), args, saved))
-        {
+        let state = match self.vm.call::<Value>(
+            &hook,
+            Budget::Host,
+            &handlers.init,
+            (cx.clone(), args, saved),
+        ) {
             Ok(state) => state,
             Err(error) => {
                 self.toast_failure(&hook, target, &error);
@@ -875,7 +886,12 @@ impl Worker {
         match run.handlers.resize.clone() {
             Some(resize_fn) => {
                 let hook = format!("{}.resize", run.block);
-                let args = (run.state.clone(), f64::from(cols), f64::from(rows), run.cx.clone());
+                let args = (
+                    run.state.clone(),
+                    f64::from(cols),
+                    f64::from(rows),
+                    run.cx.clone(),
+                );
                 self.call::<()>(&hook, EffectTarget::Pane(pane), &resize_fn, args);
                 self.cycle(pane, true);
             }

@@ -302,33 +302,33 @@ pub fn default_chords() -> Vec<String> {
 /// A registry entry's key equivalent as a chord.
 fn entry_chord(e: &Entry) -> Option<String> {
     Some(e).filter(|e| !e.key.is_empty()).and_then(|e| {
-            let key = match e.key {
-                "\r" => "enter".to_owned(),
-                "\u{F729}" => "home".to_owned(),
-                "\u{F72B}" => "end".to_owned(),
-                "\u{F702}" => "left".to_owned(),
-                "\u{F703}" => "right".to_owned(),
-                "\u{F700}" => "up".to_owned(),
-                "\u{F701}" => "down".to_owned(),
-                k if k.chars().count() == 1 => k.to_owned(),
-                _ => return None,
-            };
-            let m = e.mods;
-            let mut parts = Vec::new();
-            if m.ctrl {
-                parts.push("ctrl");
-            }
-            if m.opt {
-                parts.push("alt");
-            }
-            if m.shift {
-                parts.push("shift");
-            }
-            if m.cmd {
-                parts.push("cmd");
-            }
-            Some(format!("{}+{key}", parts.join("+")))
-        })
+        let key = match e.key {
+            "\r" => "enter".to_owned(),
+            "\u{F729}" => "home".to_owned(),
+            "\u{F72B}" => "end".to_owned(),
+            "\u{F702}" => "left".to_owned(),
+            "\u{F703}" => "right".to_owned(),
+            "\u{F700}" => "up".to_owned(),
+            "\u{F701}" => "down".to_owned(),
+            k if k.chars().count() == 1 => k.to_owned(),
+            _ => return None,
+        };
+        let m = e.mods;
+        let mut parts = Vec::new();
+        if m.ctrl {
+            parts.push("ctrl");
+        }
+        if m.opt {
+            parts.push("alt");
+        }
+        if m.shift {
+            parts.push("shift");
+        }
+        if m.cmd {
+            parts.push("cmd");
+        }
+        Some(format!("{}+{key}", parts.join("+")))
+    })
 }
 
 /// The command a menu title names (for the automation endpoint).
@@ -386,11 +386,7 @@ pub fn menu_bar_without(taken: &[auk_plugins::chord::Chord]) -> Menu {
             if e.group && !items.is_empty() {
                 items.push(MenuItem::Separator);
             }
-            let (key, mods) = if free(e) {
-                (e.key, e.mods)
-            } else {
-                ("", NONE)
-            };
+            let (key, mods) = if free(e) { (e.key, e.mods) } else { ("", NONE) };
             items.push(MenuItem::Command {
                 title: e.title.into(),
                 command: id_of(e.cmd),

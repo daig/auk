@@ -447,7 +447,12 @@ fn b6_advertises_exactly_what_is_drawn() {
         .iter()
         .map(|k| k.as_str().unwrap())
         .collect();
-    let mut want: Vec<&str> = T0_KINDS.iter().chain(&T1_KINDS).chain(T2_KINDS).copied().collect();
+    let mut want: Vec<&str> = T0_KINDS
+        .iter()
+        .chain(&T1_KINDS)
+        .chain(T2_KINDS)
+        .copied()
+        .collect();
     kinds.sort_unstable();
     want.sort_unstable();
     assert_eq!(kinds, want);
@@ -477,7 +482,11 @@ fn b6_advertises_exactly_what_is_drawn() {
 #[test]
 fn b6_a_t0_t1_hello_has_no_t2_and_no_aside() {
     let config = Config {
-        kinds: T0_KINDS.iter().chain(&T1_KINDS).map(|k| (*k).to_owned()).collect(),
+        kinds: T0_KINDS
+            .iter()
+            .chain(&T1_KINDS)
+            .map(|k| (*k).to_owned())
+            .collect(),
         features: ALL_FEATURES
             .iter()
             .filter(|f| **f != "aside")
@@ -490,7 +499,12 @@ fn b6_a_t0_t1_hello_has_no_t2_and_no_aside() {
     for t2 in T2_KINDS {
         assert!(!kinds.contains(&json!(t2)), "{t2} not advertised");
     }
-    assert!(!reply["features"].as_array().unwrap().contains(&json!("aside")));
+    assert!(
+        !reply["features"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("aside"))
+    );
     let mut h = Harness::with(config);
     h.send_json("o", json!({"id": "s1"}));
     h.frame("s1", 1, json!([["add", "main", "s1", null, {"id": "main", "k": "col", "c": [{"id": "i", "k": "math"}]}]]));
@@ -941,7 +955,11 @@ fn c6_x_keep_true_on_a_screen_surface_discards_it() {
 fn c7_adopt_picks_the_newest_of_several_closed_inline_surfaces() {
     let mut h = Harness::new();
     for (text, other) in [("first", "o1"), ("second", "o2")] {
-        h.open("s1", "inline", json!([{"id": "t", "k": "text", "p": {"text": text}}]));
+        h.open(
+            "s1",
+            "inline",
+            json!([{"id": "t", "k": "text", "p": {"text": text}}]),
+        );
         h.send_json("x", json!({"id": "s1", "keep": true}));
         // An unrelated closed inline surface in between, with another id.
         h.open(other, "inline", json!([]));
@@ -978,7 +996,10 @@ fn c7_adopt_picks_the_newest_of_several_closed_inline_surfaces() {
     h.frame("s1", 2, json!([["text", "t", "append", "!"]]));
     assert_eq!(h.node("s1", "t").unwrap()["p"]["text"], "second!");
     let first = &h.pane.surfaces()[0];
-    assert_eq!(first.document().get("t").unwrap().to_json()["p"]["text"], "first");
+    assert_eq!(
+        first.document().get("t").unwrap().to_json()["p"]["text"],
+        "first"
+    );
 }
 
 #[test]

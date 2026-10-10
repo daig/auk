@@ -93,7 +93,10 @@ mod tests {
         fn record(&self, _: &span::Id, _: &span::Record<'_>) {}
         fn record_follows_from(&self, _: &span::Id, _: &span::Id) {}
         fn event(&self, event: &Event<'_>) {
-            self.0.lock().unwrap().push(line(event.metadata().level(), event));
+            self.0
+                .lock()
+                .unwrap()
+                .push(line(event.metadata().level(), event));
         }
         fn enter(&self, _: &span::Id) {}
         fn exit(&self, _: &span::Id) {}

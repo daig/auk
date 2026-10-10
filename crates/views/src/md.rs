@@ -110,8 +110,7 @@ impl MdState {
         marks: Vec<Span>,
         env: MdEnv,
     ) -> bool {
-        if text == self.source && stream == self.stream && marks == self.marks && env == self.env
-        {
+        if text == self.source && stream == self.stream && marks == self.marks && env == self.env {
             self.rerendered = 0;
             return false;
         }
@@ -1036,7 +1035,11 @@ fn math_delimiters(src: &str) -> std::borrow::Cow<'_, str> {
             }
             b'\\' => match b.get(i + 1) {
                 Some(&o @ (b'(' | b'[')) => {
-                    let (close, fence) = if o == b'(' { ("\\)", "$") } else { ("\\]", "$$") };
+                    let (close, fence) = if o == b'(' {
+                        ("\\)", "$")
+                    } else {
+                        ("\\]", "$$")
+                    };
                     if let Some(k) = src[i + 2..].find(close) {
                         let end = i + 2 + k;
                         let inner = src[i + 2..end].trim();

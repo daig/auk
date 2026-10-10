@@ -622,7 +622,11 @@ mod tests {
             let class = layer.view().written().class(el).unwrap_or("").to_owned();
             class.split(' ').any(|c| c == "on")
         };
-        for node in ["lens0.native.0.cb", "lens0.native.0.lb.r", "lens0.native.0.lb.t"] {
+        for node in [
+            "lens0.native.0.cb",
+            "lens0.native.0.lb.r",
+            "lens0.native.0.lb.t",
+        ] {
             assert_eq!(click(&mut layer, node), Vec::new(), "{node}");
         }
         assert!(!on(&layer, "lens0.native.0.cb") && !on(&layer, "lens0.native.0.lb.r"));
@@ -631,7 +635,10 @@ mod tests {
         match out.as_slice() {
             [Outcome::Event { sf, event, .. }] => {
                 assert_eq!(sf, "lens:0");
-                assert!(matches!(**event, auk_tsp::ViewEvent::Action { ref action, .. } if action == "apply"), "{event:?}");
+                assert!(
+                    matches!(**event, auk_tsp::ViewEvent::Action { ref action, .. } if action == "apply"),
+                    "{event:?}"
+                );
             }
             other => panic!("{other:?}"),
         }

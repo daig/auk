@@ -334,7 +334,9 @@ mod tests {
     /// skipped (book: diff).
     #[test]
     fn hunks_default_new_start_and_skip_no_newline_markers() {
-        let h = parse_hunks(&json!([{"oldStart": 10, "lines": [" a", "-b", "\\ No newline at end of file", "+c"]}]));
+        let h = parse_hunks(
+            &json!([{"oldStart": 10, "lines": [" a", "-b", "\\ No newline at end of file", "+c"]}]),
+        );
         assert_eq!(h[0].lines.len(), 3, "{:?}", h[0].lines);
         assert_eq!((h[0].lines[0].old, h[0].lines[0].new), (Some(10), Some(1)));
         let h = parse_unified("@@ -1 +1 @@\n-a\n\\ No newline at end of file\n+b\n");

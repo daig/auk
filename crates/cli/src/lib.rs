@@ -588,8 +588,12 @@ fn run_verb(socket: &Path, g: &Globals, verb: Command) -> Result<ExitCode, VerbE
         Command::Close { target } => {
             let value = connect(socket, false)?.request(&["close", &target])?;
             // A locked session refuses without failing the script (book:16896).
-            let text = (value["closed"] == false)
-                .then(|| format!("session {} is locked; pane {target} stays open", value["locked"]));
+            let text = (value["closed"] == false).then(|| {
+                format!(
+                    "session {} is locked; pane {target} stays open",
+                    value["locked"]
+                )
+            });
             report(&mut out, g, &value, text)?;
         }
         Command::Lock { session } => {

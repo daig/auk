@@ -18,8 +18,8 @@ use crate::api::effects::{Effect, EffectCx, EffectTarget};
 use crate::api::tasks::{Callback, Outcome, Wake};
 use crate::api::window::WindowRegistry;
 use crate::api::{self, ApiOptions, ApiState, BlockHandlers, LensHandlers};
-use crate::events::{PaneDirectory, PaneId};
 use crate::budget::{Budget, CallClock, FrameGuard};
+use crate::events::{PaneDirectory, PaneId};
 use crate::manifest::Manifest;
 use crate::require::{PackageRequirer, chunk_name};
 
@@ -461,7 +461,9 @@ impl Vm {
 
     /// The channel completions arrive on, for an owner that selects on it (it must not
     /// receive from it: [`Vm::next_callback`] does).
-    pub(crate) fn completion_receiver(&self) -> crossbeam_channel::Receiver<crate::api::tasks::Completion> {
+    pub(crate) fn completion_receiver(
+        &self,
+    ) -> crossbeam_channel::Receiver<crate::api::tasks::Completion> {
         self.api.tasks.borrow().receiver().clone()
     }
 

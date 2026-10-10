@@ -67,8 +67,12 @@ pub enum Closed {
 /// Where a new pane goes in the layout.
 #[derive(Clone, Debug)]
 pub enum Place {
-    NewSession { name: Option<String> },
-    NewTab { session: SessionId },
+    NewSession {
+        name: Option<String>,
+    },
+    NewTab {
+        session: SessionId,
+    },
     /// Beside `pane` on `side`; `share` is `pane`'s share in thousandths (half by default).
     Split {
         pane: PaneId,
@@ -581,7 +585,11 @@ impl Daemon {
         // Lens claims follow `command_lenses`; native completion is out of v1.
         set(
             "AUK_LENSES",
-            if self.settings().command_lenses { "1" } else { "0" },
+            if self.settings().command_lenses {
+                "1"
+            } else {
+                "0"
+            },
         );
         set("AUK_COMPLETE", "0");
         set("AUK_BLOB_DIR", &self.blob_dir().to_string_lossy());
@@ -688,9 +696,13 @@ impl Daemon {
             if !st.panes.contains_key(&id) {
                 return Err(format!("no pane {id}"));
             }
-            st.layout
-                .locked_session_of(id)
-                .map(|s| (s.id, s.name.clone(), st.layout.window_of(id).map(str::to_owned)))
+            st.layout.locked_session_of(id).map(|s| {
+                (
+                    s.id,
+                    s.name.clone(),
+                    st.layout.window_of(id).map(str::to_owned),
+                )
+            })
         };
         if let Some((session, name, window)) = locked {
             if let Some(key) = window {
@@ -800,7 +812,10 @@ impl Daemon {
     /// The hop of a client on the daemon's own machine.
     fn local_hop(&self) -> auk_mirror::Hop {
         let me = self.login.identity.clone();
-        let host = me.split_once('@').map_or(me.as_str(), |(_, h)| h).to_owned();
+        let host = me
+            .split_once('@')
+            .map_or(me.as_str(), |(_, h)| h)
+            .to_owned();
         auk_mirror::Hop {
             principal: me.clone(),
             method: "local".into(),
@@ -1050,7 +1065,9 @@ impl Daemon {
                     size: None,
                 })?;
             }
-            LayoutEdit::Open { place, launch } => return self.open_launch(window_key, place, launch),
+            LayoutEdit::Open { place, launch } => {
+                return self.open_launch(window_key, place, launch);
+            }
             LayoutEdit::Move { pane, target, side } => {
                 let mut moved = false;
                 self.edit_layout(|l| {
