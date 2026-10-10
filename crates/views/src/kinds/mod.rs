@@ -5,6 +5,7 @@ pub(crate) mod agent;
 pub(crate) mod block;
 pub(crate) mod chart;
 pub(crate) mod data;
+pub(crate) mod edmd;
 pub(crate) mod effort;
 pub(crate) mod el;
 pub(crate) mod input;
@@ -296,6 +297,12 @@ pub(crate) fn after_children(
 ) {
     if kind == "tool" {
         agent::mark_kind_changes(cx, node, mounts);
+    }
+    // Chains of thoughts among the children (decorations, book:11583).
+    if node.children().any(crate::deco::is_thought)
+        || node.children().any(|c| cx.st.thought_sums.contains_key(c.id()))
+    {
+        crate::deco::thought_chains(cx, node);
     }
 }
 

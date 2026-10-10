@@ -750,6 +750,19 @@ impl PaneView {
                 place_children(&mut cx, mounts, clocked, node);
             }
         }
+        // The work fold follows main's blocks: a tool's title or took, a message turning
+        // thinking-only (book:9939-9945).
+        if settings.fold_work
+            && let Some(main) = doc_t.region("main")
+            && mounts.contains_key("main")
+            && dc.nodes.iter().chain(&dc.children).any(|id| {
+                std::iter::successors(doc_t.get(id).and_then(|n| n.parent()), |n| n.parent())
+                    .take(2)
+                    .any(|n| n.id() == "main")
+            })
+        {
+            place_children(&mut cx, mounts, clocked, main);
+        }
         // 5. Focus moved: fields redraw their caret.
         if dc.focus || fresh {
             let ids: Vec<String> = mounts
@@ -1033,6 +1046,10 @@ fn apply_look(cx: &mut Cx, m: &mut Mount, node: NodeRef, look: Look) {
     if actions.clickable() {
         class.push_str(" sf-act");
     }
+    if let Some(w) = crate::deco::work_class(cx.st, node.id()) {
+        class.push(' ');
+        class.push_str(w);
+    }
     let mut style = String::new();
     // `list` reads `max` as its own height, `seg` reads `min.w` as a truncation floor, and
     // `image` bounds its picture with `max.h`.
@@ -1138,6 +1155,10 @@ pub(crate) fn place_children(
             kinds::Route::Slot(i) if i < per_slot.len() => per_slot[i].push(el),
             _ => {}
         }
+    }
+    // The work fold's heads go among main's children (book:9939-9945).
+    if node.id() == "main" && mounts.get("main").is_some_and(|m| m.region) {
+        crate::deco::fold_work(cx, node, mounts, &mut direct);
     }
     let Some(m) = mounts.get_mut(node.id()) else {
         return;

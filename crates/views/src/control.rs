@@ -144,6 +144,8 @@ impl PaneView {
                         std::iter::successors(Some(m.el), |&e| cx.dom.doc.parent(e)).any(|e| e == l)
                     })
                 {
+                    // The Spindle mark rests under the sheet (`--sf-spindle: still`).
+                    crate::motion::spindle_rest(&mut cx, m);
                     any |= drawing_in;
                     continue;
                 }

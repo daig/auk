@@ -41,3 +41,15 @@
    a list tall enough to browse, and the detail set off under it. The card's frame is omp-panels'. */
 .sf-list[data-role='omp.model-browser.list'] { min-height: calc(10 * var(--sf-lh)); }
 .sf-col[data-role='omp.model-browser.detail'] { gap: 2px; padding: 8px 10px; border-top: 1px solid var(--l2); }
+
+/* Motion (P6, book:7938-7940): rows the picker hadn't drawn stagger in, the first eight 24ms
+   apart (picker.rs sets arr-a/arr-b and --i on them, alternating per render so a restyle never
+   replays a finished one), and bar facts grow from zero while the sheet opens. Off under
+   .sf-still; reduced motion zeroes them in motion.css. */
+@keyframes pk-row-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes pk-row-in2 { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.pk-row.arr-a { animation: pk-row-in 180ms var(--out) both; animation-delay: calc(var(--i, 0) * 24ms); }
+.pk-row.arr-b { animation: pk-row-in2 180ms var(--out) both; animation-delay: calc(var(--i, 0) * 24ms); }
+@keyframes pk-grow { from { transform: scaleX(0); } to { transform: none; } }
+.sf-picker.pk-in .pk-meter-f { transform-origin: left center; animation: pk-grow 420ms var(--out) both; }
+.sf-still .pk-row.arr-a, .sf-still .pk-row.arr-b, .sf-still .sf-picker.pk-in .pk-meter-f { animation: none; }

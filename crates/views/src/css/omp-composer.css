@@ -2,8 +2,7 @@
    usage, stop), the HUD and queue. Amendment A24.
    The meter's own rules stay in the kit (surface-data); omp.btn, omp.errorBanner, omp.hint.retry
    and omp.loader are omp.css's. The dock keeps the region's side padding, as the transcript does:
-   it follows the transcript's measure (Q-C1), which only the Chat skins set. The folded caption
-   (.sf-caption) needs the view to draw it and has no rule yet. */
+   it follows the transcript's measure (Q-C1), which only the Chat skins set. */
 
 /* Frame: a ring, no fill (the mockup's composer), scoped to the dock; an ask dialog's
    omp.editor in the layer stays bare. The ring takes the accent while the composer's field has
@@ -120,6 +119,32 @@
 .sf-dock.sf-unfocused .sf-col[data-role^='omp.editor'] { padding: 3px 8px; box-shadow: inset 0 0 0 1px var(--l1); }
 .sf-dock.sf-unfocused .sf-row[data-role='omp.composer.line'] > .sf-editor { padding-top: 0; padding-bottom: 0; }
 .sf-dock.sf-unfocused .sf-row[data-role='omp.composer.line'] .sf-ed-scroll { max-height: var(--sf-lh); overflow: hidden; }
+/* The folded caption (book:11584): the view puts div.sf-deco.sf-caption first in the composer
+   col; unfocused, it stands in for the field's line: the session's name, then the draft, the
+   name dimmed when there is one. */
+.sf-col > .sf-deco.sf-caption { display: none; }
+.sf-dock.sf-unfocused .sf-col > .sf-deco.sf-caption {
+  display: flex; gap: 6px; min-width: 0; height: var(--sf-lh); color: var(--t3); white-space: pre; overflow: hidden;
+}
+.sf-dock.sf-unfocused .sf-col[data-role^='omp.editor'] > .sf-row[data-role='omp.composer.line'] { display: none; }
+.sf-deco.sf-caption > .sf-caption-name { flex: none; color: var(--t2); font-weight: 500; }
+.sf-deco.sf-caption > .sf-caption-draft { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sf-deco.sf-caption.sf-drafted > .sf-caption-name { color: var(--t3); }
+
+/* Inline Markdown (book:9198-9201): the field draws .markdown with md-* spans over its own text.
+   Every marker stays where it is, dimmed, and nothing changes a character's width (no size,
+   spacing or face change), so the caret and selection sit as in a plain field. */
+.sf-editor.markdown .md-h { color: var(--sf-p-mdHeading, var(--t1)); font-weight: 600; }
+.sf-editor.markdown .md-strong { font-weight: 600; }
+.sf-editor.markdown .md-em { font-style: italic; }
+.sf-editor.markdown .md-strike { text-decoration-line: line-through; }
+.sf-editor.markdown .md-code { color: var(--sf-p-mdCode, var(--accent-ink)); }
+.sf-editor.markdown .md-fence, .sf-editor.markdown .md-pre { color: var(--sf-p-mdCodeBlock, var(--t2)); }
+.sf-editor.markdown .md-link { color: var(--sf-p-mdLink, var(--accent-ink)); }
+.sf-editor.markdown .md-url { color: var(--sf-p-mdLinkUrl, var(--t3)); }
+.sf-editor.markdown .md-quote { color: var(--sf-p-mdQuote, var(--t3)); }
+.sf-editor.markdown .md-mark { color: var(--t4); }
+.sf-editor.markdown .md-li.md-mark { color: var(--sf-p-mdListBullet, var(--t3)); }
 
 /* HUD: pills, the activity line (working row and todo), and the status panels. */
 .sf-row[data-role='omp.hud'] { gap: 6px; padding: 0 2px; }

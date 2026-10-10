@@ -22,6 +22,8 @@ use std::hash::{Hash, Hasher};
 const SHEET_IN_MS: f64 = 220.0;
 /// Rows past which the list is virtualized.
 const VIRTUAL_AFTER: usize = 200;
+/// Rows that stagger in at most, per render (book:7938-7939).
+const ARRIVING: usize = 8;
 /// A label keeps this much room before fact columns hide (book:6288).
 const LABEL_MIN: f32 = 260.0;
 
@@ -47,6 +49,8 @@ pub(crate) struct PickerState {
     pub menu: bool,
     /// The confirm strip drawn over the selected row.
     confirm: Option<NodeId>,
+    /// The next arriving rows take `arr-b` (else `arr-a`).
+    arr_b: bool,
 }
 
 /// What a press on a picker part means.
@@ -934,6 +938,8 @@ pub(crate) fn picker(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
         // A new scroller: rows of an old one went with it.
         old.clear();
     }
+    let arr_b = cx.st.pickers.get(&id).is_some_and(|s| s.arr_b);
+    let mut arrived = 0usize;
     let col_sig = {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         for &i in &shown_cols {
@@ -985,12 +991,13 @@ pub(crate) fn picker(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
             let el = match old.remove(&key) {
                 Some((el, s)) if s == sig && cx.dom.doc.try_node(el).is_some() => el,
                 prev => {
+                    let arriving = prev.is_none();
                     if let Some((el, _)) = prev
                         && cx.dom.doc.try_node(el).is_some()
                     {
                         cx.dom.doc.remove(el);
                     }
-                    match e {
+                    let el = match e {
                         Entry::Group { label, count, .. } => group_row(
                             cx,
                             *label,
@@ -1016,7 +1023,26 @@ pub(crate) fn picker(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
                                 &shown_cols,
                             )
                         }
+                    };
+                    // Rows that weren't drawn before stagger in (book:7938-7940): the first
+                    // eight, 24ms apart, by `--i`. A row that stays keeps its element, so its
+                    // finished animation never replays (A17); arrivals alternate `arr-a` and
+                    // `arr-b` from one render to the next.
+                    if arriving && arrived < ARRIVING {
+                        let class = format!(
+                            "{} {}",
+                            cx.dom.class_of(el),
+                            if arr_b { "arr-b" } else { "arr-a" }
+                        );
+                        cx.dom.set_class(el, &class);
+                        let style = match cx.dom.w.style(el) {
+                            Some(s) if !s.is_empty() => format!("{s}; --i: {arrived}"),
+                            _ => format!("--i: {arrived}"),
+                        };
+                        cx.dom.set_style(el, &style);
+                        arrived += 1;
                     }
+                    el
                 }
             };
             fresh.insert(key, (el, sig));
@@ -1229,6 +1255,9 @@ pub(crate) fn picker(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
         ps.reveal = Some(at);
     }
     ps.rows = fresh;
+    if arrived > 0 {
+        ps.arr_b = !arr_b;
+    }
     ps.scroll = Some(scroll);
     ps.confirm = strip;
     ps.selected = selected;

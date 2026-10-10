@@ -149,6 +149,7 @@ code.math-err { color: var(--bad); white-space: pre-wrap; }
 .sf-image { position: relative; display: flex; flex-direction: column; align-items: flex-start; }
 .sf-img-frame, .sf-img-svg { display: block; max-width: 100%; object-fit: contain; }
 .sf-img-frame { border-radius: 6px; border: 1px solid var(--l1); }
+.sf-image > .sf-deco.sf-brand { display: block; flex: none; max-width: 100%; }
 .sf-image.sf-zoom > .sf-img-frame, .sf-image.sf-zoom > .sf-img-svg { cursor: zoom-in; }
 .sf-img-card { align-self: stretch; display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 6px; border: 1px dashed var(--l3); color: var(--t3); }
 .sf-img-over { position: absolute; left: 0; top: 0; right: 0; bottom: 0; display: flex; flex-direction: column; pointer-events: none; }

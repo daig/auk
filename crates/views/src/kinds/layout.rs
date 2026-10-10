@@ -30,6 +30,11 @@ pub(crate) fn flex(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
     look.class_if(bool_prop(p, "wrap"), "wrap");
     let grows = num_prop(p, "grow").is_some_and(|g| g > 0.0);
     look.class_if(node.child_count() == 0 && !grows, "sf-void");
+    // omp's composer: the folded caption leads it (book:11584).
+    if crate::deco::is_composer(node) {
+        let c = part(cx, m, "div", "sf-deco sf-caption");
+        crate::deco::caption(cx, node, c);
+    }
 }
 
 /// The icon a `role` implies on `card`, `seg`, `overlay` (book:4461).
@@ -133,7 +138,7 @@ fn status_chip(cx: &mut Cx, parent: NodeId, status: &str) -> Option<NodeId> {
     Some(chip)
 }
 
-fn chevron(cx: &mut Cx, parent: NodeId, collapsed: bool) {
+pub(crate) fn chevron(cx: &mut Cx, parent: NodeId, collapsed: bool) {
     let c = cx.dom.child(parent, "span", "sf-chev");
     cx.dom.attr(c, "aria-hidden", "true");
     icon(cx, c, if collapsed { "chev-r" } else { "chev" });
@@ -255,6 +260,7 @@ pub(crate) fn section(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look
         let h = cx.dom.child(head, "div", "sf-head");
         m.clock |= spans_into(cx, h, p.get("head"));
     }
+    crate::deco::thought_head(cx, node, head);
     let body = slot(cx, m, 0, "div", "sf-section-body");
     cx.dom.doc.append_child(m.el, body);
     m.generated.push(body);

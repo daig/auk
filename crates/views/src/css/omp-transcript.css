@@ -63,7 +63,7 @@
 .sf-section[data-role^='omp.thinking'] .sf-md { color: var(--omp-think); font-style: italic; }
 .sf-spinner[data-role='omp.thinking.spin'] { --tc: var(--sf-p-thinkingText, var(--accent)); }
 .sf-section[data-role='omp.thinking.live'] .sf-elapsed { color: var(--omp-faint); }
-/* The thought summary decoration (K11) is not drawn yet; this waits for it. */
+/* The summary on the first head of a chain of thoughts (a decoration, book:11583). */
 .sf-section-head .sf-deco.sf-thought-sum { margin-left: 6px; color: var(--omp-meta); }
 
 /* Turn usage and meta lines (§7.5). */

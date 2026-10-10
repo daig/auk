@@ -204,6 +204,7 @@ impl WinState {
             "program_colors": s.program_colors,
             "native_editing": s.native_editing,
             "links_plain_click": s.links_plain_click,
+            "fold_work": s.fold_work,
             "edits": if s.split_diffs { "split" } else { "inline" },
             "hyperlinks": format!("{:?}", s.hyperlinks).to_lowercase(),
             "reduce_motion": self.reduce_motion(),

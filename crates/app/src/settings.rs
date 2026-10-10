@@ -45,6 +45,8 @@ pub struct Settings {
     /// The Edits setting: `diff` nodes without an explicit `mode` draw side by side when wider
     /// than 112 cells (Split) or unified (Inline, the default).
     pub split_diffs: bool,
+    /// "Fold tool calls": runs of work in a surface's main fold under one head (off by default).
+    pub fold_work: bool,
     /// How OSC 8 links in the grid draw.
     pub hyperlinks: LinkStyle,
     pub reduce_motion: Motion,
@@ -62,6 +64,7 @@ impl Default for Settings {
             native_editing: true,
             links_plain_click: false,
             split_diffs: false,
+            fold_work: false,
             hyperlinks: LinkStyle::Dotted,
             reduce_motion: Motion::System,
             keymap: None,
@@ -107,6 +110,7 @@ impl Settings {
         flag("program_colors", &mut s.program_colors, &mut problems);
         flag("native_editing", &mut s.native_editing, &mut problems);
         flag("links_plain_click", &mut s.links_plain_click, &mut problems);
+        flag("fold_work", &mut s.fold_work, &mut problems);
         s.hyperlinks = match v.get("hyperlinks") {
             None | Some(Value::Null) => LinkStyle::Dotted,
             Some(Value::String(x)) if x == "dotted" => LinkStyle::Dotted,
@@ -281,5 +285,13 @@ mod tests {
         let bad = Settings::from_json(&json!({"edits": true}));
         assert!(!bad.split_diffs);
         assert_eq!(bad.problems.len(), 1);
+    }
+
+    /// Fold tool calls: off by default (book:9939).
+    #[test]
+    fn reads_the_fold_tool_calls_setting() {
+        assert!(!Settings::default().fold_work);
+        assert!(Settings::from_json(&json!({"fold_work": true})).fold_work);
+        assert_eq!(Settings::from_json(&json!({"fold_work": 1})).problems.len(), 1);
     }
 }

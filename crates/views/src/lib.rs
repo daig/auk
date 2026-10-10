@@ -31,6 +31,7 @@ pub mod chrome;
 mod common;
 pub mod compose;
 mod control;
+mod deco;
 pub mod diff;
 mod dom;
 mod events;
@@ -103,6 +104,9 @@ pub struct ViewSettings {
     /// The host shows pictures large (the app's image viewer): images click to zoom and mermaid
     /// figures draw Open. The browser client has no viewer, so it draws neither.
     pub viewer: bool,
+    /// "Fold tool calls" (off by default, book:9939-9945): runs of work in `main` fold under one
+    /// `div.sf-work-head`.
+    pub fold_work: bool,
 }
 
 impl ViewSettings {
@@ -134,6 +138,7 @@ impl Default for ViewSettings {
             links_plain_click: false,
             annotated_headings: true,
             viewer: true,
+            fold_work: false,
         }
     }
 }
