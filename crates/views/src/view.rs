@@ -135,6 +135,10 @@ impl Cx<'_> {
     }
 }
 
+/// A surface's mounted nodes by id. Placing a container's children looks each one up, every
+/// frame a long transcript grows, so the map hashes with foldhash rather than SipHash.
+pub(crate) type Mounts = HashMap<String, Mount, foldhash::fast::RandomState>;
+
 /// One surface's projection.
 #[derive(Debug)]
 pub(crate) struct SurfaceView {
@@ -142,7 +146,7 @@ pub(crate) struct SurfaceView {
     pub id: String,
     pub scope: String,
     pub regions: [Option<NodeId>; 3],
-    pub mounts: HashMap<String, Mount>,
+    pub mounts: Mounts,
     /// Program sheets installed: (sheet name, css).
     pub sheets: Vec<(String, String)>,
     pub st: SurfaceState,
@@ -436,7 +440,7 @@ impl PaneView {
             id: surface.id().to_owned(),
             scope: format!("sf{}", surface.key().0),
             regions: [None; 3],
-            mounts: HashMap::new(),
+            mounts: Mounts::default(),
             sheets: Vec::new(),
             st: SurfaceState::default(),
             clocked: HashSet::new(),
@@ -880,7 +884,7 @@ pub(crate) use place_children as place_children_pub;
 /// Remove a node's element and forget it and every mounted node under it.
 fn unmount(
     cx: &mut Cx,
-    mounts: &mut HashMap<String, Mount>,
+    mounts: &mut Mounts,
     clocked: &mut HashSet<String>,
     regions: &mut [Option<NodeId>; 3],
     id: &str,
@@ -961,7 +965,7 @@ fn rebuild_element(cx: &mut Cx, m: &mut Mount, node: NodeRef) -> NodeId {
 /// Create a node's element and render its subtree.
 fn mount_node(
     cx: &mut Cx,
-    mounts: &mut HashMap<String, Mount>,
+    mounts: &mut Mounts,
     clocked: &mut HashSet<String>,
     node: NodeRef,
 ) -> NodeId {
@@ -1129,7 +1133,7 @@ fn apply_look(cx: &mut Cx, m: &mut Mount, node: NodeRef, look: Look) {
 /// Mount new children and put every child element where its kind routes it.
 pub(crate) fn place_children(
     cx: &mut Cx,
-    mounts: &mut HashMap<String, Mount>,
+    mounts: &mut Mounts,
     clocked: &mut HashSet<String>,
     node: NodeRef,
 ) {

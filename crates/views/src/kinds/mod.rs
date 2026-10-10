@@ -16,10 +16,9 @@ pub(crate) mod rich;
 
 use crate::common;
 use crate::spans;
-use crate::view::{Cx, Look, Mount};
+use crate::view::{Cx, Look, Mount, Mounts};
 use auk_tsp::NodeRef;
 use auk_ui::NodeId;
-use std::collections::HashMap;
 
 /// The kinds this crate draws and the hello advertises (§8.2): T0, T1 and the T2 kinds drawn so far
 /// (A23).
@@ -288,20 +287,14 @@ fn generic(cx: &mut Cx, _node: NodeRef, m: &mut Mount, look: &mut Look) {
 }
 
 /// Work that needs the children in place (status fitting, tool body separators).
-pub(crate) fn after_children(
-    cx: &mut Cx,
-    node: NodeRef,
-    kind: &str,
-    _el: NodeId,
-    mounts: &HashMap<String, Mount>,
-) {
+pub(crate) fn after_children(cx: &mut Cx, node: NodeRef, kind: &str, _el: NodeId, mounts: &Mounts) {
     if kind == "tool" {
         agent::mark_kind_changes(cx, node, mounts);
     }
-    // Chains of thoughts among the children (decorations, book:11583).
-    if node.children().any(crate::deco::is_thought)
-        || node.children().any(|c| cx.st.thought_sums.contains_key(c.id()))
-    {
+    // Chains of thoughts among the children (decorations, book:11583). Without a thinking child
+    // there is no chain to sum or unsum (`thought_chains` only touches thinking sections), so a
+    // long list of other entries costs one look at each kind.
+    if node.children().any(crate::deco::is_thought) {
         crate::deco::thought_chains(cx, node);
     }
 }

@@ -3,13 +3,14 @@
 use crate::css::cascade::{SheetKind, Stylist, cascade};
 use crate::css::compute::ComputeEnv;
 use crate::css::properties::Restrictions;
-use crate::css::selector::ElementRef;
+use crate::css::selector::{ElementRef, add_ancestor_hashes};
 use crate::css::sheet::parse_inline_style;
 use crate::dom::{
     Atom, ElementData, ElementState, Node, NodeId, NodeKind, PseudoKind, Rect, flags,
 };
 use crate::style::{ComputedStyle, ContentItem, Display};
 use crate::text::Fonts;
+use selectors::bloom::BloomFilter;
 use selectors::context::SelectorCaches;
 use std::sync::Arc;
 
@@ -656,10 +657,13 @@ impl Document {
         }
         let initial = self.initial.clone();
         let mut caches = std::mem::take(&mut self.caches);
-        self.restyle_node(root, &initial, false, None, &mut caches);
+        let mut ancestors = Box::new(BloomFilter::new());
+        self.restyle_node(root, &initial, false, None, &mut caches, &mut ancestors);
         self.caches = caches;
     }
 
+    /// Restyles what is dirty in `id`'s subtree. `ancestors` holds the hashes of `id`'s ancestors
+    /// ([`add_ancestor_hashes`]): selectors that need an ancestor none of them is fail fast.
     fn restyle_node(
         &mut self,
         id: NodeId,
@@ -667,6 +671,7 @@ impl Document {
         force: bool,
         scope: Option<(NodeId, Atom)>,
         caches: &mut SelectorCaches,
+        ancestors: &mut BloomFilter,
     ) {
         let f = self.node(id).flags;
         let dirty = force || f & flags::STYLE_DIRTY != 0;
@@ -681,6 +686,7 @@ impl Document {
                     None,
                     parent_style,
                     scope.as_ref(),
+                    Some(ancestors),
                     caches,
                 ));
                 if let Some(url) = &new.background_image {
@@ -717,7 +723,7 @@ impl Document {
                     force_children = true;
                 }
                 style = Some(new);
-                self.update_pseudos(id, scope.as_ref(), caches);
+                self.update_pseudos(id, scope.as_ref(), ancestors, caches);
             } else if !style.as_ref().is_some_and(|s| Arc::ptr_eq(s, parent_style)) {
                 self.node_mut(id).style = Some(parent_style.clone());
                 style = Some(parent_style.clone());
@@ -752,6 +758,9 @@ impl Document {
         if virtualized {
             self.node_mut(id).style_kids = Some(Vec::new());
         }
+        if let Some(e) = self.node(id).element() {
+            add_ancestor_hashes(ancestors, e, false);
+        }
         for c in children {
             if virtualized && self.style_waits(c) {
                 if force_children {
@@ -759,7 +768,17 @@ impl Document {
                 }
                 continue;
             }
-            self.restyle_node(c, &my_style, force_children, child_scope.clone(), caches);
+            self.restyle_node(
+                c,
+                &my_style,
+                force_children,
+                child_scope.clone(),
+                caches,
+                ancestors,
+            );
+        }
+        if let Some(e) = self.node(id).element() {
+            add_ancestor_hashes(ancestors, e, true);
         }
         // Pseudo-element children follow their element.
         for p in [self.node(id).before, self.node(id).after]
@@ -788,6 +807,7 @@ impl Document {
         pseudo: Option<PseudoKind>,
         parent_style: &ComputedStyle,
         scope: Option<&(NodeId, Atom)>,
+        ancestors: Option<&BloomFilter>,
         caches: &mut SelectorCaches,
     ) -> ComputedStyle {
         let mut blocks = Vec::new();
@@ -796,8 +816,14 @@ impl Document {
             id,
             scope_root: None,
         };
-        self.stylist
-            .matched_blocks(el, pseudo, scope.map(|(n, a)| (*n, a)), caches, &mut blocks);
+        self.stylist.matched_blocks(
+            el,
+            pseudo,
+            scope.map(|(n, a)| (*n, a)),
+            ancestors,
+            caches,
+            &mut blocks,
+        );
         let inline = if pseudo.is_none() {
             self.node(id).element().and_then(|e| e.inline_style.clone())
         } else {
@@ -878,7 +904,15 @@ impl Document {
         }
         let was_dirty = self.node(container).flags & flags::BOX_DIRTY != 0;
         let mut caches = std::mem::take(&mut self.caches);
-        self.restyle_node(c, &parent_style, false, scope, &mut caches);
+        let mut ancestors = Box::new(BloomFilter::new());
+        let mut cur = Some(container);
+        while let Some(e) = cur {
+            if let Some(d) = self.node(e).element() {
+                add_ancestor_hashes(&mut ancestors, d, false);
+            }
+            cur = self.node(e).parent;
+        }
+        self.restyle_node(c, &parent_style, false, scope, &mut caches, &mut ancestors);
         self.caches = caches;
         let style = self.node(c).style.clone();
         let block = style.as_ref().is_some_and(|s| {
@@ -911,19 +945,47 @@ impl Document {
         &mut self,
         id: NodeId,
         scope: Option<&(NodeId, Atom)>,
+        ancestors: &BloomFilter,
         caches: &mut SelectorCaches,
     ) {
         let Some(style) = self.node(id).style.clone() else {
             return;
         };
         for kind in [PseudoKind::Before, PseudoKind::After] {
-            let ps = self.compute_element_style(id, Some(kind), &style, scope, caches);
-            let wanted = ps.content.is_some() && ps.display != Display::None;
+            let el = ElementRef {
+                doc: self,
+                id,
+                scope_root: None,
+            };
+            // Most elements match no rule giving them this pseudo-element's `content`: they
+            // have none, and its style needn't be computed.
+            let ps = self
+                .stylist
+                .may_have_pseudo(
+                    el,
+                    kind,
+                    scope.map(|(n, a)| (*n, a)),
+                    Some(ancestors),
+                    caches,
+                )
+                .then(|| {
+                    self.compute_element_style(
+                        id,
+                        Some(kind),
+                        &style,
+                        scope,
+                        Some(ancestors),
+                        caches,
+                    )
+                });
+            let wanted = ps
+                .as_ref()
+                .is_some_and(|ps| ps.content.is_some() && ps.display != Display::None);
             let existing = match kind {
                 PseudoKind::Before => self.node(id).before,
                 PseudoKind::After => self.node(id).after,
             };
-            if !wanted {
+            let Some(ps) = ps.filter(|_| wanted) else {
                 if let Some(p) = existing {
                     self.free_subtree(p);
                     match kind {
@@ -934,7 +996,7 @@ impl Document {
                     self.invalidate_layout(id);
                 }
                 continue;
-            }
+            };
             let text: String = ps
                 .content
                 .as_ref()

@@ -2,12 +2,13 @@
 
 use super::compute::{ComputeEnv, compute_prop};
 use super::properties::{Prop, Restrictions, SV, parse_substituted};
-use super::selector::{ElementRef, PseudoElement, Selector, matches};
+use super::selector::{ElementRef, PseudoElement, Selector, ancestor_hashes, matches};
 use super::sheet::{Decl, DeclBlock, DeclProp, Keyframes, MediaEnv, MediaQuery, Stylesheet};
-use crate::dom::{Atom, PseudoKind};
+use crate::dom::{Atom, ElementData, PseudoKind};
 use crate::style::{ComputedStyle, CustomProps};
+use selectors::bloom::BloomFilter;
 use selectors::context::SelectorCaches;
-use selectors::parser::Component;
+use selectors::parser::{AncestorHashes, Combinator, Component};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -47,6 +48,8 @@ pub(crate) struct SheetEntry {
 
 struct IndexedRule {
     sel: Selector,
+    /// The hashes of what the selector needs among the element's ancestors.
+    hashes: AncestorHashes,
     specificity: u32,
     pseudo: Option<PseudoKind>,
     block: Arc<DeclBlock>,
@@ -56,13 +59,59 @@ struct IndexedRule {
     media: Option<Arc<MediaQuery>>,
 }
 
+/// Rules bucketed by the most selective simple selector of the compound the element itself must
+/// match (an id, else a class, else a tag); the rest are universal.
 #[derive(Default)]
-struct RuleIndex {
-    rules: Vec<IndexedRule>,
+struct Buckets {
     by_id: HashMap<Atom, Vec<u32>>,
     by_class: HashMap<Atom, Vec<u32>>,
     by_tag: HashMap<Atom, Vec<u32>>,
     universal: Vec<u32>,
+}
+
+impl Buckets {
+    fn add(&mut self, i: u32, id: Option<Atom>, class: Option<Atom>, tag: Option<Atom>) {
+        if let Some(a) = id {
+            self.by_id.entry(a).or_default().push(i);
+        } else if let Some(a) = class {
+            self.by_class.entry(a).or_default().push(i);
+        } else if let Some(a) = tag {
+            self.by_tag.entry(a).or_default().push(i);
+        } else {
+            self.universal.push(i);
+        }
+    }
+
+    /// Every rule that may match an element with this id, these classes and this tag.
+    fn each(&self, data: &ElementData, mut f: impl FnMut(u32)) {
+        if let Some(id) = &data.id
+            && let Some(v) = self.by_id.get(id)
+        {
+            v.iter().for_each(|&i| f(i));
+        }
+        for c in &data.classes {
+            if let Some(v) = self.by_class.get(c) {
+                v.iter().for_each(|&i| f(i));
+            }
+        }
+        if let Some(v) = self.by_tag.get(&data.tag) {
+            v.iter().for_each(|&i| f(i));
+        }
+        self.universal.iter().for_each(|&i| f(i));
+    }
+}
+
+#[derive(Default)]
+struct RuleIndex {
+    rules: Vec<IndexedRule>,
+    /// Element rules.
+    elements: Buckets,
+    /// `::before` and `::after` rules, bucketed by their originating element's compound.
+    pseudos: Buckets,
+    /// The pseudo-element rules that declare `content`. Unless one of them matches, an element
+    /// has no `::before` or `::after` (`content` isn't inherited, and is `normal` initially), and
+    /// the other pseudo-element rules needn't be tried.
+    pseudo_content: Buckets,
 }
 
 /// The installed sheets and their rule index.
@@ -195,6 +244,7 @@ impl Stylist {
                     let i = idx.rules.len() as u32;
                     idx.rules.push(IndexedRule {
                         sel: sel.clone(),
+                        hashes: ancestor_hashes(sel),
                         specificity: sel.specificity(),
                         pseudo,
                         block: rule.block.clone(),
@@ -203,12 +253,19 @@ impl Stylist {
                         scope: e.scope.clone(),
                         media: rule.media.clone(),
                     });
-                    // Bucket by the rightmost compound's most selective simple selector.
+                    // Bucket by the most selective simple selector of the compound the element
+                    // itself must match: the rightmost, or for a pseudo-element's rule the one
+                    // before the pseudo-element.
                     let mut id = None;
                     let mut class = None;
                     let mut tag = None;
-                    if pseudo.is_none() {
-                        for c in sel.iter() {
+                    let mut it = sel.iter();
+                    let own = pseudo.is_none() || {
+                        for _ in &mut it {}
+                        it.next_sequence() == Some(Combinator::PseudoElement)
+                    };
+                    if own {
+                        for c in &mut it {
                             match c {
                                 Component::ID(a) => id = Some(a.clone()),
                                 Component::Class(a) => class = class.or(Some(a.clone())),
@@ -217,14 +274,19 @@ impl Stylist {
                             }
                         }
                     }
-                    if let Some(a) = id {
-                        idx.by_id.entry(a).or_default().push(i);
-                    } else if let Some(a) = class {
-                        idx.by_class.entry(a).or_default().push(i);
-                    } else if let Some(a) = tag {
-                        idx.by_tag.entry(a).or_default().push(i);
+                    if pseudo.is_none() {
+                        idx.elements.add(i, id, class, tag);
                     } else {
-                        idx.universal.push(i);
+                        if rule
+                            .block
+                            .decls
+                            .iter()
+                            .any(|d| d.prop == DeclProp::Long(Prop::Content))
+                        {
+                            idx.pseudo_content
+                                .add(i, id.clone(), class.clone(), tag.clone());
+                        }
+                        idx.pseudos.add(i, id, class, tag);
                     }
                 }
             }
@@ -243,6 +305,7 @@ impl Stylist {
         el: ElementRef<'_>,
         pseudo: Option<PseudoKind>,
         scope: Option<(crate::dom::NodeId, &Atom)>,
+        ancestors: Option<&BloomFilter>,
         caches: &mut SelectorCaches,
         out: &mut Vec<(Origin, u32, u32, Arc<DeclBlock>)>,
     ) {
@@ -266,39 +329,52 @@ impl Stylist {
                     _ => return,
                 }
             }
-            if matches(&r.sel, elr, pseudo, caches) {
+            if matches(&r.sel, &r.hashes, elr, pseudo, ancestors, caches) {
                 out.push((r.origin, r.specificity, r.order, r.block.clone()));
             }
         };
-        if pseudo.is_some() {
-            for &i in &idx.universal {
-                consider(i, out);
-            }
+        let buckets = if pseudo.is_some() {
+            &idx.pseudos
         } else {
-            if let Some(id) = &data.id
-                && let Some(v) = idx.by_id.get(id)
-            {
-                for &i in v {
-                    consider(i, out);
-                }
-            }
-            for c in &data.classes {
-                if let Some(v) = idx.by_class.get(c) {
-                    for &i in v {
-                        consider(i, out);
-                    }
-                }
-            }
-            if let Some(v) = idx.by_tag.get(&data.tag) {
-                for &i in v {
-                    consider(i, out);
-                }
-            }
-            for &i in &idx.universal {
-                consider(i, out);
-            }
-        }
+            &idx.elements
+        };
+        buckets.each(data, |i| consider(i, out));
         out.sort_by_key(|(o, s, ord, _)| (*o, *s, *ord));
+    }
+
+    /// Whether an element may have this pseudo-element: a rule that declares `content` for it
+    /// matches. When none does, its `content` computes to `normal` and it has none.
+    pub(crate) fn may_have_pseudo(
+        &self,
+        el: ElementRef<'_>,
+        pseudo: PseudoKind,
+        scope: Option<(crate::dom::NodeId, &Atom)>,
+        ancestors: Option<&BloomFilter>,
+        caches: &mut SelectorCaches,
+    ) -> bool {
+        let data = el.doc.node(el.id).element().expect("element");
+        let idx = &self.index;
+        let mut found = false;
+        idx.pseudo_content.each(data, |i| {
+            let r = &idx.rules[i as usize];
+            if found || r.pseudo != Some(pseudo) {
+                return;
+            }
+            if let Some(m) = &r.media
+                && !m.matches(&self.media)
+            {
+                return;
+            }
+            let mut elr = el;
+            if let Some(rs) = &r.scope {
+                match scope {
+                    Some((root, v)) if v == rs => elr.scope_root = Some(root),
+                    _ => return,
+                }
+            }
+            found = matches(&r.sel, &r.hashes, elr, Some(pseudo), ancestors, caches);
+        });
+        found
     }
 }
 
