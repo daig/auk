@@ -516,3 +516,46 @@ fn a_clickable_seg_fills_on_hover() {
         );
     }
 }
+
+/// An item's label keeps its width when the detail runs long: the detail (and only it) ends in
+/// an ellipsis, and a short detail still sits at the row's end. A label too long for the row is
+/// capped so its detail stays visible.
+#[test]
+fn a_long_item_detail_truncates_before_the_label() {
+    let long = "Plan, run, inspect, import, and compare things ".repeat(6);
+    let mut h = surface(
+        true,
+        json!([{"id": "l", "k": "list", "c": [
+            {"id": "short", "k": "item", "p": {"label": "security", "detail": "x"}},
+            {"id": "long", "k": "item", "p": {"label": "security", "detail": long}},
+            {"id": "valued", "k": "item", "p": {"label": "security", "detail": long, "value": "off"}},
+            {"id": "huge", "k": "item", "p": {"label": long, "detail": "detail"}}
+        ]}]),
+    );
+    let part = |h: &Harness, id: &str, class: &str| {
+        let el = h.el("s1", id);
+        h.doc.border_box(h.find_class(el, class)[0]).expect("laid out")
+    };
+    let natural = part(&h, "short", "sf-item-label").w;
+    for id in ["long", "valued"] {
+        let label = part(&h, id, "sf-item-label");
+        assert!(
+            (label.w - natural).abs() < 0.5,
+            "{id}: the label keeps its width ({} vs {natural})",
+            label.w
+        );
+        let row = h.doc.border_box(h.el("s1", id)).unwrap();
+        let detail = part(&h, id, "sf-item-detail");
+        assert!(detail.x + detail.w <= row.x + row.w, "{id}: the detail shrinks to fit");
+    }
+    let row = h.doc.border_box(h.el("s1", "short")).unwrap();
+    let detail = part(&h, "short", "sf-item-detail");
+    assert!(
+        row.x + row.w - (detail.x + detail.w) < 12.0,
+        "a short detail sits at the row's end"
+    );
+    let row = h.doc.border_box(h.el("s1", "huge")).unwrap();
+    let label = part(&h, "huge", "sf-item-label");
+    assert!(label.w <= row.w * 0.61, "a huge label is capped ({} of {})", label.w, row.w);
+    assert!(part(&h, "huge", "sf-item-detail").w > 20.0, "and its detail stays visible");
+}

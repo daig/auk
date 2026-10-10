@@ -12,8 +12,11 @@
 .sf-item.disabled { opacity: 0.45; }
 .sf-item[data-tone] .sf-item-label { color: var(--tc); }
 .sf-item-ic { flex: none; color: var(--t3); }
-.sf-item-label { flex: 1 1 auto; min-width: 0; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
-.sf-item-detail { flex: 0 1 auto; min-width: 0; color: var(--t3); white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+/* The label keeps its width and the detail gives way first (a shrink shared by content width
+   would cut a command's name to make room for its description); a label too long for the row
+   is capped instead. margin-left: auto keeps a short detail at the row's end. */
+.sf-item-label { flex: none; max-width: 60%; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.sf-item-detail { flex: 0 1 auto; min-width: 0; margin-left: auto; color: var(--t3); white-space: pre; overflow: hidden; text-overflow: ellipsis; }
 .sf-item-value { flex: none; max-width: 40%; color: var(--t2); white-space: pre; overflow: hidden; text-overflow: ellipsis; }
 .sf-item-hint { flex: none; }
 .sf-mark { background-color: transparent; color: var(--accent-ink); font-weight: 700; }
