@@ -467,12 +467,14 @@ fn web_client_in_safari_attaches_draws_over_webgpu_and_types() {
         "not drawing over WebGPU: {}",
         state["adapter"]
     );
+    // The shell may redraw after the page's resize: compare the screen at the same position too.
     let state = page_state(&safari, "the page's replica to match the daemon's", |s| {
         let (hash, seq) = env.daemon_hash(pane);
-        pane_state(s, pane).is_some_and(|p| p["hash"] == hash.as_str() && p["seq"] == seq)
+        pane_state(s, pane).is_some_and(|p| {
+            p["hash"] == hash.as_str() && p["seq"] == seq && p["screen"].as_str() == Some(&capture(&env, pane))
+        })
     });
     let p = pane_state(&state, pane).expect("the pane");
-    assert_eq!(p["screen"].as_str().unwrap(), capture(&env, pane));
     assert!(p["screen"].as_str().unwrap().contains("web-marker-7"));
     assert!(
         state["errors"].as_array().is_some_and(Vec::is_empty),

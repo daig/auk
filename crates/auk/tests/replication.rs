@@ -192,7 +192,10 @@ fn pane_size_follows_the_primary_client() {
     // When B leaves, A is primary again and its size applies.
     env.kill9(b.pid);
     wait_for("A's size again", || (size() == (100, 30)).then_some(()));
-    assert_eq!(converge(&env, &a, pane).1, env.daemon_hash(pane).1);
+    // The shell redraws after the resize on its own schedule: wait for it to settle.
+    wait_for("A to match the daemon at rest", || {
+        (converge(&env, &a, pane).1 == env.daemon_hash(pane).1).then_some(())
+    });
 }
 
 /// A small deterministic generator, so failures reproduce from the seed.
@@ -722,6 +725,8 @@ fn clear_scrollback_from_a_window_reaches_every_replica_and_ends_its_surfaces() 
         lines.extend(format!("old-line-{i:02}.\r\n").into_bytes());
     }
     probe.write(&lines);
+    // The daemon reads the pty on its own schedule: the fence has it parse all of it first.
+    probe.fence();
     converge(&env, &a, pane);
     converge(&env, &b, pane);
     assert!(a.capture(pane, true).contains("old-line-00."));

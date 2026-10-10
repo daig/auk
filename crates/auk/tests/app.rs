@@ -940,14 +940,12 @@ fn ac01_the_shell_outlives_the_app_and_a_new_window_shows_its_scrollback() {
         "the scrollback's start is missing"
     );
     assert!(text.contains("outlived-the-app"));
-    let (hash, seq) = env.daemon_hash(pane);
-    again.caught_up(pane, seq);
-    let ours = again.request(&format!("state-hash {pane}"));
-    assert_eq!(
-        ours["hash"],
-        hash.as_str(),
-        "the replica matches the daemon"
-    );
+    // The shell may still be writing (the new window resizes the pane): compare at one position.
+    wait_for("the replica to match the daemon", || {
+        let (hash, seq) = env.daemon_hash(pane);
+        let ours = again.request(&format!("state-hash {pane}"));
+        (ours["seq"] == seq && ours["hash"] == hash.as_str()).then_some(())
+    });
 }
 
 // -------------------------------------------------------------------------------------------
@@ -2839,7 +2837,10 @@ fn remote_window_half_types_into_a_remote_pane_and_opens_the_hosts_block_types()
         "{host}"
     );
     assert_eq!(layout_shape(&tab_holding(&host, first)["root"], true), format!("R600({second},{first})"));
-    assert_eq!(tab_holding(&app.layout(), first), tab_holding(&host, first), "the window shows the host's tab");
+    // The window's replica of the layout comes over the link on its own schedule.
+    wait_for("the window to show the host's tab", || {
+        (tab_holding(&app.layout(), first) == tab_holding(&host, first)).then_some(())
+    });
 }
 
 /// §4.1: the first window starts the daemon when none answers, and the daemon outlives it.

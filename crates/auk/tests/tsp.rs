@@ -1220,6 +1220,11 @@ fn c10_a_prompt_discards_inline_and_screen_surfaces_and_closes_flow() {
     exchange(&probe, &open_with("i", "inline", text_doc()));
     exchange(&probe, b"\x1b]133;A\x1b\\");
     probe.write(b"Y");
+    // The daemon reads the pty on its own schedule: wait for the Y before reading the state.
+    let lines = wait_for("the Y on screen", || {
+        let lines = screen_lines(&env, &probe);
+        lines.iter().any(|l| l.contains('Y')).then_some(lines)
+    });
     let all = surfaces(&env, &probe);
     let summary: Vec<(String, String)> = all
         .iter()
@@ -1231,7 +1236,6 @@ fn c10_a_prompt_discards_inline_and_screen_surfaces_and_closes_flow() {
         })
         .collect();
     assert_eq!(summary, [("f2".to_owned(), "closed".to_owned())], "{all:?}");
-    let lines = screen_lines(&env, &probe);
     assert_eq!(
         line_of(&lines, "Y"),
         line_of(&lines, "abc") + 1,
@@ -1272,11 +1276,12 @@ fn c12_suspend_hands_the_pane_back_to_the_grid() {
         (json!(true), json!(false))
     );
     probe.write(b"grid output while suspended\r\n");
-    assert!(
+    wait_for("the grid output while suspended", || {
         screen_lines(&env, &probe)
             .iter()
             .any(|l| l.contains("grid output while suspended"))
-    );
+            .then_some(())
+    });
     assert_eq!(
         click(&window, &probe, "s1", "b", ""),
         json!({"event": null}),
@@ -1417,10 +1422,9 @@ fn c13_role_region_role_and_app_reach_every_replica() {
 fn c14_the_first_listening_surface_drops_the_shell_title() {
     let (env, probe) = setup("c14");
     probe.write(b"\x1b]2;shell title\x1b\\");
-    assert_eq!(
-        state(&env, &probe)["title"],
-        json!({"source": "grid", "title": "shell title"})
-    );
+    wait_state(&env, &probe, "the shell title", |st| {
+        st["title"] == json!({"source": "grid", "title": "shell title"})
+    });
     exchange(
         &probe,
         &tsp_json("o", &json!({"id": "s1", "mode": "flow", "title": "Build"})),
@@ -1430,10 +1434,9 @@ fn c14_the_first_listening_surface_drops_the_shell_title() {
         json!({"source": "surface", "title": "Build"})
     );
     probe.write(b"\x1b]2;program title\x1b\\");
-    assert_eq!(
-        state(&env, &probe)["title"],
-        json!({"source": "grid", "title": "program title"})
-    );
+    wait_state(&env, &probe, "the program's title", |st| {
+        st["title"] == json!({"source": "grid", "title": "program title"})
+    });
 }
 
 // ---------------------------------------------------------------------------------------------

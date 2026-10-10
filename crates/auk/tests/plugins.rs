@@ -1282,7 +1282,12 @@ fn m9_jsonx_route_open_through_auk_open_and_the_palette() {
         let text = app.request(&format!("capture {pane}"))["text"].as_str()?.to_owned();
         text.lines().enumerate().find_map(|(i, l)| (l.trim_end() == data_s).then_some((i, 3usize)))
     });
-    let layout = app.request(&format!("pane-layout {pane}"));
+    // The layout as last drawn: wait for a frame that draws the printed path's line.
+    let layout = wait_for("the printed path drawn", || {
+        let l = app.request(&format!("pane-layout {pane}"));
+        let drawn = l["rows"].as_array()?.iter().any(|r| r[0].as_u64() == Some(row as u64));
+        drawn.then_some(l)
+    });
     let rect = app.state()["visible"][0]["rect"].clone();
     let info = app.request("panes")["panes"]
         .as_array()

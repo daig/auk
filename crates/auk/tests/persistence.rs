@@ -53,8 +53,9 @@ fn ac01_shell_survives_window_exit_and_new_window_shows_scrollback() {
 
     // A new window shows the scrollback through snapshot replay, equal to the daemon's state.
     let second = env.start_headless("second", &[]);
-    let (hash, seq) = wait_for("the second window's replica", || second.hash(pane));
-    assert_eq!((hash, seq), env.daemon_hash(pane));
+    wait_for("the second window's replica to match the daemon's", || {
+        second.hash(pane).filter(|h| *h == env.daemon_hash(pane)).map(drop)
+    });
     assert!(second.capture(pane, true).contains("marker-42"));
 
     // And the shell still answers, in its cwd.
@@ -127,7 +128,10 @@ fn zsh_integration_reports_cwd_and_titles() {
     wait_for("the running command's title", || {
         (env.pane_info(pane)["title"] == "sleep 2").then_some(())
     });
-    assert_eq!(env.pane_info(pane)["running"], true);
+    // The title comes in a write of its own, just before the command's 133;C mark.
+    wait_for("the command running", || {
+        (env.pane_info(pane)["running"] == true).then_some(())
+    });
     env.wait(pane, "prompt");
     // The next mark records the new cwd.
     let marks = env.daemon(&format!("marks {pane}"));
@@ -734,8 +738,9 @@ fn ac10_after_kill9_of_the_daemon_panes_come_back_over_their_scrollback_with_pas
 
     // A window attaching now gets the restored state.
     let window = env.start_headless("w", &[]);
-    let (hash, seq) = wait_for("the window's replica", || window.hash(pane));
-    assert_eq!((hash, seq), env.daemon_hash(pane));
+    wait_for("the window's replica to match the daemon's", || {
+        window.hash(pane).filter(|h| *h == env.daemon_hash(pane)).map(drop)
+    });
     assert!(window.errors().is_empty(), "{:?}", window.errors());
 }
 
