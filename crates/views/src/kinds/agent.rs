@@ -242,6 +242,9 @@ pub(crate) fn tool(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
         "error" | "failed" => {
             icon(cx, stc, "x");
         }
+        "cancelled" => {
+            icon(cx, stc, "slash-circle");
+        }
         _ => {}
     }
     if collapsible {

@@ -123,6 +123,9 @@
 .sf-text.char { word-break: break-all; }
 .sf-text.prose { max-width: calc(80*var(--sf-cw)); }
 .sf-text.clamp { overflow: hidden; }
+/* A tone colours the text (--tc); neutral reads as no tone, the text keeps its parent's colour. */
+.sf-text[data-tone] { color: var(--tc); }
+.sf-text[data-tone='neutral'] { color: inherit; }
 .sf-t-muted { color: var(--sf-c-muted); }
 .sf-t-dim { color: var(--sf-c-dim); }
 .sf-t-strong { font-weight: 600; color: var(--t1); }

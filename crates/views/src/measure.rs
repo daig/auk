@@ -276,6 +276,7 @@ impl PaneView {
         let since = self.measure_mark;
         self.measure_mark = doc.layout_count();
         let mut visits = 0;
+        let (pane_el, docks_el, toasts_el) = (self.container, self.docks, self.toasts.el);
         let mut dom = crate::dom::Dom {
             doc,
             w: &mut self.written,
@@ -596,6 +597,19 @@ impl PaneView {
                     changed = true;
                 }
             }
+        }
+        // The toast layer rises to 12px above the dock while the dock shows something (a
+        // composer), so a notice never covers the input (book:9547-9553).
+        let lift = match (dom.doc.border_box(pane_el), dom.doc.border_box(docks_el)) {
+            (Some(p), Some(d)) if d.h > 0.5 => format!(
+                "bottom: {}px",
+                crate::common::fmt_num((p.y + p.h - d.y + 12.0) as f64)
+            ),
+            _ => String::new(),
+        };
+        if dom.w.style(toasts_el).unwrap_or("") != lift {
+            dom.set_style(toasts_el, &lift);
+            changed = true;
         }
         self.measure_visits += visits;
         changed
