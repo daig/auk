@@ -422,3 +422,100 @@ fn an_overlay_card_casts_its_glass_shadow() {
         }
     }
 }
+
+/// T2.1 (research/omp-stylesheets.md §16.3): omp's user bubble at its first prompt (F:17)
+/// paints a fill that shows against the page, in light and dark: with no ring at its edge, and
+/// with omp's palette (Q-T2) a whisper ring.
+#[test]
+fn an_omp_user_bubble_paints_a_fill_ringed_only_under_a_palette() {
+    for palette in [false, true] {
+        for dark in [false, true] {
+            let at = format!("dark {dark}, palette {palette}");
+            let mut line = 0;
+            let mut seen = false;
+            replay("omp-session.jsonl", |h, _| {
+                line += 1;
+                if line == 1 {
+                    let s = ViewSettings {
+                        dark,
+                        program_colors: palette,
+                        ..Default::default()
+                    };
+                    h.view.set_settings(&mut h.doc, &h.pane, s);
+                }
+                if line != 17 {
+                    return;
+                }
+                seen = true;
+                h.frame();
+                let r = h.doc.border_box(h.el("s:1", "u")).unwrap();
+                let w = 960;
+                let px = render(&h.doc, w, (r.y + r.h).ceil() as u32 + 8);
+                let y = r.y + r.h / 2.0;
+                let page = pixel(&px, w, r.x - 8.0, y);
+                let fill = pixel(&px, w, r.x + 4.0, y);
+                assert!(
+                    page.iter().zip(fill).any(|(a, b)| a.abs_diff(b) >= 3),
+                    "{at}: the fill {fill:?} shows on the page {page:?}"
+                );
+                if palette {
+                    // Q-T2: titanium's fill is about 1.02:1 on the page, so a palette keeps a
+                    // whisper ring, which shows against the fill.
+                    // Inside the card's transparent 1px border.
+                    let edge = pixel(&px, w, r.x + r.w / 2.0, r.y + 1.5);
+                    assert!(
+                        edge.iter().zip(fill).any(|(a, b)| a.abs_diff(b) >= 3),
+                        "{at}: ring {edge:?} on {fill:?}"
+                    );
+                    return;
+                }
+                // Edge pixels lie between the page and the fill: no ring beyond either.
+                for (x, y) in [
+                    (r.x + 0.5, y),
+                    (r.x + r.w - 0.5, y),
+                    (r.x + r.w / 2.0, r.y + 0.5),
+                    (r.x + r.w / 2.0, r.y + r.h - 0.5),
+                ] {
+                    let edge = pixel(&px, w, x, y);
+                    for i in 0..3 {
+                        let (lo, hi) = (page[i].min(fill[i]), page[i].max(fill[i]));
+                        assert!(
+                            edge[i] + 3 >= lo && edge[i] <= hi.saturating_add(3),
+                            "{at}: edge {edge:?} at ({x}, {y}) beyond {page:?} and {fill:?}"
+                        );
+                    }
+                }
+            });
+            assert!(seen, "{at}");
+        }
+    }
+}
+
+/// T2.9 (§16.3): an omp marker draws a hairline on each side of its label.
+#[test]
+fn an_omp_marker_draws_hairlines_either_side() {
+    for dark in [false, true] {
+        let mut h = kit_harness(dark);
+        h.apc("o", r#"{"id":"s1","mode":"inline","role":"omp.session"}"#);
+        h.frame_ops(
+            "s1",
+            1,
+            json!([["add", "main", "s1", null, {"id": "main", "k": "col", "c": [
+                {"id": "mk", "k": "row", "p": {"role": "omp.marker.cache-miss", "gap": "sm"}, "c": [
+                    {"id": "mk.t", "k": "text", "p": {"text": "cache miss"}}]}]}]]),
+        );
+        h.frame();
+        let r = h.doc.border_box(h.el("s1", "mk")).unwrap();
+        let w = 960;
+        let px = render(&h.doc, w, (r.y + r.h).ceil() as u32 + 4);
+        let page = pixel(&px, w, r.x + 4.0, r.y + 0.5);
+        let line_at = |x: f32| {
+            (0..r.h as u32).any(|dy| {
+                let p = pixel(&px, w, x, r.y + dy as f32);
+                p.iter().zip(page).any(|(a, b)| a.abs_diff(b) >= 6)
+            })
+        };
+        assert!(line_at(r.x + 4.0), "dark {dark}: the left hairline");
+        assert!(line_at(r.x + r.w - 4.0), "dark {dark}: the right hairline");
+    }
+}

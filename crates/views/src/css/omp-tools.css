@@ -1,2 +1,85 @@
 /* omp's tool calls (research/omp-stylesheets.md §8): role-scoped refinements of the kit tool
-   kind for omp's tools, its shell commands, checklists and agents. Amendment A24. */
+   kind for omp's tools, its shell commands, checklists and agents. Amendment A24. The tool,
+   agent and checklist looks stay in surface-agent.css, so a plugin's roleless tool is unchanged
+   (T3.8); never restated here: the status tints, .sf-tool-hr, the nested-frame strip, collapse
+   and preview, .fast, the head's hover actions. Every rule leads with its kind class, so
+   omp.tool.* roles on other kinds (omp.tool.file rows) don't take the frame. */
+
+/* Frame (§8.2, Q-K2): the bubble's radius, and a ring instead of the border, so a status tint
+   reads as a fill. An error restores its ring as a shadow; a nested tool loses it (the kit strips
+   only border and fill), after the error rule so a nested error loses it too. */
+.sf-tool[data-role^='omp.tool.'] { border-radius: var(--r-card); }
+.sf-tool[data-role^='omp.tool.']:not(.inline) { border-color: transparent; box-shadow: inset 0 0 0 1px var(--l2); }
+.sf-tool[data-role^='omp.tool.'].st-error:not(.inline) {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bad) 40%, transparent);
+}
+.sf-tool-body .sf-tool[data-role^='omp.tool.']:not(.inline) { box-shadow: none; border-radius: var(--r-ctl); }
+.sf-tool[data-role^='omp.tool.'] .sf-tool-target { font-family: var(--mono); color: var(--t2); }
+.sf-tool[data-role^='omp.tool.'] > .sf-tool-body { color: var(--omp-tool-out); }
+/* Inline reads and globs run dense. */
+.sf-tool[data-role^='omp.tool.'].inline > .sf-tool-head { padding-top: 2px; padding-bottom: 2px; }
+.sf-tool[data-role^='omp.tool.'].collapsible > .sf-tool-head:hover { background-color: var(--l1); border-radius: var(--r-card); }
+.sf-tool[data-role^='omp.tool.'].collapsible > .sf-tool-head:focus-visible { outline: var(--omp-focus); outline-offset: -2px; }
+
+/* Files and chips (§8.3). A toned icon keeps its tone. */
+.sf-col[data-role='omp.tool.files'] { gap: 0; }
+.sf-row[data-role='omp.tool.files'] { gap: 4px; }
+.sf-row[data-role='omp.tool.file'] { gap: 6px; min-height: var(--sf-lh); }
+.sf-row[data-role='omp.tool.file'] > .sf-icon:not([data-tone]) { width: 14px; height: 14px; color: var(--t3); }
+.sf-row[data-role='omp.tool.file'][data-tone='pending'] { color: var(--t3); }
+.sf-row[data-role='omp.tool.file'][data-tone='pending'] > .sf-icon { color: var(--live); }
+.sf-row[data-role='omp.tool.chip'] {
+  gap: 4px; height: 20px; padding: 0 6px; border-radius: var(--r-chip); background-color: var(--chip-bg);
+}
+.sf-row.sf-act[data-role='omp.tool.file']:hover, .sf-row.sf-act[data-role='omp.tool.chip']:hover {
+  background-color: var(--l1); border-radius: var(--r-chip);
+}
+
+/* Search, sources, reads, diagnostics (§8.3). */
+.sf-col[data-role='omp.tool.search.file'], .sf-col[data-role='omp.tool.find.hit'] { gap: 4px; }
+.sf-row[data-role='omp.tool.source'] { gap: 6px; }
+.sf-card[data-role='omp.tool.read.preview'] { border-radius: var(--r-ctl); }
+.sf-card[data-role='omp.tool.read.preview'] > .sf-card-head { font-size: 12px; }
+.sf-image[data-role='omp.tool.read.image'] { border-radius: var(--r-chip); }
+.sf-ansi[data-role='omp.tool.bash.output'], .sf-ansi[data-role='omp.tool.proc.log'],
+.sf-ansi[data-role='omp.tool.eval.output'] { color: var(--omp-tool-out); }
+.sf-section[data-role='omp.tool.edit.file'] > .sf-section-head,
+.sf-section[data-role='omp.tool.ast_edit.file'] > .sf-section-head { font-size: 12px; }
+.sf-col[data-role='omp.tool.diagnostics'] { gap: 4px; }
+.sf-row[data-role='omp.tool.diagnostic'] { gap: 6px; align-items: baseline; font-size: 12px; }
+.sf-code[data-role='omp.tool.error'] { box-shadow: inset 2px 0 0 var(--bad); }
+.sf-text[data-role='omp.tool.notice'], .sf-text[data-role='omp.tool.stats'],
+.sf-text[data-role='omp.tool.context'] { font-size: var(--omp-meta-fs); }
+.sf-text[data-role='omp.tool.elided'] { font-size: var(--omp-meta-fs); text-align: center; }
+.sf-row[data-role='omp.tool.answer'], .sf-row[data-role='omp.tool.answer.off'] { gap: 6px; }
+.sf-row[data-role='omp.tool.answer.off'] { color: var(--t3); }
+
+/* Eval cells, processes and IRC (§8.3). The prompt glyph is two cells (no ch unit, G5). */
+.sf-col[data-role='omp.tool.eval.cell'] { gap: 4px; }
+.sf-col[data-role='omp.tool.eval.cell'][data-tone='error'] { box-shadow: inset 2px 0 0 var(--bad); padding-left: 6px; }
+.sf-text[data-role='omp.tool.eval.caption'], .sf-text[data-role='omp.tool.eval.status'],
+.sf-text[data-role='omp.tool.proc.preview'] { font-size: var(--omp-meta-fs); }
+.sf-row[data-role='omp.tool.eval.input'], .sf-row[data-role='omp.tool.eval.result'] { gap: 6px; }
+.sf-icon[data-role='omp.tool.eval.prompt'], .sf-spinner[data-role='omp.tool.eval.prompt'] {
+  width: calc(2 * var(--sf-cw)); color: var(--t3);
+}
+.sf-col[data-role='omp.tool.eval.outputs'] { gap: 4px; min-width: 0; }
+.sf-table[data-role='omp.tool.eval.table'] { font-size: 12px; }
+.sf-list[data-role='omp.tool.proc.table'], .sf-list[data-role='omp.tool.proc.cancelled'],
+.sf-list[data-role='omp.tool.irc.receipts'] { font-size: 12px; }
+
+/* Think, task, wait and vibe (§8.3). */
+.sf-md[data-role='omp.think'] { color: var(--omp-think); font-style: italic; }
+.sf-md[data-role='omp.task.assignment'] { padding-left: 10px; border-left: 1px solid var(--l2); color: var(--t2); }
+.sf-col[data-role='omp.wait.job'] { gap: 4px; }
+.sf-row[data-role='omp.wait.agent'] { gap: 6px; }
+.sf-text[data-role='omp.vibe.composer'] { font-family: var(--mono); }
+
+/* The user's own shell commands (§8.4; not recorded yet): placed like the user's bubble. */
+.sf-tool[data-role='omp.bash'], .sf-tool[data-role='omp.eval'] {
+  align-self: flex-end; max-width: var(--omp-bubble-max); border-color: transparent; border-radius: var(--r-card);
+  box-shadow: inset 0 0 0 1px var(--l2); background-color: var(--sf-tint-user, var(--l1));
+}
+.sf-tool[data-role='omp.bash'].st-error, .sf-tool[data-role='omp.eval'].st-error {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bad) 40%, transparent);
+}
