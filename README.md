@@ -2,6 +2,8 @@
 
 Auk is a terminal for macOS whose sessions outlive their windows, and in which terminal programs can draw native UI.
 
+![omp working in an Auk tab: thinking, file reads, a test run and a diff, all as native cards](docs/media/omp-native.gif)
+
 - **Native UI for terminal programs.** Over the Tern Surface Protocol (TSP v1), a program describes its interface in-band with elements and CSS, and Auk draws it on the GPU. The same program prints plain text in any other terminal. The [omp](https://github.com/can1357/oh-my-pi) coding agent works unmodified: its transcript, tool cards, diffs, pickers, settings and composer are drawn as real UI.
 - **Sessions outlive their windows.** A session daemon owns every pane. Quit the app and your programs keep running; reopen it and they're where you left them. Panes come back after a crash or a reboot, and `auk daemon upgrade` swaps in a new build without stopping anything.
 - **The same session anywhere.** `auk web serve` opens a live pane in the browser over WebGPU, native UI included. `auk --host HOST` gives native windows on a remote daemon over SSH, and survives a dropped link.
@@ -10,6 +12,40 @@ Auk is a terminal for macOS whose sessions outlive their windows, and in which t
 - **A good terminal first.** It has GPU rendering, accurate emulation (vim, less, htop and tmux), find, jumping between prompts, hyperlinks, IME, Option-as-Alt and VoiceOver.
 
 Auk is a clean-room implementation of the design of [Tern](https://stencil.so/tern): the same protocol and plugin API, written from Tern's [public docs](https://docs.stencil.so/tern/) and SDKs. Programs built with the [Tern SDKs](https://github.com/stencil-hq/tern-sdk) and Tern's plugins run in Auk as they are.
+
+## A look around
+
+**Native pickers and settings**, keyboard first, over a live session.
+
+![The model picker filtering, the settings sheet docking beside the transcript, and a usage heatmap](docs/media/omp-overlays.gif)
+
+**Sessions outlive their windows.** Quit Auk and your shells and agents keep running; reopen it and pick up where they are.
+
+![A counter keeps counting across quitting and reopening Auk](docs/media/survives-quit.gif)
+
+**The same session in your browser**, typed into from either side, with `auk web serve`.
+
+![An Auk window and Safari showing one session, typing in each](docs/media/browser-mirror.gif)
+
+**Any program can draw native UI** over the Tern Surface Protocol, with SDKs for Python, Rust, TypeScript and Go.
+
+![A short Python script showing a native table, a progress card and a choice](docs/media/any-program.gif)
+
+**Luau plugins** turn command output into interface, and add views of their own.
+
+![terraform plan output shown as summary badges, and a JSON file browsed as a tree](docs/media/plugins.gif)
+
+**A plugin is a short Luau script.** This one shows `du -sh *` as a table with bars, in 33 lines.
+
+![A plugin's manifest and Luau in vim beside a shell, where du -sh * shows as a table with size bars](docs/media/plugin-code.gif)
+
+**Everything is styled with CSS.** A theme plugin restyles omp live, mid-session.
+
+![A stylesheet saved in vim restyles omp beside it, then one colour change recolours it](docs/media/themes.gif)
+
+**Scriptable from the shell:** `auk new`, `split`, `run`, `wait` and `capture`.
+
+![A script laying out a three-pane workspace](docs/media/scriptable.gif)
 
 ## Requirements
 
@@ -66,6 +102,7 @@ PYTHONPATH=third_party/tern-sdk/python/src python3 third_party/tern-sdk/python/e
 | `third_party/` | the pinned Tern SDKs and omp sources, the test oracles (see `third_party/README.md`) |
 | `tools/` | the TSP and terminal recorders |
 | `scripts/` | the build, environment and verification scripts |
+| `docs/media/` | the clips in this README |
 
 ## License
 
