@@ -1,6 +1,6 @@
 # Third-party oracles
 
-These are copies, not submodules, pinned to the commits that the spec's decision D6 names. Update them deliberately: the protocol changes inside v1 without version bumps.
+These are copies, not submodules, pinned to the commits below. Update them deliberately: the protocol changes inside v1 without version bumps.
 
 | Directory | Source | Commit | License |
 | --- | --- | --- | --- |

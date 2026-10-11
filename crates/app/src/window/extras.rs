@@ -31,7 +31,7 @@ impl WinState {
                     "shown": self.presence_text(),
                 }))
             }
-            // The link as the status line shows it, and its raw status (§10.1).
+            // The link as the status line shows it, and its raw status.
             "link" => {
                 let status = self.conn.link_status();
                 let shown: Vec<Value> = self
@@ -80,7 +80,7 @@ impl WinState {
                 }))
             }
             // The computed padding of the element with this `data-role` in the pane's command
-            // blocks (plugin sheets style them, §8.4 step 3).
+            // blocks (plugin sheets style them).
             "lens-style" => {
                 let (Some(pane), Some(role)) = (
                     args.first().and_then(|a| a.parse::<PaneId>().ok()),
@@ -172,7 +172,7 @@ impl WinState {
 }
 
 impl WinState {
-    /// Whether motion is reduced: Auk's setting, or the system's (§7.13).
+    /// Whether motion is reduced: Auk's setting, or the system's.
     pub fn reduce_motion(&self) -> bool {
         self.settings
             .reduces_motion(auk_platform_macos::system_reduce_motion())
@@ -228,7 +228,7 @@ impl WinState {
         })
     }
 
-    /// The status line's link segments (§10.1): the identity chain of the hops that reached the
+    /// The status line's link segments: the identity chain of the hops that reached the
     /// window's host (`local` on this machine, `ssh-key` over SSH), then the link's state.
     pub fn link_segments(&self) -> Vec<crate::chrome::StatusItem> {
         use auk_remote::State;
@@ -264,14 +264,14 @@ impl WinState {
         out
     }
 
-    /// The other clients attached to the host, for the status line (§10.1): `None` when this
+    /// The other clients attached to the host, for the status line: `None` when this
     /// window is alone.
     pub fn presence_text(&self) -> Option<String> {
         presence_of(&self.conn.shared(), self.conn.client_id)
     }
 }
 
-/// The other clients attached to the host besides client `me`, for the status line (§10.1):
+/// The other clients attached to the host besides client `me`, for the status line:
 /// `None` when it is alone.
 pub(crate) fn presence_of(shared: &crate::conn::Shared, me: u64) -> Option<String> {
     let others: Vec<String> = shared
@@ -299,13 +299,13 @@ pub(crate) fn presence_of(shared: &crate::conn::Shared, me: u64) -> Option<Strin
 }
 
 impl WinState {
-    /// Runs a keymap action (§9.8, research/plugins.md §12.2): a plugin's or a built-in command,
+    /// Runs a keymap action: a plugin's or a built-in command,
     /// or one of the keymap-only actions (`palette`, `goto_tab:N`, `last_tab`,
     /// `focus_pane:DIR`, `text:BYTES`).
     pub(super) fn run_keymap_action(&mut self, name: &str) -> Result<(), String> {
         use crate::commands::Cmd;
         use crate::geometry::Direction;
-        // The block card's buttons (§9.5).
+        // The block card's buttons.
         if name == "card:retry" {
             let card = self.plugins.block_card.take().ok_or("no block card")?;
             self.ui_dirty = true;

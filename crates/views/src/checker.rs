@@ -1,5 +1,5 @@
 //! The TSP engine's [`SheetChecker`] hook, implemented with the UI engine's stylesheet parser, so
-//! programs get Tern-format CSS errors (`<line>:<col>: <message> in <snippet>`, §7.12).
+//! programs get Tern-format CSS errors (`<line>:<col>: <message> in <snippet>`).
 
 use auk_tsp::SheetChecker;
 use auk_ui::css::properties::Restrictions;

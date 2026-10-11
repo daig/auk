@@ -1,4 +1,4 @@
-//! The kit fixes the omp sheets depend on (research/omp-stylesheets.md §2.5, K1-K9): computed
+//! The kit fixes the omp sheets depend on: computed
 //! styles in light and dark. The pixel checks are in paint.rs.
 
 mod common;
@@ -72,7 +72,7 @@ fn shadows(h: &Harness, el: NodeId) -> Vec<auk_ui::style::Shadow> {
         .unwrap_or_default()
 }
 
-/// K1: a tone colours a text (`--tc`); a neutral one reads as no tone and keeps its parent's
+/// A tone colours a text (`--tc`); a neutral one reads as no tone and keeps its parent's
 /// colour, and a span's own colour still wins inside a toned text.
 #[test]
 fn a_toned_text_takes_its_tone_colour() {
@@ -115,8 +115,8 @@ fn a_toned_text_takes_its_tone_colour() {
     }
 }
 
-/// K2: an untoned (or neutral) meter fills with the accent, a level wins over that, and any
-/// other tone wins over the level (book:8649, 8723).
+/// An untoned (or neutral) meter fills with the accent, a level wins over that, and any
+/// other tone wins over the level.
 #[test]
 fn an_untoned_meter_fills_with_the_accent() {
     for dark in [false, true] {
@@ -169,8 +169,8 @@ fn an_untoned_meter_fills_with_the_accent() {
     }
 }
 
-/// K4: a toned badge is a 10% tone fill with a 22% inset tone ring; untoned or neutral, a gray
-/// chip (--t2 on --chip-bg with an --l2 ring) (book:7230-7263, 12306-12307).
+/// A toned badge is a 10% tone fill with a 22% inset tone ring; untoned or neutral, a gray
+/// chip (--t2 on --chip-bg with an --l2 ring).
 #[test]
 fn a_badge_has_a_tone_fill_and_ring() {
     for dark in [false, true] {
@@ -218,7 +218,7 @@ fn a_badge_has_a_tone_fill_and_ring() {
     }
 }
 
-/// K5: an inline tool's body is indented behind a hairline under the head's icon (book:9853);
+/// An inline tool's body is indented behind a hairline under the head's icon;
 /// a card tool's body has none. The body text stays where it was (34px in).
 #[test]
 fn an_inline_tool_body_sits_behind_a_hairline() {
@@ -270,8 +270,8 @@ fn an_inline_tool_body_sits_behind_a_hairline() {
     );
 }
 
-/// K6: a running tool's glyph is a ring turning (an infinite animation), held under Reduce Motion
-/// and while the pane is hidden; a cancelled tool shows a slashed circle (book:9856-9858).
+/// A running tool's glyph is a ring turning (an infinite animation), held under Reduce Motion
+/// and while the pane is hidden; a cancelled tool shows a slashed circle.
 #[test]
 fn a_running_tool_spins_a_ring_and_a_cancelled_one_shows_a_slashed_circle() {
     let tools = json!([
@@ -338,7 +338,7 @@ fn a_running_tool_spins_a_ring_and_a_cancelled_one_shows_a_slashed_circle() {
     );
 }
 
-/// K7: the overlay card is glass without blur: 12px corners on --pop-bg, an --l2 ring, a
+/// The overlay card is glass without blur: 12px corners on --pop-bg, an --l2 ring, a
 /// --glass-hi top highlight and a drop shadow, deeper in dark.
 #[test]
 fn an_overlay_card_is_glass() {
@@ -412,7 +412,7 @@ fn toast_layer(h: &Harness) -> NodeId {
     h.find_class(h.view.element(), "auk-toasts")[0]
 }
 
-/// K8: the toast has 12px corners and wraps past 560px (or the pane less 32px); it sits 28px
+/// The toast has 12px corners and wraps past 560px (or the pane less 32px); it sits 28px
 /// from the bottom, and 12px above the dock while the dock holds a composer.
 #[test]
 fn a_toast_wraps_and_rises_above_the_dock() {
@@ -482,7 +482,7 @@ fn key(h: &Harness) -> auk_tsp::SurfaceKey {
         .key()
 }
 
-/// K9: a clickable status segment gets an --l1 fill (and --t1 text) on hover (book:9460-9462).
+/// A clickable status segment gets an --l1 fill (and --t1 text) on hover.
 #[test]
 fn a_clickable_seg_fills_on_hover() {
     for dark in [false, true] {

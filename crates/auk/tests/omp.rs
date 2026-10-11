@@ -1,4 +1,4 @@
-//! The omp suite (GOAL.md row `omp`, spec §7, §8.2, M5, AC9): omp, the main TSP client, against
+//! The omp suite: omp, the main TSP client, against
 //! the real daemon and a window that draws, acks and edits natively.
 //!
 //! - **Replay:** `fixtures/tsp/omp-session.jsonl` (omp 18.8.5 on three prompts) is played into a
@@ -8,7 +8,7 @@
 //!   a temporary cwd, with `HOME` pointing at the user's real home only for omp's login. The
 //!   window is the pane's primary. Live turns spend real API credits, so there are two tiny
 //!   prompts in one test, and every assertion checks structure, never model wording.
-//! - **Fallback:** with TSP off, omp runs as plain text. Under Auk's T0+T1 hello (D22), omp's own
+//! - **Fallback:** with TSP off, omp runs as plain text. Under Auk's T0+T1 hello, omp's own
 //!   record of what it sent (`PI_TUI_TSP_RECORD`) shows which T2 kinds it sends anyway, which it
 //!   replaces, and which ops the daemon rejected as a result.
 //! - **Version:** every test first checks that the installed omp is the recorded 18.8.5.
@@ -33,7 +33,7 @@ const TURN: Duration = Duration::from_secs(180);
 /// How long omp may take to start, or to react to a key.
 const UI: Duration = Duration::from_secs(30);
 
-/// The T2 kinds of §8.2 (omp's pickers and settings, rich media). `image` joined T1 (D24).
+/// The T2 kinds (omp's pickers and settings, rich media). `image` joined T1.
 const T2: [&str; 6] = ["math", "chart", "picker", "prefs", "effort", "block"];
 
 /// The pane size the window asks for.
@@ -357,7 +357,7 @@ fn added_kinds(records: &[Value]) -> Vec<(String, String, String)> {
     out
 }
 
-/// CSS effects the engine accepts but doesn't draw (§8.4 "Effects": filters, backdrop-filter,
+/// CSS effects the engine accepts but doesn't draw (filters, backdrop-filter,
 /// and 3D transforms among the other accepted-unused properties of
 /// `auk-ui`'s `properties.rs`).
 const UNDRAWN: [&str; 13] = [
@@ -464,7 +464,7 @@ fn t2_report_for(records: &[Value], kinds: &[String]) -> T2Report {
                 .map(str::to_owned)
                 .collect()
         })
-        // omp 18.8.5 doesn't record the hello reply; the kinds it saw are the daemon's (D22).
+        // omp 18.8.5 doesn't record the hello reply; the kinds it saw are the daemon's.
         .unwrap_or_else(|| kinds.iter().cloned().collect());
     let mut sent_anyway: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (_, id, kind) in added_kinds(records) {
@@ -588,7 +588,7 @@ fn image_drawn(
 // ---------------------------------------------------------------------------------------------
 // Replay of the recording
 
-/// AC9 from the recording: omp's transcript (user and assistant messages in `md`), its tool cards
+/// From the recording: omp's transcript (user and assistant messages in `md`), its tool cards
 /// and its diffs reach the daemon through `surface-play` and are drawn natively: every such node is
 /// an element of its kind in the window's projected document, with a laid-out box. The composer
 /// is a focused `editor` in `dock`, and `main`, `dock` and `layer` are the surface's regions.
@@ -721,7 +721,7 @@ fn ac09_replay_draws_transcript_tool_cards_and_diffs_natively() {
         "the edit card names its file: {text:?}"
     );
 
-    // The recording's `image` nodes draw (D24): the welcome card's logo is omp's built-in mark,
+    // The recording's `image` nodes draw: the welcome card's logo is omp's built-in mark,
     // and the chart of a numeric table (the `ls -la` summary) is an SVG blob sent after the frame
     // that names it, in an assistant message. Its id depends on the model's reply, so it's found
     // as the recording's one other image.
@@ -765,15 +765,15 @@ fn ac09_replay_draws_transcript_tool_cards_and_diffs_natively() {
 // ---------------------------------------------------------------------------------------------
 // Live sessions
 
-/// AC9 live, composer (no model turn): omp opens its inline session surface with `main`, `dock`
+/// Live, composer (no model turn): omp opens its inline session surface with `main`, `dock`
 /// and `layer`; keys typed in the pane reach omp, which owns the text; a native selection replaced
 /// by typing becomes an `edit` event omp applies; ⌘Z becomes an `undo` event omp applies; ⌃G runs
 /// `$EDITOR` and omp comes back by adopting its closed surface (`o adopt:true`), with the edited
 /// text in the composer. omp's settings (T2 `prefs`, not advertised yet) open as a screen surface
-/// built from T1 kinds; its model hub is a `picker` sheet now (A23, tested in
+/// built from T1 kinds; its model hub is a `picker` sheet now (tested in
 /// `a23_omps_model_hub_and_model_dropdown_are_picker_sheets`). ⌃D quits omp, and the shell's
 /// next prompt discards the inline surface.
-/// §8.4: the effects the engine accepts but doesn't draw (filters, backdrop-filter, masks, 3D
+/// The effects the engine accepts but doesn't draw (filters, backdrop-filter, masks, 3D
 /// transforms) are only a gap if omp sends them. It doesn't: neither recording holds a
 /// stylesheet or an `el` style that names one, and after the replay through the daemon, the
 /// window's surfaces hold no program sheet that does. (The live T2 test checks omp's own record.)
@@ -966,8 +966,8 @@ fn ac09_live_composer_native_editing_adopt_and_discard() {
         "the transcript carried over"
     );
 
-    // `/settings` and `/model` open as T2 sheets in the session's layer: see the A23 tests (and
-    // `omp_t2_fallback_under_t0_t1_hello` for their screen surfaces under a T0+T1 hello).
+    // `/settings` and `/model` open as T2 sheets in the session's layer: see the `a23_…` tests
+    // (and `omp_t2_fallback_under_t0_t1_hello` for their screen surfaces under a T0+T1 hello).
 
     // Leave with an empty composer, then ⌃D.
     omp.clear(&id);
@@ -1000,7 +1000,7 @@ fn ac09_live_composer_native_editing_adopt_and_discard() {
     let _ = &omp.work;
 }
 
-/// AC9 live, transcript (two tiny model turns): a prompt submitted through `send` is held until
+/// Live, transcript (two tiny model turns): a prompt submitted through `send` is held until
 /// the composer reports `sendable:true`, then omp runs the turn: the user message and the
 /// assistant's reply are drawn as `md` in `main`. A second prompt typed as keys makes omp call its
 /// bash tool, drawn as a `tool` card. Structure only, never wording.
@@ -1084,7 +1084,7 @@ fn ac09_live_transcript_send_and_tool_card() {
         "the composer emptied after send"
     );
 
-    // The table's chart: omp sends it as an `image` (D24), its SVG blob after the frame that
+    // The table's chart: omp sends it as an `image`, its SVG blob after the frame that
     // names it; the window draws it once the blob arrives.
     let reply_text: String = reply_md
         .iter()
@@ -1170,7 +1170,7 @@ fn ac09_live_transcript_send_and_tool_card() {
     assert!(omp.window.errors().is_empty(), "{:?}", omp.window.errors());
 }
 
-/// T2 fallback under an explicitly T0+T1 hello (host setting `t2-kinds off`; §8.2, D22, D24, A23),
+/// T2 fallback under an explicitly T0+T1 hello (host setting `t2-kinds off`),
 /// from omp's own record of a live start: omp guards `effort` (a `row` of `meter` and `text`
 /// instead) and sends nothing unadvertised. Its welcome logo, an `image` it sends without checking
 /// `supports()`, is T1: the welcome card draws with omp's built-in mark, and omp gets no errors.
@@ -1210,7 +1210,7 @@ fn omp_t2_fallback_under_t0_t1_hello() {
     let hello: BTreeSet<String> = config.kinds.iter().cloned().collect();
     assert_eq!(hello, expected, "the hello lists exactly T0 and T1");
     assert_eq!(report.advertised, expected);
-    assert!(report.advertised.contains("image"), "image is T1 (D24)");
+    assert!(report.advertised.contains("image"), "image is T1");
     assert!(
         report.sent_anyway.is_empty(),
         "omp 18.8.5 sends nothing unadvertised: {:?}",
@@ -1221,7 +1221,7 @@ fn omp_t2_fallback_under_t0_t1_hello() {
         "omp got errors: {:?}",
         report.errors
     );
-    // §8.4: none of the CSS effects the engine leaves undrawn.
+    // None of the CSS effects the engine leaves undrawn.
     let undrawn: Vec<String> = program_css(&records)
         .iter()
         .flat_map(|c| undrawn_effects(c))
@@ -1324,7 +1324,7 @@ fn omp_t2_fallback_under_t0_t1_hello() {
     omp.quit();
 }
 
-/// AC9 fallback: with TSP off in the host, omp's hello goes unanswered and omp runs as plain
+/// Fallback: with TSP off in the host, omp's hello goes unanswered and omp runs as plain
 /// text: its composer draws in the grid and takes typing; no surface opens and the daemon writes
 /// no TSP to the pane.
 #[test]
@@ -1525,13 +1525,13 @@ fn first_with_class(
         .unwrap_or_else(|| panic!("no .{class}"))
 }
 
-/// Amendments A15-A19 on a live omp 18.8.5, with no prompt: omp resumes a session file many
+/// Sheets on a live omp 18.8.5, with no prompt: omp resumes a session file many
 /// panes long (no model call), in a dark window. Its Switch Model sheet (opened by clicking the
-/// composer's model control, as a user does; a `picker` since A23) sits in the pane's visible
-/// area and lays out its list (A16), drawn over its dim, not under it (A15); a window focus
-/// change doesn't replay the sheet-in (A17). Its Usage overlay (the cost control) takes a click on its
+/// composer's model control, as a user does; a `picker`) sits in the pane's visible
+/// area and lays out its list, drawn over its dim, not under it; a window focus
+/// change doesn't replay the sheet-in. Its Usage overlay (the cost control) takes a click on its
 /// Details tab, which omp makes active, and the card omp's new props build doesn't pop again.
-/// The pane's OSC 11 answer is the dark theme's background and its TSP facts say dark (A19).
+/// The pane's OSC 11 answer is the dark theme's background and its TSP facts say dark.
 /// Esc closes each overlay; nothing is picked, and omp's config is left as it was.
 #[test]
 fn a15_to_a19_omps_overlays_over_a_long_transcript_in_the_dark() {
@@ -1579,7 +1579,7 @@ fn a15_to_a19_omps_overlays_over_a_long_transcript_in_the_dark() {
     let pane = omp.pane;
     omp.ready();
 
-    // A19: the dark window's background answers OSC 11, and the facts omp hears are dark.
+    // The dark window's background answers OSC 11, and the facts omp hears are dark.
     let osc11 = std::fs::read(&answer).expect("the OSC 11 answer");
     assert_eq!(
         String::from_utf8_lossy(&osc11),
@@ -1602,7 +1602,7 @@ fn a15_to_a19_omps_overlays_over_a_long_transcript_in_the_dark() {
     let page = omp.window.view(pane).element();
 
     // Clicking the composer's model control opens omp's Switch Model sheet: with `picker`
-    // advertised (A23) a `picker` in the layer, where A15-A17 hold for it as for an overlay.
+    // advertised, a `picker` in the layer, where the checks below hold for it as for an overlay.
     let model = omp.with_role("omp.composer.model");
     assert_eq!(model.len(), 1, "omp's model control: {model:?}");
     let s = omp
@@ -1633,7 +1633,7 @@ fn a15_to_a19_omps_overlays_over_a_long_transcript_in_the_dark() {
     let opacity = |w: &NativeWindow| w.doc(pane).computed_style(card).map(|c| c.opacity);
     assert_eq!(opacity(&omp.window), Some(1.0), "the sheet-in finished");
 
-    // A16: the sheet lies in the pane's visible area (the layer, one viewport from the pane's
+    // The sheet lies in the pane's visible area (the layer, one viewport from the pane's
     // top), not ~a transcript's length down.
     let doc = omp.window.doc(pane);
     let layers = first_with_class(&omp.window, pane, page, "auk-layers");
@@ -1652,7 +1652,7 @@ fn a15_to_a19_omps_overlays_over_a_long_transcript_in_the_dark() {
     assert!(rows.len() >= 2, "models to pick from: {}", rows.len());
     assert!(doc.laid_out(rows[0]), "the list's first row is laid out");
 
-    // A15: the sheet draws over its dim, not under it: a pixel of its action bar's empty
+    // The sheet draws over its dim, not under it: a pixel of its action bar's empty
     // middle is the sheet's own color, not dimmed.
     let bg = doc.computed_style(card).expect("styled").background_color;
     assert_eq!(bg.a, 1.0, "an opaque sheet");
@@ -1669,14 +1669,14 @@ fn a15_to_a19_omps_overlays_over_a_long_transcript_in_the_dark() {
             .all(|(a, b)| a.abs_diff(b) <= 3),
         "the sheet's background {p:?} is its color {want:?}, not dimmed"
     );
-    // Clicks land in the sheet, not the dim (A15's hit order).
+    // Clicks land in the sheet, not the dim.
     let hit = auk_ui::hit_test(doc, f.x + f.w / 2.0, f.y + 4.0).expect("a hit");
     assert!(
         std::iter::successors(Some(hit), |&e| doc.parent(e)).any(|e| e == card),
         "the press lands in the sheet"
     );
 
-    // A17: a window focus change restyles the sheet without replaying its sheet-in.
+    // A window focus change restyles the sheet without replaying its sheet-in.
     omp.window.set_focused(pane, false);
     assert_eq!(opacity(&omp.window), Some(1.0), "no replay on blur");
     omp.window.set_focused(pane, true);
@@ -1802,7 +1802,7 @@ fn picker_prop(w: &NativeWindow, pane: u64, id: &str, prop: &str) -> Option<Valu
     s.document().get(id)?.prop(prop).cloned()
 }
 
-/// Amendment A23 (`picker`, T2) on a live omp 18.8.5 with no prompt. Advertised, `picker`
+/// `picker` (T2) on a live omp 18.8.5 with no prompt. Advertised, `picker`
 /// changes both of omp's model sheets. `/model` opens the model hub as a `picker` in the session's
 /// layer (not a screen surface): scopes, tabs and rows draw in the visible area; typed keys filter
 /// it (drawn as the head's query, keys stay omp's); Down moves the selection, which the view
@@ -2051,7 +2051,7 @@ fn a23_omps_model_hub_and_model_dropdown_are_picker_sheets() {
     );
 }
 
-/// A23 `chart` on a live omp 18.8.5, with no prompt: once Auk advertises `chart`, omp's Usage
+/// `chart` on a live omp 18.8.5, with no prompt: once Auk advertises `chart`, omp's Usage
 /// overlay (its cost control) draws a year of activity as a native heatmap (`supports("chart")`;
 /// a table of glyphs otherwise). The chart reaches the window with omp's props (7 weekday rows
 /// of up to 53 weeks, month labels, per-day tips, the summary), is a `figure` named by its
@@ -2065,7 +2065,7 @@ fn a23_omps_usage_heatmap_is_a_native_chart_in_dark_and_light() {
         .iter()
         .any(|k| k == "chart")
     {
-        eprintln!("skipped: `chart` isn't advertised yet (A23 adds it to the hello's kinds)");
+        eprintln!("skipped: `chart` isn't advertised yet");
         return;
     }
     let mut omp = LiveOmp::start_with(
@@ -2237,7 +2237,7 @@ fn a23_omps_usage_heatmap_is_a_native_chart_in_dark_and_light() {
             doc.scroll_size(hm),
             doc.border_box(ov_el)
         );
-        // The full level is omp's palette accent (`--sf-p-accent`, book:6986), else the theme's.
+        // The full level is omp's palette accent (`--sf-p-accent`), else the theme's.
         let hex = |v: &str| -> Option<[u8; 3]> {
             let h = v.trim().strip_prefix('#')?;
             let byte = |i: usize| u8::from_str_radix(h.get(i..i + 2)?, 16).ok();
@@ -2265,7 +2265,7 @@ fn a23_omps_usage_heatmap_is_a_native_chart_in_dark_and_light() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// A23: math
+// Math
 
 /// The answer of [`math_session`]: md math in every delimiter of omp's dialect, and a typo.
 const MATH_ANSWER: &str = "## Math\n\n\
@@ -2299,7 +2299,7 @@ fn math_session(dir: &Path, cwd: &Path) -> PathBuf {
     path
 }
 
-/// A23 math on a live omp 18.8.5, with no prompt: omp resumes a session whose answer has math
+/// Math on a live omp 18.8.5, with no prompt: omp resumes a session whose answer has math
 /// (no model call) and sends it as `md` with the TeX as written. The window typesets every
 /// delimiter of the dialect (`$…$`, `\(…\)` inline; `$$…$$`, `\[…\]`, `\begin{env}` display)
 /// into `svg`s painting in the text color, and shows the typo as `code.math-err` titled with
@@ -2446,9 +2446,9 @@ fn a23_omps_answer_draws_md_math_typeset() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A23 `prefs` and `effort` on a live omp 18.8.5 under Auk's full hello, with no prompt. The
+/// `prefs` and `effort` on a live omp 18.8.5 under Auk's full hello, with no prompt. The
 /// composer's footer shows omp's thinking effort as an `effort` node (not the T1 fallback row),
-/// drawn as the book's meter with omp's level. `/settings` opens omp's settings as a `prefs` sheet
+/// drawn as Tern's meter with omp's level. `/settings` opens omp's settings as a `prefs` sheet
 /// in the session's layer (not a screen surface): it docks at the pane's right edge (`aside`), so
 /// omp hears the narrower width and the full width back when it goes; Down moves omp's focus,
 /// which the sheet shows; Esc closes it. Nothing is changed: omp's config is byte-identical.
@@ -2613,7 +2613,7 @@ fn a23_omps_settings_open_as_prefs_and_footer_shows_effort() {
     );
 }
 
-/// A23 `prefs` with a picker in its editor card, on a live omp 18.8.5 with no prompt: in
+/// `prefs` with a picker in its editor card, on a live omp 18.8.5 with no prompt: in
 /// `/settings`, Enter on Dark Theme (the first row, focused when the sheet opens; 102 themes,
 /// over omp's 12) opens omp's submenu as an md `picker` child of the `prefs` node. It draws in the
 /// editor card, which is the sheet's frame (`.pf-editor.on.pk`): md-sheet tall where the sheet has

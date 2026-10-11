@@ -1,4 +1,4 @@
-//! Synthetic key events, for the S1 input checks (spec §23): the same physical keystrokes
+//! Synthetic key events, for the input checks: the same physical keystrokes
 //! posted to an Auk window ([`Window::type_stroke`]) and to a reference terminal's process
 //! ([`post_to_pid`]), so the bytes each sends to its program can be compared.
 //!

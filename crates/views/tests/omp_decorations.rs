@@ -1,7 +1,6 @@
-//! The Rust features the omp sheets wait on (amendment A24; research/omp-stylesheets.md §2.5 K11,
-//! §5 P6, §7.4, §8, §9 phase B): the Spindle mark in omp's working row, inline Markdown in omp's
-//! composer, the decorations (`.sf-caption`, `.sf-thought-sum`, `.sf-work-head`, `.sf-brand`)
-//! and the picker's row arrival. Constructed frames, and omp's recorded session.
+//! The Rust features the omp sheets wait on: the Spindle mark in omp's working row, inline Markdown
+//! in omp's composer, the decorations (`.sf-caption`, `.sf-thought-sum`, `.sf-work-head`,
+//! `.sf-brand`) and the picker's row arrival. Constructed frames, and omp's recorded session.
 
 mod common;
 
@@ -85,7 +84,7 @@ fn omp(settings: ViewSettings, features: &[&str], main: Value, dock: Value) -> H
 }
 
 // ---------------------------------------------------------------------------------------------
-// The Spindle mark (book:8324-8326, 8360)
+// The Spindle mark
 
 fn working_row() -> Value {
     json!([{"id": "w", "k": "row", "p": {"role": "omp.working", "gap": "sm"}, "c": [
@@ -179,7 +178,7 @@ fn the_spindle_mark_rests_under_reduce_motion_and_under_a_sheet() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Inline Markdown in omp's composer (book:9198-9201)
+// Inline Markdown in omp's composer
 
 const DRAFT: &str = "# Plan\nFix **the** `parse` step, see [docs](https://x.y)\n- *first*";
 
@@ -330,7 +329,7 @@ fn markdown_in_the_composer_maps_the_caret_and_round_trips_edits_undo_and_send()
 }
 
 // ---------------------------------------------------------------------------------------------
-// The folded composer's caption (book:11584, §9 phase B)
+// The folded composer's caption
 
 #[test]
 fn the_unfocused_composer_folds_to_a_caption_naming_the_session_and_the_draft() {
@@ -386,7 +385,7 @@ fn the_unfocused_composer_folds_to_a_caption_naming_the_session_and_the_draft() 
 }
 
 // ---------------------------------------------------------------------------------------------
-// The summary on a chain of thoughts (book:11583)
+// The summary on a chain of thoughts
 
 fn thought(id: &str, took: Option<u64>) -> Value {
     let mut p = json!({"role": "omp.thinking", "collapsible": true, "collapsed": true, "head": format!("{id}/h")});
@@ -444,7 +443,7 @@ fn the_first_head_of_a_chain_of_thoughts_carries_its_summary() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The work fold (book:9939-9945)
+// The work fold
 
 fn tool(id: &str, title: &str, took: Option<u64>) -> Value {
     let mut p = json!({"name": title.to_lowercase(), "title": title, "status": "done"});
@@ -636,7 +635,7 @@ fn omps_recorded_session_folds_its_tool_work() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// omp's app mark (book:11585)
+// omp's app mark
 
 #[test]
 fn the_omp_builtin_mark_sits_in_a_brand_decoration() {
@@ -657,7 +656,7 @@ fn the_omp_builtin_mark_sits_in_a_brand_decoration() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// P6: picker rows arrive (book:7938-7940)
+// Picker rows arrive
 
 fn items(ids: &[&str]) -> Value {
     Value::Array(

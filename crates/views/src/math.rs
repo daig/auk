@@ -1,4 +1,4 @@
-//! TeX math (§8.5, §18.4; research/elements.md §7.1, §7.3; amendment A23): the `math` kind and
+//! TeX math: the `math` kind and
 //! md math share this engine.
 //!
 //! - **Engine:** RaTeX, a pure-Rust port of KaTeX's parser and layout (`ratex-parser`,
@@ -16,7 +16,7 @@
 //! - **Cost:** formulas are cached process-wide by TeX, style and density (LRU past
 //!   [`CACHE_BYTES`]). Short TeX ([`INLINE_TEX`] bytes or less, typically well under a
 //!   millisecond) typesets on the caller's thread; longer TeX typesets in the background, as big
-//!   images decode (A9): natively on a worker thread, in the browser one formula per clock tick
+//!   images decode: natively on a worker thread, in the browser one formula per clock tick
 //!   ([`pump`]). Until then the element shows the TeX as text (`.math.pending`).
 
 use std::collections::HashMap;
@@ -87,7 +87,7 @@ impl Formula {
 pub type Typeset = Result<Arc<Formula>, String>;
 
 /// The TeX a `math` node or md delimiter typesets: display math drops blank lines (they would end
-/// the block), inline math is one line (newlines read as spaces) (book: `math`).
+/// the block), inline math is one line (newlines read as spaces).
 pub fn normalize(tex: &str, display: bool) -> String {
     if display {
         tex.lines()
@@ -600,7 +600,7 @@ pub(crate) struct Pending {
     pub class: &'static str,
 }
 
-/// Appends a formula to `parent` (book: md Math, `math`): `span.math` (inline),
+/// Appends a formula to `parent`: `span.math` (inline),
 /// `div.math-display` (display, a block of its own) or `span.math.display` (display amid a
 /// paragraph's text, `block` false) holding the TeX in `data-tex` around an `svg` that paints
 /// the formula in `currentColor`; a formula that fails is `code.math-err` titled with the error

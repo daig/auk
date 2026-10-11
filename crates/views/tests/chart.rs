@@ -1,4 +1,4 @@
-//! `chart` (T2, A23; book:6975-7075): heatmap, bars and spark drawn as DOM+CSS, with the book's
+//! `chart` (T2): heatmap, bars and spark drawn as DOM+CSS, with Tern's docs'
 //! props, classes, levels, sizes, token fill, summary, arrivals (`omp-cell`, `omp-bar`) and their
 //! replay on any prop change; geometry from the UI engine's layout and pixels from an offscreen
 //! render in both themes; and the charts omp 18.8.5 sends (its `/usage` activity heatmap and its
@@ -13,7 +13,7 @@ use auk_views::ViewSettings;
 use common::Harness;
 use serde_json::{Value, json};
 
-/// A harness whose engine accepts `chart` (the integrator advertises it with A23).
+/// A harness whose engine accepts `chart` (the integrator advertises it).
 fn harness(settings: ViewSettings) -> Harness {
     let mut config = Config::default();
     if !config.kinds.iter().any(|k| k == "chart") {
@@ -42,7 +42,7 @@ fn bx(h: &Harness, el: NodeId) -> auk_ui::Rect {
     h.doc.border_box(el).expect("laid out")
 }
 
-/// The heatmap of the book's example: 7 rows × `weeks` columns, with tips, row and month labels.
+/// The heatmap of Tern's docs' example: 7 rows × `weeks` columns, with tips, row and month labels.
 fn heatmap(weeks: usize) -> Value {
     let cells: Vec<Vec<Value>> = (0..7)
         .map(|r| {
@@ -88,7 +88,7 @@ fn heatmap_draws_cells_by_level_with_labels_tips_and_a_summary() {
     assert_eq!(h.attr(el, "aria-label").as_deref(), Some("12 deploys"));
     let style = h.view.written().style(el).unwrap_or("").to_owned();
     assert!(style.contains("--chart-c: var(--sf-c-success)"), "{style}");
-    // Parts the book names.
+    // Parts Tern's docs name.
     for part in ["hm", "mls", "grid", "rls", "sum"] {
         assert_eq!(h.find_class(el, part).len(), 1, ".{part}");
     }
@@ -98,7 +98,7 @@ fn heatmap_draws_cells_by_level_with_labels_tips_and_a_summary() {
     assert_eq!(mls, ["Sep", "Oct", "Nov"]);
     let rls: Vec<String> = h.find_class(el, "rl").iter().map(|&m| h.text(m)).collect();
     assert_eq!(rls, ["Mon", "", "Wed", "", "Fri", "", ""]);
-    // A column per week, a cell per row, levels and tips as the book maps them.
+    // A column per week, a cell per row, levels and tips as Tern's docs map them.
     let wks = h.find_class(el, "wk");
     assert_eq!(wks.len(), 20);
     let cells = h.find_class(el, "c");

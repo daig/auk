@@ -1,4 +1,4 @@
-//! The SDK's `review-queue` block (M7) against a stand-in `gh` on `PATH`, so the test never
+//! The SDK's `review-queue` block against a stand-in `gh` on `PATH`, so the test never
 //! touches the user's GitHub login. Its own test binary: it sets `PATH` for the process before
 //! any thread starts.
 

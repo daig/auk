@@ -1,4 +1,4 @@
-//! `auk web serve` (§10.3, §12.5): serves the browser client for this machine's daemon.
+//! `auk web serve`: serves the browser client for this machine's daemon.
 //!
 //! - **Binding:** `127.0.0.1:8377` by default. A non-loopback address is refused unless
 //!   `--allow-remote` says so explicitly.
@@ -9,15 +9,15 @@
 //! - **Rebinding and cross-site requests:** on a loopback bind, requests whose `Host` isn't the
 //!   loopback address and port are refused, and the WebSocket also needs a same-origin `Origin`.
 //! - **Replication:** `/ws` is a WebSocket that bridges to the daemon socket. Each binary
-//!   message carries exactly one frame of the replication protocol (§15.6) in each direction,
+//!   message carries exactly one frame of the replication protocol in each direction,
 //!   unchanged, so the browser speaks the same protocol as native clients and the daemon
-//!   refuses a client of another version itself (X9).
+//!   refuses a client of another version itself.
 //!
 //! The client's files (`auk_web.js` and `auk_web_bg.wasm`, the output of `wasm-bindgen
 //! --target web` over the `auk-web` crate built for `wasm32-unknown-unknown`) come from the
 //! assets directory: `--assets`, else `$AUK_WEB_ASSETS`, else `web` beside the executable (in
 //! the app bundle, `Contents/Resources/web`). The grid's font is the system's monospace font,
-//! served to the page, since the browser client can't read local fonts (§18.3).
+//! served to the page, since the browser client can't read local fonts.
 
 use std::collections::HashSet;
 use std::ffi::OsString;
@@ -41,7 +41,7 @@ use futures_util::{SinkExt, StreamExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 
-/// Tern's binding, which we keep (§10.3).
+/// Tern's binding, which we keep.
 pub const DEFAULT_BIND: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8377);
 
 /// The session cookie's name.
@@ -97,7 +97,7 @@ struct WebCli {
 
 #[derive(Debug, clap::Subcommand)]
 enum WebCommand {
-    /// Serve the browser client for this machine's daemon (§10.3).
+    /// Serve the browser client for this machine's daemon.
     Serve(Args),
 }
 
@@ -123,7 +123,7 @@ pub fn main(args: Vec<OsString>) -> ExitCode {
     }
 }
 
-/// Refuses a non-loopback address unless `allow_remote` (§12.5).
+/// Refuses a non-loopback address unless `allow_remote`.
 pub fn check_bind(addr: SocketAddr, allow_remote: bool) -> Result<(), String> {
     if addr.ip().is_loopback() || allow_remote {
         Ok(())

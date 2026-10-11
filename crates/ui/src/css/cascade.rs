@@ -12,7 +12,7 @@ use selectors::parser::{AncestorHashes, Combinator, Component};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// Where a sheet comes from (§8.4).
+/// Where a sheet comes from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Origin {
     /// The user-agent sheet.

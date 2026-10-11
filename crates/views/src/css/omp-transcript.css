@@ -1,17 +1,16 @@
-/* omp's transcript (research/omp-stylesheets.md §7): the user message and its Copy/Rewind row,
+/* omp's transcript: the user message and its Copy/Rewind row,
    thinking, turn usage and markers, assistant prose, the error card, extension blocks, the welcome
-   card and the rewind screen. Amendment A24. Role refinements only: the card, section and tone
-   looks stay the kit's. :active and :focus-visible need element states (G4), so no resting look
+   card and the rewind screen. Role refinements only: the card, section and tone
+   looks stay the kit's. :active and :focus-visible need element states, so no resting look
    depends on them. */
 
-/* Rhythm (§7.2): omp's cols send no gap, and a col has none by default. */
+/* Rhythm: omp's cols send no gap, and a col has none by default. */
 .sf-col[data-role='omp.assistant'], .sf-col[data-role='omp.activity'],
 .sf-col[data-role='omp.transcript'] { gap: var(--sf-inner-gap); }
 .sf-col[data-role='omp.status-block'] { gap: 2px; font-size: var(--omp-meta-fs); color: var(--omp-meta); }
 
-/* User message (§7.3, Q-T1, Q-T3, Q-T5): a fill-only bubble at the right, width-capped (U1-U2),
-   with its time and Copy/Rewind at the foot, right-aligned (U3). The tools stay visible, faint,
-   until focus states let them hide (U7-U11). */
+/* User message: a fill-only bubble at the right, width-capped, with its time and Copy/Rewind at
+   the foot, right-aligned. The tools stay visible, faint, until focus states let them hide. */
 .sf-card[data-role='omp.user'] {
   align-self: flex-end; width: fit-content; max-width: var(--omp-bubble-max);
   border-color: transparent; background-color: var(--sf-tint-user, var(--l1)); border-radius: var(--r-card);
@@ -24,34 +23,34 @@
 .sf-row[data-role='omp.user.images'] { order: 0; gap: 6px; flex-wrap: wrap; }
 .sf-row[data-role='omp.user.images'] > .sf-image { border-radius: var(--r-chip); }
 .sf-row[data-role='omp.user.badges'] { order: 3; justify-content: flex-end; gap: 4px; }
-/* U6: the full date shows through the title. */
+/* The full date shows through the title. */
 .sf-text[data-role='omp.user.time'] { padding: 0 4px; color: var(--omp-faint); cursor: default; }
 .sf-text[data-role='omp.user.time']:hover { color: var(--omp-meta); }
-/* U7-U8: the quiet control (omp.css), faint, lifting while the bubble is hovered. */
+/* The quiet control (omp.css), faint, lifting while the bubble is hovered. */
 .sf-text[data-role='omp.user.tool'] { color: var(--omp-faint); }
 .sf-card[data-role='omp.user']:hover .sf-text[data-role='omp.user.tool'] { color: var(--omp-meta); }
-/* U9-U11: one step above the bubble's --l1. Led by the card so they outrank U8. */
+/* One step above the bubble's --l1. Led by the card so they outrank the hover lift. */
 .sf-card[data-role='omp.user'] .sf-text.sf-act[data-role='omp.user.tool']:hover { background-color: var(--l2); color: var(--t1); }
 .sf-card[data-role='omp.user'] .sf-text.sf-act[data-role='omp.user.tool']:active { background-color: var(--l3); }
 .sf-card[data-role='omp.user'] .sf-text.sf-act[data-role='omp.user.tool']:focus-visible {
   outline: var(--omp-focus); outline-offset: 1px; color: var(--t1);
 }
-/* U12: omp 18.8.5 sends no userMessageText, so the fallback applies. */
+/* omp 18.8.5 sends no userMessageText, so the fallback applies. */
 .sf-card[data-role='omp.user'] > .sf-card-body > .sf-md { color: var(--sf-p-userMessageText, var(--t1)); }
 .sf-badge[data-role='omp.reaction'] { background-color: transparent; padding: 0 2px; font-size: 14px; }
-/* U14-U15: not the user's own typing, so not a bubble. */
+/* Not the user's own typing, so not a bubble. */
 .sf-card[data-role='omp.user.synthetic'] { align-self: stretch; border-color: transparent; background-color: transparent; }
 .sf-card[data-role='omp.user.collab'] { align-self: stretch; max-width: none; }
-/* Q-T2: under titanium, userMessageBg at 60% sits about 1.02:1 against the page (paint.rs), so
+/* Under titanium, userMessageBg at 60% sits about 1.02:1 against the page (paint.rs), so
    under a palette the bubble keeps a whisper ring. */
 .sf-pal .sf-card[data-role='omp.user'] { box-shadow: inset 0 0 0 1px var(--l1); }
-/* U16: U1 hides the kit's pick bar (a border), so it draws as an inset shadow. Drop keeps the
+/* The bubble hides the kit's pick bar (a border), so it draws as an inset shadow. Drop keeps the
    kit's opacity. */
 .sf-card[data-role='omp.user'][data-mark='pick'] {
   border-left-width: 0; padding-left: 0; box-shadow: inset 2px 0 0 var(--accent);
 }
 
-/* Thinking (§7.4): a quiet disclosure; the thought in italic thinkingText. */
+/* Thinking: a quiet disclosure; the thought in italic thinkingText. */
 .sf-section[data-role^='omp.thinking'] > .sf-section-head {
   min-height: 20px; gap: 6px; font-size: 12px; color: var(--omp-meta);
 }
@@ -63,10 +62,10 @@
 .sf-section[data-role^='omp.thinking'] .sf-md { color: var(--omp-think); font-style: italic; }
 .sf-spinner[data-role='omp.thinking.spin'] { --tc: var(--sf-p-thinkingText, var(--accent)); }
 .sf-section[data-role='omp.thinking.live'] .sf-elapsed { color: var(--omp-faint); }
-/* The summary on the first head of a chain of thoughts (a decoration, book:11583). */
+/* The summary on the first head of a chain of thoughts (a decoration). */
 .sf-section-head .sf-deco.sf-thought-sum { margin-left: 6px; color: var(--omp-meta); }
 
-/* Turn usage and meta lines (§7.5). */
+/* Turn usage and meta lines. */
 .sf-row[data-role='omp.turn.usage'] {
   gap: 4px; font-size: var(--omp-meta-fs); color: var(--omp-meta); cursor: default;
 }
@@ -88,18 +87,18 @@
 .sf-row[data-role='omp.marker.served-model'] { color: var(--warn); }
 .sf-rule[data-role^='omp.marker.'] { font-size: var(--omp-meta-fs); }
 
-/* Assistant prose and its variants (§7.6): plain prose, no card. */
+/* Assistant prose and its variants: plain prose, no card. */
 .sf-col[data-role='omp.assistant.rewound'] { gap: var(--sf-inner-gap); opacity: 0.55; }
 .sf-badge[data-role='omp.assistant.rewound-tag'] { align-self: flex-start; }
 .sf-section[data-role='omp.assistant.recovered'] > .sf-section-head { font-size: 12px; color: var(--omp-meta); }
 .sf-text[data-role='omp.assistant.abort'] { font-size: 12px; }
 
-/* Error card (§7.7): the kit's error card; its actions are quiet controls, Retry the default. */
+/* Error card: the kit's error card; its actions are quiet controls, Retry the default. */
 .sf-text[data-role='omp.error.message'] { font-size: 12px; color: var(--t2); }
 .sf-row[data-role='omp.error.actions'] { gap: 4px; margin-top: 2px; }
 .sf-row[data-role='omp.error.action']:first-child { color: var(--t1); background-color: var(--l1); }
 
-/* Extension, custom and context-event blocks (§7.8). */
+/* Extension, custom and context-event blocks. */
 .sf-card[data-role='omp.custom'], .sf-card[data-role='omp.hook'] {
   background-color: var(--sf-tint-custom, var(--sf-card-bg));
 }
@@ -112,14 +111,14 @@
 .sf-checklist[data-role='omp.notice.todo'] { align-self: flex-start; }
 .sf-col[data-role='omp.collab.qrcode'] { align-items: flex-start; gap: 6px; }
 
-/* Welcome card (§7.9): logo, wordmark, version and a tip. */
+/* Welcome card: logo, wordmark, version and a tip. */
 .sf-row[data-role='omp.welcome.lockup'] { gap: 12px; }
 .sf-col[data-role='omp.welcome.mark'] { gap: 2px; }
 .sf-text[data-role='omp.welcome.wordmark'] { font-size: 16px; line-height: 20px; letter-spacing: 0.02em; }
 .sf-row[data-role='omp.welcome.tip'] { gap: 6px; padding-top: 4px; border-top: 1px solid var(--l1); color: var(--t2); }
 .sf-icon[data-role='omp.welcome.tip-icon'] { color: var(--warn); }
 
-/* Rewind screen (§7.10; not recorded yet): branches side by side, the active one in accent, the
+/* Rewind screen (not recorded yet): branches side by side, the active one in accent, the
    cut marked, the bar in the dock. Role-scoped, so nothing else matches. */
 .sf-row[data-role='omp.rewind.strip'] { gap: 16px; align-items: flex-start; overflow-x: auto; }
 .sf-col[data-role='omp.rewind.branch'] {

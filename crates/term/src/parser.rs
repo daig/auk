@@ -3,12 +3,12 @@
 //! Vendored from the `vte` crate, version 0.15.0 (Apache-2.0 OR MIT, Copyright (c) 2016 Joe Wilm
 //! and contributors), and changed for Auk:
 //!
-//! - **APC strings** (§6.1). `vte` swallows them; here `ESC _ tsp;…` strings are dispatched whole
+//! - **APC strings**. `vte` swallows them; here `ESC _ tsp;…` strings are dispatched whole
 //!   and other APC strings are dropped. A 0x9C byte inside an APC string is payload, the string
 //!   ends at ST or BEL, and a string longer than [`APC_LIMIT`] bytes (counted after `ESC _`) is
 //!   abandoned, the rest of it showing as text.
 //! - **Inspectable state.** The parser records the bytes that brought it into its current
-//!   sequence, so that a snapshot can replay them and a state hash can cover them (§15.2, §15.3).
+//!   sequence, so that a snapshot can replay them and a state hash can cover them.
 //!   Bytes that don't change the state (executed C0 controls, digits past saturation, ignored
 //!   bytes) are not recorded, which keeps the record small.
 //! - **Batched printing.** Runs of printable text go to the performer as one `&str`, and the
@@ -19,13 +19,13 @@
 //! intermediate limits, which bytes execute where) behaves as `vte` 0.15.0 does, so that the
 //! grid matches `alacritty_terminal`, which is built on it, except for one fix: a UTF-8 sequence
 //! split across calls no longer swallows the bytes after it (see `advance_partial_utf8`), so the
-//! result never depends on how the input is split (§15.2).
+//! result never depends on how the input is split.
 
 use std::str;
 
 const MAX_INTERMEDIATES: usize = 2;
 pub(crate) const MAX_PARAMS: usize = 32;
-/// The longest APC string, counted after `ESC _` (§6.1).
+/// The longest APC string, counted after `ESC _`.
 pub(crate) const APC_LIMIT: usize = 262_144;
 /// The longest OSC body kept; later bytes are dropped (as `vte` does without `std`).
 pub(crate) const OSC_LIMIT: usize = 262_144;

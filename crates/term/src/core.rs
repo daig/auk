@@ -1,6 +1,6 @@
 //! The emulator: everything the parser drives, apart from the parser itself.
 //!
-//! Semantics follow `alacritty_terminal` 0.26 (the reference grid, §21), with the deliberate
+//! Semantics follow `alacritty_terminal` 0.26 (the reference grid), with the deliberate
 //! differences listed in `tests/differential.rs`.
 
 use std::collections::VecDeque;
@@ -1106,7 +1106,7 @@ impl Core {
         self.reply(text.as_bytes());
     }
 
-    // Anchors (§7.4).
+    // Anchors.
 
     pub(crate) fn open_anchor(&mut self, key: AnchorKey) -> Result<Line, AnchorError> {
         if self.alt_active {

@@ -1,8 +1,8 @@
-//! The SDK examples (GOAL.md row `sdk_examples`, spec §21 suite 2, AC5): `table`, `ask`, `progress`
+//! The SDK examples: `table`, `ask`, `progress`
 //! and `chat` from the pinned tern-sdk, in Python, Rust, TypeScript and Go, each run in a daemon
 //! pane with a headless window as the drawing (acking) primary, each completing a scripted
 //! interaction (the scenarios of `fixtures/scenarios/`). Each also prints plain text in a terminal
-//! without TSP (AC3): the same pane setup with TSP switched off.
+//! without TSP: the same pane setup with TSP switched off.
 //!
 //! Comparisons are on decoded JSON: every SDK records the logical messages it sent and received
 //! (`TERN_TSP_RECORD`); replaying the program's own record of what it sent into a fresh replica
@@ -251,7 +251,7 @@ impl Run {
             .iter()
             .find(|l| l["body"]["r"] == "hello")
             .unwrap_or_else(|| panic!("the program never read a hello reply: {ins:?}"));
-        // T0, T1 (§8.2, D24) and the T2 kinds drawn so far (A23).
+        // T0, T1 and the T2 kinds drawn so far.
         assert_eq!(
             reply["body"]["kinds"].as_array().unwrap().len(),
             38 + auk_tsp::T2_KINDS.len()

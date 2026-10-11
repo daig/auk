@@ -1,4 +1,4 @@
-//! A window's mirror connection (§15.6) over a local socket or an SSH link (§10.2).
+//! A window's mirror connection over a local socket or an SSH link.
 //!
 //! [`Link::connect`] opens the transport and says hello; it returns the sending half ([`Link`],
 //! cheap to clone and shared by threads) and the receiving half ([`LinkReader`]), which a
@@ -6,18 +6,18 @@
 //!
 //! Over SSH the link survives drops. When the stream ends, the reader reruns `ssh` with a
 //! backoff, says hello again with the window's latest facts, reattaches the window key and
-//! hands on what the daemon sends: the layout, then a fresh snapshot of every pane (§15.3),
+//! hands on what the daemon sends: the layout, then a fresh snapshot of every pane,
 //! which replaces the window's replica. Until every pane's snapshot has arrived, typing and
-//! other user input is held, then sent in order (§10.1); acks are dropped, since the window
+//! other user input is held, then sent in order; acks are dropped, since the window
 //! redraws and acks what the snapshots bring.
 //!
-//! A local link reconnects the same way when its daemon was upgraded in place (§15.7): the new
+//! A local link reconnects the same way when its daemon was upgraded in place: the new
 //! daemon keeps the old one's listening socket, so connecting again succeeds. A local daemon
 //! that went away refuses the connection, and the link fails at once. A daemon upgrading itself
 //! to this client's release refuses the hello with `upgrading` set; the link says hello again
 //! until the new daemon welcomes it.
 //!
-//! Connection states (§10.1): `connecting` (opening, or attaching for the first time),
+//! Connection states: `connecting` (opening, or attaching for the first time),
 //! `connected`, `stalled` (input sent and nothing heard for [`STALL_AFTER`]), `reconnecting(n)`
 //! (attempt n, through the resync) and `failed`. Tern's `verify` state for unknown host keys
 //! is SSH's own prompt here.
@@ -66,7 +66,7 @@ pub enum Target {
     Ssh(SshTarget),
 }
 
-/// A link's connection state (§10.1).
+/// A link's connection state.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum State {
@@ -226,7 +226,7 @@ impl Write for Duplex {
 const UPGRADE_WAIT: Duration = Duration::from_secs(20);
 
 /// Opens the transport and says hello. A daemon that answers that it is upgrading to this
-/// client's release (§15.7) is asked again until the new one welcomes the client.
+/// client's release is asked again until the new one welcomes the client.
 fn greet(target: &Target, hello: &Hello) -> Result<(Opened, Welcome), LinkError> {
     let deadline = Instant::now() + UPGRADE_WAIT;
     loop {
@@ -248,7 +248,7 @@ fn handshake(opened: Opened, hello: &Hello) -> Result<(Opened, Welcome), Handsha
         hop,
         bridge,
     } = opened;
-    // The daemon shows this link's hop to every client attached to the host (§10.1 presence).
+    // The daemon shows this link's hop to every client attached to the host (presence).
     let mut hello = hello.clone();
     hello.identity = vec![hop.clone().into()];
     let (client, welcome) = Client::handshake(Duplex { reader, writer }, &hello)?;
@@ -590,7 +590,7 @@ impl Link {
         if st.detached {
             return false;
         }
-        // A local daemon that still accepts connections was upgraded in place (§15.7);
+        // A local daemon that still accepts connections was upgraded in place;
         // reconnecting to one that went away fails at once.
         true
     }

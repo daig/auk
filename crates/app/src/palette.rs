@@ -1,4 +1,4 @@
-//! The command palette (§9.8): built-in commands, the rows plugins add (shown while their
+//! The command palette: built-in commands, the rows plugins add (shown while their
 //! `available` says so), and "Open file…" for a typed path, whose open goes through
 //! `route.open` with origin `palette`.
 
@@ -13,7 +13,7 @@ pub enum RowAction {
     Plugin(String),
     /// Open a path (origin `palette`).
     Open(String),
-    /// Open a block of this type (`<plugin>.<block>`, §9.5).
+    /// Open a block of this type (`<plugin>.<block>`).
     Block(String),
     /// Show a session of the window key ("Switch Session…").
     Session(u64),

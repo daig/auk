@@ -1,4 +1,4 @@
-//! Input encoding (§15.4, §19), checked by decoding with the Tern SDK's key decoder: what a
+//! Input encoding, checked by decoding with the Tern SDK's key decoder: what a
 //! program built on the SDK reads must be the key that was pressed.
 
 // Uses dev-dependencies that don't build for wasm32 (see Cargo.toml).

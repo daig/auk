@@ -303,7 +303,7 @@ fn omp_session_replays_without_errors() {
     assert!(checked > 50);
 }
 
-/// A24's omp recordings (no prompts; the error card's one request went to a local 401 server):
+/// The omp recordings (no prompts; the error card's one request went to a local 401 server):
 /// each replays with no errors and every frame lays out with finite boxes.
 #[test]
 fn omp_a24_fixtures_replay_without_errors() {

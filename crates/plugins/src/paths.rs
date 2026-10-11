@@ -1,4 +1,4 @@
-//! Auk's config and state directories for plugins (§9.1, D5).
+//! Auk's config and state directories for plugins.
 //!
 //! - macOS: `~/Library/Application Support/Auk` for both;
 //! - Linux: `$XDG_CONFIG_HOME/auk` (`~/.config/auk`) and `$XDG_STATE_HOME/auk` (`~/.local/state/auk`);

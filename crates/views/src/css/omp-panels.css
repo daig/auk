@@ -1,5 +1,5 @@
-/* omp's panels and overlays (research/omp-stylesheets.md §10): the overlay forms, the Usage
-   overlay and the other panel sheets. Amendment A24.
+/* omp's panels and overlays: the overlay forms, the Usage
+   overlay and the other panel sheets.
    One glass frame per sheet: omp draws its overlays either as a roleless overlay holding a
    card with the omp.overlay.<name> role (forms A and B), whose frame is stripped here, or with
    the role on the overlay itself (form C), whose sheet gets roomier padding. The glass, the

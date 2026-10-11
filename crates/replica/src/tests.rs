@@ -337,7 +337,7 @@ fn restored_surfaces_are_closed_read_only_and_survive_snapshots_and_prompts() {
     let late = Replica::from_snapshot(&a.snapshot(), Role::Follower, None);
     assert_eq!(late.state_hash(), a.state_hash());
     assert!(late.tsp().surfaces().iter().all(|s| s.restored()));
-    // The new shell's prompt keeps the restored inline surface (§5.4, ours).
+    // The new shell's prompt keeps the restored inline surface (Auk's own behavior).
     let (seq, _) = a.push(Item::Output(b"\x1b]133;A\x07$ "));
     b.apply(seq, Item::Output(b"\x1b]133;A\x07$ ")).unwrap();
     assert_eq!(a.tsp().surfaces().len(), 2);

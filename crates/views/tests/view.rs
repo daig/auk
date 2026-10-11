@@ -361,7 +361,7 @@ fn md_streaming_caret_and_tool_and_agent_timers_run_on_the_view_clock() {
 
 #[test]
 fn an_arriving_age_restarts_top_level_timers_and_nested_agent_ages_only_on_a_new_value() {
-    // §7.13 (book:6731, 7864, 8048): a top-level `age` (elapsed, tool) restarts whenever it
+    // A top-level `age` (elapsed, tool) restarts whenever it
     // arrives, unchanged or a countdown too; an agent's nested ages restart only on a new value.
     let mut h = Harness::new();
     h.hello(&[]);
@@ -467,7 +467,7 @@ fn reduce_motion_gives_still_equivalents() {
     assert_eq!(h.text(h.el("s1", "el")), "0.7s");
 }
 
-/// §7.13 Reduce Motion: no shimmer (the `shimmer` kind and span `fx` hold still, in the text's
+/// Reduce Motion: no shimmer (the `shimmer` kind and span `fx` hold still, in the text's
 /// own color), no pulse, and a `meter` shows its value at once.
 #[test]
 fn reduce_motion_means_no_shimmer_no_pulse_and_meters_at_their_value() {
@@ -516,7 +516,7 @@ fn reduce_motion_means_no_shimmer_no_pulse_and_meters_at_their_value() {
     assert_eq!(h.view.written().style(fill), Some("width: 40%"));
 }
 
-/// §8.4: the system's Reduce Motion, Reduce Transparency and Increase Contrast reach program
+/// The system's Reduce Motion, Reduce Transparency and Increase Contrast reach program
 /// sheets as `prefers-reduced-motion`, `prefers-reduced-transparency` and `prefers-contrast`, and
 /// a settings change re-matches them.
 #[test]
@@ -578,7 +578,7 @@ fn levels(h: &Harness, chars: &[auk_ui::NodeId]) -> Vec<u8> {
         .collect()
 }
 
-/// §7.13: the `shimmer` kind sweeps on the view's clock (2.25 s, staggered per character), and
+/// The `shimmer` kind sweeps on the view's clock (2.25 s, staggered per character), and
 /// span `fx` (shimmer and pulse) inside any spans move with it.
 #[test]
 fn shimmer_and_span_fx_move_on_the_view_clock() {
@@ -650,7 +650,7 @@ fn shimmer_and_span_fx_move_on_the_view_clock() {
     assert_eq!(levels(&h, &kind_chars), kind_seen[2]);
 }
 
-/// §7.13: a `meter` grows from 0 on first show (0.6 s) and later values transition (0.4 s), on
+/// A `meter` grows from 0 on first show (0.6 s) and later values transition (0.4 s), on
 /// the view's clock.
 #[test]
 fn meter_values_grow_and_transition_on_the_view_clock() {
@@ -978,13 +978,13 @@ fn long_lists_code_ansi_md_kv_tables_and_trees_virtualize() {
             text_laid_out(&h, last),
             "{name}: the last row lays out in view"
         );
-        // The copy text still has every row (§8.3: Copy sees everything).
+        // The copy text still has every row (Copy sees everything).
         assert!(h.text(x).contains(&format!("{}", n - 1)), "{name}");
     }
 }
 
-/// §7.10 Cost: "Ops on off-screen nodes apply immediately; their layout waits until they come
-/// into view." A `set` and a `text` op on rows far below the view of a long, virtualized `col`
+/// Ops on off-screen nodes apply immediately; their layout waits until they come into view.
+/// A `set` and a `text` op on rows far below the view of a long, virtualized `col`
 /// land in the document, the DOM and the col's Copy at once, while those rows stay unlaid; when
 /// the view scrolls to them they lay out with the new text.
 #[test]
@@ -1326,7 +1326,7 @@ fn fold_and_overlay_transitions_run_on_the_view_clock() {
         h.view.tick(&mut h.doc, &h.pane, h.now + 316.0).is_none(),
         "settled"
     );
-    // New props build its card again, after the pop: it doesn't pop again (A17).
+    // New props build its card again, after the pop: it doesn't pop again.
     h.now += 1000.0;
     h.frame_ops("s1", 4, json!([["set", "ov", {"head": "Ask again"}]]));
     h.frame();
@@ -1373,9 +1373,9 @@ fn scroll_offsets(h: &Harness, el: auk_ui::NodeId) -> Vec<(auk_ui::NodeId, f32)>
     out
 }
 
-/// §7.6 `scroll`: "An inline surface's `main` ignores it." Scrolling `main` leaves every scroll
+/// An inline surface's `main` ignores `scroll`. Scrolling `main` leaves every scroll
 /// offset in the surface as it was (a scrollable list inside it included), while the same op on
-/// the list itself, and on a screen surface's `main` (which scrolls itself, §7.5), moves them.
+/// the list itself, and on a screen surface's `main` (which scrolls itself), moves them.
 #[test]
 fn scroll_on_an_inline_surfaces_main_leaves_every_scroll_offset_unchanged() {
     let mut h = Harness::new();
@@ -1436,7 +1436,7 @@ fn scroll_on_an_inline_surfaces_main_leaves_every_scroll_offset_unchanged() {
     assert_eq!(h.doc.scroll_offset(smain).1, 0.0);
 }
 
-/// §8.3 virtualization thresholds, at their limits: a `col` virtualizes over 64 children, `code`
+/// Virtualization thresholds, at their limits: a `col` virtualizes over 64 children, `code`
 /// over 400 lines and a `list` over 200 items. At the limit everything lays out (the last row,
 /// far below the view, included); one more and the rows far below the view are only estimated.
 #[test]
@@ -1487,7 +1487,7 @@ fn virtualization_starts_just_past_64_col_children_400_code_lines_and_200_list_i
     }
 }
 
-/// §8.3 Spacing: blocks in `main` are 16px apart (`--sf-block-gap`), and the parts inside a card
+/// Spacing: blocks in `main` are 16px apart (`--sf-block-gap`), and the parts inside a card
 /// 8px apart (`--sf-inner-gap`), in the terminal's design units (the region's zoom scales them
 /// with the font). Programs never send spacing.
 #[test]

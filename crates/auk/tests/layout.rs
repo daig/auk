@@ -1,14 +1,14 @@
-//! The layout suite (GOAL.md row `layout`, spec §8, §18): the UI engine against WebKit.
+//! The layout suite: the UI engine against WebKit.
 //!
 //! - **Probe pages** (`crates/conformance/probes`), one per layout mode the engine implements
-//!   (§18.2: block, inline, flex, grid, table, positioned) plus collapsed tables, overflow, mixed
+//!   (block, inline, flex, grid, table, positioned) plus collapsed tables, overflow, mixed
 //!   modes and zoom, set in Ahem: every element's border box within 1 CSS px of WebKit's. A page in
 //!   the system fonts is held to the real-font tolerance.
 //! - **Fixtures**: every `el`-plus-stylesheet recording (`fixtures/tsp/docs-*`, `python-*`) is played
 //!   into a pane of the real daemon with `surface-play`; a window replica draws it through
 //!   `auk-tsp`, `auk-views` and `auk-ui`, and `auk-views` exports the same DOM and CSS as a page
 //!   for WebKit. Every box is within 2 CSS px or 2% of its size, whichever is larger.
-//! - **Kinds**: the daemon's hello advertises exactly T0+T1 (D22), and a surface holding every one
+//! - **Kinds**: the daemon's hello advertises exactly T0+T1, and a surface holding every one
 //!   of them, sent by a program in a daemon pane, renders: each node is an `.sf.sf-<kind>` element
 //!   with its `data-id`, and every kind lays out to a non-empty box.
 //!
@@ -257,12 +257,12 @@ fn has_el(v: &Value) -> bool {
 // ---------------------------------------------------------------------------------------------
 // Kinds: advertised exactly T0+T1, and each renders.
 
-/// §8.2's tiers, spelled out from the spec.
+/// The kind tiers, spelled out.
 const T0: &str =
     "col row card section rule spacer text badge kv icon spinner elapsed progress ansi rows el";
 const T1: &str = "md code diff editor input status seg overlay toast shimmer rate meter list item tabs table tree kbd tool agent checklist image";
 
-/// Kinds that render as spans (§8.3: inline kinds).
+/// Kinds that render as spans (the inline kinds).
 const INLINE: [&str; 7] = [
     "badge", "kbd", "icon", "spinner", "shimmer", "elapsed", "rate",
 ];
@@ -308,7 +308,7 @@ fn every_t0_and_t1_kind_renders() {
         .into_iter()
         .filter(|b| b["ev"] == "error")
         .collect();
-    // The one error is the surface's deliberate unknown `el` tag (§7.7).
+    // The one error is the surface's deliberate unknown `el` tag.
     assert_eq!(
         errors,
         [
@@ -370,7 +370,7 @@ fn every_t0_and_t1_kind_renders() {
         }
     }
     let kinds: BTreeSet<&str> = seen.keys().map(String::as_str).collect();
-    // T2 kinds have their own suites (A23); the shared probe surface stays T0+T1.
+    // T2 kinds have their own suites; the shared probe surface stays T0+T1.
     let probed: BTreeSet<&str> = want
         .iter()
         .copied()
@@ -380,7 +380,7 @@ fn every_t0_and_t1_kind_renders() {
         kinds, probed,
         "the surface holds a node of every advertised T0 and T1 kind"
     );
-    // A toast node is hidden by design; the pane's toast layer shows it (book:7636).
+    // A toast node is hidden by design; the pane's toast layer shows it.
     let shown = descendants(&p.doc, p.body)
         .into_iter()
         .filter(|&el| p.class(el).split(' ').any(|c| c == "toast"))
@@ -417,7 +417,7 @@ fn descendants(
 }
 
 // ---------------------------------------------------------------------------------------------
-// `el`: every one of its 42 tags (§8.2), drawn and compared with WebKit.
+// `el`: every one of its 42 tags, drawn and compared with WebKit.
 
 /// An `el` node.
 fn el(id: &str, tag: &str, text: Option<&str>, c: Vec<Value>) -> Value {
@@ -580,7 +580,7 @@ fn every_el_tag() -> Value {
     serde_json::json!([doc])
 }
 
-/// §8.2 "`el` covers all 42 tags": a program in a daemon pane sends a surface using every tag in
+/// `el` covers all 42 tags: a program in a daemon pane sends a surface using every tag in
 /// `auk_tsp::EL_TAGS`; a drawing window (`auk-tsp`, `auk-views`, `auk-ui`) builds each node as its
 /// element (`form` as a `div`, the checkbox and radio as `span`s), all lay out, and the page
 /// `auk-views` exports lays out in WebKit within the fixtures' tolerance.

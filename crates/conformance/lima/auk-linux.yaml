@@ -1,4 +1,4 @@
-# The Linux VM for the `remote` suite (GOAL.md): it builds and runs Auk's Linux daemon, and the
+# The Linux VM for the `remote` suite: it builds and runs Auk's Linux daemon, and the
 # suite attaches to it with `ssh … auk attach --stdio`. Create with:
 #   limactl create --name auk-linux crates/conformance/lima/auk-linux.yaml
 base: template:ubuntu-24.04

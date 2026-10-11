@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Luau's native codegen maps its code with MAP_JIT (spec §20, spike S5). -->
+	<!-- Luau's native codegen maps its code with MAP_JIT. -->
 	<key>com.apple.security.cs.allow-jit</key>
 	<true/>
 </dict>

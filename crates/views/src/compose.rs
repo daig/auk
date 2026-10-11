@@ -1,4 +1,4 @@
-//! The pane flow (§6.2): runs of grid rows at a fixed height, with surface blocks at their natural
+//! The pane flow: runs of grid rows at a fixed height, with surface blocks at their natural
 //! height in place of their anchor rows. [`compose`] is pure: from the pane's line count, its
 //! blocks, its tail and the scroll state it decides which buffer lines to draw, where each row
 //! goes and where each visible block goes. Selection, mouse reports, links and clicks on surfaces
@@ -9,8 +9,7 @@
 //! top row while everything down to the tail fits; once blocks make the content taller than the
 //! view, it scrolls just enough to keep the tail's bottom at the view's bottom. So blank screen
 //! rows below the tail give way first, and a surface the program just drew stays in view rather
-//! than being pushed off by empty rows (§6.2: "while the view follows the tail, the tail stays
-//! pinned").
+//! than being pushed off by empty rows (while the view follows the tail, the tail stays pinned).
 //!
 //! **Scrolled up.** Scrolling is in pixels, measured up from the following position. Once
 //! scrolled, the view is anchored to the line at its top, so content above or below that changes
@@ -53,7 +52,7 @@ pub struct Flow<'a> {
     pub view: f32,
     /// Blocks, in line order.
     pub blocks: &'a [Block],
-    /// Lines from here on are hidden: stray output under a live inline surface (§7.3).
+    /// Lines from here on are hidden: stray output under a live inline surface.
     pub hide_from: Option<Line>,
 }
 

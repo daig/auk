@@ -1,13 +1,13 @@
 {
   "argv": [
     "python3",
-    "/Users/dai/code/tern-clone/third_party/tern-sdk/python/examples/ask.py"
+    "third_party/tern-sdk/python/examples/ask.py"
   ],
-  "cwd": "/Users/dai/code/tern-clone/third_party/tern-sdk",
+  "cwd": "third_party/tern-sdk",
   "cols": 120,
   "rows": 40,
   "env": [
-    "PYTHONPATH=/Users/dai/code/tern-clone/third_party/tern-sdk/python/src"
+    "PYTHONPATH=third_party/tern-sdk/python/src"
   ],
   "recorded": "2026-10-08T01:41:17-0600",
   "recorder": "tools/tsp_record.py",

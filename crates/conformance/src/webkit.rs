@@ -1,4 +1,4 @@
-//! The WebKit oracle for the layout suite (GOAL.md `layout`, spec §18.2): `webkit/boxes.swift`
+//! The WebKit oracle for the layout suite: `webkit/boxes.swift`
 //! lays a page out in a `WKWebView` and prints every element's border box. The tool is built fresh
 //! with `swiftc` in each test process, and its boxes are compared with the UI engine's.
 

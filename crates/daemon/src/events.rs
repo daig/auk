@@ -1,4 +1,4 @@
-//! The daemon's event stream (§11.1, `auk events [--filter k,…]`): one JSON object per line, such
+//! The daemon's event stream (`auk events [--filter k,…]`): one JSON object per line, such
 //! as `{"event":"pane_spawned","pane":3,"window":"main","by":2}`.
 //!
 //! `by` says who caused the event: a client id (a window's layout edit, focus), `"cli"` (a

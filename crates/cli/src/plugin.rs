@@ -1,6 +1,6 @@
-//! `auk plugin …` (§9.11, research/plugins.md §12.3): manages the plugins folder through
+//! `auk plugin …`: manages the plugins folder through
 //! `auk_plugins::manage` and asks a running daemon to reload. It never runs Lua and never starts
-//! a daemon (§4.1).
+//! a daemon.
 //!
 //! Exit codes: 0; 1 when a verb fails (and `reload` when the new catalog has a Failed plugin or
 //! a problem); 2 for usage errors; 124 when the daemon doesn't answer `reload` within 60 s.
@@ -121,7 +121,7 @@ fn run_verb(socket: &Path, args: &[String], out: &mut impl Write) -> Result<Exit
                     serde_json::from_value(value).map_err(|e| Fail::Failed(e.to_string()))?
                 }
                 // `plugins` and `plugins_disabled` from the settings file, as the daemon reads
-                // them (§9.1).
+                // them.
                 None => {
                     manage::offline_catalog(&plugins_dir, &auk_daemon::settings::read().plugins)
                 }

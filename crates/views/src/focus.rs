@@ -1,4 +1,4 @@
-//! Focus and press states (amendment A24, H-F): `:focus`, `:focus-visible` and `:focus-within`
+//! Focus and press states: `:focus`, `:focus-visible` and `:focus-within`
 //! follow the pane's keyboard focus, and `:active` the `.sf-act` node a primary press is down on.
 //! Like hover they are the window's own: never replicated, never in snapshots or HTML.
 //!
@@ -22,7 +22,7 @@ use crate::view::PaneView;
 use auk_tsp::TspPane;
 use auk_ui::{Document, ElementState, NodeId};
 
-/// Keyboard navigation between focusable nodes (`tabindex`, K3).
+/// Keyboard navigation between focusable nodes (`tabindex`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NavKey {
     /// Tab: the next focusable node.
@@ -255,7 +255,7 @@ impl PaneView {
         out
     }
 
-    /// Tab, ⇧Tab, Enter or Space in the pane (K3). A live surface's program reads every key,
+    /// Tab, ⇧Tab, Enter or Space in the pane. A live surface's program reads every key,
     /// so then (and when there is nothing to move to or press) the key is the program's:
     /// [`Outcome::Keys`]. Otherwise Tab moves focus between focusable nodes (wrapping) and Enter
     /// or Space press the focused node as a click would.

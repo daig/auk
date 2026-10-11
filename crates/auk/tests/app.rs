@@ -1,8 +1,8 @@
-//! The `app` suite (GOAL.md): the real macOS app (`auk` with no subcommand) on a test daemon,
-//! driven through its automation endpoint. Layout replicated across windows (M4), menus and the
+//! The `app` suite: the real macOS app (`auk` with no subcommand) on a test daemon,
+//! driven through its automation endpoint. Layout replicated across windows, menus and the
 //! clipboard, input through the real `NSEvent` → `keyDown:` → `interpretKeyEvents:` →
 //! `NSTextInputClient` path, IME composition and dead keys, the accessibility tree, surfaces
-//! composited in the pane and acked after drawing, and the shell outliving the app (AC1). The S1
+//! composited in the pane and acked after drawing, and the shell outliving the app. The keystroke
 //! comparison posts real key events to Auk and to Ghostty, which needs the Accessibility
 //! permission.
 #![cfg(target_os = "macos")]
@@ -296,7 +296,7 @@ fn lossy(all: &[Vec<u8>]) -> Vec<String> {
         .collect()
 }
 
-/// S1 (§23): the same physical keystrokes, posted as `CGEvent`s to Auk and to Ghostty, reach the
+/// The same physical keystrokes, posted as `CGEvent`s to Auk and to Ghostty, reach the
 /// program as the same bytes. Posting needs the Accessibility permission.
 #[test]
 fn s1_posted_keys_reach_the_program_as_ghostty_sends_them() {
@@ -497,7 +497,7 @@ fn the_accessibility_tree_has_the_pane_text_the_chrome_and_surface_roles() {
         .unwrap();
     assert_eq!(progress["value"], "25", "{progress}");
     // The chrome: the tabs as a tab group with tab buttons, and its buttons. The probe's pane
-    // is a second session, so the session chip is a button naming the shown one (A11).
+    // is a second session, so the session chip is a button naming the shown one.
     let groups: Vec<&&Value> = flat.iter().filter(|n| n["role"] == "AXTabGroup").collect();
     assert_eq!(groups.len(), 1, "{tree}");
     let layout = app.layout();
@@ -720,7 +720,7 @@ fn program_field_editing_keys_go_through_the_view_as_edit_events() {
     // ⌘Z is an undo.
     let undo = stroke_event(&app, &probe, "cmd+z", "undo");
     assert_eq!(undo["id"], "ed");
-    // So is ⌃Z (§7.9), and the program never sees the ^Z byte (`stroke_event` checks).
+    // So is ⌃Z, and the program never sees the ^Z byte (`stroke_event` checks).
     let undo = stroke_event(&app, &probe, "ctrl+z", "undo");
     assert_eq!(
         (undo["sf"].clone(), undo["id"].clone()),
@@ -934,7 +934,7 @@ fn the_zoom_action_opens_the_image_viewer_over_the_window() {
     );
 }
 
-/// Amendment A9: the viewer shows a big picture (over 512×512 pixels) once it is decoded in
+/// The viewer shows a big picture (over 512×512 pixels) once it is decoded in
 /// the background, without a toast.
 #[test]
 fn a9_the_viewer_shows_a_big_picture_once_it_is_decoded() {
@@ -1021,8 +1021,8 @@ fn ac01_the_shell_outlives_the_app_and_a_new_window_shows_its_scrollback() {
 }
 
 // -------------------------------------------------------------------------------------------
-// Find, prompt navigation, links, the reporting app, native editing, and the mixed layout (§5.3,
-// §6.2, §7.2, §7.3, §7.8, §7.9, §7.14, §8.3, §12.2), and view state per window (§4.4, §4.5).
+// Find, prompt navigation, links, the reporting app, native editing, and the mixed layout,
+// and view state per window.
 
 /// The pane's flow as last drawn, once `done` holds for it.
 fn pane_layout(app: &App, pane: u64, what: &str, done: impl Fn(&Value) -> bool) -> Value {
@@ -1095,7 +1095,7 @@ fn find_sees_the_grid_and_surfaces_virtualized_content_too_and_steps_through_the
         }
     }
     probe.write(out.as_bytes());
-    // A column of 300 rows virtualizes (§8.3): rows far from the view aren't laid out.
+    // A column of 300 rows virtualizes: rows far from the view aren't laid out.
     let rows: Vec<Value> = (0..300)
         .map(|i| {
             let text = if i == 250 {
@@ -1289,7 +1289,7 @@ fn hover_shows_a_links_target_on_the_grid_and_on_surfaces_and_a_plain_click_open
     wait_for("the grid link's target", || {
         (app.request("chrome")["hover_link"] == "https://example.com/grid").then_some(())
     });
-    // A plain click on it opens nothing: links need ⌘-click (§7.14).
+    // A plain click on it opens nothing: links need ⌘-click.
     click(&app, (x, y));
     assert_eq!(app.request("opens")["opened"], json!([]));
 
@@ -1346,8 +1346,8 @@ fn the_chrome_names_the_reporting_app_only_while_a_listening_surface_is_open() {
     assert!(app.request("chrome")["pane_app"].is_null());
 }
 
-/// §7.2: the hello's app names the pane's program in the command palette too, by the same rule
-/// as the tab (§12.2): only while a listening surface is open, and not once the program is gone.
+/// The hello's app names the pane's program in the command palette too, by the same rule
+/// as the tab: only while a listening surface is open, and not once the program is gone.
 #[test]
 fn the_palette_names_the_focused_panes_reporting_app() {
     let env = env("app-palette");
@@ -1436,7 +1436,7 @@ fn system_hour12() -> bool {
     })
 }
 
-/// §4.5, §7.2: the app reports the system's 12/24-hour clock, so the hello reply's `hour12` is
+/// The app reports the system's 12/24-hour clock, so the hello reply's `hour12` is
 /// the system setting, and the daemon holds it as the pane's fact.
 #[test]
 fn the_hello_reply_carries_the_systems_12_hour_clock() {
@@ -1459,7 +1459,7 @@ fn the_hello_reply_carries_the_systems_12_hour_clock() {
     assert_eq!(tsp["facts"]["hour12"], want, "{tsp}");
 }
 
-/// §5.1: an agent pane's tab shows the agent icon in the app's tab bar; a shell's tab doesn't.
+/// An agent pane's tab shows the agent icon in the app's tab bar; a shell's tab doesn't.
 #[test]
 fn an_agent_panes_tab_shows_the_agent_icon() {
     let env = env("agent-icon");
@@ -1571,7 +1571,7 @@ fn native_editing_drag_selects_in_a_field_and_copy_and_paste_go_through_it() {
     wait_for("the field's selection on the clipboard", || {
         (app.request("clipboard") == "hello").then_some(())
     });
-    // A paste with the selection is an edit that replaces it (§7.9), not bracketed keys.
+    // A paste with the selection is an edit that replaces it, not bracketed keys.
     app.request("clipboard-set XY");
     menu(&app, "Edit", "Paste");
     let edit = program_event(&probe, "edit");
@@ -1705,7 +1705,7 @@ fn logging_opener(env: &TestEnv) -> (std::path::PathBuf, std::path::PathBuf) {
     (opener, log)
 }
 
-/// §7.8: the `open` action opens a node's `href` or `path` (through the routes, to the system
+/// The `open` action opens a node's `href` or `path` (through the routes, to the system
 /// opener), `copy` on a node with an `href` copies the `href`, and a click on the checklist
 /// hud's pill opens it and sends `activate`.
 #[test]
@@ -1799,7 +1799,7 @@ fn the_open_action_opens_href_or_path_copy_takes_the_href_and_the_checklist_hud_
     assert_eq!(app.request("opens")["opened"].as_array().unwrap().len(), 2);
 }
 
-/// §7.8: "A link click opens the link instead of running click." A node with a `click` action
+/// A link click opens the link instead of running click. A node with a `click` action
 /// holds a link span: the link gesture (⌘-click, or a plain click under `links_plain_click`) on
 /// the link opens it and sends the program nothing; a plain click elsewhere, or on the link
 /// without the setting, runs the node's click.
@@ -1892,7 +1892,7 @@ fn a_link_click_inside_a_clickable_node_opens_the_link_instead_of_running_click(
     assert_eq!(app.request("opens")["opened"].as_array().unwrap().len(), 2);
 }
 
-/// §7.14: "`file://` links are limited to paths, and nothing runs a command." A `file://` link
+/// `file://` links are limited to paths, and nothing runs a command. A `file://` link
 /// opens its path; a file URL naming another host or carrying a query is refused with a toast;
 /// a link to an executable is revealed in the Finder rather than opened; and a link whose scheme
 /// the system hands to a terminal (`ssh:`) is refused.
@@ -2186,7 +2186,7 @@ fn num(v: &Value) -> f64 {
     v.as_f64().unwrap_or_else(|| panic!("not a number: {v}"))
 }
 
-/// §7.5 `dock`: sticky at the pane bottom while live, `main` laid out above it, and the tail kept
+/// `dock`: sticky at the pane bottom while live, `main` laid out above it, and the tail kept
 /// in view until the user scrolls up; checked by where the window drew them.
 #[test]
 fn the_dock_sits_at_the_pane_bottom_with_main_above_it_and_the_tail_in_view() {
@@ -2300,7 +2300,7 @@ fn the_dock_sits_at_the_pane_bottom_with_main_above_it_and_the_tail_in_view() {
     assert_eq!(node_box(&app, pane, "dock"), Some(dock));
 }
 
-/// §7.5 `main` in a screen surface takes the pane's height and scrolls itself: the wheel over it
+/// `main` in a screen surface takes the pane's height and scrolls itself: the wheel over it
 /// scrolls its content, not the (hidden) grid.
 #[test]
 fn a_screen_surfaces_main_takes_the_pane_height_and_scrolls_itself() {
@@ -2360,7 +2360,7 @@ fn a_screen_surfaces_main_takes_the_pane_height_and_scrolls_itself() {
     assert!(moved[1] < r0[1]);
 }
 
-/// §7.5 `layer` overlays above everything: placed from the pane's top whatever the flow does,
+/// `layer` overlays above everything: placed from the pane's top whatever the flow does,
 /// and on top of the surface's `main` where they overlap, so a press there is the layer's.
 #[test]
 fn a_layer_overlays_the_pane_from_its_top_above_main() {
@@ -2448,7 +2448,7 @@ fn a_layer_overlays_the_pane_from_its_top_above_main() {
     assert_eq!(node_box(&app, pane, "ly4"), None);
 }
 
-/// §8.1 `title` is the node's tooltip: hovering the node (or anything inside it) shows it by the
+/// `title` is the node's tooltip: hovering the node (or anything inside it) shows it by the
 /// pointer, and it goes when the pointer leaves.
 #[test]
 fn hovering_a_node_with_a_title_shows_its_tooltip() {
@@ -2556,7 +2556,7 @@ fn a_tooltip_follows_the_node_under_a_still_pointer() {
     });
 }
 
-/// §5.5: Edit ▸ Clear Scrollback (⌘K) is the in-band pane operation: the daemon records it, so
+/// Edit ▸ Clear Scrollback (⌘K) is the in-band pane operation: the daemon records it, so
 /// every replica's scrollback clears (the other window's and the daemon's too), the screen stays,
 /// and nothing reaches the program.
 #[test]
@@ -2705,7 +2705,7 @@ fn write_settings(env: &TestEnv, settings: Value) {
         .expect("write settings.json");
 }
 
-/// §7.8, §7.9, §7.12, §7.13: the settings file turns off program colors and native editing,
+/// The settings file turns off program colors and native editing,
 /// makes a plain click open links, and reduces motion (Auk's own setting over the system's); the
 /// program learns motion from the hello and a `motion` event when "Reload Settings" changes it.
 #[test]
@@ -2796,7 +2796,7 @@ fn settings_drive_program_colors_native_editing_plain_click_links_and_reduce_mot
     });
 }
 
-/// §9.8 keymap layers: the preset (`keymap`, `keymap_prefix`) under the user's `keybinds`, which
+/// Keymap layers: the preset (`keymap`, `keymap_prefix`) under the user's `keybinds`, which
 /// replace a preset chord, take a default's keys from the menu, and `unbind` one.
 #[test]
 fn keymap_preset_and_user_keybinds_with_unbind() {
@@ -2879,7 +2879,7 @@ fn with_native_editing_switched_off_field_keys_and_pastes_are_the_programs() {
     ));
     acked(&probe, 2);
     caught_up(&env, &app, probe.pane);
-    // The program granted `edit`, but the user's switch wins (§7.9): selecting keys are keys.
+    // The program granted `edit`, but the user's switch wins: selecting keys are keys.
     app.request("type shift+right");
     let (bodies, bytes) = program_input(&probe, Duration::from_millis(400));
     assert!(bodies.is_empty(), "{bodies:?}");
@@ -2895,7 +2895,7 @@ fn with_native_editing_switched_off_field_keys_and_pastes_are_the_programs() {
     assert!(events(&tsp_bodies(&split_input(&got)), "edit").is_empty());
 }
 
-/// §4.3 "can be locked": Shell › Lock Session locks the shown session through the daemon; a
+/// Sessions can be locked: Shell › Lock Session locks the shown session through the daemon; a
 /// close is then refused with a toast in the window, and the same command unlocks it.
 #[test]
 fn lock_session_from_the_menu_refuses_closes_with_a_toast_and_unlocks() {
@@ -2920,7 +2920,7 @@ fn lock_session_from_the_menu_refuses_closes_with_a_toast_and_unlocks() {
     wait_for("the session to unlock", || (!locked(&app)).then_some(()));
 }
 
-/// §10.1 Presence: the window shows the other clients attached to its host, with their
+/// Presence: the window shows the other clients attached to its host, with their
 /// identity, and stops when they leave.
 #[test]
 fn presence_shows_the_other_clients_attached_to_the_host() {
@@ -2956,7 +2956,7 @@ fn presence_shows_the_other_clients_attached_to_the_host() {
     });
 }
 
-/// §4.2, §10.1 "Who runs what", §10.4 "Remote window": `auk --host` opens the app's windows on a
+/// Remote windows: `auk --host` opens the app's windows on a
 /// remote host's daemon (the Lima VM, over SSH). The remote daemon owns the panes; the window
 /// halves run here and see them (a status formatter reads the remote pane's directory); plugin
 /// CSS is the remote host's catalog styles plus the local manifests.
@@ -3153,7 +3153,7 @@ stty sane
 [[ $buf == *'"act":"hit"'* ]] && print -r -- "surface-clicked-$((40+2))"
 "#;
 
-/// §10.1 "Who runs what", §10.4 "Remote window": the remote daemon runs its own plugins' host
+/// Who runs what in a remote window: the remote daemon runs its own plugins' host
 /// halves (a `title` hook, a lens and a block, all in a plugin installed only on the VM), and a
 /// local remote window draws what they make, with a TSP surface of a remote program: each is
 /// drawn, and a click on each goes back over the link to the code on the host. No local daemon
@@ -3305,8 +3305,8 @@ fn palette_run(app: &App, query: &str, action: &str) {
     });
 }
 
-/// §9.10 "Whose rights": a window half, running here, types into a remote pane with `cx:run`, and
-/// the remote shell runs it. §10.4 "Remote window", blocks: the window opens a block type of its
+/// Whose rights: a window half, running here, types into a remote pane with `cx:run`, and
+/// the remote shell runs it. Blocks in a remote window: the window opens a block type of its
 /// host's catalog from the palette; the remote daemon starts it, and the window focuses and draws
 /// it.
 #[test]
@@ -3409,7 +3409,7 @@ fn remote_window_half_types_into_a_remote_pane_and_opens_the_hosts_block_types()
         node_box(&app, block, "main.hello")
     });
 
-    // §9.8 on a remote window: `cx:new_block`, `layout:split` with a launch and `layout:tab` ask
+    // On a remote window: `cx:new_block`, `layout:split` with a launch and `layout:tab` ask
     // the window's own host over its link and answer with the new panes' ids, placed on the
     // sides and at the ratio asked.
     app.request(&format!("focus {pane}"));
@@ -3455,7 +3455,7 @@ fn remote_window_half_types_into_a_remote_pane_and_opens_the_hosts_block_types()
     });
 }
 
-/// §4.1: the first window starts the daemon when none answers, and the daemon outlives it.
+/// The first window starts the daemon when none answers, and the daemon outlives it.
 #[test]
 fn the_first_window_starts_a_daemon_when_none_answers_and_it_outlives_the_window() {
     let env = TestEnv::new(env!("CARGO_BIN_EXE_auk"), "autostart");
@@ -3524,7 +3524,7 @@ fn a11y_has(tree: &Value, needle: &str) -> bool {
     })
 }
 
-/// §10.1 "Identity and keys", "Connection behavior": a local window's status line shows its
+/// Identity and connection state: a local window's status line shows its
 /// host's identity chain, the local hop ("dai@mac via local from mac as dai@mac"), and the link's
 /// state, connected; both are in the accessibility tree too.
 #[test]
@@ -3553,7 +3553,7 @@ fn a_local_windows_status_line_shows_its_local_hop_and_the_link_state() {
     assert!(a11y_has(&tree, "connected"), "{tree}");
 }
 
-/// §10.1 "Identity and keys", "Connection behavior" on a remote window (the Lima VM): the
+/// Identity and connection state on a remote window (the Lima VM): the
 /// status line shows the SSH key hop ("<key> via ssh-key from <this mac> as <user>@<vm>") and
 /// the link's state. When the ssh process dies the window shows "reconnecting (attempt 1)" and
 /// holds what is typed; once the link resyncs it shows "connected" again and the typing reaches
@@ -3678,7 +3678,7 @@ fn remote_window_shows_its_ssh_hop_and_the_link_reconnecting_then_connected_and_
     assert_eq!(link_shown(&app).1.as_deref(), Some(failed.as_str()));
 }
 
-/// §9.5 "Keys and events": in a focused block pane, the window keymap takes the keys it binds
+/// Keys and events: in a focused block pane, the window keymap takes the keys it binds
 /// first: a bound chord runs its action (the palette) and never reaches the block's `key`, while
 /// an unbound key does, as `{name, ctrl, …}`.
 #[test]
@@ -3761,7 +3761,7 @@ fn the_window_keymap_takes_its_keys_before_a_focused_block() {
 
 /// omp's toast when it closes its session (omp 18.8.4's own TSP record): the window shows it on
 /// the views' clock, in ms, for its `ttl`, and then it goes, though its surface closed in the
-/// same burst; its icon, and an `icon` node's, draw in the bundled Nerd Fonts face (§18.3).
+/// same burst; its icon, and an `icon` node's, draw in the bundled Nerd Fonts face.
 #[test]
 fn a_toast_goes_after_its_duration_and_icons_draw_in_the_bundled_nerd_font() {
     let env = env("toast");
@@ -3871,7 +3871,7 @@ fn a11y_shows(app: &App, needle: &str) -> bool {
     }
 }
 
-/// A generated session name: two lowercase words (Tern's random names, book:16894).
+/// A generated session name: two lowercase words (as Tern's random names are).
 fn two_words(name: &str) -> bool {
     let words: Vec<&str> = name.split('-').collect();
     words.len() == 2
@@ -3880,7 +3880,7 @@ fn two_words(name: &str) -> bool {
             .all(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_lowercase()))
 }
 
-/// A11 (§4.3, §13): one generated-name session shows tabs only; a second session brings the
+/// One generated-name session shows tabs only; a second session brings the
 /// session chip, whose menu switches sessions; ⌃⌘S lists the sessions in the palette with New,
 /// Rename and Lock; renaming names the chip; the window title is the shown session's name; the
 /// chip goes again with one unnamed session and comes back while it is locked.
@@ -4038,7 +4038,7 @@ fn a11_the_session_chip_shows_with_two_sessions_switches_them_and_names_the_wind
     });
 }
 
-/// A11 (§12.2): a tab whose program's badge says what its title says shows the badge alone,
+/// A tab whose program's badge says what its title says shows the badge alone,
 /// and both when they differ; its accessible name is always the program and the whole title.
 #[test]
 fn a11_a_tab_whose_title_is_its_app_shows_the_badge_only() {
@@ -4084,7 +4084,7 @@ fn a11_a_tab_whose_title_is_its_app_shows_the_badge_only() {
     );
 }
 
-/// A13 (§5.3, §6.2, §7.14): OSC 8 link cells draw a dotted underline in a muted color; ⌘ over a
+/// OSC 8 link cells draw a dotted underline in a muted color; ⌘ over a
 /// link arms it: a solid accent underline and the pointing hand; off it, or without ⌘, back to
 /// dotted and the arrow. With `links_plain_click` the hovered link arms without ⌘, and
 /// `hyperlinks: "hover"` draws nothing until then.

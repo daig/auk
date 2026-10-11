@@ -1,4 +1,4 @@
-//! The state hash (§15.2): BLAKE3 over a canonical serialization of all replicated state.
+//! The state hash: BLAKE3 over a canonical serialization of all replicated state.
 //!
 //! Everything is written as fixed-width little-endian integers and length-prefixed bytes, in a
 //! fixed order, so the hash is the same on every platform (wasm32 included). Cells name their

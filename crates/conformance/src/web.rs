@@ -1,4 +1,4 @@
-//! Harness for the `web` suite (§10.3): building the browser client fresh, running
+//! Harness for the `web` suite: building the browser client fresh, running
 //! `auk web serve`, plain HTTP and WebSocket clients for the server, and a minimal WebDriver
 //! client for Safari (`safaridriver`).
 //!
@@ -560,7 +560,7 @@ instance that safaridriver launched for automation (it logs \"Rejecting session:
 launched for automation\"), so quit Safari (Cmd-Q) before running the web suite; safaridriver \
 opens its own automation window and closes it afterwards.";
 
-/// What the browser test needs the user to have done once (PROGRESS.md, "Needs the user").
+/// What the browser test needs the user to have done once.
 pub const SAFARI_PREREQUISITE: &str = "Safari automation isn't enabled. Run `sudo safaridriver \
      --enable` once, then in Safari open Settings → Advanced, turn on \"Show features for web \
      developers\", and choose Develop → \"Allow Remote Automation\".";

@@ -1,4 +1,4 @@
-//! `prefs` (T2, amendment A23; book: `prefs`, Regions "Aside"): the settings page and sheet drawn
+//! `prefs` (T2): the settings page and sheet drawn
 //! from the program's data, the pointer events it sends, the program-driven focus ring, menus and
 //! text drafts, the aside docking, and omp's own `/settings` (`fixtures/tsp/omp-settings.jsonl`).
 
@@ -31,7 +31,7 @@ fn harness() -> Harness {
     h
 }
 
-/// The book's example page (book: prefs, the Lua `settings(state)`), plus the rows it doesn't
+/// Tern's docs' example page (the Lua `settings(state)`), plus the rows it doesn't
 /// show: keys, a menu choice, a warning, a disabled row and an ordered multi.
 fn page(extra: Value) -> Value {
     let mut p = json!({
@@ -1191,8 +1191,8 @@ fn prefs_editor_column_holding_a_picker_fills_the_card() {
     assert!(h.doc.border_box(card).unwrap().h < 80.0);
 }
 
-/// Under "Use program colors" (.sf-pal) the page's kit accents follow the program's accent
-/// (book: prefs Variables): `--accent` is it, `--accent-ink` reads on the page, `--accent-fill`
+/// Under "Use program colors" (.sf-pal) the page's kit accents follow the program's accent:
+/// `--accent` is it, `--accent-ink` reads on the page, `--accent-fill`
 /// carries white; an on switch paints the program's fill. Without the setting, the theme's.
 #[test]
 fn prefs_accents_follow_the_program_palette() {
@@ -1246,7 +1246,7 @@ fn prefs_accents_follow_the_program_palette() {
     assert!(var(&h, root, "--accent-fill").starts_with('#'));
 }
 
-/// An ordered multi list reorders by dragging a grip onto another item (book: prefs, `multi`):
+/// An ordered multi list reorders by dragging a grip onto another item:
 /// before it, or after it on its lower half; the dragged item is enabled, and the new order of
 /// enabled values goes out as `change`. The dragged item shows `.drag` and follows the pointer.
 #[test]
@@ -1326,7 +1326,7 @@ fn prefs_ordered_list_reorders_by_dragging_a_grip() {
     assert!(h.view.reorder_release(&mut h.doc, x, y).is_none());
 }
 
-/// Book (Updates): while the structure holds (page, query, sections, row ids, control kinds and
+/// While the structure holds (page, query, sections, row ids, control kinds and
 /// options), rows patch in place: a flip redraws only its row, the others keep their elements;
 /// a new option set (structure) rebuilds the document.
 #[test]

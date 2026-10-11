@@ -1,6 +1,6 @@
 //! Runs [`auk_web::replay`] over the encoded cases on stdin and prints one line per case. The
 //! web suite builds it for `wasm32-wasip1` and runs it under wasmtime, to compare wasm replicas
-//! with native ones (AC2).
+//! with native ones.
 
 use std::io::{Read, Write};
 

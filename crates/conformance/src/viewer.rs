@@ -1,4 +1,4 @@
-//! A test window on the daemon's wire (§15): it attaches to a window key like the app does and
+//! A test window on the daemon's wire: it attaches to a window key like the app does and
 //! keeps a follower replica of each pane it is sent, so a test can read cells, links and modes
 //! exactly as a client sees them after snapshot and live output.
 

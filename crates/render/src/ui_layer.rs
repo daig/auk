@@ -1,4 +1,4 @@
-//! The UI layer (§18.1): auk-ui's Vello scene (chrome, surface blocks, overlays) rendered into a
+//! The UI layer: auk-ui's Vello scene (chrome, surface blocks, overlays) rendered into a
 //! texture the size of the window, then composited over the grid pass in the same frame.
 //!
 //! Vello rasterizes with compute shaders into a storage texture, which a window's swap chain

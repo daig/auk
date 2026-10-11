@@ -1,5 +1,4 @@
-//! Terminal (GOAL.md; spec §6, §17, M2): the reference grid, live programs in a daemon pane, and
-//! the M2 protocols.
+//! Terminal: the reference grid, live programs in a daemon pane, and the terminal protocols.
 //!
 //! # Reference grid
 //!
@@ -422,7 +421,7 @@ fn wait_screen(env: &TestEnv, pane: u64, what: &str, f: impl Fn(&str) -> bool) -
     }
 }
 
-/// Types into the pane through the window, which encodes keys from its replica (§15.4).
+/// Types into the pane through the window, which encodes keys from its replica.
 fn keys(window: &Headless, pane: u64, keys: &str) {
     let words: Vec<String> = keys.split(' ').map(quote).collect();
     window.request(&format!("send {pane} keys {}", words.join(" ")));
@@ -603,7 +602,7 @@ fn write_big_file(path: &Path, size: usize) -> Vec<String> {
     last.into()
 }
 
-// Protocols (M2), with the probe as the program.
+// Protocols, with the probe as the program.
 
 /// The probe in a pane in raw mode, plus a window to type through.
 fn probe(env: &TestEnv) -> (Probe, Headless) {
@@ -635,7 +634,7 @@ fn da1_is_answered_with_a_digit_through_the_pane() {
     else {
         unreachable!()
     };
-    // CSI ? Ps ; … c with at least one digit (§6.1).
+    // CSI ? Ps ; … c with at least one digit.
     let params = &answer[3..answer.len() - 1];
     assert!(params.iter().any(u8::is_ascii_digit), "{answer:?}");
     assert!(params.iter().all(|b| b.is_ascii_digit() || *b == b';'));

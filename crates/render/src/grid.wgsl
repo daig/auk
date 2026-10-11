@@ -1,4 +1,4 @@
-// The grid pass (spec §18.1): cell backgrounds from a per-cell color texture, then instanced
+// The grid pass: cell backgrounds from a per-cell color texture, then instanced
 // quads for glyphs (from the atlases), decorations and the cursor. Everything is in physical
 // pixels; colors are sRGB values blended as they are, like the rest of macOS's text.
 
@@ -13,7 +13,7 @@ struct Uniforms {
 @group(0) @binding(1) var backgrounds: texture_2d<f32>;
 @group(0) @binding(2) var coverage_atlas: texture_2d<f32>;
 @group(0) @binding(3) var color_atlas: texture_2d<f32>;
-// Row slots for the mixed layout (§6.2): each row's top and height, relative to the origin, two
+// Row slots for the mixed layout: each row's top and height, relative to the origin, two
 // rows per vec4. Rows past the table sit at their uniform position.
 @group(0) @binding(4) var<uniform> slots: array<vec4<f32>, 512>;
 

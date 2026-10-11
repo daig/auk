@@ -1,4 +1,4 @@
-//! Fuzzed pane streams for the determinism checks (AC2, S4): byte soup biased toward what
+//! Fuzzed pane streams for the determinism checks: byte soup biased toward what
 //! terminals parse, TSP messages among it, and records at random positions. Deterministic per
 //! seed, so a failure reproduces.
 

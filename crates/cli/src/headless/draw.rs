@@ -1,7 +1,7 @@
-//! Offscreen drawing for a headless window (§11.3, §21): the shown tab's panes laid out in a
+//! Offscreen drawing for a headless window: the shown tab's panes laid out in a
 //! window of a given size, each pane's grid through `auk-render`'s `GridRenderer` and its surfaces
-//! through `auk-views` into an `auk-ui` document painted with Vello, composited as a window does
-//! (§6.2): inline and flow surfaces take their natural height in place of their anchor rows, docks
+//! through `auk-views` into an `auk-ui` document painted with Vello, composited as a window does:
+//! inline and flow surfaces take their natural height in place of their anchor rows, docks
 //! sit at the pane's bottom, a screen surface covers the pane and layers overlay it. The result is
 //! a PNG and a layout JSON describing where everything went.
 //!
@@ -380,7 +380,7 @@ impl Drawer {
                 now,
             );
             let main_screen = !term.modes().alt_screen;
-            // The flow (§6.2), following the tail: rows one cell high, blocks at their height.
+            // The flow, following the tail: rows one cell high, blocks at their height.
             let arranged = pd.arrange_shown(
                 term,
                 tsp,
@@ -565,7 +565,7 @@ impl Drawer {
         Ok(json!(out))
     }
 
-    /// The pane document's sheets in cascade order (`css` with no selector, §7.15): program
+    /// The pane document's sheets in cascade order (`css` with no selector): program
     /// sheets show as `tsp:<scope>:<name>`.
     pub fn sheets(&self, pane: PaneId) -> Result<Value, String> {
         let pd = self

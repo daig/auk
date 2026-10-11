@@ -1,4 +1,4 @@
-//! The wgpu renderer (spec §18.1): the GPU device, window surfaces, the cell grid's pass with its
+//! The wgpu renderer: the GPU device, window surfaces, the cell grid's pass with its
 //! glyph atlases, and offscreen rendering with PNG readback.
 //!
 //! Drawing a terminal:

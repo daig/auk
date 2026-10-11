@@ -1,7 +1,7 @@
-//! The local end of an SSH link (§10.2): `ssh <host> auk attach --stdio` with the system `ssh`.
+//! The local end of an SSH link: `ssh <host> auk attach --stdio` with the system `ssh`.
 //!
 //! Authentication, host keys and encryption are SSH's own: the agent, `~/.ssh/config` and
-//! `known_hosts` (§12.5). The link adds a few options of its own:
+//! `known_hosts`. The link adds a few options of its own:
 //!
 //! - `-T`: no remote terminal; the channel carries binary frames.
 //! - `-o ControlMaster=no -o ControlPath=none`: a connection of its own, never a multiplexed

@@ -1,10 +1,11 @@
 [package]
 name = "auk-cli"
-description = "The auk CLI verbs, the control-endpoint client and the headless window (spec §11)."
+description = "The auk CLI verbs, the control-endpoint client and the headless window."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 auk-daemon = { version = "0.0.0", path = "../daemon" }

@@ -1,4 +1,4 @@
-# A shell session: commands, colored output and the prompt (auk shot, §11.3).
+# A shell session: commands, colored output and the prompt.
 # Expects the test shell config (PS1='%~ %# ') and HOME as its directory.
 size 720x360
 ready

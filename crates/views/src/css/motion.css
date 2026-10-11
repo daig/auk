@@ -1,9 +1,9 @@
-/* Motion settings (research/elements.md §4.9, §4.10). The view clocks motion itself; these rules
+/* Motion settings. The view clocks motion itself; these rules
    cover program sheets' transitions and the still look. */
 @media (prefers-reduced-motion: reduce) {
   .sf-region, .sf-region * { transition-duration: 0s !important; animation-duration: 0s !important; }
 }
-/* Fold and overlay transitions (§7.13, book:5654, 7694), clocked by the view: a fold opened by
+/* Fold and overlay transitions, clocked by the view: a fold opened by
    the user or the program fades and slides in; an overlay that opens pops in over 220ms. */
 @keyframes sf-unfold { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 @keyframes sf-pop { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: none; } }

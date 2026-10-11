@@ -1,6 +1,5 @@
-//! The TSP suite (GOAL.md row `tsp`, spec §7, §12.1): one test per item of the conformance
-//! checklist in `research/sdk-wire.md` §10 (except F2, Windows), named by its ID, plus the
-//! handshake (AC3), lifetimes (AC6), silence (AC7), robustness (AC15) and advertising (D22).
+//! The TSP suite: one test per item of the protocol conformance checklist (except the Windows
+//! one), named by its ID, plus the handshake, lifetimes, silence, robustness and advertising.
 //!
 //! Every test drives real bytes through a daemon pane: the program is `tools/pty_probe.py`, so a
 //! test controls exactly what the program writes and how its tty is set, and sees exactly what
@@ -171,7 +170,7 @@ fn hello_reply(bodies: &[Value]) -> &Value {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The handshake (AC3) and advertising (D22)
+// The handshake and advertising
 
 #[test]
 fn ac03_hello_is_answered_before_da1_in_raw_mode_and_v2_gets_only_da1() {
@@ -217,7 +216,7 @@ fn advertises_exactly_the_t0_and_t1_kinds() {
         .iter()
         .map(|k| k.as_str().unwrap())
         .collect();
-    // §8.2, D22, D26: T0, T1 and the T2 kinds drawn so far (A23), nothing else.
+    // T0, T1 and the T2 kinds drawn so far, nothing else.
     let t0 =
         "col row card section rule spacer text badge kv icon spinner elapsed progress ansi rows el";
     let t1 = "md code diff editor input status seg overlay toast shimmer rate meter list item tabs table tree kbd tool agent checklist image";
@@ -691,7 +690,7 @@ fn b6_kinds_and_features_list_only_what_is_implemented() {
     let (env, probe) = setup("b6");
     let reply = hello_reply(&exchange(&probe, &hello(&[]))).clone();
     let kinds = reply["kinds"].as_array().unwrap();
-    // T2 kinds are advertised once drawn (A23).
+    // T2 kinds are advertised once drawn.
     for t2 in ["math", "chart", "picker", "prefs", "effort", "block"] {
         assert_eq!(
             kinds.contains(&json!(t2)),
@@ -699,7 +698,7 @@ fn b6_kinds_and_features_list_only_what_is_implemented() {
             "{t2} is advertised only once drawn"
         );
     }
-    // omp sends `image` unguarded, so it is T1 (D24).
+    // omp sends `image` unguarded, so it is T1.
     assert!(kinds.contains(&json!("image")));
     assert_eq!(kinds.len(), 38 + auk_tsp::T2_KINDS.len());
     let allowed = [
@@ -721,7 +720,7 @@ fn b6_kinds_and_features_list_only_what_is_implemented() {
         .map(|f| f.as_str().unwrap())
         .collect();
     assert!(features.iter().all(|f| allowed.contains(f)), "{features:?}");
-    // `aside` (the docking of `prefs`) is advertised exactly when `prefs` is (A23).
+    // `aside` (the docking of `prefs`) is advertised exactly when `prefs` is.
     assert!(kinds.contains(&json!("prefs")));
     assert!(features.contains(&"aside"));
     // Under `t2-kinds off` the hello lists neither the T2 kinds nor `aside`, and an unadvertised
@@ -1304,7 +1303,7 @@ fn c12_suspend_hands_the_pane_back_to_the_grid() {
     assert_eq!(click(&window, &probe, "s1", "b", "")["act"], "go");
 }
 
-/// §7.3 Suspend: a suspended surface keeps its place. The anchor (its key and its row) is the
+/// Suspend: a suspended surface keeps its place. The anchor (its key and its row) is the
 /// same in every replica while suspended and after resume, though the grid took output below it.
 #[test]
 fn c12_a_suspended_surface_keeps_its_anchor_row_across_suspend_and_resume() {
@@ -1358,7 +1357,7 @@ fn c12_a_suspended_surface_keeps_its_anchor_row_across_suspend_and_resume() {
     assert_eq!(surface(&env, &probe, "s1")["anchor"], before);
 }
 
-/// §7.3: a screen surface over an inline one hides it without changing it, and the inline
+/// A screen surface over an inline one hides it without changing it, and the inline
 /// surface's frames still apply (in every replica), with no error.
 #[test]
 fn c11_frames_to_an_inline_surface_under_a_screen_surface_still_apply() {
@@ -1656,7 +1655,7 @@ fn d5_add_checks_ids_before_kinds_duplicates_and_limits() {
     assert!(doc_node(&env, &probe, "s1", "big").is_none());
 }
 
-/// §7.6: ids are non-empty. A node whose id is `""` (alone, or deep in an added subtree) is
+/// Ids are non-empty. A node whose id is `""` (alone, or deep in an added subtree) is
 /// rejected as that op's error, the frame's other ops still apply, and nothing of the rejected
 /// subtree lands; a missing or non-string id is rejected the same way.
 #[test]
@@ -2169,7 +2168,7 @@ fn e5_the_retention_budget_evicts_closed_surfaces_then_settled_children() {
     assert_eq!(errors(&bodies).len(), 1, "an evicted id is unknown");
 }
 
-/// §7.10: a palette (`t`) or a stylesheet (`s`) that leaves the pane over budget evicts too, with
+/// A palette (`t`) or a stylesheet (`s`) that leaves the pane over budget evicts too, with
 /// no frame or close after it: the palette pushes out the closed surface first, then the sheet
 /// pushes out the oldest settled child of `main`, sending `gone`.
 #[test]
@@ -3048,7 +3047,7 @@ fn snapshot_node(msgs: &[(String, String, Value)], sf: &str, id: &str) -> Value 
 
 #[test]
 fn h1_an_arriving_age_restarts_elapsed_and_tool_but_nested_agent_ages_need_a_new_value() {
-    // §7.13 (book:6731, 7864, 8048): the daemon stamps when each age arrived, and a snapshot
+    // The daemon stamps when each age arrived, and a snapshot
     // rewrites ages from those stamps, so a late window agrees with the live ones.
     let (env, probe) = setup("h1-ages");
     exchange(&probe, &hello(&[]));
@@ -3139,7 +3138,7 @@ fn h2_after_the_program_is_gone_surfaces_come_back_closed_and_read_only() {
     exchange(&probe, &open_with("sc", "screen", text_doc()));
     probe.exit(0);
     env.wait(probe.pane, "exit");
-    // Restore rebuilds a pane from its snapshot (§16): replay it into a fresh replica.
+    // Restore rebuilds a pane from its snapshot: replay it into a fresh replica.
     let snap = env.daemon(&format!("snapshot {}", probe.pane));
     let mut snapshot: auk_replica::Snapshot = serde_json::from_value(snap.clone()).unwrap();
     snapshot.bytes = base64::engine::general_purpose::STANDARD
@@ -3237,7 +3236,7 @@ fn i4_osc_133_a_marks_a_prompt() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Lifetimes (AC6), silence (AC7), robustness (AC15)
+// Lifetimes, silence, robustness
 
 #[test]
 fn ac06_a_kept_flow_surface_stays_in_scrollback_inert_past_the_next_prompt() {
@@ -3372,7 +3371,7 @@ fn ac07_nothing_reaches_a_pty_whose_program_isnt_listening() {
     );
 }
 
-/// The mode gate needs both halves of raw mode (§12.1): a canonical tty with echo off (a password
+/// The mode gate needs both halves of raw mode: a canonical tty with echo off (a password
 /// prompt, `read -s`) and a non-canonical one with echo on each refuse TSP input, though the
 /// engine answers; only non-canonical with echo off lets it through.
 #[test]
@@ -3535,7 +3534,7 @@ fn ac15_malformed_frames_and_unknown_verbs_never_kill_the_pane_under_fuzzing() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// surface-play (§7.15)
+// surface-play
 
 /// The documents a recording's `out` messages build in a fresh replica.
 fn replay_fixture(path: &std::path::Path, until: Option<usize>) -> Vec<Value> {
@@ -3685,7 +3684,7 @@ fn surface_play_feeds_recordings_into_a_stand_in_program() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The paste rule (§12.1) and effects
+// The paste rule and effects
 
 #[test]
 fn tsp_input_waits_while_a_bracketed_paste_is_open() {

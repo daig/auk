@@ -1,4 +1,4 @@
-//! A pane's surfaces composited with its grid (§6.2), shared by every window that draws: the app,
+//! A pane's surfaces composited with its grid, shared by every window that draws: the app,
 //! the headless window and the web client.
 //!
 //! [`PaneSurfaces`] owns the pane's UI document and its [`PaneView`]. Each frame the host
@@ -33,9 +33,9 @@ const CONTAINERS: [&str; 4] = ["auk-flow", "auk-docks", "auk-screen", "auk-layer
 pub struct PaneSurfaces {
     doc: Document,
     view: PaneView,
-    /// The pane's command blocks (§9.6), once it has any.
+    /// The pane's command blocks, once it has any.
     lens: Option<crate::lenses::LensLayer>,
-    /// Plugin sheets (§8.4 cascade step 3), installed after the built-in ones.
+    /// Plugin sheets, installed after the built-in ones.
     plugin_sheets: Vec<(String, String)>,
 }
 
@@ -149,12 +149,12 @@ impl PaneSurfaces {
     }
 
     /// Whether this document's `block`s are command blocks, whose Copy copies the raw output
-    /// (a lens card's private engine); a program's `block` copies an empty string (A23).
+    /// (a lens card's private engine); a program's `block` copies an empty string.
     pub fn set_command_blocks(&mut self, on: bool) {
         self.view.command_blocks = on;
     }
 
-    /// Installs plugin sheets (manifest styles and `tern.css`, §8.4 cascade step 3) into the
+    /// Installs plugin sheets (manifest styles and `tern.css`) into the
     /// pane's documents, replacing the last set. Returns whether anything changed.
     pub fn set_plugin_sheets(&mut self, sheets: &[(String, String)]) -> bool {
         if self.plugin_sheets == sheets {
@@ -178,7 +178,7 @@ impl PaneSurfaces {
         self.plugin_sheets.iter().map(|(n, _)| n.clone()).collect()
     }
 
-    /// Takes the replica's command blocks (§9.6): each draws at its anchor row as a `block`.
+    /// Takes the replica's command blocks: each draws at its anchor row as a `block`.
     /// Returns whether the drawn blocks changed.
     pub fn sync_lenses(&mut self, blocks: &[crate::lenses::LensInput], now: f64) -> bool {
         if blocks.is_empty() && self.lens.as_ref().is_none_or(|l| l.is_empty()) {
@@ -332,7 +332,7 @@ impl PaneSurfaces {
             })
     }
 
-    /// The toast the pane's toast layer shows (§7.12 `toast`), if any.
+    /// The toast the pane's toast layer shows, if any.
     pub fn toast(&self) -> Option<ShownToast> {
         let host = self.container("auk-toasts")?;
         let el = *self.doc.element_children(host).first()?;
@@ -380,7 +380,7 @@ impl PaneSurfaces {
         let main_screen = !term.modes().alt_screen;
         let mut blocks = Vec::new();
         // Stray output under a live inline surface stays hidden until the surface closes or
-        // suspends (§7.3): the lines below its anchor take no space.
+        // suspends: the lines below its anchor take no space.
         let hide_from = tsp
             .surfaces()
             .iter()
@@ -467,7 +467,7 @@ impl PaneSurfaces {
 
     /// [`PaneSurfaces::arrange`], then tells the views which part of the document that shows
     /// ([`PaneSurfaces::show`]) and, while that lays out more of what's in view (virtualized
-    /// content coming into view, §8.3), arranges again. Hosts arrange through this.
+    /// content coming into view), arranges again. Hosts arrange through this.
     pub fn arrange_shown(
         &mut self,
         term: &Terminal,
@@ -686,7 +686,7 @@ impl PaneSurfaces {
         }
     }
 
-    /// Whether `el` is in the layers container: it overlays the pane (§7.5).
+    /// Whether `el` is in the layers container: it overlays the pane.
     pub fn in_layers(&self, el: NodeId) -> bool {
         self.container("auk-layers")
             .is_some_and(|layers| self.inside(el, layers))

@@ -1,5 +1,5 @@
 //! One plugin VM: Luau in sandbox mode with the 256 MiB cap, per-call budgets, native codegen,
-//! a package-confined `require`, and the `tern` API (§9.2, §20).
+//! a package-confined `require`, and the `tern` API.
 //!
 //! A [`Vm`] is not `Send`: a host half's VM lives on its worker thread (`worker.rs`), a window
 //! half's on the window's UI thread.

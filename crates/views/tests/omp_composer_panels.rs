@@ -1,7 +1,6 @@
-//! omp's composer and panel sheets (amendment A24; research/omp-stylesheets.md §9-10, §16.5-16.6,
-//! §16.9): the composer's frame, field, context hairline, bar and fold; the overlay forms, the
-//! Usage sheet and the overlay head icons (K10). Recorded frames where omp sent them, constructed
-//! ones otherwise.
+//! omp's composer and panel sheets: the composer's frame, field, context hairline, bar and fold;
+//! the overlay forms, the Usage sheet and the overlay head icons. Recorded frames where omp sent
+//! them, constructed ones otherwise.
 
 mod common;
 
@@ -130,14 +129,14 @@ fn replay_at(name: &str, lines: &[usize], mut at: impl FnMut(&mut Harness, usize
     })
 }
 
-/// Every probed node: no transition and no animation of the omp sheets' own (T6.2).
+/// Every probed node: no transition and no animation of the omp sheets' own.
 fn still(h: &Harness, el: NodeId) {
     let st = h.doc.computed_style(el).unwrap();
     assert!(st.transitions.is_none(), "{:?}", st.transitions);
     assert!(st.animations.is_none(), "{:?}", st.animations);
 }
 
-/// T4.1, T4.6 and Q-C1 on omp's recorded session: the composer is a ring with no fill whose
+/// On omp's recorded session: the composer is a ring with no fill whose
 /// field draws no well; the ring takes the accent while the field has focus; it sits in the
 /// transcript's column; and when the pane loses focus it folds to one line, then unfolds.
 #[test]
@@ -158,7 +157,7 @@ fn the_composer_is_a_ring_that_folds_when_the_pane_loses_focus() {
         still(h, c);
         still(h, field);
 
-        // Q-C1: the dock follows the transcript's column.
+        // The dock follows the transcript's column.
         let welcome = h.doc.border_box(h.el("s:1", "1")).unwrap();
         let frame = h.doc.border_box(c).unwrap();
         assert!((welcome.x - frame.x).abs() <= 1.0, "{welcome:?} {frame:?}");
@@ -192,7 +191,7 @@ fn the_composer_is_a_ring_that_folds_when_the_pane_loses_focus() {
     });
 }
 
-/// T4.2, T4.4 and T4.7: while omp runs the ring takes the live colour, Stop is a red quiet
+/// While omp runs the ring takes the live colour, Stop is a red quiet
 /// control, the working row's separator is faint and the activity line spaced; afterwards the
 /// ring returns.
 #[test]
@@ -221,7 +220,7 @@ fn a_running_turn_tints_the_ring_and_shows_a_red_stop() {
         let pending = ring(h, c).expect("a ring");
         assert_ne!(Some(pending), rest, "the live colour");
         let stop = h.el("s:1", "3.bar/stop");
-        // Tone error: the palette's error colour, else --bad (K1).
+        // Tone error: the palette's error colour, else --bad.
         let bad = token(h, stop, "var(--sf-bad, var(--bad))");
         assert_eq!(fg(h, stop), bad);
         let rest_fill = bg(h, stop);
@@ -243,7 +242,7 @@ fn a_running_turn_tints_the_ring_and_shows_a_red_stop() {
     });
 }
 
-/// T4.3 and Q-C2: the context meter is a 2px hairline on the frame's top edge, its share a
+/// The context meter is a 2px hairline on the frame's top edge, its share a
 /// legend cut out of the edge with the page colour; the total hides.
 #[test]
 fn the_context_share_is_a_hairline_on_the_frames_top_edge_with_a_legend() {
@@ -278,10 +277,10 @@ fn context_hairline(h: &mut Harness) {
     assert_eq!(bg(h, lbl), page, "cut out of the ring");
     let fill = one(h, ctx, "sf-mt-fill");
     let accent = token(h, ctx, "var(--accent)");
-    assert_eq!(bg(h, fill), accent, "untoned: the accent (K2)");
+    assert_eq!(bg(h, fill), accent, "untoned: the accent");
 }
 
-/// T4.1 (the dialog) and T4.5: an omp.editor in the layer draws no frame; in the dock, vim's
+/// An omp.editor in the layer draws no frame; in the dock, vim's
 /// insert mode shows no chip and normal mode a block caret; a plain editor keeps its chip.
 #[test]
 fn vim_modes_in_the_composer_and_no_frame_outside_the_dock() {
@@ -320,7 +319,7 @@ fn vim_modes_in_the_composer_and_no_frame_outside_the_dock() {
     assert_ne!(display(&h, plain), "None", "outside omp the kit chip stays");
 }
 
-/// T6.1 for the composer: its ring and the focused tint differ between themes, and are tokens.
+/// For the composer: its ring and the focused tint differ between themes, and are tokens.
 #[test]
 fn the_composer_ring_follows_the_theme() {
     let mut rings = Vec::new();
@@ -346,7 +345,7 @@ fn the_composer_ring_follows_the_theme() {
     assert_ne!(rings[0].1, rings[1].1);
 }
 
-/// T4.8: the autocomplete is 480px wide (omp's recorded `/model` completion).
+/// The autocomplete is 480px wide (omp's recorded `/model` completion).
 #[test]
 fn the_autocomplete_is_480px_wide() {
     replay_at("omp-picker.jsonl", &[15], |h, _| {
@@ -445,7 +444,7 @@ fn pixel(px: &[u8], w: u32, x: f32, y: f32) -> [u8; 3] {
     [px[i], px[i + 1], px[i + 2]]
 }
 
-/// T5.1 and T6.1 on omp's recorded model picker (form B): the card in the overlay draws no
+/// On omp's recorded model picker (form B): the card in the overlay draws no
 /// frame of its own, so the sheet shows one ring edge; in both themes.
 #[test]
 fn an_overlay_card_draws_no_second_frame() {
@@ -493,7 +492,7 @@ fn an_overlay_card_draws_no_second_frame() {
     }
 }
 
-/// T5.2, T5.3 and K10 on omp's recorded Usage sheet (form C): roomier sheet padding, a chart
+/// On omp's recorded Usage sheet (form C): roomier sheet padding, a chart
 /// head icon, the provider in a well, and the share column 9 cells wide, right-aligned.
 #[test]
 fn the_usage_sheet_has_room_a_chart_icon_and_aligned_columns() {
@@ -526,7 +525,7 @@ fn the_usage_sheet_has_room_a_chart_icon_and_aligned_columns() {
     });
 }
 
-/// The Usage sheet's windows stay one line however the pointer moves (A25's jump): every
+/// The Usage sheet's windows stay one line however the pointer moves: every
 /// element of the sheet hovered in turn leaves every window row, label, share and reset at one
 /// line and where it was.
 #[test]
@@ -576,7 +575,7 @@ fn hovering_the_usage_sheet_never_wraps_or_moves_a_window() {
     });
 }
 
-/// K10: an overlay with an omp.overlay.<name> role heads with its sheet's icon (omp's app icon
+/// An overlay with an omp.overlay.<name> role heads with its sheet's icon (omp's app icon
 /// for any other name); a card with such a role, an overlay without a head, and other overlays
 /// keep the kit's behaviour.
 #[test]

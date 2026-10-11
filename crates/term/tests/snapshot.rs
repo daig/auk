@@ -1,4 +1,4 @@
-//! Snapshots (§15.3) and determinism (§15.2): a snapshot replayed on a fresh terminal of the same
+//! Snapshots and determinism: a snapshot replayed on a fresh terminal of the same
 //! size and configuration gives the same state hash, anchors included, and the two stay equal as
 //! the same input continues. Streams come from raw bytes biased toward escape sequences (so the
 //! parser is often caught mid-sequence) and from the realistic grammar, mixed with records and
@@ -206,7 +206,7 @@ fn stream() -> impl Strategy<Value = Vec<u8>> {
 }
 
 /// Cuts `stream` at `cut`: a terminal rebuilt from a snapshot there, with other sequences between
-/// the terminal's state and the parser's (as a replica appends its own, §15.3), continues like
+/// the terminal's state and the parser's (as a replica appends its own), continues like
 /// the original.
 fn check_cut(cols: u16, rows: u16, stream: &[u8], cut: usize) -> Result<(), TestCaseError> {
     let config = Config { scrollback: 6 };
@@ -309,7 +309,7 @@ fn hash_covers_state() {
     }
 }
 
-/// Prompt rows (OSC 133 `A`, §5.3) are replicated state: they survive a snapshot and scrolling
+/// Prompt rows (OSC 133 `A`) are replicated state: they survive a snapshot and scrolling
 /// into the scrollback, and erasing the row clears them. The alternate screen has none.
 #[test]
 fn prompt_rows_survive_snapshots_and_go_with_their_row() {

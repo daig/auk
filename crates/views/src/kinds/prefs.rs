@@ -1,9 +1,9 @@
-//! `prefs` (T2, amendment A23): the kit Preferences page drawn from the program's data (book:
-//! `prefs`; research/elements.md §2.4, §6.4). In `main` it is a page (a nav column, the scrolling
-//! document and Close; an icon rail below 760px); in `layer` it is a sheet docked at the right
-//! edge, and in an inline surface the pane narrows beside it (feature `aside`). The program owns
-//! every key: focus, menus and text drafts come as props (`focus`, `editing`); pointer actions
-//! go back as `action`, `change`, `activate`, `select` and `focus` events.
+//! `prefs` (T2): the kit Preferences page drawn from the program's data. In `main` it is a page (a
+//! nav column, the scrolling document and Close; an icon rail below 760px); in `layer` it is a
+//! sheet docked at the right edge, and in an inline surface the pane narrows beside it (feature
+//! `aside`). The program owns every key: focus, menus and text drafts come as props (`focus`,
+//! `editing`); pointer actions go back as `action`, `change`, `activate`, `select` and `focus`
+//! events.
 //!
 //! The page keeps its skeleton (`.pf`, the nav, `.pf-scroll`) across renders, so the document's
 //! scroll survives the program's updates; a page or query change scrolls to the top and replays
@@ -25,7 +25,7 @@ const EXTRA: usize = 0;
 const EDITOR: usize = 1;
 const PREVIEW: usize = 2;
 
-/// Where the role of a child sends it (book: Children: placed by role).
+/// Where the role of a child sends it (children are placed by role).
 pub(crate) fn route(child: NodeRef) -> usize {
     match str_prop(child.props(), "role") {
         Some("omp.prefs.preview.status") => PREVIEW,
@@ -45,7 +45,7 @@ pub(crate) struct Memo {
     /// The document's content (its head, sections or search parts, the "nothing" line), kept
     /// while the structure is the same.
     body: Vec<NodeId>,
-    /// The document's structure as last built (book: Updates): page, query, sections, row ids,
+    /// The document's structure as last built: page, query, sections, row ids,
     /// control kinds and options. While it holds, rows patch in place.
     structure: Option<u64>,
     /// Each row drawn: its element, its list and the signature of what it shows.
@@ -72,7 +72,7 @@ fn pane_px(cx: &Cx) -> f32 {
     f32::from(cx.cols) * cx.set.cell.0 / zoom
 }
 
-/// An open menu's width budget (`--pf-room`, book: prefs Variables), so long options wrap inside
+/// An open menu's width budget (`--pf-room`), so long options wrap inside
 /// the row: what the row's control may take, from the page's width (`surface-prefs.css`: the
 /// nav, the document's 760px and paddings, the label's room) or the sheet's (its control's 55%).
 fn menu_room(cx: &Cx, sheet: bool) -> f32 {
@@ -347,7 +347,7 @@ pub(crate) fn prefs(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
     let query = str_prop(p, "query").unwrap_or("").trim().to_owned();
     let searching = !query.is_empty();
     let structure = structure_sig(p, &query);
-    // Book (Updates): the document rebuilds only when its structure changes; otherwise rows
+    // The document rebuilds only when its structure changes; otherwise rows
     // patch in place, so a switch slides instead of redrawing.
     let patch = !fresh && memo.structure == Some(structure);
     // Rebuilding, the switches leave before the old content goes (a removed node's id is
@@ -785,7 +785,7 @@ pub(crate) fn prefs(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
     cx.st.prefs.insert(id, memo);
 }
 
-/// The document's structure (book: prefs Updates): page, query, the header's texts, sections
+/// The document's structure: page, query, the header's texts, sections
 /// (ids, titles, pages), row ids, control kinds and options. While it holds, rows patch.
 fn structure_sig(p: &Map<String, Value>, query: &str) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -1275,7 +1275,7 @@ fn find_row<'a>(p: &'a Map<String, Value>, rid: &str) -> Option<&'a Map<String, 
         .find(|r| str_prop(r, "id") == Some(rid))
 }
 
-/// An ordered multi list's item dragged by its grip (book: prefs, `multi` with `ordered`).
+/// An ordered multi list's item dragged by its grip (`multi` with `ordered`).
 #[derive(Debug)]
 pub(crate) struct Reorder {
     scope: String,
@@ -1320,7 +1320,7 @@ pub(crate) fn reorder_values(
 }
 
 impl PaneView {
-    /// A press on an ordered list's grip starts dragging its item (book: prefs, `multi`):
+    /// A press on an ordered list's grip starts dragging its item:
     /// returns whether it did. Hosts call this before [`PaneView::click`], and then
     /// [`PaneView::reorder_drag`] and [`PaneView::reorder_release`].
     pub fn reorder_press(&mut self, doc: &mut Document, pane: &TspPane, x: f32, y: f32) -> bool {
@@ -1467,7 +1467,7 @@ impl PaneView {
     }
 
     /// Pointing at an open menu's option previews it: `select {item: "<row>=<value>"}`, once
-    /// per option (book: `prefs` events). Hosts call this after [`PaneView::hover`].
+    /// per option. Hosts call this after [`PaneView::hover`].
     pub fn hover_events(&mut self, doc: &Document) -> Vec<Outcome> {
         let chain = self.hover.clone();
         let Some(mi) = chain

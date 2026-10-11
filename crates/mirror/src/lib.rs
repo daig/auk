@@ -1,14 +1,14 @@
-//! The daemon-to-client replication protocol (spec §15.6).
+//! The daemon-to-client replication protocol.
 //!
 //! - **Frames** ([`frame`]): a u32 little-endian payload length, a type byte, then the payload.
 //!   Pane output, input and snapshots carry raw bytes behind a small binary header; every other
 //!   message is JSON.
-//! - **Messages** ([`msg`]): [`ClientMsg`] and [`DaemonMsg`], the table of §15.6.
+//! - **Messages** ([`msg`]): [`ClientMsg`] and [`DaemonMsg`].
 //! - **Handshake**: the client's [`Hello`] carries the protocol version, the parser version
 //!   ([`auk_replica::PARSER_VERSION`]), the Auk version, its kind and its facts. The daemon
-//!   answers [`DaemonMsg::Welcome`], or [`DaemonMsg::Refused`] when any version differs (X9).
+//!   answers [`DaemonMsg::Welcome`], or [`DaemonMsg::Refused`] when any version differs.
 //!   Then [`ClientMsg::Attach`] brings the window's layout, a snapshot per visible pane at a
-//!   sequence number, and the live stream after it (§15.3). Blobs the snapshot's documents name
+//!   sequence number, and the live stream after it. Blobs the snapshot's documents name
 //!   follow it ([`DaemonMsg::Blob`]); a window asks for others with [`ClientMsg::Blobs`].
 //! - **Requests**: a [`ClientMsg::Request`] is a layout edit the client waits on; the daemon
 //!   answers [`DaemonMsg::Reply`] with the same id once the edit's layout has gone out.
@@ -40,7 +40,7 @@ pub type PaneId = u64;
 /// The version of this protocol. Bump it with any change to frames or messages.
 pub const PROTOCOL_VERSION: u32 = 3;
 
-/// The versions client and daemon must share (§4.5, §15.2).
+/// The versions client and daemon must share.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Versions {
     pub protocol: u32,
@@ -61,7 +61,7 @@ impl Versions {
     }
 
     /// Checks a client's versions against the daemon's (`self`). Any difference refuses the
-    /// client: replicas must parse identically (X9).
+    /// client: replicas must parse identically.
     pub fn admit(&self, client: &Versions) -> Result<(), Refusal> {
         let reason = if client.protocol != self.protocol {
             format!(
@@ -103,7 +103,7 @@ pub fn write_msg<M: Message>(w: &mut impl Write, msg: &M) -> io::Result<()> {
 #[derive(Debug)]
 pub enum HandshakeError {
     Wire(WireError),
-    /// The daemon refused this client's versions (X9).
+    /// The daemon refused this client's versions.
     Refused(Refusal),
     /// The daemon closed the connection or answered out of turn.
     Unexpected(String),

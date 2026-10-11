@@ -1,4 +1,4 @@
-//! The replicated-state hash (§15.2): BLAKE3 over a canonical serialization of everything every
+//! The replicated-state hash: BLAKE3 over a canonical serialization of everything every
 //! replica of a pane must agree on.
 //!
 //! Covered: the replicated config, the answer gate, the program hello, the title state, the next
@@ -9,7 +9,7 @@
 //! Not covered: client facts, acks and `resize` bookkeeping, the output queue, held `send`s,
 //! pending `reveal`/`scroll` requests (view commands), blobs (content-addressed storage outside
 //! the documents), replica-local surface keys, and the values of age props, which a snapshot
-//! rewrites to snapshot time and which replicas may disagree on (§7.13, §15.2).
+//! rewrites to snapshot time and which replicas may disagree on.
 
 use serde_json::Value;
 

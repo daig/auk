@@ -1,5 +1,5 @@
-//! A pane in the pane table (§14.2): its process, its authoritative replica, the clients that
-//! show it, the primary-replica policy (§15.5) and the shell's command marks (§5.3).
+//! A pane in the pane table: its process, its authoritative replica, the clients that
+//! show it, the primary-replica policy and the shell's command marks.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -21,13 +21,13 @@ use crate::client::{ClientId, ClientTx};
 use crate::pty::{Master, TtyMode};
 use crate::tsp::{Ages, parse_view_event};
 
-/// How long a chunk sequence may wait for its next chunk (§7.1).
+/// How long a chunk sequence may wait for its next chunk.
 pub const CHUNK_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// How many finished command marks a pane keeps.
 const MAX_MARKS: usize = 1000;
 
-/// What a pane runs (§5.1).
+/// What a pane runs.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PaneKind {
@@ -35,10 +35,10 @@ pub enum PaneKind {
     Shell,
     /// `$SHELL -l -c <line>`.
     Command { line: String },
-    /// An agent pane (§5.1): a command pane running `agent_command` (default `omp`) through the
+    /// An agent pane: a command pane running `agent_command` (default `omp`) through the
     /// login shell, which windows badge with the agent icon.
     Agent { line: String },
-    /// A plugin block (§9.5): its kind `<plugin>.<block>`, its launch args and its last `save`
+    /// A plugin block: its kind `<plugin>.<block>`, its launch args and its last `save`
     /// (JSON text), which a restore starts it from.
     Block {
         block: String,
@@ -50,7 +50,7 @@ pub enum PaneKind {
 }
 
 impl PaneKind {
-    /// The kind every window sees in the layout (§5.1).
+    /// The kind every window sees in the layout.
     pub fn tag(&self) -> auk_mirror::layout::PaneTag {
         use auk_mirror::layout::PaneTag;
         match self {
@@ -70,7 +70,7 @@ impl PaneKind {
     }
 }
 
-/// One `C`…`D` span (§5.3): the daemon measures the duration itself.
+/// One `C`…`D` span: the daemon measures the duration itself.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommandMark {
     /// The command line, as the shell reported it at `C` (alias-expanded when the shell
@@ -169,18 +169,18 @@ struct Viewer {
     facts: ClientFacts,
 }
 
-/// One write to a pane's PTY, in the order the single writer (§14.2) makes them.
+/// One write to a pane's PTY, in the order the single writer makes them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PtyWrite {
     /// Client input: keys, pastes.
     Input(Vec<u8>),
     /// Terminal answers (DA1, CPR, …).
     Answer(Vec<u8>),
-    /// One TSP reply or event: written only through the mode gate (§12.1).
+    /// One TSP reply or event: written only through the mode gate.
     Tsp(Vec<u8>),
 }
 
-/// What the mode gate let through and held back (§12.1), for diagnostics.
+/// What the mode gate let through and held back, for diagnostics.
 #[derive(Debug, Default)]
 pub struct GateStats {
     pub written: AtomicU64,
@@ -192,9 +192,9 @@ pub struct GateStats {
 #[derive(Debug)]
 pub struct PaneIo {
     pub master: Arc<Master>,
-    /// The pane socket's server (§11.2); it stops with the process.
+    /// The pane socket's server; it stops with the process.
     pub pane_socket: Option<tokio::task::AbortHandle>,
-    /// The single writer to the PTY (§14.2): client input and the replica's answers go through
+    /// The single writer to the PTY: client input and the replica's answers go through
     /// this queue, in order.
     pub input: mpsc::UnboundedSender<PtyWrite>,
     pub gate: Arc<GateStats>,
@@ -208,7 +208,7 @@ impl Drop for PaneIo {
     }
 }
 
-/// A pane's persistent description: what the state file (§16) stores per pane, with the
+/// A pane's persistent description: what the state file stores per pane, with the
 /// snapshot alongside.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaneRecord {
@@ -237,31 +237,31 @@ pub struct Pane {
     pub exit: Option<i32>,
     pub last_output: Instant,
     viewers: BTreeMap<ClientId, Viewer>,
-    /// Clients by recency of input or focus, most recent last (§15.5).
+    /// Clients by recency of input or focus, most recent last.
     activity: Vec<ClientId>,
     primary: Option<ClientId>,
-    /// The facts TSP sees: the primary's, else the last primary's (§15.5).
+    /// The facts TSP sees: the primary's, else the last primary's.
     facts: ClientFacts,
     changed: watch::Sender<u64>,
-    /// When ages arrived, for snapshots (§7.13).
+    /// When ages arrived, for snapshots.
     ages: Ages,
-    /// A chunk sequence being joined: its size and when it last grew (§7.1).
+    /// A chunk sequence being joined: its size and when it last grew.
     chunk: Option<(usize, Instant)>,
     /// Bumped when the pane's process is replaced (`surface-play`): output and exits of an older
     /// process are ignored.
     pub generation: u64,
     /// The pane runs `surface-play`'s stand-in program.
     pub stand_in: bool,
-    /// The plugin host: host events, lens captures, and a block pane's worker (§9).
+    /// The plugin host: host events, lens captures, and a block pane's worker.
     pub plugin: Option<crate::plugins::PaneLink>,
-    /// The resume variables set since the last prompt (§5.4, D19), for the state file.
+    /// The resume variables set since the last prompt, for the state file.
     pub resume: crate::persist::ResumeVars,
-    /// The pane stays in the layout when its program exits 0 (`--keep-open`, §5.1).
+    /// The pane stays in the layout when its program exits 0 (`--keep-open`).
     pub keep_open: bool,
     /// A close was asked for: the pane leaves the layout when its process ends, whatever its
     /// status.
     pub closing: bool,
-    /// A block pane whose block couldn't start shows a card with Retry (§9.5).
+    /// A block pane whose block couldn't start shows a card with Retry.
     pub block_failed: Option<crate::plugins::FailedBlock>,
 }
 
@@ -361,14 +361,14 @@ impl Pane {
                 .is_some_and(|io| io.master.output_pending())
     }
 
-    /// The snapshot at the current position, ages rewritten to now (§15.3).
+    /// The snapshot at the current position, ages rewritten to now.
     pub fn snapshot(&self) -> Snapshot {
         let ages = &self.ages;
         self.replica
             .snapshot_with(&mut |s, node, props| ages.rewrite(s, node, props))
     }
 
-    /// Inserts a record into the stream at the current position (§15.2).
+    /// Inserts a record into the stream at the current position.
     pub fn push_record(&mut self, record: Record) {
         let (seq, events) = self.replica.push(Item::Record(&record));
         self.forward_replies();
@@ -396,7 +396,7 @@ impl Pane {
     fn forward_replies(&mut self) {
         let replies = self.replica.take_replies();
         let Some(io) = &self.io else {
-            // A block pane's answers go to its worker (§9.5).
+            // A block pane's answers go to its worker.
             for answer in replies {
                 self.block_input(answer.bytes().to_vec());
             }
@@ -410,7 +410,7 @@ impl Pane {
         }
     }
 
-    /// An ack from a client (§7.10): only the primary's counts.
+    /// An ack from a client: only the primary's counts.
     pub fn client_ack(&mut self, client: ClientId, sf: &str, s: u64) {
         if self.primary != Some(client) {
             return;
@@ -419,8 +419,8 @@ impl Pane {
         self.forward_replies();
     }
 
-    /// A view event from a client showing the pane (§15.4), checked against the documents and
-    /// written subject to §7.7 and the mode gate. Pointer input makes the client primary.
+    /// A view event from a client showing the pane, checked against the documents and
+    /// written subject to the mode gate. Pointer input makes the client primary.
     pub fn client_view_event(
         &mut self,
         client: ClientId,
@@ -471,7 +471,7 @@ impl Pane {
         })
     }
 
-    /// Whether the pane leaves the layout now that its program ended with `status` (§5.1): a
+    /// Whether the pane leaves the layout now that its program ended with `status`: a
     /// program that exits 0 closes its pane unless it was opened with `--keep-open`; any other
     /// status keeps the pane open, showing how it ended, until it is closed. A pane being closed,
     /// and a plugin block, always leave.
@@ -497,7 +497,7 @@ impl Pane {
         self.bump();
     }
 
-    /// The tty's mode, for the TSP mode gate (§12.1). `None` once the process has exited.
+    /// The tty's mode, for the TSP mode gate. `None` once the process has exited.
     pub fn tty_mode(&self) -> Option<TtyMode> {
         self.io.as_ref().and_then(|io| io.master.tty_mode().ok())
     }
@@ -508,7 +508,7 @@ impl Pane {
         }
     }
 
-    // Viewers and the primary replica (§15.5).
+    // Viewers and the primary replica.
 
     /// Starts showing the pane to a client: queues a snapshot at the current position, then
     /// everything after it. The client ranks below every client that has been active here.
@@ -516,7 +516,7 @@ impl Pane {
         let mut frame = Vec::new();
         encode_snapshot(&mut frame, self.id, &self.snapshot());
         tx.send(Bytes::from(frame));
-        // Snapshots don't carry blobs; the window gets the ones its documents name (§7.12).
+        // Snapshots don't carry blobs; the window gets the ones its documents name.
         let named = self.replica.tsp().referenced_blobs();
         self.send_blobs(&tx, named.iter().map(String::as_str));
         self.send_lens_views(&tx);
@@ -552,7 +552,7 @@ impl Pane {
         }
     }
 
-    /// A window asks for blobs its documents name and it lacks (§7.12).
+    /// A window asks for blobs its documents name and it lacks.
     pub fn client_blobs(&self, client: ClientId, ids: &[String]) {
         if let Some(v) = self.viewers.get(&client) {
             self.send_blobs(&v.tx, ids.iter().map(String::as_str));
@@ -672,7 +672,7 @@ impl Pane {
         }
     }
 
-    /// Client facts from the primary (§15.5): the terminal's answers and TSP's hello fields and
+    /// Client facts from the primary: the terminal's answers and TSP's hello fields and
     /// events. With no client attached, the last primary's facts stay, and the pane is hidden.
     fn apply_primary_facts(&mut self) {
         if let Some(viewer) = self.primary.and_then(|c| self.viewers.get(&c)) {

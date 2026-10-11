@@ -1,6 +1,6 @@
 //! `auk doctor`: prints facts about this build and process as JSON: the version, where the
 //! executable is, its code signature, the web client's assets, and whether Luau's native code
-//! really runs here (§19, §20; spike S5).
+//! really runs here.
 
 use std::ffi::OsString;
 use std::path::Path;

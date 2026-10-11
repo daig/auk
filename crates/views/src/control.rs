@@ -60,11 +60,10 @@ impl PaneView {
     }
 
     /// Advance motion to `now` (ms, the view clock). Returns when the next frame is due, or
-    /// `None` when nothing moves (§7.13: frames only while something animates and the pane
-    /// shows).
+    /// `None` when nothing moves (frames only while something animates and the pane shows).
     pub fn tick(&mut self, doc: &mut Document, pane: &TspPane, now: f64) -> Option<f64> {
         self.last_now = now;
-        // CSS transitions and animations, on the same clock (§7.13, §8.4).
+        // CSS transitions and animations, on the same clock.
         doc.set_time(self.css_clock(now));
         // Toasts the last sync asked for.
         let mut next: Option<f64> = None;
@@ -125,7 +124,7 @@ impl PaneView {
                     sv.clocked.remove(&id);
                     continue;
                 };
-                // Highlighting the background finished draws in (§8.5), when the node is in
+                // Highlighting the background finished draws in, when the node is in
                 // view; out of view, the measure loop draws it in once it's laid out.
                 let drawing_in = !m.hl.is_empty() && cx.dom.doc.laid_out(m.el) && {
                     m.hl.retain_mut(|d| d.draw_in(&mut cx.dom, &mut 0, hl_budget));

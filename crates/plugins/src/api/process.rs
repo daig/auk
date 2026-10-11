@@ -1,4 +1,4 @@
-//! `tern.process.run` (§9.9, research/plugins.md §11.3): an argv, no shell, run off the owner
+//! `tern.process.run`: an argv, no shell, run off the owner
 //! thread; at most 16 MiB per output stream; an optional timeout.
 
 use std::io::{Read, Write};

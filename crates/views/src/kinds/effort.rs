@@ -1,4 +1,4 @@
-//! `effort`: omp's thinking-effort glyph (§8.2 T2, amendment A23; book:7074-7146). A 14px ring
+//! `effort`: omp's thinking-effort glyph (T2). A 14px ring
 //! that fills clockwise one sixth per level in that level's palette color; at `max` the ring
 //! closes and catches fire (a blazing ring, a crown of flames and an ember, flickering). Any other
 //! level draws a dashed empty ring and sets `.unknown`.
@@ -104,7 +104,7 @@ pub(crate) fn effort(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
     cx.dom.set_style(l, &style(b, &rb));
 }
 
-/// A level change's sweep (book: "the arc sweeps to the new fill"): one clockwise arc, so the
+/// A level change's sweep (in Tern, "the arc sweeps to the new fill"): one clockwise arc, so the
 /// right rotor turns first and the left one after it when filling (the left first, then the
 /// right, when emptying), each for its share of 0.4 s. The transitions for the right and left
 /// rotors, as inline CSS; none without a change (the first show sweeps by keyframes).

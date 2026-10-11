@@ -1,4 +1,4 @@
-//! Running blocks (§9.5): a block is a daemon pane that speaks TSP with no program features. Its
+//! Running blocks: a block is a daemon pane that speaks TSP with no program features. Its
 //! worker writes the pane's output bytes (a hello, a screen surface with role
 //! `plugin.<plugin>.<block>`, frames, titles) and reads the pane's input (keys, and the
 //! terminal's replies and events).
@@ -271,7 +271,7 @@ impl BlockRun {
                     }
                 }
                 Item::Event(event) => {
-                    // Acks are dropped: a block writes without waiting for credits (§9.5, D25).
+                    // Acks are dropped: a block writes without waiting for credits.
                     if !matches!(event, Event::Ack(_) | Event::Resize(_)) {
                         out.push(BlockInput::Event(event.raw().clone()));
                     }

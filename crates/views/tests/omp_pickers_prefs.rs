@@ -1,4 +1,4 @@
-//! omp's picker and settings sheets (amendment A24; research/omp-stylesheets.md §5, §6, §16.7):
+//! omp's picker and settings sheets:
 //! the preview heading, the copy picker's blocks, the agents prompt, the unfocused pane and the
 //! card fallback model browser; the status-line preview, the editor card's children, the picker
 //! in the editor card, program accents, the fallback settings list and the unfocused and still
@@ -86,7 +86,7 @@ fn px(v: &impl std::fmt::Debug) -> String {
     format!("{v:?}")
 }
 
-/// T6.2: omp's sheets add no motion: no transition and no animation on a probed node.
+/// omp's sheets add no motion: no transition and no animation on a probed node.
 fn still(h: &Harness, el: NodeId) {
     let st = h.doc.computed_style(el).unwrap();
     assert!(
@@ -188,7 +188,7 @@ fn settings_sheet(h: &mut Harness) -> NodeId {
 // ---------------------------------------------------------------------------------------------
 // omp-pickers.css
 
-/// T-P1: the model hub's preview heading (`fixtures/tsp/omp-picker.jsonl` s6) is the preview's
+/// The model hub's preview heading (`fixtures/tsp/omp-picker.jsonl` s6) is the preview's
 /// h1: sans 15px 600; the id line under it is --t3 and sits 2px below.
 #[test]
 fn omp_picker_preview_title_is_a_sans_heading_with_the_id_tucked_under() {
@@ -236,7 +236,7 @@ fn omp_picker_preview_title_is_a_sans_heading_with_the_id_tucked_under() {
     assert!(seen, "s6 drew the hub");
 }
 
-/// T-P2: the copy picker's blocks (`fixtures/tsp/omp-picker-tree-copy.jsonl` s12, focus on the
+/// The copy picker's blocks (`fixtures/tsp/omp-picker-tree-copy.jsonl` s12, focus on the
 /// preview, `18.b0` focused): tiles with an --l2 border and no tree hairline; the focused one is
 /// ringed in --accent. In both themes.
 #[test]
@@ -315,7 +315,7 @@ fn omp_copy_picker_blocks_are_tiles_and_the_focused_one_is_ringed() {
     assert_ne!(colours[0].1, colours[1].1, "--well follows the theme");
 }
 
-/// T-P3 (constructed: the agents hub's preview is unrecorded): the system prompt's body stops
+/// Constructed (the agents hub's preview is unrecorded): the system prompt's body stops
 /// at 14 lines and scrolls.
 #[test]
 fn omp_agents_prompt_scrolls_after_fourteen_lines() {
@@ -339,7 +339,7 @@ fn omp_agents_prompt_scrolls_after_fourteen_lines() {
     still(&h, body);
 }
 
-/// T-P4: the model hub (`fixtures/tsp/omp-picker.jsonl`, s11: the list focused, a query typed)
+/// The model hub (`fixtures/tsp/omp-picker.jsonl`, s11: the list focused, a query typed)
 /// in an unfocused pane: no caret, and the selection loses its accent edge for an --l2 fill.
 #[test]
 fn omp_picker_in_an_unfocused_pane_hides_its_caret_and_quiets_the_selection() {
@@ -414,7 +414,7 @@ fn model_picker_card() -> Value {
                     {"id": "v.hints/4/1", "k": "text", "p": {"spans": [{"t": "close", "s": "muted"}]}}]}]}]}]}])
 }
 
-/// T-P5 (constructed from `long_model.jsonl`:1096; the recording isn't in fixtures/): the list
+/// Constructed (from `long_model.jsonl`:1096; the recording isn't in fixtures/): the list
 /// keeps ten lines to browse, and the detail is set off by an --l2 hairline with 8/10 padding.
 #[test]
 fn omp_model_browser_card_keeps_a_browsable_list_and_a_ruled_detail() {
@@ -453,7 +453,7 @@ fn omp_model_browser_card_keeps_a_browsable_list_and_a_ruled_detail() {
 // ---------------------------------------------------------------------------------------------
 // omp-prefs.css
 
-/// T-R1: omp's /settings (`fixtures/tsp/omp-settings.jsonl` s6): the status-line preview is a
+/// omp's /settings (`fixtures/tsp/omp-settings.jsonl` s6): the status-line preview is a
 /// well in the terminal font; its strip is 24px tall at the meta size.
 #[test]
 fn omp_settings_status_preview_is_a_terminal_font_well() {
@@ -496,7 +496,7 @@ fn prefs_page(kids: Value, dark: bool) -> Harness {
     )
 }
 
-/// T-R2 (constructed): a card in the editor column drops its frame (the glass card is it), and
+/// Constructed: a card in the editor column drops its frame (the glass card is it), and
 /// the column is terminal content.
 #[test]
 fn omp_prefs_editor_card_child_drops_its_frame() {
@@ -526,9 +526,9 @@ fn omp_prefs_editor_card_child_drops_its_frame() {
     still(&h, card);
 }
 
-/// T-R3: a picker child of a prefs sheet in the layer is framed by the editor card: no
-/// backdrop, the sheet inside the card. surface-prefs.css draws this (A23); the omp sheets must
-/// leave it whole (T-D1b).
+/// A picker child of a prefs sheet in the layer is framed by the editor card: no
+/// backdrop, the sheet inside the card. surface-prefs.css draws this; the omp sheets must
+/// leave it whole.
 #[test]
 fn omp_prefs_picker_child_fills_the_editor_card_without_a_backdrop() {
     let items: Vec<Value> = (0..30)
@@ -576,7 +576,7 @@ fn omp_prefs_picker_child_fills_the_editor_card_without_a_backdrop() {
     );
 }
 
-/// T-R4, the engine check: under "Use program colors" (`.sf-pal`) a custom property naming
+/// The engine check: under "Use program colors" (`.sf-pal`) a custom property naming
 /// another resolves per element at computed time, so the kit's accents follow omp's palette
 /// (`fixtures/tsp/omp-settings.jsonl` s6): an on switch fills with the program's fill; without
 /// the setting, with the theme's.
@@ -625,7 +625,7 @@ fn omp_settings_switches_follow_the_program_accent_under_program_colors() {
     assert!(seen);
 }
 
-/// T-R5 (constructed: the fallback list shows only without `prefs`): a heading item isn't
+/// Constructed (the fallback list shows only without `prefs`): a heading item isn't
 /// dimmed and reads as a section head; the search row is a well. In both themes.
 #[test]
 fn omp_settings_fallback_headings_are_section_heads_not_dimmed_items() {
@@ -676,7 +676,7 @@ fn omp_settings_fallback_headings_are_section_heads_not_dimmed_items() {
     assert_ne!(colours[0].1, colours[1].1);
 }
 
-/// R6 (constructed): the composer-shape sample takes no pointer; the snapcompact image is
+/// Constructed: the composer-shape sample takes no pointer; the snapcompact image is
 /// framed by a hairline.
 #[test]
 fn omp_shape_previews_are_inert_samples() {
@@ -703,7 +703,7 @@ fn omp_shape_previews_are_inert_samples() {
     still(&h, img);
 }
 
-/// T-R7: omp's /settings (`fixtures/tsp/omp-settings.jsonl`): unfocused, the focus ring is a
+/// omp's /settings (`fixtures/tsp/omp-settings.jsonl`): unfocused, the focus ring is a
 /// quiet --l3 ring (s6) and the text draft's caret is hidden (s13); under reduce motion
 /// (`.sf-still`) the switches snap.
 #[test]

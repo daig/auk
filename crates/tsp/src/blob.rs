@@ -1,4 +1,4 @@
-//! Blobs (`b`, §7.12): content-addressed by the SHA-256 of the decoded bytes, shared by a pane's
+//! Blobs (`b`): content-addressed by the SHA-256 of the decoded bytes, shared by a pane's
 //! surfaces. Storage sits behind [`BlobStore`]; the daemon backs it with the on-disk cache.
 
 use std::collections::BTreeMap;
@@ -7,9 +7,9 @@ use std::fmt::Debug;
 use base64::Engine as _;
 use sha2::{Digest as _, Sha256};
 
-/// The largest blob, decoded (§7.14).
+/// The largest blob, decoded.
 pub const MAX_BLOB: usize = 16 << 20;
-/// Unreferenced blobs kept per pane before LRU eviction (§7.14: 256 MiB per screen).
+/// Unreferenced blobs kept per pane before LRU eviction (256 MiB per screen).
 pub const BLOBS_PER_PANE: usize = 256 << 20;
 
 /// A stored blob.

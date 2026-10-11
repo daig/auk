@@ -1,4 +1,4 @@
-//! `surface-play` (§7.15): feeds a TSP recording's program-side messages into a pane, as if its
+//! `surface-play`: feeds a TSP recording's program-side messages into a pane, as if its
 //! program wrote them, so recordings become a regression corpus.
 //!
 //! `surface-play [--pane TARGET] FILE [from N] [until N] [paced [TIMES]]`
@@ -10,8 +10,8 @@
 //! - The first play in a pane restarts it as a stand-in program ([`stand_in`]): a raw-mode reader
 //!   that swallows whatever the terminal answers, so the answers pass the mode gate and never
 //!   reach a shell.
-//! - A frame is named by its `s` (`3`) or by surface and `s` (`chat#3`), as in Tern (book:11581,
-//!   16730). `from F` starts after frame F, so a second play continues the first; it needs an
+//! - A frame is named by its `s` (`3`) or by surface and `s` (`chat#3`), as in Tern.
+//!   `from F` starts after frame F, so a second play continues the first; it needs an
 //!   earlier play in the pane. `until F` stops after frame F. `paced` keeps the recorded gaps,
 //!   divided by `TIMES` (default 1); without it the messages go in one after another.
 

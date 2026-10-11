@@ -1,5 +1,5 @@
-//! Terminal behavior beyond the reference grid: APC strings for TSP (§6.1), events and their
-//! stream order, reports, kitty keyboard stacks, anchors (§7.4), and Unicode details.
+//! Terminal behavior beyond the reference grid: APC strings for TSP, events and their
+//! stream order, reports, kitty keyboard stacks, anchors, and Unicode details.
 
 // Uses dev-dependencies that don't build for wasm32 (see Cargo.toml).
 #![cfg(not(target_family = "wasm"))]
@@ -33,7 +33,7 @@ fn events_at(t: &mut Terminal, bytes: &[u8]) -> Vec<(usize, Event)> {
     out
 }
 
-// APC (§6.1).
+// APC.
 
 #[test]
 fn tsp_apc_is_an_event_in_stream_order() {
@@ -506,7 +506,7 @@ fn text_joins_wrapped_rows() {
     assert_eq!(t.text(0..3), "abcdefg\nhi");
 }
 
-// Anchors (§7.4).
+// Anchors.
 
 const A: AnchorKey = AnchorKey(1);
 const B: AnchorKey = AnchorKey(2);

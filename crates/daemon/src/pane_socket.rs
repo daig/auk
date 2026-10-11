@@ -1,4 +1,4 @@
-//! The pane socket (§11.2), `AUK_PANE_SOCKET`: a Unix socket for programs running in the pane.
+//! The pane socket, `AUK_PANE_SOCKET`: a Unix socket for programs running in the pane.
 //! Frames are a u32 little-endian length plus one JSON object. The greeting `{"hello":{}}` is
 //! answered by `{"welcome":{"ops":[]}}`. v1 offers no ops, so programs can feature-detect.
 //!

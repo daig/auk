@@ -1,4 +1,4 @@
--- tern.ui: the view builders (research/plugins.md §8.2). Builders return plain tables in the
+-- tern.ui: the view builders. Builders return plain tables in the
 -- TSP wire form {k, p?, c?}; p and c are left out when empty. Bad arguments raise
 -- `tern.ui.<builder>: <arg path>: <problem>`.
 local native = ...
@@ -580,7 +580,7 @@ function ui.el(tag: any, props: any, children: any)
 	return node("el", p, nodes("el", "children", children))
 end
 
--- tern.parse (research/plugins.md §8.8). Unlike tern.ui, strings are required.
+-- tern.parse. Unlike tern.ui, strings are required.
 local parse = {}
 
 local function pfail(f: string, path: string, problem: string): never

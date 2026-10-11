@@ -1,4 +1,4 @@
-//! Pointer details of the pane (§6.2, §7.9, §7.14, §12.2): the hover readout of a link's target,
+//! Pointer details of the pane: the hover readout of a link's target,
 //! drag-selection inside a focused program field, and mapping document points of a pane's
 //! surfaces back to window points.
 
@@ -22,7 +22,7 @@ pub struct WinRect {
 
 impl WinState {
     /// The program `pane` reports (its hello's `app`), only while a listening surface is open
-    /// (§7.2, §12.2: `TspPane::app` is `None` otherwise).
+    /// (`TspPane::app` is `None` otherwise).
     fn pane_app(&self, pane: PaneId) -> Option<String> {
         let shared = self.conn.shared();
         shared
@@ -62,7 +62,7 @@ impl WinState {
             .collect()
     }
 
-    /// The shown tabs whose focused pane is an agent pane (§5.1: drawn with the agent icon).
+    /// The shown tabs whose focused pane is an agent pane (drawn with the agent icon).
     pub(super) fn chrome_tab_agents_in(
         &self,
         sessions: &Sessions,
@@ -86,8 +86,7 @@ impl WinState {
     }
 
     /// The link under a window point: an OSC 8 link on the grid, or a surface link (an element
-    /// with `data-href`). Links show their target on hover and open only on an explicit gesture
-    /// (§7.14, §12.2).
+    /// with `data-href`). Links show their target on hover and open only on an explicit gesture.
     pub(super) fn link_at(&self, x: f64, y: f64) -> Option<String> {
         let pane = self.tab_layout.pane_at(x, y)?;
         if let Some((dx, dy)) = self.surface_point(pane, x, y) {
@@ -127,7 +126,7 @@ impl WinState {
         (link != 0).then_some((p, link))
     }
 
-    /// The grid link a click would open now (A13): the one under the pointer while ⌘ is down,
+    /// The grid link a click would open now: the one under the pointer while ⌘ is down,
     /// or with `links_plain_click` while the program doesn't take the mouse. It draws a solid
     /// accent underline (none with `hyperlinks` off) and the pointer is a pointing hand.
     pub fn armed_link(&self) -> Option<(PaneId, u32)> {
@@ -137,7 +136,7 @@ impl WinState {
         (self.pointer_cmd || plain).then_some((pane, link))
     }
 
-    /// The grid view the frame draws `pane` with, as far as links go (A13): the `hyperlinks`
+    /// The grid view the frame draws `pane` with, as far as links go: the `hyperlinks`
     /// style and the armed link when it is this pane's.
     pub fn link_view(&self, pane: PaneId) -> (auk_render::LinkStyle, Option<u32>) {
         let armed = self.armed_link();
@@ -232,7 +231,7 @@ impl WinState {
     }
 
     /// The `title` of the surface node under a window point, or of its nearest ancestor with
-    /// one: the node's tooltip (§8.1).
+    /// one: the node's tooltip.
     pub(super) fn title_at(&self, x: f64, y: f64) -> Option<String> {
         let pane = self.tab_layout.pane_at(x, y)?;
         let (dx, dy) = self.surface_point(pane, x, y)?;
@@ -389,7 +388,7 @@ impl WinState {
     }
 
     /// A drag after [`field_press`](Self::field_press): the field's native selection runs from
-    /// the press to the pointer (§7.9). Returns whether a field drag is under way.
+    /// the press to the pointer. Returns whether a field drag is under way.
     pub(super) fn field_dragged(&mut self, window: &Window, m: &MouseEvent) -> bool {
         let Some((pane, anchor)) = self.field_drag else {
             return false;
@@ -488,7 +487,7 @@ impl WinState {
             return None;
         }
         let r = sf.doc().border_box(el)?;
-        // A layer overlays the pane from its top, over everything else (§7.5).
+        // A layer overlays the pane from its top, over everything else.
         if sf.in_layers(el) {
             let view = self.views.get(&pane)?;
             if !view.arranged.layers {

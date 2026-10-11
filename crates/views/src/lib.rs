@@ -1,5 +1,4 @@
-//! TSP kinds as UI components, the built-in stylesheets and the per-window view layer (spec §8,
-//! §18.2–§18.4, research/elements.md).
+//! TSP kinds as UI components, the built-in stylesheets and the per-window view layer.
 //!
 //! A [`PaneView`] projects one pane's TSP surfaces (auk-tsp) into the UI engine's DOM (auk-ui),
 //! incrementally from [`auk_tsp::TspPane::take_changes`]: each node becomes `.sf.sf-<kind>` with
@@ -19,7 +18,7 @@
 //! programs get the engine's CSS errors. [`PaneView::to_html`] serializes the projection with
 //! every sheet that applies, for laying the same page out in WebKit.
 //!
-//! Windows composite a pane through [`compose`] (the §6.2 flow: grid rows and surface blocks,
+//! Windows composite a pane through [`compose`] (the flow: grid rows and surface blocks,
 //! following the tail, scroll anchoring) and [`surfaces`] ([`PaneSurfaces`]: the document, the
 //! blocks, docks, screen surfaces and layers, painted into a Vello scene). The app, the headless
 //! window and the web client share both.
@@ -68,7 +67,7 @@ pub use state::{Preedit, Selection};
 pub use surfaces::{Arranged, PaneSurfaces, Place, ShownToast, SurfaceBlock};
 pub use view::PaneView;
 
-/// The regions of a surface (§7.5).
+/// The regions of a surface.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Region {
     Main = 0,
@@ -80,22 +79,22 @@ pub enum Region {
 /// ([`PaneView::set_settings`]).
 #[derive(Clone, Debug, PartialEq)]
 pub struct ViewSettings {
-    /// The terminal font size in px; regions zoom by `font_px / 13` (§8.3).
+    /// The terminal font size in px; regions zoom by `font_px / 13`.
     pub font_px: f32,
     /// The cell size in px at that font.
     pub cell: (f32, f32),
     pub dark: bool,
-    /// Reduce Motion (the system setting or ours): still equivalents (§7.13).
+    /// Reduce Motion (the system setting or ours): still equivalents.
     pub reduce_motion: bool,
-    /// The system's Reduce Transparency, for `@media (prefers-reduced-transparency)` (§8.4).
+    /// The system's Reduce Transparency, for `@media (prefers-reduced-transparency)`.
     pub reduce_transparency: bool,
-    /// The system's Increase Contrast, for `@media (prefers-contrast: more)` (§8.4).
+    /// The system's Increase Contrast, for `@media (prefers-contrast: more)`.
     pub more_contrast: bool,
-    /// "Use program colors": apply program palettes (§7.12).
+    /// "Use program colors": apply program palettes.
     pub program_colors: bool,
     /// The "Edits" setting: split diffs wider than 112 cells when `mode` is absent or `auto`.
     pub split_diffs: bool,
-    /// Native editing in program fields (§7.9).
+    /// Native editing in program fields.
     pub native_editing: bool,
     /// "Open links with" plain click (otherwise ⌘-click).
     pub links_plain_click: bool,
@@ -104,13 +103,13 @@ pub struct ViewSettings {
     /// The host shows pictures large (the app's image viewer): images click to zoom and mermaid
     /// figures draw Open. The browser client has no viewer, so it draws neither.
     pub viewer: bool,
-    /// "Fold tool calls" (off by default, book:9939-9945): runs of work in `main` fold under one
+    /// "Fold tool calls" (off by default): runs of work in `main` fold under one
     /// `div.sf-work-head`.
     pub fold_work: bool,
 }
 
 impl ViewSettings {
-    /// The media features sheets match (§8.4): reduced motion, reduced transparency, more
+    /// The media features sheets match: reduced motion, reduced transparency, more
     /// contrast.
     pub fn media(&self) -> (bool, bool, bool) {
         (

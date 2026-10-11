@@ -1,5 +1,5 @@
 //! The command registry: every app command with its menu placement and key equivalent. The
-//! main menu is generated from it (§19), so the menu is also the keymap.
+//! main menu is generated from it, so the menu is also the keymap.
 
 use auk_platform_macos::{KeyMods, Menu, MenuItem, StandardAction};
 
@@ -294,7 +294,7 @@ pub fn builtin_ids() -> Vec<String> {
 }
 
 /// The key equivalents the menu binds, as chords (`cmd+shift+p`): the default keymap layer a
-/// plugin bind may not take (§9.8 "Binds").
+/// plugin bind may not take.
 pub fn default_chords() -> Vec<String> {
     REGISTRY.iter().filter_map(entry_chord).collect()
 }
@@ -355,7 +355,7 @@ pub fn menu_bar() -> Menu {
 }
 
 /// The menu bar with the key equivalents of `taken` left out: chords the user's `keybinds`
-/// rebind or unbind (§9.8: the user layer always wins), so those keys reach the keymap.
+/// rebind or unbind (the user layer always wins), so those keys reach the keymap.
 pub fn menu_bar_without(taken: &[auk_plugins::chord::Chord]) -> Menu {
     let free = |e: &Entry| {
         entry_chord(e)

@@ -1,16 +1,16 @@
-//! Where the daemon lives on disk (§4.1, §16, Appendix B).
+//! Where the daemon lives on disk.
 //!
 //! | What | Path |
 //! | --- | --- |
 //! | Daemon socket | `$AUK_DAEMON_SOCKET`, else `<runtime>/daemon.sock` |
 //! | Control endpoint | the daemon socket with the extension `ctl` (`daemon.ctl`) |
 //! | Single-daemon lock | the daemon socket with the extension `lock` |
-//! | Pane sockets (§11.2) | `<socket dir>/panes/<pane>.sock` |
+//! | Pane sockets | `<socket dir>/panes/<pane>.sock` |
 //! | State dir | `$AUK_STATE_DIR`, else `$AUK_CONFIG_DIR`, else the settings dir |
 //! | Daemon log | `<state>/daemon.log` |
-//! | zsh integration (§5.3) | `<state>/shell/zsh` |
+//! | zsh integration | `<state>/shell/zsh` |
 //! | Blob cache | `<state>/blobs` |
-//! | State file (M6) | `<state>/daemon.state` |
+//! | State file | `<state>/daemon.state` |
 //!
 //! The runtime dir is `$XDG_RUNTIME_DIR/auk` when that is set. Otherwise it is the settings dir:
 //! on macOS `~/Library/Application Support/Auk` (stable across reboots, unlike `$TMPDIR`, whose
@@ -21,9 +21,9 @@ use std::env;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-/// Names the daemon socket (§4.1). A different socket means a separate daemon.
+/// Names the daemon socket. A different socket means a separate daemon.
 pub const DAEMON_SOCKET_ENV: &str = "AUK_DAEMON_SOCKET";
-/// Names the settings directory (Appendix B, `TERN_CONFIG_DIR`).
+/// Names the settings directory (`TERN_CONFIG_DIR`).
 pub const CONFIG_DIR_ENV: &str = "AUK_CONFIG_DIR";
 /// Names the state directory; tests point it at a temporary directory.
 pub const STATE_DIR_ENV: &str = "AUK_STATE_DIR";

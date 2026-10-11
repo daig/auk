@@ -1,4 +1,4 @@
-//! Scenario scripts and deterministic headless runs (§11.3, §21).
+//! Scenario scripts and deterministic headless runs.
 //!
 //! - `auk shot SCENARIO… [--out DIR] [--size WxH[@S]] [--appearance light|dark]` runs each script
 //!   in a fresh private daemon with a headless window, writing a PNG and a layout JSON for every

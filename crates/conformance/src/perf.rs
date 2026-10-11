@@ -1,4 +1,4 @@
-//! The `perf` suite's inputs and measuring tools (GOAL.md `perf`, spec §18.1, §23 S2): an
+//! The `perf` suite's inputs and measuring tools: an
 //! omp-style transcript of any length built from omp's own entries, percentiles, and the
 //! comparison with Ghostty (the 100 MB file and the screen probe that times keystrokes and
 //! prompts on screen).
@@ -92,7 +92,7 @@ fn reid(node: &mut Value, copy: usize) {
 /// A TSP recording (Tern's JSONL) of an omp-style transcript with `entries` entries: omp's own
 /// final entries ([`omp_entries`]) repeated in order, each copy with fresh ids, added to an inline
 /// surface's `main` region `per_frame` at a time. Entries larger than `max_entry` bytes of JSON
-/// are left out so the transcript stays within a pane's retention budget (§7.10). The frames
+/// are left out so the transcript stays within a pane's retention budget. The frames
 /// are stamped `step_ms` apart (`t`), so `surface-play … paced` sends them at that pace; 0 stamps
 /// them all at once.
 pub fn transcript_recording(
@@ -213,7 +213,7 @@ pub fn write_text_file(path: &Path, size: usize) {
     std::fs::write(path, out).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
 }
 
-// Against Ghostty (S2).
+// Against Ghostty.
 
 /// The Ghostty app the comparison runs.
 pub const GHOSTTY_APP: &str = "/Applications/Ghostty.app";

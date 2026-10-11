@@ -1,7 +1,7 @@
-//! Spike S1's reference side (§23): the bytes Ghostty sends its program for the same physical
+//! The input probe's reference side: the bytes Ghostty sends its program for the same physical
 //! keystrokes. Ghostty runs a recorder (`cat` on a raw tty into a file); each stroke is posted
 //! to its process as a `CGEvent`, which needs the Accessibility permission. Used by the
-//! `keyprobe` example and the app suite's S1 test.
+//! `keyprobe` example and the app suite's input test.
 
 use std::path::Path;
 use std::process::Command;

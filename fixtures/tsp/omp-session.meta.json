@@ -1,12 +1,12 @@
 {
   "argv": [
-    "/Users/dai/.local/bin/omp"
+    "~/.local/bin/omp"
   ],
   "cwd": "/private/tmp/claude-501/-Users-dai-code-tern-clone/31364f1a-19f4-408f-a94a-d692aa417101/scratchpad/omp-work/tern-sdk",
   "cols": 120,
   "rows": 40,
   "env": [
-    "PI_TUI_TSP_RECORD=/Users/dai/code/tern-clone/fixtures/tsp/omp-session-own.jsonl"
+    "PI_TUI_TSP_RECORD=fixtures/tsp/omp-session-own.jsonl"
   ],
   "recorded": "2026-10-08T14:51:00-0600",
   "recorder": "tools/tsp_record.py",

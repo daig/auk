@@ -1,4 +1,4 @@
-//! Mermaid fences in `md` (§8.5, §18.4, amendment A23; book:5000, 5018, 5026, 5065): every
+//! Mermaid fences in `md`: every
 //! diagram kind drawn (nodes, edges and labels present, labels apart and inside their shapes),
 //! the terminal's colors dark and light, the figure's DOM, size and sideways scroll, Open, the
 //! code fallback with its note, an open fence while streaming, and omp's stream drawn.

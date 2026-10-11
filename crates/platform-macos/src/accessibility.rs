@@ -1,4 +1,4 @@
-//! Accessibility (§19): AccessKit's macOS adapter, hosted by the content view. The app supplies
+//! Accessibility: AccessKit's macOS adapter, hosted by the content view. The app supplies
 //! the tree ([`AccessibilityHandler`]); the view answers `NSAccessibility` requests from it.
 //! [`crate::Window::accessibility_tree`] reads the tree back through the same `NSAccessibility`
 //! calls an assistive app makes.

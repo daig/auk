@@ -1,11 +1,11 @@
-//! The wasm entry point (§10.3): the page's WebSocket, WebGPU canvas and keyboard.
+//! The wasm entry point: the page's WebSocket, WebGPU canvas and keyboard.
 //!
 //! [`start`] fetches the grid font from the server, opens WebGPU on the page's canvas, says
 //! hello over `/ws` and attaches to the window key (`?window=`, default `main`). Each frame draws
 //! the shown tab's panes (`?pane=` picks the tab holding that pane) with `auk-render`'s grid
-//! pass, glyphs rasterized by swash (§18.3). Keys are encoded for the pane's modes and sent as
+//! pass, glyphs rasterized by swash. Keys are encoded for the pane's modes and sent as
 //! input; paste, input-method text and resizes go through the same session ([`Session`]). The
-//! tab bar, dividers and focus ring are the app's chrome widgets (D3, §13.1), drawn by the UI
+//! tab bar, dividers and focus ring are the app's chrome widgets, drawn by the UI
 //! engine over the panes.
 
 use std::cell::RefCell;
@@ -62,7 +62,7 @@ struct PaneView {
     draw: PaneDraw,
 }
 
-/// How long a toast stays up, in milliseconds (§9.7: two lines, a few seconds).
+/// How long a toast stays up, in milliseconds (two lines, a few seconds).
 const TOAST_MS: i32 = 4000;
 
 struct App {
@@ -75,14 +75,14 @@ struct App {
     scale: f32,
     cell: (u32, u32),
     dark: bool,
-    /// The Edits setting (§8.5): `?edits=split` draws auto-mode diffs side by side when wider
+    /// The Edits setting: `?edits=split` draws auto-mode diffs side by side when wider
     /// than 112 cells; otherwise Inline (unified).
     split_diffs: bool,
     /// The facts last told the daemon: the page's look, motion and clock, followed as they
-    /// change (§4.5).
+    /// change.
     facts: ClientFacts,
     views: BTreeMap<PaneId, PaneView>,
-    /// Surfaces, drawn with Vello over the grids (§6.2, §18.1).
+    /// Surfaces, drawn with Vello over the grids.
     ui: UiLayer,
     /// The UI layer holds surfaces from the last frame.
     ui_painted: bool,
@@ -90,7 +90,7 @@ struct App {
     input: HtmlTextAreaElement,
     status: HtmlElement,
     /// The tab bar with its session chip and menu, the dividers and the focus ring: the app's
-    /// chrome widgets (D3, §13.1), painted into the UI layer over the panes. The browser views
+    /// chrome widgets, painted into the UI layer over the panes. The browser views
     /// and switches; it creates no tabs or sessions.
     chrome: ChromeDoc,
     /// The chrome changed since the UI layer last rendered.
@@ -625,7 +625,7 @@ impl App {
         let Some(pane) = self.focused else {
             return;
         };
-        // Pixels, in the flow's pixel scrolling (§6.2).
+        // Pixels, in the flow's pixel scrolling.
         let cell = f64::from(self.cell.1.max(1));
         let px = match e.delta_mode() {
             WheelEvent::DOM_DELTA_LINE => e.delta_y() * cell,
@@ -710,7 +710,7 @@ impl App {
     }
 
     /// A press on the canvas: it focuses the pane under it, and a surface or command block there
-    /// takes it as a view event (§7.8). What it landed on is kept for the debug state.
+    /// takes it as a view event. What it landed on is kept for the debug state.
     fn mouse_down(&mut self, e: &web_sys::MouseEvent) {
         let (cx, cy) = (e.offset_x() as f32, e.offset_y() as f32);
         let located = self.locate(cx, cy, e.button() == 0);
@@ -968,7 +968,7 @@ impl App {
         }
     }
 
-    /// Performs the effects the serving host sent (§9.7, §10.3): toasts show over the page,
+    /// Performs the effects the serving host sent: toasts show over the page,
     /// copies go to the clipboard, and links open in a new tab.
     fn effects(&mut self) {
         for effect in self.session.take_effects() {
@@ -1200,7 +1200,7 @@ impl App {
                 view.draw.sync(tsp, c, now);
             }
             view.draw.configure(tsp, settings.clone(), scale);
-            // The catalog's plugin styles (§9.4, §10.4).
+            // The catalog's plugin styles.
             view.draw
                 .set_styles(self.session.styles_serial, &self.session.styles);
         }
@@ -1227,7 +1227,7 @@ impl App {
             let content_w = (rect.w - 2.0 * pad).max(0.0);
             let content_h = (rect.h - 2.0 * pad).max(0.0);
             let pane_focused = doc_focused && self.focused == Some(pane);
-            // The pane's flow (§6.2): grid rows, and surface and command blocks at their anchor
+            // The pane's flow: grid rows, and surface and command blocks at their anchor
             // rows.
             if view.draw.layout(
                 &p.replica,

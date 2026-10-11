@@ -1,4 +1,4 @@
-//! Lens claims and command blocks in replicas (§9.6, §15.1, §15.2): every replica claims from the
+//! Lens claims and command blocks in replicas: every replica claims from the
 //! sequenced catalog and captures the same bytes, followers built from a snapshot mid-command
 //! included.
 

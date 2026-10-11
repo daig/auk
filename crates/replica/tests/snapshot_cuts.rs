@@ -1,4 +1,4 @@
-//! A snapshot may be taken at any byte position (§15.3): a late-attaching client's replica
+//! A snapshot may be taken at any byte position: a late-attaching client's replica
 //! rebuilt from it and fed the rest of the stream must reach the live replica's state, even when
 //! the cut falls inside an escape sequence, an OSC, DCS or TSP string, a UTF-8 character or a TSP
 //! chunk sequence.

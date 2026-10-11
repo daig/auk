@@ -204,7 +204,7 @@ impl Document {
     /// §10.6.2). Sizes the parent already decided (`known_dimensions`) are final.
     fn compute_replaced_layout(&mut self, id: NodeId, inputs: LayoutInput) -> LayoutOutput {
         let n = self.node(id);
-        // The natural size is in CSS px; the box's lengths are zoomed (§8.3's region zoom).
+        // The natural size is in CSS px; the box's lengths are zoomed (the region zoom).
         let zoom = n.style.as_ref().map_or(1.0, |s| s.zoom);
         let natural = n
             .image
@@ -240,7 +240,7 @@ impl Document {
                 }
             };
         let (w, min_w, mut max_w) = axis(known.width, size.width, min.width, max.width, pb.width);
-        // Tern's rule for pictures (book:5929): an `auto` width also fits the available width,
+        // Tern's rule for pictures: an `auto` width also fits the available width,
         // both axes shrinking together.
         if w.is_none()
             && let AvailableSpace::Definite(avail) = inputs.available_space.width
@@ -304,7 +304,7 @@ impl Document {
         self.layout_dirty = std::mem::take(&mut self.needs_relayout);
     }
 
-    /// Scroll anchoring (§3.4): remember, for each scrolled container, the first child under the
+    /// Scroll anchoring: remember, for each scrolled container, the first child under the
     /// top edge and its offset, so content above can change height without moving the view.
     fn record_anchors(&self) -> Vec<(NodeId, NodeId, f32)> {
         let mut out = Vec::new();
@@ -934,7 +934,7 @@ pub(crate) fn border_box(doc: &Document, id: NodeId) -> Option<Rect> {
     Some(Rect::new(x, y, n.layout.size.width, n.layout.size.height))
 }
 
-/// The paint-time offset of a `position: sticky` box (§3.6: sticky insets apply at paint time):
+/// The paint-time offset of a `position: sticky` box (sticky insets apply at paint time):
 /// it stays within its nearest scrolling ancestor's visible area, inside its containing block.
 pub(crate) fn sticky_offset(doc: &Document, id: NodeId) -> (f32, f32) {
     let n = doc.node(id);

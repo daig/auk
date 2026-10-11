@@ -1,4 +1,4 @@
-//! The daemon's side of TSP (§7, §12.1, §14.2): the engine its authoritative replicas run, with
+//! The daemon's side of TSP: the engine its authoritative replicas run, with
 //! the UI engine's CSS checker and the on-disk blob store; ages rewritten to snapshot time; view
 //! events from clients; and the JSON view of a pane's TSP state that the control endpoints share.
 
@@ -18,7 +18,7 @@ use auk_ui::css::properties::Restrictions;
 use auk_ui::css::sheet::Stylesheet;
 use serde_json::{Map, Value, json};
 
-/// Blobs kept on disk (§7.14): past this, the least recently shown go at daemon start.
+/// Blobs kept on disk: past this, the least recently shown go at daemon start.
 pub const BLOB_DISK_LIMIT: u64 = 1 << 30;
 
 /// The daemon's TSP engine for a new pane.
@@ -30,7 +30,7 @@ pub fn engine(settings: &Settings, blob_dir: &Path) -> TspPane {
     )
 }
 
-/// Program stylesheets checked by the UI engine's parser with the program restrictions (§7.12):
+/// Program stylesheets checked by the UI engine's parser with the program restrictions:
 /// `url()` and `position: fixed` dropped and reported, `@import` reported, parse errors.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ProgramCss;
@@ -41,7 +41,7 @@ impl SheetChecker for ProgramCss {
     }
 }
 
-/// A pane's blobs (§7.12, §7.14): in memory per pane (256 MiB, LRU of unreferenced blobs) and
+/// A pane's blobs: in memory per pane (256 MiB, LRU of unreferenced blobs) and
 /// written through to `<state>/blobs/<sha256>`, which outlives the pane and the daemon.
 #[derive(Debug)]
 pub struct DiskBlobs {
@@ -113,7 +113,7 @@ impl BlobStore for DiskBlobs {
     }
 
     /// A blob for a window to show (the daemon sends what a window's documents name): loading it
-    /// counts as showing it, so its file becomes the most recently shown (§4.4).
+    /// counts as showing it, so its file becomes the most recently shown.
     fn load(&self, id: &str) -> Option<Blob> {
         let path = self.path(id);
         if let Some(blob) = self.memory.get(id) {
@@ -122,7 +122,7 @@ impl BlobStore for DiskBlobs {
             }
             return Some(blob.clone());
         }
-        // Restored panes (§16) find their blobs on disk; the file name is the hash, checked again.
+        // Restored panes find their blobs on disk; the file name is the hash, checked again.
         let path = path?;
         let bytes = fs::read(&path).ok()?;
         (auk_tsp::blob::blob_id(&bytes) == id).then(|| {
@@ -164,7 +164,7 @@ pub fn evict_blobs(dir: &Path, limit: u64) -> io::Result<u64> {
     Ok(total)
 }
 
-/// When each age prop arrived (§7.13): a snapshot rewrites ages to snapshot time, as
+/// When each age prop arrived: a snapshot rewrites ages to snapshot time, as
 /// `age + (now − received)`. Keyed by surface, node and the prop's path.
 #[derive(Debug, Default)]
 pub struct Ages {
@@ -187,7 +187,7 @@ impl Ages {
                 continue;
             };
             // A top-level `age` that arrived restarts even unchanged; nested agent ages only on a
-            // new value (§7.13).
+            // new value.
             let mut visit = |node: NodeRef<'_>| {
                 let arrived = sc.doc.ages.contains(node.id());
                 for (path, age) in ages_of(node) {
@@ -273,7 +273,7 @@ fn ages_of(node: NodeRef<'_>) -> Vec<(String, f64)> {
     out
 }
 
-/// Reads a view event a client sent (§15.4): the body the program will get, as JSON, without
+/// Reads a view event a client sent: the body the program will get, as JSON, without
 /// `sf` (the message carries it).
 pub fn parse_view_event(v: &Value) -> Result<ViewEvent, String> {
     let ev = v.get("ev").and_then(Value::as_str).ok_or("missing `ev`")?;

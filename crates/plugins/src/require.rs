@@ -1,4 +1,4 @@
-//! `require` confined to the plugin package (§9.2, research/plugins.md §2.6).
+//! `require` confined to the plugin package.
 //!
 //! Luau require-by-string, relative to the calling file: `./x` and `../x` resolve to `x.luau`,
 //! `x.lua`, `x/init.luau` or `x/init.lua`. More than one match is an error, leaving the package

@@ -1,5 +1,5 @@
-//! Virtualized lists an ancestor scrolls (a transcript's `main`, amendment A10, §7.10 cost,
-//! §8.3): children out of the window are neither styled nor laid out until they come into it,
+//! Virtualized lists an ancestor scrolls (a transcript's `main`): children out of the window
+//! are neither styled nor laid out until they come into it,
 //! a list growing at the end builds only the new boxes, and a measure loop can ask what layout
 //! computed since it last looked.
 

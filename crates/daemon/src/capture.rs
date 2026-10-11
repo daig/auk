@@ -1,4 +1,4 @@
-//! `capture` (§11.1): a pane's content as plain text, ANSI (SGR attributes kept) or HTML, the
+//! `capture`: a pane's content as plain text, ANSI (SGR attributes kept) or HTML, the
 //! screen or the whole buffer, optionally with its surfaces' text in place of their anchor rows.
 //!
 //! With surfaces, an inline or flow surface's text replaces its anchor row, docks follow the

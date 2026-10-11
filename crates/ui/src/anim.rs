@@ -1,8 +1,8 @@
-//! CSS transitions and keyframe animations (§8.4 "Effects: transitions, keyframes", §7.13), run on
+//! CSS transitions and keyframe animations, run on
 //! the document's clock ([`crate::Document::set_time`]), which the view drives at display rate.
 //!
 //! On top of each element's cascaded style the engine paints running transitions, then CSS
-//! animations (research/elements.md §4.3). Transitions start when a listed property changes value
+//! animations. Transitions start when a listed property changes value
 //! through a style change, from the value shown at that moment. Animations follow CSS Animations
 //! (delay, iterations, direction, fill mode, play state), their keyframes resolved first in the
 //! element's scope (private to program sheets). Interpolated properties are the ones Auk paints

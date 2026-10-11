@@ -1,4 +1,4 @@
-//! The daemon (§14.2): the pane table, sessions and layout, attached clients, and the loops that
+//! The daemon: the pane table, sessions and layout, attached clients, and the loops that
 //! serve them.
 
 use std::collections::{BTreeMap, VecDeque};
@@ -55,7 +55,7 @@ impl Config {
     }
 }
 
-/// What a user's close did (§4.3).
+/// What a user's close did.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Closed {
     /// The pane is closing: its process was hung up, or it had already ended.
@@ -89,9 +89,9 @@ pub struct NewPane {
     pub cwd: Option<PathBuf>,
     /// A command line for a command pane; a login shell otherwise.
     pub command: Option<String>,
-    /// An agent pane (§5.1): `agent_command` from the settings file, in place of `command`.
+    /// An agent pane: `agent_command` from the settings file, in place of `command`.
     pub agent: bool,
-    /// Keep the pane in the layout when its program exits 0 (Tern's `--keep-open`, §5.1).
+    /// Keep the pane in the layout when its program exits 0 (Tern's `--keep-open`).
     pub keep_open: bool,
     pub size: Option<(u16, u16)>,
 }
@@ -102,7 +102,7 @@ pub(crate) struct ClientEntry {
     pub window_key: Option<String>,
     pub tx: ClientTx,
     pub facts: ClientFacts,
-    /// Who the client is, for presence (§10.1).
+    /// Who the client is, for presence.
     pub identity: Vec<auk_mirror::Hop>,
 }
 
@@ -125,15 +125,15 @@ pub struct Daemon {
     pub(crate) state_dir: PathBuf,
     pub(crate) login: LoginEnv,
     zdotdir: Option<PathBuf>,
-    /// Host settings that change parsing (§15.2): new panes start with them, and a change
+    /// Host settings that change parsing: new panes start with them, and a change
     /// reaches every pane as a record.
     settings: Mutex<Settings>,
     pub(crate) versions: Versions,
     state: Mutex<State>,
     pub(crate) shutdown: CancellationToken,
-    /// The plugin host (§9, §20); loaded before panes are restored.
+    /// The plugin host; loaded before panes are restored.
     pub(crate) plugins: crate::plugins::Plugins,
-    /// The state file's checkpoints and an upgrade's sockets (§16, §15.7).
+    /// The state file's checkpoints and an upgrade's sockets.
     pub(crate) persist: crate::persist::Persist,
 }
 
@@ -151,7 +151,7 @@ fn private_dir(path: &Path) -> io::Result<()> {
 
 /// Runs a daemon until it is told to stop (`shutdown`, SIGTERM or SIGINT).
 pub fn run(config: Config) -> io::Result<()> {
-    // An in-place upgrade's handoff (§15.7), read while this is the only thread.
+    // An in-place upgrade's handoff, read while this is the only thread.
     crate::upgrade::take_from_env()?;
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -161,7 +161,7 @@ pub fn run(config: Config) -> io::Result<()> {
 
 /// The daemon's main loop.
 pub async fn serve(config: Config) -> io::Result<()> {
-    // The plugin runtime's diagnostics (a late spawn-filter answer, a disabled hook, §9.7, §9.2)
+    // The plugin runtime's diagnostics (a late spawn-filter answer, a disabled hook)
     // go to the daemon's log.
     auk_plugins::diagnostics::to_stderr("auk daemon");
     private_dir(&config.state_dir)?;
@@ -193,7 +193,7 @@ pub async fn serve(config: Config) -> io::Result<()> {
     } else {
         None
     };
-    // Start order (§4.1): load plugins, then restore saved panes.
+    // Start order: load plugins, then restore saved panes.
     let plugins = crate::plugins::Plugins::start(config.state_dir.clone());
     let daemon = Arc::new(Daemon {
         socket: config.socket.clone(),
@@ -213,7 +213,7 @@ pub async fn serve(config: Config) -> io::Result<()> {
         let fds = (listener.as_raw_fd(), control_listener.as_raw_fd());
         daemon.persist.set_listeners(fds.0, fds.1);
     }
-    // Then the saved panes (§5.4), or the panes an upgrade hands over (§15.7).
+    // Then the saved panes, or the panes an upgrade hands over.
     match handoff {
         Some(h) => daemon.adopt(h.state),
         None => daemon.restore(),
@@ -390,7 +390,7 @@ impl Daemon {
             tsp::engine(&settings, &self.blob_dir()),
         );
         // Clients showing this window key see the new pane; the first becomes its primary, so
-        // the program starts with that client's facts (§15.5).
+        // the program starts with that client's facts.
         let viewers: Vec<_> = st
             .clients
             .iter()
@@ -460,7 +460,7 @@ impl Daemon {
         Ok(id)
     }
 
-    /// Where blobs live (§7.11, §16): `<state>/blobs`, by SHA-256.
+    /// Where blobs live: `<state>/blobs`, by SHA-256.
     pub fn blob_dir(&self) -> PathBuf {
         self.state_dir.join("blobs")
     }
@@ -470,7 +470,7 @@ impl Daemon {
         lock(&self.settings).clone()
     }
 
-    /// Changes host settings: every live pane gets them as a record (§15.2), and new panes start
+    /// Changes host settings: every live pane gets them as a record, and new panes start
     /// with them.
     pub fn set_settings(&self, settings: Settings) {
         *lock(&self.settings) = settings.clone();
@@ -485,7 +485,7 @@ impl Daemon {
         }
     }
 
-    /// Sequences the chunk timeout (§7.1) in panes whose chunk sequence waited 1 s.
+    /// Sequences the chunk timeout in panes whose chunk sequence waited 1 s.
     fn expire_chunks(&self) {
         let panes: Vec<_> = self.state().panes.values().cloned().collect();
         for pane in panes {
@@ -576,7 +576,7 @@ impl Daemon {
         set("TERM", "xterm-256color");
         set("COLORTERM", "truecolor");
         set("PWD", &cwd.to_string_lossy());
-        // The pane-identity set (§5.2, Appendix B).
+        // The pane-identity set.
         set("AUK_IDENTITY", &self.login.identity);
         set("AUK_PANE", &id.to_string());
         set("AUK_PANE_SOCKET", &pane_socket.to_string_lossy());
@@ -617,9 +617,9 @@ impl Daemon {
             cols,
             rows,
         };
-        // Plugin spawn filters run next (§5.2, §9.7); rc files run after them.
+        // Plugin spawn filters run next; rc files run after them.
         self.plugins.filter_spawn(&mut spec);
-        // `TERM_PROGRAM` and its version are set outside the filter (§5.2): its answer can't
+        // `TERM_PROGRAM` and its version are set outside the filter: its answer can't
         // change them.
         for (k, v) in [
             ("TERM_PROGRAM", "auk"),
@@ -653,7 +653,7 @@ impl Daemon {
             serde_json::json!({"pane": id, "status": status, "by": null}),
         );
         // A command that exits 0 closes its pane; otherwise the pane stays, showing how its
-        // program ended, until it is closed (§5.1).
+        // program ended, until it is closed.
         if close {
             Self::take_out_of_layout(&mut st, id);
         }
@@ -688,7 +688,7 @@ impl Daemon {
         }
     }
 
-    /// Closes a pane the way a user does (§4.3): refused, with a toast to the windows showing
+    /// Closes a pane the way a user does: refused, with a toast to the windows showing
     /// it, while its session is locked; otherwise as [`kill`](Self::kill).
     pub fn close(&self, id: PaneId) -> Result<Closed, String> {
         let locked = {
@@ -773,7 +773,7 @@ impl Daemon {
         tx: ClientTx,
     ) -> ClientId {
         // A client on this machine reached the daemon through its private socket: it is the
-        // daemon's own user, one `local` hop (§10.1). A remote link names its SSH hop itself.
+        // daemon's own user, one `local` hop. A remote link names its SSH hop itself.
         let identity = if identity.is_empty() {
             vec![self.local_hop()]
         } else {
@@ -836,7 +836,7 @@ impl Daemon {
     }
 
     /// Shows a window key's sessions to a client: its layout, then a snapshot per pane, then
-    /// live output (§15.3).
+    /// live output.
     pub(crate) fn attach(&self, id: ClientId, window_key: String) {
         let mut st = self.state();
         for pane in st.panes.values() {
@@ -888,7 +888,7 @@ impl Daemon {
         }
     }
 
-    /// A window's Clear Scrollback (§5.5): a sequenced record, so every replica clears.
+    /// A window's Clear Scrollback: a sequenced record, so every replica clears.
     pub(crate) fn client_clear_scrollback(&self, id: ClientId, pane: PaneId) {
         if let Some(p) = self.pane(pane) {
             let mut p = lock(&p);
@@ -914,7 +914,7 @@ impl Daemon {
         if let Some(block) = sf.strip_prefix(auk_replica::SF_PREFIX) {
             return self.lens_view_event(id, pane, block, event);
         }
-        // Retry on a "Could not start the block" card (§9.5).
+        // Retry on a "Could not start the block" card.
         let card = self.pane(pane).is_some_and(|p| {
             let p = lock(&p);
             p.has_viewer(id) && p.block_failed.as_ref().is_some_and(|f| f.surface == sf)
@@ -1001,7 +1001,7 @@ impl Daemon {
         };
         match edit {
             // Edits that add a pane answer `{pane}`: the window that asked knows it added it
-            // (§9.8 `pane_created` is for panes this window adds).
+            // (`pane_created` is for panes this window adds).
             LayoutEdit::NewSession { name } => {
                 let pane = self.new_pane(new(Place::NewSession { name }))?;
                 return Ok(serde_json::json!({ "pane": pane }));
@@ -1025,7 +1025,7 @@ impl Daemon {
                 self.edit_layout(|l| l.lock_session(session, locked))?
             }
             LayoutEdit::Agent { pane } => {
-                // Agent placement's default: a split right of the focused pane (book:16916).
+                // Agent placement's default: a split right of the focused pane.
                 let at = pane.filter(|p| self.state().layout.window_of(*p).is_some());
                 let place = match at {
                     Some(pane) => split(pane, Side::Right),
@@ -1103,7 +1103,7 @@ impl Daemon {
         place: OpenPlace,
         launch: auk_mirror::Launch,
     ) -> Result<serde_json::Value, String> {
-        // A directory that isn't one on this host starts at home (book:15706).
+        // A directory that isn't one on this host starts at home.
         let cwd = match (launch.cwd.map(PathBuf::from), &place) {
             (Some(dir), _) if dir.is_dir() => Some(dir),
             (Some(_), _) => None,
@@ -1165,7 +1165,7 @@ impl Daemon {
 }
 
 impl Daemon {
-    /// Asks every client showing `window_key` to perform an effect (§15.6). Returns how many
+    /// Asks every client showing `window_key` to perform an effect. Returns how many
     /// clients it went to.
     pub fn send_effect(&self, window_key: &str, effect: auk_mirror::Effect) -> usize {
         let frame = Bytes::from(DaemonMsg::Effect(effect).to_bytes());
@@ -1183,7 +1183,7 @@ impl Daemon {
     }
 }
 
-/// The attached clients, with their identities (§10.1).
+/// The attached clients, with their identities.
 pub(crate) fn presence(st: &State) -> Vec<auk_mirror::ClientInfo> {
     st.clients
         .iter()
@@ -1196,7 +1196,7 @@ pub(crate) fn presence(st: &State) -> Vec<auk_mirror::ClientInfo> {
         .collect()
 }
 
-/// Tells every client who is attached to the host (§10.1 presence), after a client came, went
+/// Tells every client who is attached to the host (presence), after a client came, went
 /// or attached.
 fn broadcast_presence(st: &State) {
     let frame = Bytes::from(
@@ -1247,7 +1247,7 @@ pub(crate) fn spawn_thread(name: String, f: impl FnOnce() + Send + 'static) -> R
 /// was replaced.
 pub(crate) fn read_pty(pane: &Mutex<Pane>, master: &pty::Master, generation: u64) {
     let mut buf = vec![0u8; 64 * 1024];
-    // Readers wait in poll, never in read, so an upgrade can stop them between reads (§15.7).
+    // Readers wait in poll, never in read, so an upgrade can stop them between reads.
     let _reader = crate::upgrade::reader();
     loop {
         crate::upgrade::wait_readable(std::os::fd::AsFd::as_fd(master));
@@ -1272,7 +1272,7 @@ pub(crate) fn read_pty(pane: &Mutex<Pane>, master: &pty::Master, generation: u64
 
 /// Writes queued input and answers to the PTY until the queue closes (the pane exited).
 ///
-/// TSP replies and events pass the mode gate (§12.1) first: written only while the tty is
+/// TSP replies and events pass the mode gate first: written only while the tty is
 /// non-canonical with echo off, read with `tcgetattr` on the master right before the write, and
 /// dropped otherwise. While client input has opened a bracketed paste the program sees, TSP waits
 /// until the paste ends.

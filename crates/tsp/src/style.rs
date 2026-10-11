@@ -1,10 +1,10 @@
-//! Program palettes (`t`) and stylesheets (`s`), §7.12.
+//! Program palettes (`t`) and stylesheets (`s`).
 
 use std::fmt::Debug;
 
 use serde_json::{Map, Value};
 
-/// The most CSS one surface may hold, summed over its sheets (§7.14).
+/// The most CSS one surface may hold, summed over its sheets.
 pub const MAX_CSS: usize = 256 * 1024;
 
 /// A program palette: token colors per appearance, normalized to `#rrggbb`.

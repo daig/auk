@@ -1,4 +1,4 @@
-//! T2 `effort` and a program's `block` (amendment A23, book:7074-7146, 8265-8346): props, ARIA,
+//! T2 `effort` and a program's `block`: props, ARIA,
 //! children, pointer behavior, layout, an offscreen pixel check of the ring, and omp's own
 //! effort chip from its recorded session.
 
@@ -92,7 +92,7 @@ fn effort_is_an_inline_meter_with_the_books_aria() {
         assert_eq!(h.attr(el, "aria-valuenow"), Some(now.to_string()));
         assert_eq!(h.attr(el, "aria-valuetext").as_deref(), Some(*l));
         assert_eq!(h.attr(el, "aria-label").as_deref(), Some("Thinking effort"));
-        // The glyph and its parts (book: track, arc, blaze, crown, ember).
+        // The glyph and its parts (track, arc, blaze, crown, ember).
         let eff = h.find_class(el, "sf-eff");
         assert_eq!(eff.len(), 1);
         assert_eq!(h.attr(eff[0], "aria-hidden").as_deref(), Some("true"));
@@ -512,7 +512,7 @@ fn block_surface(h: &mut Harness) {
     settle(h);
 }
 
-/// A program's `block` draws as Tern's (book:8265-8346): the toolbar with the lens label, the
+/// A program's `block` draws as Tern's: the toolbar with the lens label, the
 /// Native/Raw control and Copy, the foot with the failing exit and the duration.
 #[test]
 fn a_programs_block_draws_like_a_command_block() {
@@ -634,7 +634,7 @@ fn a_command_blocks_copy_still_copies_its_raw_output() {
 }
 
 /// The lens picks the block's icon, not an overriding `role`; Native/Raw shows only with both a
-/// native and a raw child (book: block).
+/// native and a raw child.
 #[test]
 fn the_lens_picks_the_icon_and_native_raw_needs_both_children() {
     let mut h = harness();

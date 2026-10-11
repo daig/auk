@@ -1,4 +1,4 @@
-//! Long transcripts (amendment A10, §7.10 cost, §8.3): the measure loops visit only what layout
+//! Long transcripts: the measure loops visit only what layout
 //! laid out since they last ran, so content virtualized out of view costs nothing per frame;
 //! highlighting waits in the background until its node is in view; and a cut that fits stays.
 

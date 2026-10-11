@@ -1,5 +1,5 @@
 // webkit-boxes: lays out an HTML page in WebKit and prints every element's border box as JSON.
-// The layout suite compares these boxes with Auk's UI engine (GOAL.md, `layout`).
+// The layout suite compares these boxes with Auk's UI engine (`layout`).
 //
 // usage: webkit-boxes <page.html> [--width CSS_PX] [--height CSS_PX]
 //

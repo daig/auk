@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Builds Auk.app (spec §19): the release `auk` binary, with the browser client's files in
+# Builds Auk.app: the release `auk` binary, with the browser client's files in
 # Contents/Resources/web for `auk web serve`, signed ad hoc with the hardened runtime and the
-# allow-jit entitlement Luau's native codegen needs (§20).
+# allow-jit entitlement Luau's native codegen needs.
 #
 # The app goes in the target dir: target/Auk.app, or $CARGO_TARGET_DIR/Auk.app when that's set.
 # Written for the bash 3.2 that macOS ships.

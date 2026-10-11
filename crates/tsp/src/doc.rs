@@ -1,21 +1,21 @@
-//! A surface's document (§7.5, §7.6): the node tree, the 12 frame ops with their validation, the
+//! A surface's document: the node tree, the 12 frame ops with their validation, the
 //! settle hints, focus, reveal and scroll requests, and the change log views read.
 
 use std::collections::{BTreeSet, HashMap};
 
 use serde_json::{Map, Value};
 
-/// The most nodes in one surface, root included (§7.14).
+/// The most nodes in one surface, root included.
 pub const MAX_NODES: usize = 200_000;
-/// The deepest a node may sit; the root is at depth 1 (§7.14).
+/// The deepest a node may sit; the root is at depth 1.
 pub const MAX_DEPTH: usize = 64;
-/// Region ids: the fixed children of the surface root (§7.5).
+/// Region ids: the fixed children of the surface root.
 pub const REGIONS: [&str; 3] = ["main", "dock", "layer"];
-/// Kinds whose primary text is `p.text` (§7.6).
+/// Kinds whose primary text is `p.text`.
 pub const TEXT_KINDS: [&str; 9] = [
     "text", "md", "code", "ansi", "math", "editor", "input", "shimmer", "el",
 ];
-/// The fixed per-node overhead of the retention estimate, in bytes (§7.10).
+/// The fixed per-node overhead of the retention estimate, in bytes.
 pub const NODE_OVERHEAD: u64 = 64;
 
 /// Whether `kind` keeps its primary text in `p.text`.
@@ -32,7 +32,7 @@ pub enum RevealAt {
 }
 
 impl RevealAt {
-    /// Reads a position; anything unknown reads as `nearest` (§7.6).
+    /// Reads a position; anything unknown reads as `nearest`.
     fn parse(v: Option<&Value>) -> Self {
         match v.and_then(Value::as_str) {
             Some("start") => RevealAt::Start,
@@ -50,7 +50,7 @@ impl RevealAt {
     }
 }
 
-/// A `scroll` step (§7.6).
+/// A `scroll` step.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ScrollBy {
     LineUp,
@@ -110,7 +110,7 @@ struct Node {
     parent: Option<usize>,
     settled: bool,
     cost: u64,
-    /// The blob an `image` node names, lowercase; kept up to date like `cost` (§7.12).
+    /// The blob an `image` node names, lowercase; kept up to date like `cost`.
     blob: Option<Box<str>>,
 }
 
@@ -160,7 +160,7 @@ pub struct DocChanges {
     /// Nodes removed (deleted, evicted, or dropped with a region on close).
     pub removed: BTreeSet<String>,
     /// Nodes a top-level `age` prop arrived on (an `add` or a `set` naming it), even with an
-    /// unchanged value: their timers restart (§7.13). View-only; no replica state depends on it.
+    /// unchanged value: their timers restart. View-only; no replica state depends on it.
     pub ages: BTreeSet<String>,
     /// The focus changed.
     pub focus: bool,
@@ -199,17 +199,17 @@ pub struct Document {
     root: usize,
     count: usize,
     cost: u64,
-    /// How many `image` nodes name each blob id (lowercase), kept at every mutation (§7.12).
+    /// How many `image` nodes name each blob id (lowercase), kept at every mutation.
     blob_refs: HashMap<Box<str>, u32>,
     focus: Option<String>,
     changes: DocChanges,
     reveal: Option<Reveal>,
     scrolls: Vec<Scroll>,
-    /// `(node id, message)` for `el` nodes whose new version has an unknown tag (§7.7).
+    /// `(node id, message)` for `el` nodes whose new version has an unknown tag.
     tag_errors: Vec<(String, String)>,
 }
 
-/// The 42 tags `el` builds (§8.2, research/elements.md §2.9).
+/// The 42 tags `el` builds.
 pub const EL_TAGS: [&str; 42] = [
     "div",
     "span",
@@ -256,7 +256,7 @@ pub const EL_TAGS: [&str; 42] = [
 ];
 
 /// The `error` message for an `el` node's tag, when it isn't one `el` builds: a tag outside the
-/// list, or an `input` that isn't a checkbox or radio (book:8622, "Unknown tags"). `None` for
+/// list, or an `input` that isn't a checkbox or radio. `None` for
 /// other kinds and known tags.
 pub fn el_tag_error(kind: &str, props: &Map<String, Value>) -> Option<String> {
     if kind != "el" {
@@ -607,7 +607,7 @@ impl Document {
     }
 
     /// `(node id, message)` for each `el` node version since the last call whose tag `el`
-    /// doesn't build: once per add or change of the node (§7.7).
+    /// doesn't build: once per add or change of the node.
     pub fn take_tag_errors(&mut self) -> Vec<(String, String)> {
         std::mem::take(&mut self.tag_errors)
     }
@@ -642,7 +642,7 @@ impl Document {
         let Some(kind) = obj.get("k").and_then(Value::as_str) else {
             return Err(format!("{id}: a node needs a string k"));
         };
-        // A region node's kind is ignored (§7.5).
+        // A region node's kind is ignored.
         if !region
             && let Some(kinds) = ctx.kinds
             && !kinds.contains(kind)
@@ -730,7 +730,7 @@ impl Document {
                 node.props.insert(k.clone(), v.clone());
             }
         }
-        // An `age` arriving restarts its timer even when the value is unchanged (§7.13).
+        // An `age` arriving restarts its timer even when the value is unchanged.
         if props.get("age").is_some_and(|v| !v.is_null()) {
             self.changes.ages.insert(id.to_owned());
         }
@@ -970,7 +970,7 @@ impl Document {
         Ok(())
     }
 
-    /// The form `values` for an event from node `id` (§7.8): `None` unless the node is inside an
+    /// The form `values` for an event from node `id`: `None` unless the node is inside an
     /// `el` `form`. `checked` gives a control's local state where the user flipped it; otherwise
     /// its `checked` prop counts.
     pub fn form_values(
@@ -1049,7 +1049,7 @@ impl Document {
         Some(values)
     }
 
-    /// Removes the oldest settled top-level child of `main`, returning its id (retention, §7.10).
+    /// Removes the oldest settled top-level child of `main`, returning its id (retention).
     pub(crate) fn evict_settled(&mut self) -> Option<String> {
         let main = self.region("main")?.slot;
         let victim = self

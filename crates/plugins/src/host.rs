@@ -1,7 +1,7 @@
 //! The daemon side of the plugin runtime: loading, the catalog, events, the spawn filter, blocks
 //! and lens captures.
 //!
-//! The daemon waits on workers in only two places (§4.1): while plugins load or reload, and for
+//! The daemon waits on workers in only two places: while plugins load or reload, and for
 //! the spawn filter (at most 50 ms per plugin, counted from when the request is queued).
 //! Everything else is a channel send, and worker output arrives on [`PluginHost::outputs`].
 
@@ -60,7 +60,7 @@ impl std::fmt::Debug for HostConfig {
 }
 
 impl HostConfig {
-    /// The standard locations (§9.1, D5), default settings, and logs to tracing.
+    /// The standard locations, default settings, and logs to tracing.
     pub fn standard() -> Self {
         HostConfig {
             plugins_dir: paths::plugins_dir(&paths::config_dir()),
@@ -272,7 +272,7 @@ impl PluginHost {
     }
 
     /// Replaces the `plugins` and `plugins_disabled` settings; the next [`reload`](Self::reload)
-    /// applies them (the daemon re-reads its settings file before each reload, §9.3).
+    /// applies them (the daemon re-reads its settings file before each reload).
     pub fn set_settings(&mut self, settings: PluginSettings) {
         self.config.settings = settings;
     }
@@ -320,7 +320,7 @@ impl PluginHost {
     // -----------------------------------------------------------------------------------------
     // Blocks
 
-    /// Starts a block pane (§9.5 "Opening", "Survival"). Its output arrives as
+    /// Starts a block pane. Its output arrives as
     /// [`HostOutput::Block`]. Fails with `no block type KIND on this host` when no Ready plugin
     /// defines the kind; the window shows "Could not start the block".
     pub fn start_block(&mut self, launch: BlockLaunch) -> Result<(), String> {

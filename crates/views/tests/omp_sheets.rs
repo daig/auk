@@ -1,4 +1,4 @@
-//! omp's sheets (amendment A24; research/omp-stylesheets.md §16.1-16.2): they parse, sit in Tern's
+//! omp's sheets: they parse, sit in Tern's
 //! slot, keep every rule in a class bucket, and give omp's shared roles their look.
 
 mod common;
@@ -9,7 +9,7 @@ use auk_views::sheets::{BUILTIN, builtin_css};
 use common::*;
 use serde_json::{Value, json};
 
-/// The omp sheets in Tern's order (book: Stylesheets), after the kit's and before the chrome.
+/// The omp sheets in Tern's order, after the kit's and before the chrome.
 const OMP: [&str; 11] = [
     "omp",
     "omp-pickers",
@@ -91,7 +91,7 @@ fn selectors(css: &str) -> Vec<String> {
     out
 }
 
-/// The cascade buckets rules by the rightmost compound's first class (G1): a rule that starts
+/// The cascade buckets rules by the rightmost compound's first class: a rule that starts
 /// with an attribute, a pseudo-class, `*` or the `.sf` every node has is tried on every element.
 /// Pseudo-element rules sit in the universal bucket anyway and are exempt.
 #[test]
@@ -194,7 +194,7 @@ fn btn(id: &str, tone: Option<&str>) -> Value {
     json!({"id": id, "k": "row", "p": p, "c": [{"id": format!("{id}.t"), "k": "text", "p": {"text": "Close"}}]})
 }
 
-/// T1.1: omp's regions carry the omp tokens; other programs' don't.
+/// omp's regions carry the omp tokens; other programs' don't.
 #[test]
 fn omp_regions_carry_the_omp_tokens() {
     let h = omp_surface(json!([{"id": "t", "k": "text", "p": {"text": "hi"}}]), true);
@@ -218,7 +218,7 @@ fn omp_regions_carry_the_omp_tokens() {
     assert_eq!(var(&other, other.el("s1", "main"), "--omp-meta-fs"), "");
 }
 
-/// T1.2: the button idiom, at rest and hovered, and its accent and error tones, in both themes.
+/// The button idiom, at rest and hovered, and its accent and error tones, in both themes.
 #[test]
 fn omp_buttons_are_26px_on_a_quiet_fill_with_accent_and_error_tones() {
     for dark in [true, false] {
@@ -266,7 +266,7 @@ fn omp_buttons_are_26px_on_a_quiet_fill_with_accent_and_error_tones() {
     }
 }
 
-/// T1.4: the quiet control: a 20px seg with 6px sides, whose hover fills with --l1.
+/// The quiet control: a 20px seg with 6px sides, whose hover fills with --l1.
 #[test]
 fn omp_quiet_controls_are_20px_segs_that_fill_on_hover() {
     let mut h = omp_surface(
@@ -298,7 +298,7 @@ fn omp_quiet_controls_are_20px_segs_that_fill_on_hover() {
     assert_eq!(h.doc.computed_style(stop).unwrap().color.to_rgba8(), t1);
 }
 
-/// T1.3 (constructed): an overlay's hint row is meta-sized, muted, and set off by a hairline.
+/// Constructed: an overlay's hint row is meta-sized, muted, and set off by a hairline.
 #[test]
 fn omp_overlay_hints_are_muted_meta_text_under_a_hairline() {
     let mut h = omp_surface(
@@ -320,7 +320,7 @@ fn omp_overlay_hints_are_muted_meta_text_under_a_hairline() {
     assert_eq!(h.doc.computed_style(hints).unwrap().color.to_rgba8(), t3);
 }
 
-// omp-transcript.css and omp-tools.css (§16.3-16.4), in both themes (T6.1) and still (T6.2).
+// omp-transcript.css and omp-tools.css, in both themes and still.
 
 /// A program palette for constructed surfaces (omp's own recorded one is titanium, F:4).
 const PALETTE: &str = r##"{"dark":{"userMessageBg":"#203a5c","customMessageBg":"#5c2040"},"light":{"userMessageBg":"#c8dcff","customMessageBg":"#ffc8dc"}}"##;
@@ -372,7 +372,7 @@ fn inner_right(h: &Harness, el: NodeId) -> f32 {
     r.x + r.w - px(&st.padding[1]) - border
 }
 
-/// T6.2: the omp sheets add no transitions and no animations.
+/// The omp sheets add no transitions and no animations.
 fn assert_still(h: &Harness, el: NodeId, what: &str) {
     let st = h.doc.computed_style(el).unwrap();
     assert!(
@@ -385,7 +385,7 @@ fn assert_still(h: &Harness, el: NodeId, what: &str) {
     assert!(st.animations.is_none(), "{what}: {:?}", st.animations);
 }
 
-/// T2.1-T2.3 (F:17): the user's message is a fill-only bubble at main's right edge, at most 85%
+/// F:17: the user's message is a fill-only bubble at main's right edge, at most 85%
 /// wide, with the time and Copy/Rewind in a 20px row at its foot, right-aligned, faint until the
 /// bubble is hovered, and hovering moves nothing. With a palette the fill is userMessageBg.
 #[test]
@@ -403,7 +403,7 @@ fn omp_user_message_is_a_right_aligned_bubble_with_its_tools_at_the_foot() {
                 assert!(st.border_color.iter().all(|c| c.a == 0.0), "{at}: no ring");
                 let ring = st.box_shadow.as_deref().map(|s| s[0]);
                 let l1 = token(h, u, "var(--l1)");
-                // Q-T2: only under a palette, a whisper ring.
+                // Only under a palette, a whisper ring.
                 match ring {
                     None => assert!(!palette, "{at}"),
                     Some(s) => {
@@ -432,7 +432,7 @@ fn omp_user_message_is_a_right_aligned_bubble_with_its_tools_at_the_foot() {
                 assert!(ub.w <= 0.85 * mb.w + 0.5, "{at}: {ub:?} in {mb:?}");
                 assert!(ub.x > mb.x + 8.0, "{at}: not full width");
 
-                // T2.2: the tools row at the foot, right-aligned, 20px tall.
+                // The tools row at the foot, right-aligned, 20px tall.
                 let (tools, md) = (h.el("s:1", "u.tools"), h.el("s:1", "u.1"));
                 let (tb, db) = (
                     h.doc.border_box(tools).unwrap(),
@@ -476,7 +476,7 @@ fn omp_user_message_is_a_right_aligned_bubble_with_its_tools_at_the_foot() {
                 assert_eq!(bg(h, copy), l2, "{at}");
                 assert_eq!(color(h, copy), t1, "{at}");
                 h.frame();
-                // T2.3: the reveal moves nothing.
+                // The reveal moves nothing.
                 assert_eq!(h.doc.border_box(u).unwrap(), ub, "{at}");
                 h.doc.set_state(copy, ElementState::HOVER, false);
                 h.doc.set_state(u, ElementState::HOVER, false);
@@ -491,7 +491,7 @@ fn omp_user_message_is_a_right_aligned_bubble_with_its_tools_at_the_foot() {
     }
 }
 
-/// T2.4 and T2.6 (F:661, F:1093): an assistant turn's blocks sit 8px apart, and each finished
+/// F:661, F:1093: an assistant turn's blocks sit 8px apart, and each finished
 /// turn ends in a meta-sized, muted usage line with a 12px icon.
 #[test]
 fn omp_assistant_turns_breathe_and_end_in_a_quiet_usage_line() {
@@ -532,7 +532,7 @@ fn omp_assistant_turns_breathe_and_end_in_a_quiet_usage_line() {
     assert_eq!(checked, [661, 1093]);
 }
 
-/// T2.5 (F:47, F:153): thinking has a quiet 12px head; once finished it folds, and its thought
+/// F:47, F:153: thinking has a quiet 12px head; once finished it folds, and its thought
 /// is italic in thinkingText (the palette's, else --t3).
 #[test]
 fn omp_thinking_folds_under_a_quiet_head_in_italic_thinking_text() {
@@ -568,7 +568,7 @@ fn omp_thinking_folds_under_a_quiet_head_in_italic_thinking_text() {
     }
 }
 
-/// T2.11 (F:5): the welcome card's lockup is 12px apart, and its tip sits under an --l1 rule.
+/// F:5: the welcome card's lockup is 12px apart, and its tip sits under an --l1 rule.
 #[test]
 fn omp_welcome_card_sets_its_tip_under_a_hairline() {
     let mut seen = false;
@@ -594,7 +594,7 @@ fn error_action(id: &str, label: &str) -> Value {
         "c": [{"id": format!("{id}.t"), "k": "text", "p": {"text": label}}]})
 }
 
-/// T2.7 (constructed, S:417729-417749): the error card's actions are 20px quiet controls, Retry
+/// Constructed: the error card's actions are 20px quiet controls, Retry
 /// filled as the default.
 #[test]
 fn omp_error_actions_are_quiet_controls_with_retry_first() {
@@ -626,7 +626,7 @@ fn omp_error_actions_are_quiet_controls_with_retry_first() {
     }
 }
 
-/// T2.8 (constructed): under a palette a custom message takes customMessageBg, and a skill keeps
+/// Constructed: under a palette a custom message takes customMessageBg, and a skill keeps
 /// the user tint with an inset rail in the label colour.
 #[test]
 fn omp_custom_messages_take_their_tint_and_skills_a_rail() {
@@ -654,7 +654,7 @@ fn omp_custom_messages_take_their_tint_and_skills_a_rail() {
     }
 }
 
-/// T2.9 (constructed): a marker centres its label between two hairlines (their pixels are
+/// Constructed: a marker centres its label between two hairlines (their pixels are
 /// checked in paint.rs).
 #[test]
 fn omp_markers_centre_their_label() {
@@ -679,7 +679,7 @@ fn omp_markers_centre_their_label() {
     assert_eq!(h.doc.computed_style(mk).unwrap().font_size, 11.5);
 }
 
-/// T2.10 (constructed, S:435738-435809): on the rewind screen the inactive branch is dimmed, the
+/// Constructed: on the rewind screen the inactive branch is dimmed, the
 /// accent one full; a picked prompt draws its bar as an inset shadow, a dropped one fades.
 #[test]
 fn omp_rewind_dims_other_branches_and_marks_picked_and_dropped_prompts() {
@@ -728,7 +728,7 @@ fn omp_tool(id: &str, role: &str, status: &str, frame: &str) -> Value {
         "targetKind": "command", "status": status, "frame": frame}})
 }
 
-/// T3.1 (F:838→1093, then constructed): an omp card tool draws a 1px --l2 ring instead of its
+/// F:838→1093, then constructed: an omp card tool draws a 1px --l2 ring instead of its
 /// border, 12px round; an error's ring is red, a running tool's isn't, over the pending tint.
 #[test]
 fn omp_card_tools_draw_a_ring_red_on_error() {
@@ -778,7 +778,7 @@ fn omp_card_tools_draw_a_ring_red_on_error() {
     }
 }
 
-/// T3.2 (F:23): an inline read draws no ring, and its head runs dense.
+/// F:23: an inline read draws no ring, and its head runs dense.
 #[test]
 fn omp_inline_tools_stay_ringless_and_dense() {
     let mut seen = false;
@@ -797,7 +797,7 @@ fn omp_inline_tools_stay_ringless_and_dense() {
     assert!(seen);
 }
 
-/// T3.3 (constructed): a tool nested in a task's body loses its ring, an error's too.
+/// Constructed: a tool nested in a task's body loses its ring, an error's too.
 #[test]
 fn omp_nested_tools_lose_their_ring() {
     let mut task = omp_tool("task", "omp.tool.task", "running", "card");
@@ -814,7 +814,7 @@ fn omp_nested_tools_lose_their_ring() {
     }
 }
 
-/// T3.4 (F:37→43): a file row being read is muted with a live icon; once read it takes the tool
+/// F:37→43: a file row being read is muted with a live icon; once read it takes the tool
 /// output colour and a muted icon.
 #[test]
 fn omp_tool_files_show_their_reading_state() {
@@ -842,7 +842,7 @@ fn omp_tool_files_show_their_reading_state() {
     assert_eq!(checked, [37, 43]);
 }
 
-/// T3.5 (F:839): bash output is in toolOutput (the palette's, else --t2).
+/// F:839: bash output is in toolOutput (the palette's, else --t2).
 #[test]
 fn omp_bash_output_takes_the_tool_output_colour() {
     for palette in [false, true] {
@@ -866,7 +866,7 @@ fn omp_bash_output_takes_the_tool_output_colour() {
     }
 }
 
-/// T3.6, T3.7 (constructed): the user's own shell command sits at the right like their message;
+/// Constructed: the user's own shell command sits at the right like their message;
 /// the think tool's md is italic and muted; an eval prompt glyph is two cells wide.
 #[test]
 fn omp_user_shell_commands_think_and_eval_prompts() {
@@ -900,7 +900,7 @@ fn omp_user_shell_commands_think_and_eval_prompts() {
     }
 }
 
-/// T3.8: roleless tools (an SDK program's) compute the same styles with and without the omp
+/// Roleless tools (an SDK program's) compute the same styles with and without the omp
 /// transcript and tool sheets, on a plain surface and on an omp one.
 #[test]
 fn roleless_tools_look_the_same_without_the_omp_sheets() {

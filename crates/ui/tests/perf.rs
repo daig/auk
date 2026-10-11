@@ -1,5 +1,5 @@
 //! Frame-time measurement on a 10,000-entry transcript-like document with virtualization. The
-//! frame budget is 8.3 ms (§18.1); the incremental cases are asserted in release builds.
+//! frame budget is 8.3 ms; the incremental cases are asserted in release builds.
 
 use auk_ui::{Document, NodeId, SheetKind, paint};
 use std::time::{Duration, Instant};

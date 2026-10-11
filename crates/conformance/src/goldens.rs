@@ -1,4 +1,4 @@
-//! PNG and layout-JSON goldens for scenario shots (§21), in `fixtures/goldens/<scenario>/`.
+//! PNG and layout-JSON goldens for scenario shots, in `fixtures/goldens/<scenario>/`.
 //!
 //! A shot matches its golden when:
 //! - the PNG has the same size, and at most [`MAX_DIFF_FRACTION`] of its pixels differ by more

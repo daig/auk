@@ -1,4 +1,4 @@
-//! Motion clocked by the view at display rate (§7.13, research/elements.md §5): `spinner`,
+//! Motion clocked by the view at display rate: `spinner`,
 //! `shimmer`, `elapsed`, `rate`, `progress`, `meter` and span effects. The UI engine parses CSS
 //! animations but doesn't run them, so the view drives every moving part by writing the DOM on
 //! each tick. Reduce Motion gives still equivalents; timers still tick.
@@ -11,7 +11,7 @@ use auk_tsp::NodeRef;
 use auk_ui::NodeId;
 use serde_json::Value;
 
-/// An `elapsed`-style timer anchored at `start = receive − age` (§7.13).
+/// An `elapsed`-style timer anchored at `start = receive − age`.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Timer {
     /// When the count started (view clock, ms). For a countdown, when it ends.
@@ -58,7 +58,7 @@ impl Timer {
     }
 }
 
-/// `short`: `12.3s`, `4m 05s`, `1h 02m`; `clock`: `0:12`, `4:05`, `1:02:03` (book:6717).
+/// `short`: `12.3s`, `4m 05s`, `1h 02m`; `clock`: `0:12`, `4:05`, `1:02:03`.
 pub fn format_duration(ms: f64, clock: bool) -> String {
     let ms = ms.max(0.0);
     let total_s = (ms / 1000.0).floor() as u64;
@@ -91,8 +91,8 @@ pub(crate) fn anchor_key(id: &str, path: &str) -> String {
 
 /// Anchor an age prop: a new value re-anchors, the same value keeps running. A top-level `age`
 /// also re-anchors whenever it arrives, even unchanged: the view does that from the drain's
-/// `ages` (§7.13). Nested agent ages (`stats.age`, `tool.age`, `retry.age`) restart only on a new
-/// value (book:8048).
+/// `ages`. Nested agent ages (`stats.age`, `tool.age`, `retry.age`) restart only on a new
+/// value.
 pub(crate) fn anchor(cx: &mut Cx, key: String, age: Option<&Value>) -> Option<f64> {
     let age_v = age?.clone();
     let age_ms = age_v.as_f64()?;
@@ -167,7 +167,7 @@ pub(crate) fn spinner(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look
             },
         );
     }
-    // A starburst in omp's working row draws the Spindle mark instead (book:8324-8326): painted
+    // A starburst in omp's working row draws the Spindle mark instead: painted
     // by the view on the clock, not by CSS keyframes.
     let spindle = style == "starburst"
         && node
@@ -214,7 +214,7 @@ pub(crate) fn spinner(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look
     tick(cx, node, m);
 }
 
-/// The Spindle mark's turn: one revolution per 1.2 s (the starburst's loop, book:8318), in
+/// The Spindle mark's turn: one revolution per 1.2 s (Tern's starburst loop), in
 /// [`SPINDLE_FRAMES`] steps.
 const SPINDLE_MS: f64 = 1200.0;
 pub const SPINDLE_FRAMES: usize = 24;

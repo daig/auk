@@ -1,4 +1,4 @@
-//! Sessions, tabs and split trees (§4.3): daemon state, replicated to every window that shows
+//! Sessions, tabs and split trees: daemon state, replicated to every window that shows
 //! the session. Focus belongs to each window and is not here.
 
 use std::collections::BTreeMap;
@@ -20,7 +20,7 @@ pub enum SplitDir {
     Down,
 }
 
-/// A side of a pane (§9.8 `Dir`): where a split puts the new pane, where a move puts the moved
+/// A side of a pane (`Dir`): where a split puts the new pane, where a move puts the moved
 /// one, or which divider a resize moves. A split node keeps its children left to right or top to
 /// bottom, so a pane put left of or above another becomes the split's first child.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -245,7 +245,7 @@ pub struct Tab {
 pub struct Session {
     pub id: SessionId,
     pub name: String,
-    /// A locked session refuses closing itself, its tabs and its panes (book:16896): the daemon
+    /// A locked session refuses closing itself, its tabs and its panes: the daemon
     /// answers such a close with a toast instead. New sessions start unlocked.
     pub locked: bool,
     /// The user gave the session its name (at creation or by renaming it), rather than taking
@@ -256,7 +256,7 @@ pub struct Session {
 }
 
 /// Adjectives and animals for generated session names (`brisk-otter`), as Tern names new
-/// sessions with two random words (book:16894).
+/// sessions with two random words.
 const NAME_ADJECTIVES: &[&str] = &[
     "amber", "brisk", "calm", "clever", "cosy", "dapper", "eager", "fair", "gentle", "golden",
     "hardy", "humble", "jolly", "keen", "lively", "lucky", "mellow", "merry", "nimble", "noble",
@@ -300,7 +300,7 @@ fn generated_name(taken: &[&str]) -> String {
     }
 }
 
-/// What kind of pane a layout cell holds (§5.1), so every window can badge it: an agent pane is
+/// What kind of pane a layout cell holds, so every window can badge it: an agent pane is
 /// a command pane that windows show with the agent icon.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -477,7 +477,7 @@ impl Layout {
         Ok(())
     }
 
-    /// Moves `pane` to `side` of `target`, or swaps the two with `None` (§9.8 `layout:move`).
+    /// Moves `pane` to `side` of `target`, or swaps the two with `None` (`layout:move`).
     /// Both must be in one window key; a tab the move empties goes, and then its session. Returns
     /// whether anything moved.
     pub fn move_pane(&mut self, pane: PaneId, target: PaneId, side: Option<Side>) -> bool {
@@ -514,7 +514,7 @@ impl Layout {
     }
 
     /// Moves `pane`'s nearest divider on `side` by `delta` thousandths of its split, toward `side`
-    /// for a positive delta (§9.8 `layout:resize`). Returns whether the divider moved: `false`
+    /// for a positive delta (`layout:resize`). Returns whether the divider moved: `false`
     /// when no split runs that way or it is already at its limit.
     pub fn resize(&mut self, pane: PaneId, side: Side, delta: i32) -> Result<bool, NotFound> {
         let tab = self.tab_of_mut(pane).ok_or(NotFound("pane", pane))?;
@@ -707,7 +707,7 @@ mod tests {
         );
     }
 
-    /// New sessions get two random words (book:16894), unique in their window key; a name the
+    /// New sessions get two random words, unique in their window key; a name the
     /// user gives (or renames to) is kept and marks the session named.
     #[test]
     fn default_session_names_are_two_unique_words_and_given_names_are_kept() {

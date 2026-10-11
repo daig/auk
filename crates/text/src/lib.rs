@@ -1,4 +1,4 @@
-//! Fonts and glyph rasterization for the cell grid (spec §18.3).
+//! Fonts and glyph rasterization for the cell grid.
 //!
 //! [`GridFonts`] resolves a monospace family and its fallbacks through fontique (CoreText's font
 //! list on macOS), derives the [`CellMetrics`] of the grid from the primary face, and rasterizes
@@ -7,7 +7,7 @@
 //!
 //! Rasterization goes through CoreText in the app, for the native look, and through swash in the
 //! browser client ([`Backend`]). Both backends share font selection and cell metrics, so a grid
-//! has the same geometry whichever backend draws it. Text metrics are view-only (§18.3): replicas
+//! has the same geometry whichever backend draws it. Text metrics are view-only: replicas
 //! never depend on them, and grid character widths come from the terminal core.
 
 mod canvas;
@@ -55,8 +55,8 @@ pub struct FontConfig {
 }
 
 /// The bundled Nerd Fonts symbols face (Nerd Fonts v3.4.0, SIL OFL 1.1; see `assets/README.md`).
-/// It draws Nerd Font icons, which live in the Private Use Area: surfaces' icon spans (§7.12)
-/// and the grid's fallback for PUA codepoints the grid's family lacks (§18.3).
+/// It draws Nerd Font icons, which live in the Private Use Area: surfaces' icon spans
+/// and the grid's fallback for PUA codepoints the grid's family lacks.
 pub static NERD_SYMBOLS: &[u8] = include_bytes!("../assets/SymbolsNerdFontMono-Regular.ttf");
 
 /// The family name of [`NERD_SYMBOLS`].

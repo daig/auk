@@ -1,4 +1,4 @@
-//! One client connection on the daemon socket (§15.6): the handshake, then messages in, and
+//! One client connection on the daemon socket: the handshake, then messages in, and
 //! frames out through a queue the pane readers feed.
 
 use std::sync::Arc;
@@ -60,7 +60,7 @@ pub async fn serve(daemon: Arc<Daemon>, stream: UnixStream) {
         _ => return,
     };
     if let Err(mut refusal) = daemon.versions.admit(&hello.versions) {
-        // A newer client upgrades the daemon to its own binary (§15.7); the client connects
+        // A newer client upgrades the daemon to its own binary; the client connects
         // again once the new daemon serves.
         if crate::upgrade::under_way() {
             refusal.upgrading = true;
@@ -177,7 +177,7 @@ fn on_message(daemon: &Arc<Daemon>, id: ClientId, msg: ClientMsg) {
         }
         ClientMsg::Blobs { pane, ids } => daemon.client_blobs(id, pane, &ids),
         ClientMsg::ClearScrollback { pane } => daemon.client_clear_scrollback(id, pane),
-        // Client environments matter once windows spawn panes with them (M4).
+        // Client environments matter once windows spawn panes with them.
         ClientMsg::Env { .. } => {}
         ClientMsg::Hello(_) | ClientMsg::Detach => {}
     }

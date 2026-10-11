@@ -1,4 +1,4 @@
-//! A test window that is a pane's primary and edits natively (§7.9, §15.5): it attaches to the
+//! A test window that is a pane's primary and edits natively: it attaches to the
 //! daemon like the app, keeps a follower replica per pane, projects each pane's TSP state through
 //! `auk-views` into an `auk-ui` document and lays it out, acks what it drew, and routes input the
 //! way a window does: keys become PTY bytes encoded for the pane's modes, and native editing in
@@ -30,7 +30,7 @@ struct Shown {
     view: PaneView,
     /// The last frame acked per surface key.
     acked: BTreeMap<u64, u64>,
-    /// Blobs asked of the daemon, or sent by it after the snapshot (§7.12).
+    /// Blobs asked of the daemon, or sent by it after the snapshot.
     asked: BTreeSet<String>,
 }
 
@@ -104,7 +104,7 @@ impl NativeWindow {
     }
 
     /// Applies everything the daemon has sent so far: projects TSP changes, lays the pane out
-    /// and, as its primary, acks each live listening surface's last frame once drawn (§7.10).
+    /// and, as its primary, acks each live listening surface's last frame once drawn.
     pub fn pump(&mut self) {
         let mut touched = Vec::new();
         while let Ok(msg) = self.rx.try_recv() {

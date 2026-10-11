@@ -1,4 +1,4 @@
-//! Kinds on rich sub-engines (§8.5, §18.4): `md code diff ansi rows image`, and the T2 `math`
+//! Kinds on rich sub-engines: `md code diff ansi rows image`, and the T2 `math`
 //! (typeset by [`crate::math`], as md math is).
 
 use super::layout::preview_lines;
@@ -38,7 +38,7 @@ pub(crate) fn md(cx: &mut Cx, node: NodeRef, m: &mut Mount, _look: &mut Look) {
         unreachable!()
     };
     st.math_em = math_em(cx.set.font_px, cx.dom.doc.device_scale());
-    // Mermaid figures draw for the theme at the region zoom times the display scale (§8.3).
+    // Mermaid figures draw for the theme at the region zoom times the display scale.
     let env = crate::md::MdEnv {
         dark: cx.set.dark,
         density: cx.set.font_px / 13.0 * cx.dom.doc.device_scale(),
@@ -48,7 +48,7 @@ pub(crate) fn md(cx: &mut Cx, node: NodeRef, m: &mut Mount, _look: &mut Look) {
     let math_pending = !st.math_pending.is_empty();
     // Blocks are the node's generated parts.
     m.generated = st.blocks.iter().map(|b| b.el).collect();
-    // Many blocks: virtualize (§8.3).
+    // Many blocks: virtualize.
     let many = st.blocks.len() > 64;
     super::virtualize(cx, node.id(), m.el, many.then_some(60.0));
     // The clock also fills in formulas and draws in diagrams finished in the background.
@@ -56,7 +56,7 @@ pub(crate) fn md(cx: &mut Cx, node: NodeRef, m: &mut Mount, _look: &mut Look) {
 }
 
 /// Math's device pixels per em in a region at terminal font `font_px` (regions zoom by
-/// `font_px / 13`, §8.3; body text is 13px).
+/// `font_px / 13`; body text is 13px).
 pub(crate) fn math_em(font_px: f32, device_scale: f32) -> u32 {
     crate::math::em_px(13.0, font_px / 13.0, device_scale)
 }
@@ -92,7 +92,7 @@ pub(crate) fn tick_md(cx: &mut Cx, _node: NodeRef, m: &mut Mount) -> bool {
 /// A `code` node's incremental state.
 #[derive(Debug, Default)]
 pub(crate) struct CodeState {
-    /// Highlighting, done in the background past the first screenful (§8.5).
+    /// Highlighting, done in the background past the first screenful.
     pub hl: Option<highlight::Background>,
     pub key: String,
     pub body: Option<NodeId>,
@@ -291,7 +291,7 @@ pub(crate) fn code(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
     let pending = guard.is_some_and(|h| !h.done()) || st.hl_drawn < new_lines.len();
     st.redrawn = new_lines.len() - first;
     st.text = text;
-    // Long code virtualizes (§8.3: over 400 lines).
+    // Long code virtualizes (over 400 lines).
     let long = st.lines.len() > 400;
     super::virtualize(cx, node.id(), body, long.then_some(17.0));
     // Highlighting still on its way: the clock draws it in.
@@ -337,7 +337,7 @@ fn inside_open_fold(st: &mut SurfaceState, node: NodeRef) -> bool {
 }
 
 /// A `diff` node's state: its hunks and grammar, kept so the measure loop can redraw it split or
-/// unified when its width crosses 112 cells (§8.5, the Edits setting).
+/// unified when its width crosses 112 cells (the Edits setting).
 #[derive(Debug)]
 pub(crate) struct DiffState {
     pub hunks: Vec<Hunk>,
@@ -706,7 +706,7 @@ pub(crate) fn ansi(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
         cx.dom.set_class(more, "sf-ansi-more sf-hidden");
         cx.dom.set_only_text(more, "");
     }
-    // Long output paints the visible lines (§8.3).
+    // Long output paints the visible lines.
     super::virtualize(cx, node.id(), mini, (n > 48).then_some(17.0));
     if scroll && follow {
         cx.st.follow.insert(node.id().to_owned(), clip);
@@ -755,7 +755,7 @@ pub(crate) fn rows(cx: &mut Cx, node: NodeRef, m: &mut Mount, _look: &mut Look) 
     st.draw(&mut cx.dom, mini, 0..n);
 }
 
-/// `math` (book: math): one TeX formula, `div.md > div.math-display` centered in the node's
+/// `math`: one TeX formula, `div.md > div.math-display` centered in the node's
 /// width when `display`, else `div.md > p > span.math` at the node's start, typeset like md math.
 /// A formula typesetting in the background shows its TeX until the clock fills it in.
 pub(crate) fn math(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
@@ -817,9 +817,9 @@ enum ImageSource {
     Unavailable(String),
 }
 
-/// `image` (book:5925-5969): a blob (raster or sanitized SVG) or a built-in picture in a replaced
+/// `image`: a blob (raster or sanitized SVG) or a built-in picture in a replaced
 /// box, its children drawn over it in `.sf-img-over`. Until the blob arrives, or when it can't be
-/// decoded, a placeholder card with an icon and `alt`. Animations run on the view clock (§7.13),
+/// decoded, a placeholder card with an icon and `alt`. Animations run on the view clock,
 /// still under Reduce Motion. Blob images zoom on click unless the node has its own `click`.
 pub(crate) fn image(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
     let prior = match std::mem::take(&mut m.extra) {
@@ -831,7 +831,7 @@ pub(crate) fn image(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
     let alt = str_prop(p, "alt");
     let builtin = str_prop(p, "builtin");
     let blob = str_prop(p, "blob").map(str::to_ascii_lowercase);
-    // Vector pictures draw at the region zoom times the display scale (§8.3).
+    // Vector pictures draw at the region zoom times the display scale.
     let density = cx.set.font_px / 13.0 * cx.dom.doc.device_scale();
     let source = if let Some(name) = builtin {
         match crate::image::load_builtin(name, density) {
@@ -846,7 +846,7 @@ pub(crate) fn image(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
             .or_else(|| cx.blobs.load(id).map(std::borrow::Cow::Owned));
         match held {
             None => ImageSource::Loading,
-            // A big picture decodes off the frame path (amendment A9); small ones now.
+            // A big picture decodes off the frame path; small ones now.
             Some(b) => match crate::image::request_blob(&b, density) {
                 crate::image::Poll::Ready(Ok(pic)) => ImageSource::Ready(pic),
                 crate::image::Poll::Ready(Err(e)) => ImageSource::Unavailable(e),
@@ -871,7 +871,7 @@ pub(crate) fn image(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
                 && crate::common::Actions::read(p, "image").click.is_none();
             look.class_if(zoom, "sf-zoom");
             let label = alt.unwrap_or("Image");
-            // omp's app mark (book:11585) sits in a decoration, `div.sf-deco.sf-brand`.
+            // omp's app mark sits in a decoration, `div.sf-deco.sf-brand`.
             let brand = (builtin == Some("omp")).then(|| part(cx, m, "div", "sf-deco sf-brand"));
             let mut picture = |cx: &mut Cx, tag: &str, class: &str| match brand {
                 Some(b) => cx.dom.child(b, tag, class),
@@ -980,13 +980,13 @@ fn node_blob(node: NodeRef) -> String {
         .unwrap_or_default()
 }
 
-/// An animated image's next frame (§7.13), or a picture decoded in the background drawn in.
+/// An animated image's next frame, or a picture decoded in the background drawn in.
 /// Returns whether it still needs the clock.
 pub(crate) fn tick_image(cx: &mut Cx, node: NodeRef, m: &mut Mount) -> bool {
     let Extra::Image(st) = &mut m.extra else {
         return false;
     };
-    // Decoding in the background: redraw the node once the picture is ready (§8.5).
+    // Decoding in the background: redraw the node once the picture is ready.
     if st.decoding {
         crate::image::pump();
         if crate::image::decoding_blob(&node_blob(node)) {

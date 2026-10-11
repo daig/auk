@@ -1,4 +1,4 @@
-//! The window half's host (§9.8, §9.3 "Window reload", §20): each window runs
+//! The window half's host: each window runs
 //! [`auk_plugins::WindowPlugins`] on its UI thread and implements its [`WindowHost`] here.
 //!
 //! - Commands join the palette and the action names; binds join the keymap (chords, sequences
@@ -6,7 +6,7 @@
 //! - Overrides run before every built-in command, however it was started.
 //! - `route.open` sees `auk open` (origin `cli`), "Open file…" in the palette (`palette`) and
 //!   clicked paths and host `cx:open` effects (`link`); `route.link` sees link clicks first.
-//! - Manifest styles and `tern.css` sheets install into the chrome document (D3).
+//! - Manifest styles and `tern.css` sheets install into the chrome document.
 //! - Chrome formatters title the tabs and the window and fill the status line.
 //! - Window events are queued from the replicas and the layout and delivered after each frame.
 //!
@@ -15,7 +15,7 @@
 //! queues it until the handler returns.
 //!
 //! Layout operations that answer (`new_tab`, `split`, `new_block`, `tab`, `move`, `resize`) are
-//! requests on the window's own link to its host's daemon, local or remote (§15.6): the daemon
+//! requests on the window's own link to its host's daemon, local or remote: the daemon
 //! answers with the new pane or the outcome after the replicated layout, which brings the change
 //! to every window, so the window's layout already shows it.
 
@@ -47,7 +47,7 @@ use crate::conn::PaneNote;
 /// How long a toast stays up.
 pub const TOAST_FOR: Duration = Duration::from_secs(6);
 
-/// What a window shows of one pane, from its stream (§9.8 `PaneInfo`).
+/// What a window shows of one pane, from its stream.
 #[derive(Clone, Debug, Default)]
 pub struct Track {
     pub busy: bool,
@@ -148,7 +148,7 @@ impl Drop for Ticker {
     }
 }
 
-/// How soon each tap of a tap sequence (`shift>shift`) follows the last (§9.8 chords).
+/// How soon each tap of a tap sequence (`shift>shift`) follows the last.
 const TAP_WITHIN: Duration = Duration::from_millis(500);
 
 /// The window's plugin state.
@@ -168,19 +168,19 @@ pub struct PluginState {
     pub toast_log: Vec<Value>,
     /// Built-in opens (the system opener), for the automation endpoint.
     pub opened: Vec<Value>,
-    /// Links refused under §7.14 (for the automation endpoint).
+    /// Links refused (for the automation endpoint).
     pub refused: Vec<Value>,
     /// Route decisions taken, for the automation endpoint.
     pub routed: Vec<Value>,
     /// The plugin keymap layer: chords and actions.
     pub keymap: Vec<(Chord, String)>,
-    /// The preset layer (`keymap`, `keymap_prefix`), below the plugins' (§9.8).
+    /// The preset layer (`keymap`, `keymap_prefix`), below the plugins'.
     pub preset: Vec<(Chord, String)>,
     /// The user's `keybinds`, above everything: a chord and its actions in priority order.
     pub user: Vec<(Chord, Vec<String>)>,
     /// The plugin sheets installed, in cascade order.
     pub sheets: Vec<(String, String)>,
-    /// A block that could not start, for the card's Retry (§9.5).
+    /// A block that could not start, for the card's Retry.
     pub block_card: Option<BlockCard>,
     /// Chords left out because a default binds them.
     pub dropped_binds: Vec<String>,
@@ -198,7 +198,7 @@ pub struct PluginState {
     /// Requests this window sent that add a pane, not answered yet.
     creating: Vec<u64>,
     /// Panes this window added (from the answers), until the layout shows them: only these fire
-    /// `pane_created`, and their new tabs `tab_created` (book:22076).
+    /// `pane_created`, and their new tabs `tab_created`.
     own_panes: BTreeSet<PaneId>,
     queued: Vec<String>,
     catalog_generation: u64,
@@ -262,7 +262,7 @@ pub fn osc7_path(cwd: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// The local path a `file:` link names (§7.14: "`file://` links are limited to paths"): only
+/// The local path a `file:` link names (`file://` links are limited to paths): only
 /// `file:` with no host or `localhost`, an absolute path, and no query or fragment. Anything else
 /// (another machine's file, a URL with parts that aren't a path) is `None`, and is refused.
 pub fn file_url_path(url: &str) -> Option<String> {
@@ -289,7 +289,7 @@ pub fn file_url_path(url: &str) -> Option<String> {
 }
 
 /// URL schemes the system hands to a terminal program or a remote shell: a link never opens them
-/// (§7.14 "nothing runs a command").
+/// (nothing runs a command).
 const COMMAND_SCHEMES: &[&str] = &["ssh", "telnet", "rlogin", "tn3270", "x-man-page"];
 
 /// Whether opening `path` with the system opener would run something: an executable file or a
@@ -330,7 +330,7 @@ pub fn system_open(target: &str) {
 }
 
 /// Shows `path` selected in the Finder (`open -R`) instead of opening it: how a link reaches a
-/// program or an app bundle, so that following a link never runs a command (§7.14).
+/// program or an app bundle, so that following a link never runs a command.
 pub fn system_reveal(path: &str) {
     run_opener(&["-R", path]);
 }
@@ -358,7 +358,7 @@ fn is_remote() -> bool {
 fn control(words: &[String]) -> Result<Value, String> {
     let (socket, remote) =
         crate::app::with(|a| (a.opts.socket.clone(), a.opts.remote.is_some())).ok_or("no app")?;
-    // A remote host's daemon has no control endpoint here (§10.2); its panes are reached
+    // A remote host's daemon has no control endpoint here; its panes are reached
     // through the window's link.
     if remote {
         return Err("the remote host's daemon takes no control requests from this machine".into());
@@ -513,12 +513,12 @@ impl WinState {
     // -----------------------------------------------------------------------------------------
     // Loading and reloading
 
-    /// Loads the window halves once the window's session settled (§9.3), then runs
+    /// Loads the window halves once the window's session settled, then runs
     /// `window_start`.
     pub(super) fn plugins_settled(&mut self, window: &Window) {
         if !self.plugins.loaded {
             self.plugins.loaded = true;
-            // What exists now came before any window half: those events are dropped (§9.8).
+            // What exists now came before any window half: those events are dropped.
             let sessions = self.sessions();
             self.plugins.seen_panes = sessions.panes().into_iter().collect();
             self.plugins.seen_tabs = sessions
@@ -556,7 +556,7 @@ impl WinState {
 
     /// The keymap layer, sheets and formatter caches after a load or reload.
     pub(super) fn plugins_rebuilt(&mut self) {
-        // The preset and user layers (§9.8), from the settings; plugins fill the layer between.
+        // The preset and user layers, from the settings; plugins fill the layer between.
         let preset = self.settings.preset();
         let user: Vec<(Chord, Vec<String>)> = self
             .settings
@@ -609,13 +609,13 @@ impl WinState {
         }
     }
 
-    /// The plugin sheets (§8.4 cascade step 3, §9.8 "CSS"): the host's catalog styles (only
+    /// The plugin sheets: the host's catalog styles (only
     /// Ready plugins contribute), local manifest styles too in a remote window, then `tern.css`
     /// sheets. They install into the chrome and every pane's documents.
     pub(super) fn refresh_sheets(&mut self) {
         let host = self.conn.host_name();
         // A plugin file's `url()` in manifest styles becomes a `data:` URL at install, as in
-        // `tern.css` sheets (§9.8 CSS). A local plugin resolves against its package directory; a
+        // `tern.css` sheets. A local plugin resolves against its package directory; a
         // remote host's files aren't here, so only `data:` URLs pass in its styles.
         let dirs: BTreeMap<String, PathBuf> = if host == "local" {
             let root = auk_plugins::paths::plugins_dir(&auk_plugins::paths::config_dir());
@@ -664,7 +664,7 @@ impl WinState {
         }
     }
 
-    /// Reloads every window half (§9.3 "Window reload").
+    /// Reloads every window half.
     pub(super) fn plugins_reload(&mut self) {
         if self.plugins.rt.is_none() {
             return;
@@ -808,7 +808,7 @@ impl WinState {
         for step in &candidates {
             let mut seq = prefix.clone();
             seq.push(step.clone());
-            // The user layer, then plugins, then the preset (§9.8 keymap layers).
+            // The user layer, then plugins, then the preset.
             let found: Option<Vec<String>> = self
                 .plugins
                 .user
@@ -894,7 +894,7 @@ impl WinState {
     }
 
     /// ⌘-click on the grid: an OSC 8 link goes to `route.link` (then `route.open` for a
-    /// file), a printed path straight to `route.open` with origin `link` (§9.8). Returns whether
+    /// file), a printed path straight to `route.open` with origin `link`. Returns whether
     /// there was something to open.
     pub(super) fn grid_link_click(&mut self, pane: PaneId, line: auk_term::Line, col: u16) -> bool {
         let found = {
@@ -1064,7 +1064,7 @@ impl WinState {
         }
     }
 
-    /// The built-in open: with no file blocks in v1, the system opener (§9.8 "v1 subset").
+    /// The built-in open: with no file blocks in v1, the system opener.
     pub(super) fn builtin_open(&mut self, target: &str, how: Option<How>, origin: &str) {
         let is_url = target.contains("://") || target.starts_with("mailto:");
         let mut target = if is_url {
@@ -1074,7 +1074,7 @@ impl WinState {
         };
         let mut reveal = false;
         // A link (from a program's output or a surface, or a route's answer to one) opens a page
-        // or a path, and never runs a command (§7.14).
+        // or a path, and never runs a command.
         if origin == "link" {
             if is_url {
                 let scheme = target
@@ -1108,7 +1108,7 @@ impl WinState {
         }
     }
 
-    /// A link that §7.14 doesn't let open: a toast, and a note for the automation endpoint.
+    /// A link that may not open: a toast, and a note for the automation endpoint.
     fn refuse_link(&mut self, target: &str, why: &str) {
         self.plugins
             .refused
@@ -1160,7 +1160,7 @@ impl WinState {
                 Ok(pane)
             }
             Err(error) => {
-                // "Could not start the block", with Retry (§9.5).
+                // "Could not start the block", with Retry.
                 eprintln!("auk: block {kind}: {error}");
                 self.plugins.block_card = Some(BlockCard {
                     kind: kind.to_owned(),
@@ -1229,7 +1229,7 @@ impl WinState {
         let pane = v["pane"]
             .as_u64()
             .ok_or_else(|| format!("the daemon answered without a pane: {v}"))?;
-        // This window added it (§9.8 `pane_created`).
+        // This window added it (for `pane_created`).
         self.plugins.own_panes.insert(pane);
         Ok(pane)
     }
@@ -1289,7 +1289,7 @@ impl WinState {
                     crate::app::clipboard_set(&text);
                 }
                 auk_mirror::Effect::Open { target, origin } => match origin.as_deref() {
-                    // `auk open`: route.open with origin cli (§9.8).
+                    // `auk open`: route.open with origin cli.
                     None => self.open_path_routed(&target, "cli", How::Default, None),
                     Some(o) => self.open_routed(&target, o, None),
                 },
@@ -1350,7 +1350,7 @@ impl WinState {
 
     /// Pane and tab events from a layout change, and the pane kinds behind them. `pane_created`
     /// and `tab_created` fire only for what this window added: panes restored from the daemon
-    /// or added by another window don't (book:22076).
+    /// or added by another window don't.
     fn plugins_layout(&mut self, window: &Window) {
         // The answers that came: the panes this window added.
         let creating = std::mem::take(&mut self.plugins.creating);

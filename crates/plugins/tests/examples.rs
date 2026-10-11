@@ -1,4 +1,4 @@
-//! The SDK's example plugins at the runtime level (§9, M7–M9): each loads unmodified and its
+//! The SDK's example plugins at the runtime level: each loads unmodified and its
 //! core behavior works through the real host, workers, blocks, lenses and window runtime.
 
 mod common;

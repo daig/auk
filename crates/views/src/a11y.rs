@@ -1,4 +1,4 @@
-//! A simple accessibility tree of the projected surfaces (§8.3): roles such as progressbar, meter,
+//! A simple accessibility tree of the projected surfaces: roles such as progressbar, meter,
 //! tree, listbox, dialog and timer, with names and values, for the platform layer to feed to
 //! AccessKit.
 

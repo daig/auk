@@ -1,5 +1,5 @@
 //! Host-only members: `tern.on` (host events), `tern.block.define`, `tern.lens.define` and
-//! `tern.pane`. Nothing here names a window (AC14): effects target a pane or the whole host.
+//! `tern.pane`. Nothing here names a window: effects target a pane or the whole host.
 
 use std::rc::Rc;
 

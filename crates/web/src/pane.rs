@@ -1,16 +1,16 @@
-//! A pane as the browser client draws it (§6.2, §9.6, §10.3, §10.4): its TSP surfaces (plugin
-//! blocks are panes with a screen surface, §9.5), its command blocks with their lens views, the
+//! A pane as the browser client draws it: its TSP surfaces (plugin
+//! blocks are panes with a screen surface), its command blocks with their lens views, the
 //! catalog's plugin styles, and pointer input to all of them. Pure, so it runs and is tested
 //! natively; the wasm client draws the grid where [`PaneDraw::arrange`] puts the rows and paints
 //! the rest with [`PaneDraw::paint`].
 //!
 //! **Command blocks.** The replica claims lensed commands on its own and keeps each block's raw
-//! output and its latest view (a side message, §15.1). Each block is drawn as a card at its anchor
+//! output and its latest view (a side message). Each block is drawn as a card at its anchor
 //! row in the flow: the lens's view when one arrived, else the raw output as a mini terminal
-//! (§9.6: "replicas show raw output until a view arrives"). A block's card is rendered by the
+//! (replicas show raw output until a view arrives). A block's card is rendered by the
 //! views into a document of its own, through an inline surface of a private TSP engine that
 //! only this client sees, so lens views draw with every kind the views know. Clicks in it become
-//! view events for `lens:<block>` (§9.6). View node ids are unstable (§9.6), so nodes without an
+//! view events for `lens:<block>`. View node ids are unstable, so nodes without an
 //! id get one here.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -54,7 +54,7 @@ fn new_surfaces(settings: &ViewSettings, scale: f32, font: Option<&Arc<Vec<u8>>>
     surfaces
 }
 
-/// The catalog's styles as plugin sheets (§8.4 cascade step 3), replacing the last set.
+/// The catalog's styles as plugin sheets, replacing the last set.
 fn install_styles(surfaces: &mut PaneSurfaces, old: &[(String, String)], new: &[(String, String)]) {
     let (doc, _) = surfaces.parts();
     for (id, _) in old {
@@ -209,9 +209,9 @@ impl LensDoc {
     }
 }
 
-/// A command block's card, the views' `block` kind (research/elements.md `block`): the lens's
+/// A command block's card, the views' `block` kind: the lens's
 /// view as its native child when one arrived, and the raw output as its `raw` mini terminal,
-/// which shows until then (§9.6).
+/// which shows until then.
 pub fn lens_card(b: &LensBlock, raw: &[u8]) -> Value {
     let mut c = Vec::new();
     if let Some(view) = &b.view {
@@ -240,8 +240,8 @@ pub fn lens_card(b: &LensBlock, raw: &[u8]) -> Value {
     json!({"id": CARD_PREFIX, "k": "block", "p": p, "c": c})
 }
 
-/// A lens view with an id on every node: views come from plugins and their ids are unstable
-/// (§9.6), so missing and repeated ids get fresh ones (`v1`, `v2`, … in tree order).
+/// A lens view with an id on every node: views come from plugins and their ids are unstable,
+/// so missing and repeated ids get fresh ones (`v1`, `v2`, … in tree order).
 pub fn with_ids(view: &Value) -> Value {
     // The card's own ids and the region names stay free.
     let mut seen: BTreeSet<String> = ["main", "dock", "layer", "raw"].map(str::to_owned).into();
@@ -354,7 +354,7 @@ impl PaneDraw {
         self.scale = scale;
     }
 
-    /// The catalog's plugin styles (§10.4: the serving host's manifests), installed when
+    /// The catalog's plugin styles (the serving host's manifests), installed when
     /// `serial` changed.
     pub fn set_styles(&mut self, serial: u64, styles: &[(String, String)]) {
         if self.styles_serial == Some(serial) {
@@ -498,7 +498,7 @@ impl PaneDraw {
     }
 
     /// The surfaces shown this frame: (surface id, top in the flow area, height), in pixels. A
-    /// screen surface (a plugin block's, §9.5) covers the content area from its top.
+    /// screen surface (a plugin block's) covers the content area from its top.
     pub fn surfaces_placed(&self, tsp: &TspPane) -> Vec<(String, f32, f32)> {
         let mut out: Vec<(String, f32, f32)> = self
             .arranged
@@ -605,7 +605,7 @@ impl PaneDraw {
     }
 
     /// A pointer press at `press` (pixels from the content area's top-left): a surface's or a
-    /// command block's view takes it (§7.8) and says what to do. `None` when no view is there
+    /// command block's view takes it and says what to do. `None` when no view is there
     /// (the press is the grid's).
     pub fn click(
         &mut self,
@@ -657,7 +657,7 @@ impl PaneDraw {
         changed
     }
 
-    /// A press that may start dragging a `prefs` ordered list item by its grip (book: prefs).
+    /// A press that may start dragging a `prefs` ordered list item by its grip.
     /// Returns whether it did; the press is then not a click.
     pub fn reorder_press(&mut self, replica: &Replica, press: Press, content_px: f32) -> bool {
         let Some(Target::Surfaces { x, y }) = self.target(press, content_px) else {
@@ -1218,7 +1218,7 @@ mod tests {
 
     #[test]
     fn a_screen_surface_covers_the_pane_and_takes_clicks() {
-        // A plugin block's shape (§9.5): a screen surface with no program features.
+        // A plugin block's shape: a screen surface with no program features.
         let mut r = Replica::new(80, 24, Settings::default(), Role::Follower);
         feed(&mut r, &apc("o", json!({"id": "s1", "mode": "screen"})));
         let main = json!({"id": "main", "k": "col", "c": [

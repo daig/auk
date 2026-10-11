@@ -1,4 +1,4 @@
-//! Text and data kinds: `text badge kbd icon kv table tree` (research/elements.md §2.2, §2.3).
+//! Text and data kinds: `text badge kbd icon kv table tree`.
 
 use super::layout::value_key;
 use super::{begin, icon, part, spans_into};
@@ -10,7 +10,7 @@ use auk_tsp::NodeRef;
 use auk_ui::NodeId;
 use serde_json::Value;
 
-/// How a `text` node is cut after layout (§8.3 measure-then-layout).
+/// How a `text` node is cut after layout (measure, then layout).
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Trunc {
     pub el: NodeId,
@@ -188,7 +188,7 @@ pub(crate) fn kv(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
         let vd = cx.dom.child(row, "div", "sf-kv-v");
         m.clock |= spans_into(cx, vd, o.get("v"));
     }
-    // Long lists virtualize (§8.3): each item lays out as its own grid row on the shared columns,
+    // Long lists virtualize: each item lays out as its own grid row on the shared columns,
     // in a stack only the visible part of which is laid out.
     let virt = !inline && items.len() > VIRTUAL_ROWS;
     look.class_if(virt, "virt");
@@ -201,11 +201,11 @@ pub(crate) fn kv(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
     super::virtualize(cx, node.id(), m.el, virt.then_some(19.0));
 }
 
-/// `kv` items, `table` rows and `tree` items past this many virtualize (§8.3; Tern's `list`
+/// `kv` items, `table` rows and `tree` items past this many virtualize (Tern's `list`
 /// threshold).
 pub(crate) const VIRTUAL_ROWS: usize = 200;
 
-/// Column sizing input for a table (book:5522).
+/// Column sizing input for a table.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct TableCol {
     pub natural: usize,
@@ -361,7 +361,7 @@ pub(crate) fn table(cx: &mut Cx, node: NodeRef, m: &mut Mount, _look: &mut Look)
         .map(|c| format!("calc({}*var(--sf-cw) + 14px)", c.natural))
         .collect();
     cx.dom.set_style(grid, &table_columns(&tpl.join(" ")));
-    // Long tables virtualize (§8.3): rows become their own grids on the shared columns.
+    // Long tables virtualize: rows become their own grids on the shared columns.
     super::virtualize(cx, node.id(), grid, virt.then_some(23.0));
     cx.st.tables.insert(node.id().to_owned(), info);
 }
@@ -371,7 +371,7 @@ pub(crate) fn table_columns(tpl: &str) -> String {
     format!("grid-template-columns: {tpl}; --sf-tbl-cols: {tpl}")
 }
 
-/// Fit table columns to `width` px with cell width `cw` (book:5522): hide lowest priority first
+/// Fit table columns to `width` px with cell width `cw`: hide lowest priority first
 /// (ties: rightmost), give spare width to `grow` columns, shrink `grow` columns to 24 cells, then
 /// all proportionally. Returns (shown, width px) per column.
 pub(crate) fn fit_columns(cols: &[TableCol], width: f32, cw: f32) -> Vec<(bool, f32)> {
@@ -456,7 +456,7 @@ pub(crate) fn tree(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
         }
     }
     m.generated.extend(made);
-    // Many items at a level virtualize (§8.3), the top level here and open groups below.
+    // Many items at a level virtualize, the top level here and open groups below.
     super::virtualize(cx, &id, el, (nodes.len() > VIRTUAL_ROWS).then_some(22.0));
 }
 

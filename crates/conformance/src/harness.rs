@@ -1,4 +1,4 @@
-//! A hermetic harness for suites that drive the real `auk` binary (GOAL.md): a temporary state
+//! A hermetic harness for suites that drive the real `auk` binary: a temporary state
 //! dir and socket per test, a test `ZDOTDIR` and `HOME`, and handles for the daemon, headless
 //! windows and control endpoints. Nothing touches the user's daemon, state or shell config.
 //!

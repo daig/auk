@@ -1,5 +1,5 @@
-//! Host-half workers: one OS thread per plugin, named `plugin <id>`, owning that plugin's VM
-//! (§9.2, §20). The daemon talks to a worker only over channels and never runs Lua itself.
+//! Host-half workers: one OS thread per plugin, named `plugin <id>`, owning that plugin's VM.
+//! The daemon talks to a worker only over channels and never runs Lua itself.
 //!
 //! A worker handles its plugin's requests, events, block input, lens captures and callbacks one
 //! at a time, in arrival order; workers run in parallel. Work requested through a cx is applied
@@ -176,7 +176,7 @@ pub(crate) struct Starting {
 }
 
 impl Starting {
-    /// Waits for the entry to finish (allowed by §4.1: the daemon waits while plugins load).
+    /// Waits for the entry to finish (allowed: the daemon may wait while plugins load).
     /// Returns the handle when the plugin is Ready, else the Failed error.
     pub(crate) fn wait(self) -> (Result<WorkerHandle, String>, bool) {
         match self.loaded.recv() {

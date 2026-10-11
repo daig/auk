@@ -1,4 +1,4 @@
-//! Package discovery: reading the plugins folder (§9.1 "Folders", research/plugins.md §2.3, §2.8).
+//! Package discovery: reading the plugins folder.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

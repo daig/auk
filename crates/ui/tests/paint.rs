@@ -264,7 +264,7 @@ div { position: absolute; background: rgb(0, 0, 255); }
 <div class="round"></div><div class="blur"></div><div class="iblur"></div><div class="faded"></div>
 <div class="multi"></div><div class="turned"></div></body></html>"#;
 
-/// A7: outer shadows (offset, spread, radii, several, under an opacity layer) draw outside the
+/// Outer shadows (offset, spread, radii, several, under an opacity layer) draw outside the
 /// border box and never inside it; inset shadows draw inside the padding box over the
 /// background, under the border. The first shadow in the list is on top.
 #[test]
@@ -316,7 +316,7 @@ fn box_shadows_paint_outer_inset_spread_and_stacked() {
     assert_eq!(at(270, 110), BLUE, "the box over it");
 }
 
-/// A7: blur softens the shadow's edge (Gaussian, standard deviation half the blur radius), and an
+/// Blur softens the shadow's edge (Gaussian, standard deviation half the blur radius), and an
 /// inset blur fades inward without taking out the background.
 #[test]
 fn blurred_box_shadows_fade_with_distance() {
@@ -363,7 +363,7 @@ fn blurred_box_shadows_fade_with_distance() {
     assert_eq!(at(98, 130), [255, 255, 255, 255], "nothing outside");
 }
 
-/// A7: culling counts a box's outer shadows, so a shadow that reaches into view is painted
+/// Culling counts a box's outer shadows, so a shadow that reaches into view is painted
 /// though its box is far outside it.
 #[test]
 fn culling_keeps_boxes_whose_shadows_reach_into_view() {

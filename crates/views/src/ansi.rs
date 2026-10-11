@@ -1,4 +1,4 @@
-//! The `ansi` and `rows` sub-engine (§8.5): our own terminal core (auk-term) in a box, for SGR,
+//! The `ansi` and `rows` sub-engine: our own terminal core (auk-term) in a box, for SGR,
 //! OSC 8, `\r`, `\b`, reflow on width change and follow-tail. Appends feed only the new tail.
 
 use crate::dom::Dom;

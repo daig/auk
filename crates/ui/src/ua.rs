@@ -1,4 +1,4 @@
-//! The user-agent sheet: a subset of WebKit's, covering the tags `el` allows (§2.9) plus the
+//! The user-agent sheet: a subset of WebKit's, covering the tags `el` allows plus the
 //! document root and body.
 
 pub const UA_CSS: &str = r#"

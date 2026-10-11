@@ -1,4 +1,4 @@
-//! Split (side-by-side) `diff` (§8.5, A23, book "diff"): the Edits setting and `mode`, pairing
+//! Split (side-by-side) `diff`: the Edits setting and `mode`, pairing
 //! of removed and added lines, word emphasis and highlighting on both sides, fold rows, the
 //! blank side, the layout of the halves, and omp's diffs drawn split.
 
@@ -381,7 +381,7 @@ fn omp_session_diffs_draw_split_under_the_split_setting() {
 }
 
 /// Outside a card a diff has its ring and `--code-bg`; inside one (directly or deeper) it sits
-/// flush, with no ring or background of its own (book: diff).
+/// flush, with no ring or background of its own.
 #[test]
 fn a_diff_in_a_card_sits_flush() {
     let mut h = Harness::new();

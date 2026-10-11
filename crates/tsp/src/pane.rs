@@ -1,5 +1,5 @@
 //! The per-pane TSP engine: everything a pane's replica knows about the program's surfaces, and
-//! the rules for what goes back to the program (§7.2–§7.12, §12.1 at the library level).
+//! the rules for what goes back to the program.
 
 use std::collections::BTreeSet;
 
@@ -13,12 +13,12 @@ use crate::style::{AcceptAll, MAX_CSS, Palette, SheetChecker, valid_sheet_name};
 use crate::surface::{Buffer, Mode, State, Surface, SurfaceChanges, SurfaceKey};
 use crate::wire::{self, Joined, Joiner, MAX_APC, Message, ToProgram};
 
-/// The T0 kinds (§8.2).
+/// The T0 kinds.
 pub const T0_KINDS: [&str; 16] = [
     "col", "row", "card", "section", "rule", "spacer", "text", "badge", "kv", "icon", "spinner",
     "elapsed", "progress", "ansi", "rows", "el",
 ];
-/// The T1 kinds (§8.2).
+/// The T1 kinds.
 pub const T1_KINDS: [&str; 22] = [
     "md",
     "code",
@@ -43,10 +43,10 @@ pub const T1_KINDS: [&str; 22] = [
     "checklist",
     "image",
 ];
-/// The T2 kinds drawn so far, advertised with T0 and T1 (A23, D26: a kind is advertised once it
-/// is drawn).
+/// The T2 kinds drawn so far, advertised with T0 and T1 (a kind is advertised once it is
+/// drawn).
 pub const T2_KINDS: &[&str] = &["picker", "prefs", "effort", "chart", "math", "block"];
-/// Every terminal feature name of v1 (§7.2).
+/// Every terminal feature name of v1.
 pub const ALL_FEATURES: [&str; 10] = [
     "blobs",
     "settle",
@@ -60,7 +60,7 @@ pub const ALL_FEATURES: [&str; 10] = [
     "flow",
 ];
 /// The width of the settings sheet a docked `prefs` node takes at the pane's right edge, in
-/// columns: Tern's 440px sheet at the default 13px font (book: `prefs`, Regions). Kept in
+/// columns: Tern's 440px sheet at the default 13px font. Kept in
 /// columns because the pane's facts carry the cell size in device pixels, not points.
 pub const ASIDE_COLS: u16 = 56;
 
@@ -70,10 +70,10 @@ pub fn aside_reserve(cols: u16) -> u16 {
     ASIDE_COLS.min((u32::from(cols) * 3 / 5) as u16)
 }
 
-/// The default retention budget per pane (§7.10).
+/// The default retention budget per pane.
 pub const RETENTION: u64 = 64 << 20;
 
-/// Replicated settings: they change only through sequenced records (§15.2).
+/// Replicated settings: they change only through sequenced records.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
     /// TSP on (`native_surfaces`). Off, no hello is answered and every TSP message is ignored.
@@ -110,7 +110,7 @@ impl Default for Config {
             .chain(T2_KINDS)
             .map(|k| (*k).to_owned())
             .collect();
-        // `aside` is the docking of `prefs`: advertised with it (A23).
+        // `aside` is the docking of `prefs`: advertised with it.
         let prefs = kinds.iter().any(|k| k == "prefs");
         Config {
             enabled: true,
@@ -129,7 +129,7 @@ impl Default for Config {
     }
 }
 
-/// Client facts: the primary replica's, or the last primary's (§15.5). Not replicated.
+/// Client facts: the primary replica's, or the last primary's. Not replicated.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Facts {
     /// Cell size in px.
@@ -153,7 +153,7 @@ impl Default for Facts {
     }
 }
 
-/// Whether answers reach the program (§7.7).
+/// Whether answers reach the program.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Gate {
     /// Answers go out.
@@ -183,7 +183,7 @@ impl Gate {
     }
 }
 
-/// The program's last hello (§7.2).
+/// The program's last hello.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Hello {
     pub app: Option<String>,
@@ -197,7 +197,7 @@ impl Hello {
     }
 }
 
-/// Who names the pane (§7.3 Title).
+/// Who names the pane.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum TitleSource {
     /// The grid's title (OSC 0/2, usually the shell's).
@@ -226,7 +226,7 @@ impl Changes {
     }
 }
 
-/// A `send` waiting for its field to become sendable (§7.9).
+/// A `send` waiting for its field to become sendable.
 #[derive(Clone, Debug)]
 struct HeldSend {
     surface: SurfaceKey,
@@ -234,7 +234,7 @@ struct HeldSend {
     text: String,
 }
 
-/// State a snapshot's seeded hello carries (§15.3), applied at the end of the replay.
+/// State a snapshot's seeded hello carries, applied at the end of the replay.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Seed {
     pub swallow: Option<(String, String)>,
@@ -243,8 +243,8 @@ pub(crate) struct Seed {
     pub order: Vec<(SurfaceKey, u64)>,
 }
 
-/// Document state held outside the TSP engine that counts against the pane's retention budget
-/// (§7.10): a replica's finished command block, by its anchor row.
+/// Document state held outside the TSP engine that counts against the pane's retention budget:
+/// a replica's finished command block, by its anchor row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Outside {
     pub anchor: AnchorKey,
@@ -278,7 +278,7 @@ pub struct TspPane {
     arrived: Vec<String>,
     pane_changed: bool,
     held: Vec<HeldSend>,
-    /// Finished command blocks (§7.10), oldest first: evictable like closed surfaces.
+    /// Finished command blocks, oldest first: evictable like closed surfaces.
     outside: Vec<Outside>,
     /// Command blocks the budget evicted, for the replica to drop.
     outside_evicted: Vec<u64>,
@@ -351,7 +351,7 @@ impl TspPane {
 
     /// Whether something covers this surface's `main` and `dock`: a live screen surface in the
     /// same buffer (over an inline or flow surface), or a sheet in its own `layer`: a `modal`
-    /// or `size: "full"` overlay, or a `picker` (§7.8, `.sf-covered`).
+    /// or `size: "full"` overlay, or a `picker` (`.sf-covered`).
     pub fn covered(&self, key: SurfaceKey) -> bool {
         let Some(s) = self.surface(key) else {
             return false;
@@ -391,7 +391,7 @@ impl TspPane {
         self.blobs.as_ref()
     }
 
-    /// A blob that reached this replica outside the stream (§7.12): the daemon sends a late
+    /// A blob that reached this replica outside the stream: the daemon sends a late
     /// window the blobs its documents name, since snapshots don't carry them. Blob bytes are
     /// storage, not replicated state (the hash leaves them out), so this changes nothing a replica
     /// must agree on; nodes naming the blob redraw. Returns false, storing nothing, when `id`
@@ -413,7 +413,7 @@ impl TspPane {
     }
 
     /// Blob ids that `image` nodes name, lowercase: the union of the documents' tracked sets,
-    /// so it costs the number of images, not the documents' size (§7.12).
+    /// so it costs the number of images, not the documents' size.
     pub fn referenced_blobs(&self) -> BTreeSet<String> {
         self.surfaces
             .iter()
@@ -438,7 +438,7 @@ impl TspPane {
             + self.outside.iter().map(|o| o.cost).sum::<u64>()
     }
 
-    /// The replica's finished command blocks, which share the retention budget (§7.10). Over
+    /// The replica's finished command blocks, which share the retention budget. Over
     /// budget, they are evicted whole with the closed surfaces, oldest (highest anchor row)
     /// first; [`take_outside_evicted`](Self::take_outside_evicted) says which went.
     pub fn set_outside(&mut self, grid: &mut dyn Grid, outside: Vec<Outside>) {
@@ -452,7 +452,7 @@ impl TspPane {
     }
 
     /// Takes the messages for the program, in order. The daemon writes them to the PTY subject
-    /// to the mode gate (§12.1); other replicas drop them.
+    /// to the mode gate; other replicas drop them.
     pub fn take_output(&mut self) -> Vec<Outgoing> {
         std::mem::take(&mut self.output)
     }
@@ -474,14 +474,14 @@ impl TspPane {
     // ---------------------------------------------------------------------------------------
     // Records and client input
 
-    /// A sequenced settings record (§15.2). A lower budget evicts at once.
+    /// A sequenced settings record. A lower budget evicts at once.
     pub fn set_config(&mut self, grid: &mut dyn Grid, config: Config) {
         self.kinds = config.kinds.iter().cloned().collect();
         self.config = config;
         self.enforce_budget(grid);
     }
 
-    /// New client facts (§15.5): reports `theme`, `motion` (feature `reduce-motion`), `resize`
+    /// New client facts: reports `theme`, `motion` (feature `reduce-motion`), `resize`
     /// and `visible` to the program as they change.
     pub fn set_facts(&mut self, grid: &dyn Grid, facts: Facts) {
         let old = std::mem::replace(&mut self.facts, facts);
@@ -503,7 +503,7 @@ impl TspPane {
         }
     }
 
-    /// The primary drew surface `sf` up to frame `s` (§7.10). Sends the first-draw `resize`, then
+    /// The primary drew surface `sf` up to frame `s`. Sends the first-draw `resize`, then
     /// one `ack` per displayed frame.
     pub fn ack(&mut self, grid: &dyn Grid, sf: &str, s: u64) {
         let Some(i) = self.route(sf, grid.alt_screen()) else {
@@ -531,7 +531,7 @@ impl TspPane {
         self.report_size(grid);
     }
 
-    /// An event a client built from the view (§15.4).
+    /// An event a client built from the view.
     pub fn view_event(
         &mut self,
         grid: &dyn Grid,
@@ -589,7 +589,7 @@ impl TspPane {
     }
 
     /// The bytes joined so far when a chunk sequence is being joined. The daemon arms its 1 s
-    /// timeout (§7.1) while this is `Some`, and restarts it whenever a chunk arrives.
+    /// timeout while this is `Some`, and restarts it whenever a chunk arrives.
     pub fn chunk_pending(&self) -> Option<usize> {
         self.joiner.pending().map(|seq| seq.body.len())
     }
@@ -604,11 +604,11 @@ impl TspPane {
     // ---------------------------------------------------------------------------------------
     // Hooks from the grid
 
-    /// OSC 133 `A` (§7.3): discards inline and screen surfaces, kept ones included, undoing an
+    /// OSC 133 `A`: discards inline and screen surfaces, kept ones included, undoing an
     /// inline anchor row with nothing below it; closes live flow surfaces. The program is gone.
     ///
-    /// Inline surfaces restored after a daemon restart stay (§5.4, ours): the rule discards only
-    /// inline surfaces opened since the previous prompt.
+    /// Inline surfaces restored after a daemon restart stay (our rule, not Tern's): the rule
+    /// discards only inline surfaces opened since the previous prompt.
     pub fn on_prompt(&mut self, grid: &mut dyn Grid) {
         for key in self.keys() {
             let Some(i) = self.index(key) else { continue };
@@ -647,7 +647,7 @@ impl TspPane {
         self.program_gone();
     }
 
-    /// The pane came back from the state file after a daemon restart (§5.4): inline and flow
+    /// The pane came back from the state file after a daemon restart: inline and flow
     /// surfaces close as if kept and become restored (read-only, and past the prompt rule); screen
     /// surfaces go; a chunk sequence being joined is dropped; the program is gone.
     pub fn on_restore(&mut self, grid: &mut dyn Grid) {
@@ -697,7 +697,7 @@ impl TspPane {
         }
     }
 
-    /// An anchor row ended (§7.4): its surface ends, and a listening program hears `gone`.
+    /// An anchor row ended: its surface ends, and a listening program hears `gone`.
     pub fn on_anchor_gone(&mut self, grid: &mut dyn Grid, key: AnchorKey) {
         if let Some(i) = self.surfaces.iter().position(|s| s.anchor == Some(key)) {
             self.surfaces[i].anchor = None;
@@ -828,7 +828,7 @@ impl TspPane {
         }
     }
 
-    /// The hello reply: every field, always, with exact JSON types (§7.2, B4).
+    /// The hello reply: every field, always, with exact JSON types.
     pub fn hello_reply(&self, cols: u16) -> Value {
         json!({
             "r": "hello",
@@ -926,7 +926,7 @@ impl TspPane {
         }
     }
 
-    /// Replacement and stacking (§7.3): a new `o` replaces the live surface of its mode in its
+    /// Replacement and stacking: a new `o` replaces the live surface of its mode in its
     /// buffer, and a new inline `o` also discards a screen surface covering the buffer.
     fn replace(&mut self, grid: &mut dyn Grid, mode: Mode, buffer: Buffer) {
         for key in self.keys() {
@@ -1056,7 +1056,7 @@ impl TspPane {
                 )),
             }
             // An `el` whose tag isn't built draws as a `div`, and the program hears once per
-            // node version (§7.7, book:8622).
+            // node version.
             for (id, msg) in surface.doc.take_tag_errors() {
                 errors.push(json!({"ev": "error", "sf": sf, "id": id, "msg": msg}));
             }
@@ -1319,7 +1319,7 @@ impl TspPane {
         }
     }
 
-    /// Retention (§7.10): evicts closed surfaces oldest first, then the oldest settled top-level
+    /// Retention: evicts closed surfaces oldest first, then the oldest settled top-level
     /// children of `main` in open surfaces, until the pane fits its budget or nothing is left to
     /// evict.
     fn enforce_budget(&mut self, grid: &mut dyn Grid) {
@@ -1374,7 +1374,7 @@ impl TspPane {
         }
     }
 
-    /// The `prefs` node docked beside the pane (feature `aside`, book: Regions): a `prefs` node in
+    /// The `prefs` node docked beside the pane (feature `aside`): a `prefs` node in
     /// the `layer` of a live inline surface on the active buffer, with no screen surface over it.
     /// Returns the surface and the node's id.
     pub fn aside(&self, alt: bool) -> Option<(SurfaceKey, String)> {
@@ -1488,7 +1488,7 @@ impl TspPane {
     // ---------------------------------------------------------------------------------------
     // Snapshot replay
 
-    /// Starts replaying a snapshot (§15.3): reserved parameters are honored and nothing is
+    /// Starts replaying a snapshot: reserved parameters are honored and nothing is
     /// answered until [`end_replay`](Self::end_replay).
     pub fn begin_replay(&mut self) {
         self.replaying = true;
@@ -1568,7 +1568,7 @@ fn px(v: f64) -> Value {
     }
 }
 
-/// A live, editable field reporting `sendable:true` (§7.9, F12).
+/// A live, editable field reporting `sendable:true`.
 fn sendable(surface: &Surface, id: &str) -> bool {
     let Some(node) = surface.doc.get(id) else {
         return false;

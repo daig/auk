@@ -1,10 +1,10 @@
-//! The `plugins` suite (GOAL.md; spec §9, §20, M7, M8, AC11–AC14): the SDK's example plugins and
+//! The `plugins` suite: the SDK's example plugins and
 //! purpose-built ones, loaded by the real daemon from a temporary config dir, with headless
 //! windows as clients.
 //!
-//! The window-half examples (`longrun`, `workspaces` except Edit, `jsonx`; M9) and the window
-//! side of AC14 run in the real app (`m9_…`, `ac14_window_…`), driven through its automation
-//! endpoint; they share the `screen` test group with the app suite.
+//! The window-half examples (`longrun`, `workspaces` except Edit, `jsonx`) and the window
+//! side of the isolation check run in the real app (`m9_…`, `ac14_window_…`), driven through
+//! its automation endpoint; they share the `screen` test group with the app suite.
 
 use std::path::{Path, PathBuf};
 use std::process::Child;
@@ -208,7 +208,7 @@ fn auk(env: &TestEnv, args: &[&str]) -> (i32, String, String) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// M7: the palette-opened example blocks
+// The palette-opened example blocks
 
 #[test]
 fn m7_dirvars_block_approves_and_the_spawn_filter_sets_new_panes_env() {
@@ -379,7 +379,7 @@ fn m7_review_queue_block_lists_opens_toggles_saves_and_survives_reload() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// M8: the terraform lens
+// The terraform lens
 
 fn terraform(env: &TestEnv) -> PathBuf {
     let path = env.root.join("bin/terraform");
@@ -454,7 +454,7 @@ fn m8_terraform_lens_captures_views_late_windows_and_events() {
     assert_eq!(got["blocks"][0]["raw"], block["raw"]);
 
     // An event from the view: the lens copies the address in the pane's windows.
-    // Lens view node ids are unstable (§9.6); the action carries the whole choice.
+    // Lens view node ids are unstable; the action carries the whole choice.
     assert!(
         strings(&view).contains("copy-address=aws_instance.old"),
         "a destroy row"
@@ -482,7 +482,7 @@ fn m8_terraform_lens_captures_views_late_windows_and_events() {
 // ---------------------------------------------------------------------------------------------
 // Acceptance checks
 
-/// AC11: a block takes timer ticks with no window open, and a later window sees the update.
+/// A block takes timer ticks with no window open, and a later window sees the update.
 #[test]
 fn ac11_a_block_ticks_with_no_window_open_and_a_later_window_sees_it() {
     let env = TestEnv::new(EXE, "ac11");
@@ -576,7 +576,7 @@ fn await_picture(window: &Headless, pane: u64, id: &str, w: f64, h: f64, who: &s
     });
 }
 
-/// §7.12, §9.5: a block's `cx:blob` goes through the daemon's replica into its disk store, and
+/// A block's `cx:blob` goes through the daemon's replica into its disk store, and
 /// windows draw it: one attaching later (the daemon sends the blobs its documents name), and one
 /// attached when a handler sends a new blob. The 80 KB blob is chunked under the 64 KiB APC limit.
 #[test]
@@ -643,7 +643,7 @@ fn a_block_blob_reaches_the_disk_store_and_windows_draw_it() {
     assert!(window.errors().is_empty(), "{:?}", window.errors());
 }
 
-/// AC12: a lens decision is identical on every replica and doesn't depend on any window half.
+/// A lens decision is identical on every replica and doesn't depend on any window half.
 #[test]
 fn ac12_lens_decisions_are_identical_on_every_replica() {
     let env = TestEnv::new(EXE, "ac12");
@@ -714,7 +714,7 @@ fn ac12_lens_decisions_are_identical_on_every_replica() {
     assert!(a.capture(pane, true).contains("Plan: 2 to add"));
 }
 
-/// AC13: a host hook past 2 s is disabled until reload; other plugins and the daemon keep going.
+/// A host hook past 2 s is disabled until reload; other plugins and the daemon keep going.
 #[test]
 fn ac13_a_hook_past_2s_is_disabled_until_reload_and_the_rest_keeps_going() {
     let env = TestEnv::new(EXE, "ac13");
@@ -804,7 +804,7 @@ fn ac13_a_hook_past_2s_is_disabled_until_reload_and_the_rest_keeps_going() {
     });
 }
 
-/// AC14, host side: host code can't name a window. The window side (window code can't write
+/// Host side: host code can't name a window. The window side (window code can't write
 /// block frames) is the app's window host.
 #[test]
 fn ac14_host_code_cannot_name_a_window() {
@@ -854,7 +854,7 @@ fn ac14_host_code_cannot_name_a_window() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// S5 through the daemon
+// Runtime budgets, the memory cap and native code, through the daemon
 
 #[test]
 fn s5_runtime_budgets_memory_cap_and_codegen_through_the_daemon() {
@@ -945,7 +945,7 @@ fn doctor(app: &Path) -> Value {
     serde_json::from_str(&out).unwrap_or_else(|e| panic!("doctor printed no JSON ({e}): {out}"))
 }
 
-/// §19, §20: the app built by `scripts/bundle.sh`, signed ad hoc with the hardened runtime and
+/// The app built by `scripts/bundle.sh`, signed ad hoc with the hardened runtime and
 /// `allow-jit`, runs Luau's native code. As a control, the same app re-signed without the
 /// entitlement falls back to the interpreter, which shows the probe tells the two apart.
 #[test]
@@ -1068,7 +1068,7 @@ fn lifecycle_plugin_verbs_and_reload_on_change() {
     let env = TestEnv::new(EXE, "lifecycle");
     let dir = plugins_dir(&env);
 
-    // No daemon: the verbs work on the folder, and never start one (§4.1).
+    // No daemon: the verbs work on the folder, and never start one.
     let (code, out, _) = auk(&env, &["plugin", "list"]);
     assert_eq!((code, out.as_str()), (0, "no plugins\n"));
     let (code, out, _) = auk(&env, &["plugin", "dir"]);
@@ -1197,7 +1197,7 @@ fn lifecycle_plugin_verbs_and_reload_on_change() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// M9: window halves in the real app
+// Window halves in the real app
 
 #[cfg(target_os = "macos")]
 mod window_half {
@@ -1921,7 +1921,7 @@ fn click_at(app: &auk_conformance::app::App, (x, y): (f64, f64)) {
     app.request(&format!("mouse up {x} {y}"));
 }
 
-/// §9.6, §8.2 (`block` drawn internally), §8.4 step 3, §10.4 Desktop "lens views": the app draws
+/// Lens views in the app (`block` drawn internally): the app draws
 /// a lensed command as a block in the flow, raw until the view arrives, then the view with the
 /// plugin's manifest CSS; Native/Raw is a local toggle; Copy copies the raw output as plain
 /// text; a click in the view is a lens event whose `copy` effect reaches the app's clipboard.
@@ -2024,7 +2024,7 @@ fn m9_lens_blocks_draw_in_the_app_with_native_raw_copy_and_view_events() {
     });
 }
 
-/// §9.4, §9.8 "CSS": the window's plugin sheets come from the host's catalog, so a plugin whose
+/// The window's plugin sheets come from the host's catalog, so a plugin whose
 /// host entry failed contributes no styles, while a Ready one does.
 #[cfg(target_os = "macos")]
 #[test]
@@ -2090,7 +2090,7 @@ fn m9_catalog_drives_plugin_css_and_a_failed_host_contributes_none() {
     });
 }
 
-/// §9.8 "CSS": a local plugin's manifest styles reach the app with their plugin-file `url()`s
+/// A local plugin's manifest styles reach the app with their plugin-file `url()`s
 /// inlined as `data:` URLs (the engine loads only `data:`), as `tern.css` sheets do; a `url()`
 /// out of the package, or to another scheme, stays as written and so is dropped.
 #[cfg(target_os = "macos")]
@@ -2153,7 +2153,7 @@ fn m9_manifest_style_urls_inline_plugin_files_as_data_in_the_app() {
     });
 }
 
-/// §9.8 through the app: the recursion guard (`cx:command` and `cx:action` run the built-in, not
+/// Through the app: the recursion guard (`cx:command` and `cx:action` run the built-in, not
 /// an override, and `cx:open` skips routes), the window cx's `command`, `action`, `session`
 /// (`sessions`, `layout`, `read`, `surface`, `settle`) and `layout` (`split`, `move`, `resize`,
 /// `close`), and a plugin bind on a chord a default already binds being left out.
@@ -2332,7 +2332,7 @@ fn m9_window_cx_recursion_guard_session_and_layout_calls_and_a_bind_on_a_taken_c
     }
 }
 
-/// §9.8 `cx.layout`: `split` puts the new pane on any side (left and up first in the tree, so
+/// `cx.layout`: `split` puts the new pane on any side (left and up first in the tree, so
 /// the window draws them left of and above the target); `tab(spec)` honours `split` sides and
 /// `ratio`; `resize` moves the pane's nearest divider by about the cells asked, and answers false
 /// without one; `move` puts a pane beside another, in its tab or another, or swaps them, and
@@ -2521,7 +2521,7 @@ fn m9_window_layout_splits_on_every_side_resizes_moves_and_tab_ratios_replicate_
     assert!(env.pane_info(c)["exit"].is_null());
 }
 
-/// §9.5 "Opening": the palette offers "New <title> block" for Ready plugins' palette block
+/// Opening a block: the palette offers "New <title> block" for Ready plugins' palette block
 /// types, and an open whose type is gone shows "Could not start the block" with Retry, which
 /// opens it once the type is back.
 #[cfg(target_os = "macos")]
@@ -2636,7 +2636,7 @@ fn block_top_in_view(app: &auk_conformance::app::App, pane: u64) -> Value {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Host hooks through the daemon, settings, and the CLI (§9.1, §9.5, §9.7, §9.11)
+// Host hooks through the daemon, settings, and the CLI
 
 /// A plugin whose `title` and `pane_exited` hooks toast what they hear.
 fn hooks_plugin(env: &TestEnv) {
@@ -2799,7 +2799,7 @@ fn a_block_that_cannot_start_shows_a_card_with_retry() {
         window_doc(&window, pane).filter(|(s, _)| *s != sf)
     });
     // Install the plugin; the catalog every window gets names the type and its title, which is
-    // what the palette's "New <title> block" rows read (§9.4, §9.5).
+    // what the palette's "New <title> block" rows read.
     package(
         &env,
         "later",
@@ -2960,7 +2960,7 @@ fn plugin_install_from_a_git_url_and_from_github_owner_repo() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Blocks: the frame diff, quiet keys and view events, through the daemon (§9.5)
+// Blocks: the frame diff, quiet keys and view events, through the daemon
 
 /// A client attached to the daemon's `main` window key that keeps every output byte of every
 /// pane, as a window receives them: a block's frames are there exactly as the worker wrote them.
@@ -3397,7 +3397,7 @@ fn a_block_gets_resize_through_the_daemon_activate_in_event_and_draws_its_layer_
 }
 
 // ---------------------------------------------------------------------------------------------
-// Data and paths (§9.1)
+// Data and paths
 
 #[test]
 fn plugin_data_is_kept_when_the_plugin_is_removed_and_reinstalling_finds_it() {
@@ -3491,7 +3491,7 @@ fn without_auk_config_dir_plugins_live_in_application_support_on_macos() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Loading (§9.3, §4.1 start order)
+// Loading, and the daemon's start order
 
 /// A plugin whose entry spins for `ms` and records when it ran, by `os.clock` (one clock for the
 /// whole process), in its kv store.
@@ -3577,7 +3577,7 @@ fn host_halves_load_in_parallel_before_saved_panes_are_restored() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Lens preconditions and the 16 MiB abort, through the daemon (§9.6)
+// Lens preconditions and the 16 MiB abort, through the daemon
 
 #[test]
 fn lenses_claim_only_with_shell_integration_lenses_on_and_the_main_screen_and_abort_past_16_mib() {
@@ -3768,7 +3768,7 @@ fn an_alias_is_claimed_by_its_expansion_while_lenses_and_hooks_see_the_typed_lin
         "{seen}"
     );
 
-    // Host hooks get the line as typed (§9.7).
+    // Host hooks get the line as typed.
     wait_effect(&window, "command_started with the typed line", |e| {
         e["text"] == "started lz one"
     });
@@ -3799,7 +3799,7 @@ fn an_alias_is_claimed_by_its_expansion_while_lenses_and_hooks_see_the_typed_lin
 }
 
 // ---------------------------------------------------------------------------------------------
-// Host hooks and the spawn filter, through the daemon (§9.7)
+// Host hooks and the spawn filter, through the daemon
 
 #[test]
 fn the_spawn_filter_never_runs_for_blocks_a_late_answer_is_logged_and_cwd_events_fire() {
@@ -3904,7 +3904,7 @@ fn the_spawn_filter_never_runs_for_blocks_a_late_answer_is_logged_and_cwd_events
     );
 }
 
-/// Through the real daemon (§5.2, §9.7): the spawn filter's `env` is exactly the pane-identity
+/// Through the real daemon: the spawn filter's `env` is exactly the pane-identity
 /// set under `TERN_` names, without `TERM_PROGRAM`, `TERM_PROGRAM_VERSION` or the login
 /// environment; its answer is the complete set (a key it drops is gone from the pane), while
 /// `TERM_PROGRAM` and its version stay the daemon's. `tern.pane.write` from a host hook types
@@ -4034,7 +4034,7 @@ fn the_spawn_filter_sees_only_the_identity_set_and_pane_write_reaches_the_pty() 
     );
 }
 
-/// Through the real daemon (§5.2): the user's shell rc files run after the spawn filter and can
+/// Through the real daemon: the user's shell rc files run after the spawn filter and can
 /// override anything. The filter sets two variables; the test `ZDOTDIR`'s `.zshrc` overrides
 /// one of them, a pane-identity variable and the daemon's `TERM_PROGRAM`, and the shell sees the
 /// rc's values for those and the filter's for the one it left alone.
@@ -4088,7 +4088,7 @@ fn shell_rc_files_run_after_the_spawn_filter_and_can_override_anything() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Window half: route decisions, modifier taps and pane/tab events through the app (§9.8)
+// Window half: route decisions, modifier taps and pane/tab events through the app
 
 /// An app on a fresh daemon with one window-half package `probe` (window.luau = `src`), the
 /// system opener replaced by a script logging what it opens, typing with the US layout. Returns
@@ -4176,7 +4176,7 @@ fn cmd_click_text(app: &auk_conformance::app::App, pane: u64, text: &str) {
     app.request(&format!("mouse up {x} {y} --cmd"));
 }
 
-/// §9.8 routes: `route.open` decisions `{url}` (which `route.link` then sees), `{path, how?}`
+/// Routes: `route.open` decisions `{url}` (which `route.link` then sees), `{path, how?}`
 /// and `{handled = true}` are carried out for `auk open`, and a `route.link` decision on a
 /// ⌘-clicked link (`{url}`, `{path}`, `{handled = true}`, or nil for the built-in open).
 #[cfg(target_os = "macos")]
@@ -4323,7 +4323,7 @@ fn m9_route_open_and_link_decisions_url_path_and_handled_are_applied_in_the_app(
     assert_eq!(app.request("opens")["routed"].as_array().unwrap().len(), 6);
 }
 
-/// §9.8 binds: a modifier-tap sequence (`shift>shift`) runs its bind when the taps come within
+/// Binds: a modifier-tap sequence (`shift>shift`) runs its bind when the taps come within
 /// 0.5 s of each other, not when the second comes later; and a key after a lone tap still
 /// reaches the program.
 #[cfg(target_os = "macos")]
@@ -4374,7 +4374,7 @@ fn m9_a_modifier_tap_bind_runs_on_taps_within_half_a_second() {
     assert_eq!(info_toasts(&app), ["double shift 1", "double shift 2"]);
 }
 
-/// §9.8 window events: `tab_created` and `pane_created` fire for the tabs and panes this window
+/// Window events: `tab_created` and `pane_created` fire for the tabs and panes this window
 /// adds (a menu's new tab, a split a handler makes through `cx.layout`), after the frame shows
 /// them, in order, with a handler's own changes delivered in the next round and never
 /// re-entered. Panes there before the window half loaded, and panes another window adds, don't
@@ -4456,7 +4456,7 @@ fn m9_pane_and_tab_created_fire_for_this_windows_additions_and_never_re_enter() 
     assert_eq!(info_toasts(&app).len(), 3, "{:?}", info_toasts(&app));
 }
 
-/// §9.8 through the app, for a window half: the `cwd`, `title` and `pane_closed` events reach
+/// Through the app, for a window half: the `cwd`, `title` and `pane_closed` events reach
 /// its handlers with the pane; `cx.session:event` sends a TSP event to a pane's program; the
 /// user's `keybinds` layer wins over a plugin bind of the same chord; and a plugin bind whose
 /// chord the keymap preset binds is left out, the preset's action running instead.
@@ -4609,7 +4609,7 @@ fn m9_window_half_events_session_event_and_keymap_layers_over_plugin_binds() {
     );
 }
 
-/// §9.3 "Window reload": editing a plugin's CSS file reloads the window halves, and the
+/// Window reload: editing a plugin's CSS file reloads the window halves, and the
 /// `plugin:local:*` sheet is reinstalled with the new contents: the window's sheet changes and
 /// the chrome draws with the new rule (a stale sheet would keep the old one).
 #[cfg(target_os = "macos")]

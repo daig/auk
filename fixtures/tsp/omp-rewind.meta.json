@@ -1,6 +1,6 @@
 {
   "argv": [
-    "/Users/dai/.local/bin/omp",
+    "~/.local/bin/omp",
     "--no-title",
     "--model",
     "anthropic/claude-sonnet-4-5",

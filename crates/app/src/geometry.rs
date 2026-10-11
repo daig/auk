@@ -1,4 +1,4 @@
-//! Where a tab's panes go: the split tree (§4.3) laid out in a window's content area, zoom, the
+//! Where a tab's panes go: the split tree laid out in a window's content area, zoom, the
 //! dividers between panes, and which pane lies in a direction from another.
 
 use auk_mirror::PaneId;

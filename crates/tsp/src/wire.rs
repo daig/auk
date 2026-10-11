@@ -1,4 +1,4 @@
-//! The wire (§7.1): parsing a program's APC payloads into verb, parameters and body; encoding
+//! The wire: parsing a program's APC payloads into verb, parameters and body; encoding
 //! terminal-to-program messages; the chunker and the chunk joiner.
 //!
 //! Nothing here reads a clock. The 1 s chunk timeout is decided by the daemon, which sequences it
@@ -9,9 +9,9 @@ use serde_json::Value;
 
 /// What follows `ESC _` in every TSP string.
 pub const PREFIX: &[u8] = b"tsp;";
-/// The longest APC string, counted after `ESC _`, parameters included (§7.14).
+/// The longest APC string, counted after `ESC _`, parameters included.
 pub const MAX_APC: usize = 262_144;
-/// The longest joined chunked body (§7.1).
+/// The longest joined chunked body.
 pub const MAX_JOINED: usize = 25_165_824;
 
 /// One program-to-terminal message: `tsp;<verb>[;<key>=<value>]*;<body>`.
@@ -69,7 +69,7 @@ pub fn leads_with_parameter(rest: &[u8]) -> bool {
 /// it isn't a TSP string.
 ///
 /// A segment is a parameter only if it is `key=value` and another `;` follows it; the first
-/// segment that isn't one starts the body (§7.1).
+/// segment that isn't one starts the body.
 pub fn parse(payload: &[u8]) -> Option<Message> {
     let rest = payload.strip_prefix(PREFIX)?;
     let (verb, mut at) = match rest.iter().position(|&b| b == b';') {
@@ -112,7 +112,7 @@ pub fn push_apc(out: &mut Vec<u8>, verb: &str, params: &[(&str, &str)], body: &[
 }
 
 /// Encodes one terminal-to-program message: `ESC _ tsp;<r|e>;<json> ESC \`, compact JSON, no
-/// parameters, never chunked, ST only (§7.1, F1).
+/// parameters, never chunked, ST only.
 pub fn encode_to_program(verb: ToProgram, body: &Value) -> Vec<u8> {
     let json = body.to_string();
     let mut out = Vec::with_capacity(json.len() + 12);
@@ -158,7 +158,7 @@ fn chunk_end(body: &[u8], start: usize, limit: usize) -> usize {
 /// possible, cut only where the next piece starts on a UTF-8 boundary and not with a
 /// parameter-shaped segment. Since a parameter needs a `;` before any byte outside
 /// `[A-Za-z0-9_-]=` and value bytes, this cuts only right before a `;` or a byte that can't be
-/// read as a parameter (§7.1). An empty body has no chunks.
+/// read as a parameter. An empty body has no chunks.
 pub fn chunks(body: &[u8], limit: usize) -> impl Iterator<Item = &[u8]> {
     let mut start = 0;
     std::iter::from_fn(move || {
@@ -233,7 +233,7 @@ pub enum Joined {
     Dropped(String),
 }
 
-/// Joins chunk sequences (§7.1), one at a time.
+/// Joins chunk sequences, one at a time.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Joiner {
     active: Option<Sequence>,

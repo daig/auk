@@ -1,11 +1,11 @@
-/* prefs (book: prefs; amendment A23): the kit Preferences page and sheet, authored from the book's
+/* prefs: the kit Preferences page and sheet, authored from Tern's docs'
    description (Tern's prefs.css and omp-prefs.css aren't published). A page in main (nav column,
    scrolling document, Close; an icon rail below 760px), a sheet docked at the right edge in
-   layer. Hooks: .pf, .pf-nav, .pf-doc, .pf-row and the control classes the book names. */
+   layer. Hooks: .pf, .pf-nav, .pf-doc, .pf-row and the control classes Tern's docs name. */
 .sf-prefs { display: flex; min-width: 0; min-height: 0; }
-/* Under "Use program colors" (.sf-pal) the kit's accents follow the program's (book: prefs
-   Variables); the palette sets --pf-accent* on the region. The theme's are captured on the region
-   first, since a custom property can't name itself. */
+/* Under "Use program colors" (.sf-pal) the kit's accents follow the program's; the palette sets
+   --pf-accent* on the region. The theme's are captured on the region first, since a custom property
+   can't name itself. */
 .sf-region { --pf-kit-accent: var(--accent); --pf-kit-accent-ink: var(--accent-ink); --pf-kit-accent-fill: var(--accent-fill); }
 .sf-pal .sf-prefs {
   --accent: var(--pf-accent, var(--pf-kit-accent)); --accent-ink: var(--pf-accent-ink, var(--pf-kit-accent-ink));

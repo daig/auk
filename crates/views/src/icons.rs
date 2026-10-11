@@ -1,4 +1,4 @@
-//! Icon names (§7.12) and keycap glyphs.
+//! Icon names and keycap glyphs.
 
 pub use auk_text::is_private_use;
 

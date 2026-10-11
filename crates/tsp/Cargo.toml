@@ -1,16 +1,17 @@
 [package]
 name = "auk-tsp"
-description = "The Tern Surface Protocol, terminal side: wire codec, handshake, surfaces, documents, ops, events, credits, retention and snapshots (spec §7)."
+description = "The Tern Surface Protocol, terminal side: wire codec, handshake, surfaces, documents, ops, events, credits, retention and snapshots."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 auk-term = { path = "../term" }
 base64 = "0.23.1"
 blake3 = "1.8.7"
-# `preserve_order`: form `values` follow the order in which names first appear (§7.8), and props
+# `preserve_order`: form `values` follow the order in which names first appear, and props
 # keep the order the program sent them in snapshots.
 serde_json = { workspace = true, features = ["preserve_order"] }
 sha2 = "0.11.0"

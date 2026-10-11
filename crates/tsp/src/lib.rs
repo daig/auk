@@ -1,4 +1,4 @@
-//! The Tern Surface Protocol, terminal side (spec §7): wire codec and chunking, handshake,
+//! The Tern Surface Protocol, terminal side: wire codec and chunking, handshake,
 //! surfaces, documents and their ops, events and the listening rules, credits and acks, retention,
 //! palettes, stylesheets, blobs, the snapshot encoder and the replicated-state hash.
 //!
@@ -16,7 +16,7 @@
 //!
 //! The grid is reached through [`Grid`], which `auk_term::Terminal` implements. Messages for the
 //! program queue up in [`TspPane::take_output`]; the daemon writes them subject to the tty mode
-//! gate (§12.1), and other replicas drop them. Views read [`TspPane::surfaces`] and drain
+//! gate, and other replicas drop them. Views read [`TspPane::surfaces`] and drain
 //! [`TspPane::take_changes`].
 
 pub mod blob;

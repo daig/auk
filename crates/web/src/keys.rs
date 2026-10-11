@@ -1,4 +1,4 @@
-//! DOM keyboard events to the terminal's key model (§15.4): the browser client encodes keys for
+//! DOM keyboard events to the terminal's key model: the browser client encodes keys for
 //! the pane's current modes with `auk_term::input`, exactly as the app does.
 //!
 //! Plain typing, Option compositions and Ctrl chords become key events. Dead keys and input

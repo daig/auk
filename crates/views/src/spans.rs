@@ -1,4 +1,4 @@
-//! Spans `{t, s?, href?, fx?}` (§8.1, book:4845-4960): style tokens, omp program tokens, links,
+//! Spans `{t, s?, href?, fx?}`: style tokens, omp program tokens, links,
 //! effects, keycaps, paths and Nerd Font icon runs.
 
 use crate::dom::Dom;
@@ -18,7 +18,7 @@ pub(crate) const COLOR_TOKENS: [&str; 14] = [
     "ins", "del", "code",
 ];
 
-/// omp's program tokens and the semantic token each maps to (`""` for plain), book:4896-4912.
+/// omp's program tokens and the semantic token each maps to (`""` for plain).
 pub fn program_token(t: &str) -> Option<&'static str> {
     Some(match t {
         "text" | "customMessageText" | "syntaxVariable" | "toolOutput" | "userMessageText" => "",

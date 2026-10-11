@@ -1,4 +1,4 @@
-//! The S1 input probe (spec §23): types keystrokes into an Auk window through the real AppKit
+//! The input probe: types keystrokes into an Auk window through the real AppKit
 //! input path (`keyDown:`, the active input method, `NSTextInputClient`) and prints the bytes
 //! each would send to the program, encoded by `auk_term::input`. With `--ghostty`, it posts the
 //! same keystrokes to a Ghostty window running a byte recorder and compares.
@@ -18,7 +18,7 @@
 //! The Ghostty comparison needs Ghostty installed and the Accessibility permission for the
 //! terminal running this (to post events to another process). Set Ghostty's
 //! `macos-option-as-alt` to match `--option-as-alt`. IME composition is checked the same way
-//! with an input source selected (the manual checklist covers a real IME session).
+//! with an input source selected (a real IME session is checked by hand).
 
 use std::io::Write as _;
 use std::time::Duration;

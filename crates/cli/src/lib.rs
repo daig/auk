@@ -1,4 +1,4 @@
-//! The `auk` command line (§11.1): the CLI verbs, which talk to the daemon's control endpoint,
+//! The `auk` command line: the CLI verbs, which talk to the daemon's control endpoint,
 //! plus the `daemon` and `headless` subcommands. `auk` with no subcommand is the macOS app.
 
 pub mod control;
@@ -27,7 +27,7 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub socket: Option<PathBuf>,
 
-    /// The window key a verb acts in (§11.1): where `new` opens panes, which windows `open`
+    /// The window key a verb acts in: where `new` opens panes, which windows `open`
     /// asks. Default: `main`.
     #[arg(long, global = true, value_name = "KEY")]
     pub window: Option<String>,
@@ -43,7 +43,7 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Run the session daemon in the foreground; `auk daemon upgrade` hands the running one to
-    /// a new build in place (§15.7).
+    /// a new build in place.
     Daemon {
         #[command(subcommand)]
         action: Option<DaemonAction>,
@@ -57,7 +57,7 @@ pub enum Command {
         /// The size to ask for each pane, as COLSxROWS.
         #[arg(long, value_parser = parse_size)]
         size: Option<(u16, u16)>,
-        /// Attach to this host's daemon over SSH (`ssh HOST auk attach --stdio`, §10.2).
+        /// Attach to this host's daemon over SSH (`ssh HOST auk attach --stdio`).
         #[arg(long)]
         host: Option<String>,
         /// With --host: the SSH config file (`ssh -F`).
@@ -68,7 +68,7 @@ pub enum Command {
         remote_command: Option<String>,
     },
     /// The remote end of an SSH link: bridge stdio to this host's daemon, starting it if none
-    /// answers (§10.2). Run by `ssh HOST auk attach --stdio`.
+    /// answers. Run by `ssh HOST auk attach --stdio`.
     Attach {
         /// Speak the replication protocol on stdin and stdout (the only mode).
         #[arg(long, required = true)]
@@ -144,7 +144,7 @@ pub enum Command {
     /// Open a file: a connected window showing the window key routes it (its `route.open`
     /// plugins, then its opener); with no window, the system opener ($AUK_OPENER, else `open`).
     Open { path: PathBuf },
-    /// Run scenario scripts offscreen in a private daemon (§11.3); writes a PNG and a layout
+    /// Run scenario scripts offscreen in a private daemon; writes a PNG and a layout
     /// JSON for every `shot` command into OUT/<scenario>/.
     Shot {
         #[arg(required = true)]
@@ -160,7 +160,7 @@ pub enum Command {
         appearance: Option<String>,
     },
     /// A deterministic headless window on a private daemon, serving a control endpoint until
-    /// `quit` (§11.3).
+    /// `quit`.
     Serve {
         /// The control endpoint (default: serve.ctl in the runtime dir).
         #[arg(long)]
@@ -215,7 +215,7 @@ pub enum Command {
         #[arg(long)]
         surfaces: bool,
     },
-    /// Play a TSP recording into a pane (§7.15): `surface-play FILE [from F] [until F]
+    /// Play a TSP recording into a pane: `surface-play FILE [from F] [until F]
     /// [paced [TIMES]]`, where F is a frame's `s` or `<sf>#<s>`; `from` continues an earlier play
     /// after frame F. The first play restarts the pane as a stand-in program.
     SurfacePlay {
@@ -231,13 +231,13 @@ pub enum Command {
     #[command(hide = true)]
     StandIn,
     /// Manage plugins: `list|reload|dir|install SRC [--force]|remove ID|link DIR|unlink ID|types
-    /// DIR [--json] [--window KEY]` (§9.11). Never starts a daemon.
+    /// DIR [--json] [--window KEY]`. Never starts a daemon.
     #[command(disable_help_flag = true)]
     Plugin {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// Open a plugin block pane (§9.5): `block KIND [ARG…]`, KIND being `<plugin>.<block>`.
+    /// Open a plugin block pane: `block KIND [ARG…]`, KIND being `<plugin>.<block>`.
     /// Prints the new pane's id. Run in a pane, the block opens beside it (a split to its right)
     /// in the shell's directory; with `--window`, in a new session of that window.
     Block {
@@ -269,7 +269,7 @@ fn parse_size(s: &str) -> Result<(u16, u16), String> {
         .ok_or_else(|| format!("expected COLSxROWS, got `{s}`"))
 }
 
-/// The exit status `wait` uses for a timeout (§11.1).
+/// The exit status `wait` uses for a timeout.
 pub const EXIT_TIMEOUT: u8 = 124;
 
 /// Runs the command line.
@@ -409,7 +409,7 @@ struct Globals {
 /// What `auk daemon` can do besides running one.
 #[derive(Debug, Subcommand)]
 pub enum DaemonAction {
-    /// Hand the running daemon to a new build without ending any program (§15.7): the daemon
+    /// Hand the running daemon to a new build without ending any program: the daemon
     /// execs it, passing its sockets, PTYs and state; windows reconnect.
     Upgrade {
         /// The new build (default: this `auk`).
@@ -588,7 +588,7 @@ fn run_verb(socket: &Path, g: &Globals, verb: Command) -> Result<ExitCode, VerbE
         }
         Command::Close { target } => {
             let value = connect(socket, false)?.request(&["close", &target])?;
-            // A locked session refuses without failing the script (book:16896).
+            // A locked session refuses without failing the script.
             let text = (value["closed"] == false).then(|| {
                 format!(
                     "session {} is locked; pane {target} stays open",

@@ -1,4 +1,4 @@
-/* Regions, common node hooks, layout kinds and spans (book:9175-9283). */
+/* Regions, common node hooks, layout kinds and spans. */
 .sf-region {
   font-family: var(--tv-font, var(--mono)); font-size: 13px; line-height: var(--sf-lh, 17px);
   color: var(--sf-text, var(--tv-fg, var(--t1))); --tc: var(--sf-neutral); --sf-fs: 13px;
@@ -116,7 +116,7 @@
 
 /* text and spans */
 /* A word breaks only when it is longer than the line: in a row, text keeps its longest word's
-   width (or the row's, at most) and wide siblings shrink instead (amendment A22). */
+   width (or the row's, at most) and wide siblings shrink instead. */
 .sf-text { min-width: 0; white-space: pre-wrap; overflow-wrap: break-word; }
 .sf-row > .sf-text { min-width: auto; max-width: 100%; }
 .sf-text.nowrap { white-space: pre; overflow: hidden; text-overflow: ellipsis; }
@@ -148,8 +148,7 @@
 .sf-t-del { color: var(--sf-c-del); text-decoration: line-through; }
 .sf-t-mark { background-color: var(--sf-mark-bg, var(--sf-mark-bg-default)); border-radius: 3px; }
 .sf-t-typo { text-decoration: underline dotted var(--spelling-error-color); }
-/* Icons draw as atomic boxes 1.2em wide, so a line may break on either side (book: span style
-   `icon`). */
+/* Icons draw as atomic boxes 1.2em wide, so a line may break on either side. */
 .sf-t-icon {
   display: inline-block; min-width: 1.2em; text-align: center; white-space: pre;
   font-family: 'Symbols Nerd Font Mono', 'Symbols Nerd Font', var(--mono);

@@ -1,5 +1,5 @@
 //! Layout, bar, list and overlay kinds: `col row card section rule spacer status seg overlay toast
-//! tabs list item` (research/elements.md §2.1, §2.4, §2.7).
+//! tabs list item`.
 
 use super::{begin, icon, part, slot, spans_into};
 use crate::common::{self, bool_prop, num_prop, str_prop};
@@ -30,14 +30,14 @@ pub(crate) fn flex(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
     look.class_if(bool_prop(p, "wrap"), "wrap");
     let grows = num_prop(p, "grow").is_some_and(|g| g > 0.0);
     look.class_if(node.child_count() == 0 && !grows, "sf-void");
-    // omp's composer: the folded caption leads it (book:11584).
+    // omp's composer: the folded caption leads it.
     if crate::deco::is_composer(node) {
         let c = part(cx, m, "div", "sf-deco sf-caption");
         crate::deco::caption(cx, node, c);
     }
 }
 
-/// The icon a `role` implies on `card`, `seg`, `overlay` (book:4461).
+/// The icon a `role` implies on `card`, `seg`, `overlay`.
 pub(crate) fn role_icon(role: &str) -> Option<&'static str> {
     let mut parts = role.split('.');
     let first = parts.next()?;
@@ -79,8 +79,8 @@ pub(crate) fn role_icon(role: &str) -> Option<&'static str> {
     }
 }
 
-/// The head icon of an `overlay`: a role of `omp.overlay.<name>` names one of omp's panel sheets
-/// (book:9686), by its third segment; any other role as on a card.
+/// The head icon of an `overlay`: a role of `omp.overlay.<name>` names one of omp's panel sheets,
+/// by its third segment; any other role as on a card.
 pub(crate) fn overlay_icon(role: &str) -> Option<&'static str> {
     let Some(rest) = role.strip_prefix("omp.overlay.") else {
         return role_icon(role);
@@ -362,7 +362,7 @@ pub(crate) fn overlay(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look
         _ => "center".to_owned(),
     };
     look.class(&format!("at-{anchor}"));
-    // An overlay that opens into a drawn surface pops in (§7.13), once: the card a later
+    // An overlay that opens into a drawn surface pops in, once: the card a later
     // render builds (new props) doesn't pop again.
     let opened = cx.st.drawn.then_some(cx.now);
     let opened = *cx.st.overlays.entry(node.id().to_owned()).or_insert(opened);
@@ -479,7 +479,7 @@ pub(crate) fn toast(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
     }
 }
 
-/// The window-level toast layer at bottom center: one toast at a time (book:7636-7648).
+/// The window-level toast layer at bottom center: one toast at a time.
 #[derive(Debug)]
 pub(crate) struct ToastHost {
     pub el: NodeId,
@@ -619,7 +619,7 @@ pub(crate) fn list(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
     }
     let s = slot(cx, m, 0, "div", "sf-list-slot");
     cx.dom.doc.append_child(scroll, s);
-    // Virtualizes past 200 items (§8.3).
+    // Virtualizes past 200 items.
     let virt = node.child_count() > 200 || bool_prop(p, "virtual");
     super::virtualize(cx, node.id(), s, virt.then_some(24.0));
     if node.child_count() == 0 {
@@ -632,7 +632,7 @@ pub(crate) fn list(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) {
     }
 }
 
-/// Filter marking: substring first, else a fuzzy subsequence (book:6061). Returns char ranges.
+/// Filter marking: substring first, else a fuzzy subsequence. Returns char ranges.
 pub(crate) fn filter_marks(label: &str, filter: &str) -> Vec<(usize, usize)> {
     if filter.is_empty() {
         return Vec::new();

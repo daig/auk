@@ -1,5 +1,5 @@
-/* picker (book:6274-6528): omp's glass sheet in the layer, as Tern's omp-pickers.css draws it from
-   the book's description: a dim backdrop, a top-centered sheet (lg up to 1120x760, 28px from the
+/* picker: omp's glass sheet in the layer, as Tern's omp-pickers.css draws it from
+   Tern's docs' description: a dim backdrop, a top-centered sheet (lg up to 1120x760, 28px from the
    top; md up to 680x540, 72px from the top; screen fills the surface), a head with the drawn
    search line, a scope column, tabs, fixed-height rows, the preview pane, the strip above the
    action bar and the bar. */
@@ -137,7 +137,7 @@
 .sf-picker.lay-timeline .pk-row { height: 26px; }
 .sf-picker.lay-timeline .pk-row[data-node='user'] { height: 34px; }
 .sf-picker.lay-tree .pk-row { height: 24px; gap: 4px; }
-/* Group headers are 32px in every layout (book: row heights). */
+/* Group headers are 32px in every layout. */
 .sf-picker .pk-list .pk-row.grp { height: 32px; }
 .pk-row:hover { background-color: var(--l1); }
 .pk-row.sel { background-color: color-mix(in srgb, var(--accent) 18%, transparent); }
@@ -287,7 +287,7 @@
 .pk-btn.off { opacity: 0.45; cursor: default; }
 .pk-btn .kbds { display: inline-flex; gap: 2px; }
 
-/* The confirm strip (book: confirm): over the selected row (inset 0 in it), the trash icon, the
+/* The confirm strip: over the selected row (inset 0 in it), the trash icon, the
    text, the danger button and Keep, opaque over the row; the list is .pk-spacer.confirming. */
 .pk-row > .pk-confirm {
   position: absolute; left: 0; right: 0; top: 0; bottom: 0; z-index: 2; display: flex; align-items: center;

@@ -1,4 +1,4 @@
-/* block: the command-lens block (§9.6; book:8267-8346). Quiet chrome so it reads as command
+/* block: the command-lens block. Quiet chrome so it reads as command
    output: a faint left edge, a toolbar that shows on hover or focus, a muted foot. */
 .sf-block {
   position: relative; display: flex; flex-direction: column; gap: var(--sf-inner-gap);

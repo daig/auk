@@ -1,4 +1,4 @@
-//! The portable chrome widgets (§22 `views`, D3) the app and the browser client share: the tab
+//! The portable chrome widgets the app and the browser client share: the tab
 //! bar, dividers and focus ring, the status line and the palette, laid out by the UI engine.
 
 use auk_ui::{Document, Rect, SheetKind};
@@ -167,7 +167,7 @@ fn tab_bar_dividers_status_line_and_palette_lay_out_with_actions_and_roles() {
     );
 }
 
-/// §5.1: an agent pane's tab shows the agent icon, a badge before its title, beside the
+/// An agent pane's tab shows the agent icon, a badge before its title, beside the
 /// program's name when one draws, and no other tab does.
 #[test]
 fn agent_tabs_carry_the_agent_icon() {
@@ -284,7 +284,7 @@ fn action_names(c: &ChromeDoc) -> Vec<String> {
     c.actions().into_iter().map(|(a, _)| a).collect()
 }
 
-/// A11: the session chip shows only when it says something (more than one session, a locked
+/// The session chip shows only when it says something (more than one session, a locked
 /// session, or one the user named), and opens the session menu.
 #[test]
 fn the_session_chip_shows_only_when_it_says_something_and_opens_the_session_menu() {
@@ -376,7 +376,7 @@ fn the_session_chip_shows_only_when_it_says_something_and_opens_the_session_menu
     );
 }
 
-/// A11: a tab whose program's badge says the same as its title shows the badge alone; its
+/// A tab whose program's badge says the same as its title shows the badge alone; its
 /// accessible name is still the program and the title.
 #[test]
 fn a_tab_whose_title_is_its_app_shows_the_badge_only() {
@@ -437,7 +437,7 @@ fn a_tab_whose_title_is_its_app_shows_the_badge_only() {
     assert_eq!(chrome::tab_label("zsh", None), Some("zsh"));
 }
 
-/// A12: the chrome document hosts share rebuilds only when its model changes, and plugin
+/// The chrome document hosts share rebuilds only when its model changes, and plugin
 /// sheets restyle its widgets.
 #[test]
 fn the_chrome_doc_rebuilds_on_change_and_takes_plugin_sheets() {

@@ -1,24 +1,24 @@
-//! The macOS app (spec §19, §22): `auk` with no subcommand.
+//! The macOS app: `auk` with no subcommand.
 //!
 //! The app makes sure a daemon runs (spawning one detached, as the CLI does), then opens a window
-//! per window key with sessions in the daemon's state (§19: windows restore from daemon state,
-//! not AppKit's). Each window is its own client of the daemon (§15.6): it attaches to its window
+//! per window key with sessions in the daemon's state (windows restore from daemon state,
+//! not AppKit's). Each window is its own client of the daemon: it attaches to its window
 //! key, keeps a follower replica per pane, and draws the shown tab's panes with the grid
-//! renderer, with the chrome (tab bar, sessions, dividers) drawn by the UI engine (D3) in the
-//! same frame. Layout edits go to the daemon, and every window showing the key follows (M4).
+//! renderer, with the chrome (tab bar, sessions, dividers) drawn by the UI engine in the
+//! same frame. Layout edits go to the daemon, and every window showing the key follows.
 //!
 //! - [`conn`]: the daemon connection and the replicas it feeds.
 //! - [`window`]: one window: focus, sessions UI, input routing, scrolling, selection, drawing,
-//!   acks (§15.5).
-//! - Panes composite through `auk_views::compose` and `auk_views::PaneSurfaces` (§6.2): grid rows
+//!   acks.
+//! - Panes composite through `auk_views::compose` and `auk_views::PaneSurfaces`: grid rows
 //!   and surface blocks, docks, layers and screen surfaces, as the headless window and the web
 //!   client do.
 //! - [`geometry`]: split trees laid out in a window.
 //! - [`chrome`]: the tab bar and dividers as a UI document.
 //! - [`commands`]: the command registry the menu bar is generated from.
-//! - [`a11y`]: the accessibility tree for AccessKit (§8.3).
+//! - [`a11y`]: the accessibility tree for AccessKit.
 //! - [`control`]: the automation endpoint tests drive the app through.
-//! - [`s1`]: the S1 reference recorder (Ghostty), shared by the `keyprobe` example and the app
+//! - [`s1`]: the reference recorder (Ghostty), shared by the `keyprobe` example and the app
 //!   suite.
 
 pub mod geometry;
@@ -67,7 +67,7 @@ pub struct Options {
     pub window_keys: Vec<String>,
     /// Which Option keys act as Alt: `none`, `left`, `right` or `both`.
     pub option_as_alt: OptionAsAltSetting,
-    /// Attach every window to this host's daemon over SSH instead (§10.2, §10.4 "Remote window").
+    /// Attach every window to this host's daemon over SSH instead.
     pub remote: Option<RemoteHost>,
 }
 
@@ -80,7 +80,7 @@ pub struct RemoteHost {
     pub remote_command: Option<String>,
 }
 
-/// The Option-as-Alt setting (§19), portable.
+/// The Option-as-Alt setting, portable.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OptionAsAltSetting {
     #[default]
@@ -142,7 +142,7 @@ pub fn run(opts: Options) -> ExitCode {
         }
     };
     auk_platform_macos::run(move |ctx| {
-        // The user's keybinds take their keys from the menu (§9.8).
+        // The user's keybinds take their keys from the menu.
         ctx.set_main_menu(&commands::menu_bar_without(
             &settings::Settings::load().user_chords(),
         ));

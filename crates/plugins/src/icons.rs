@@ -1,9 +1,9 @@
-//! Icon-name resolution for manifests and the catalog (book:5904-5921, 21764-21766).
+//! Icon-name resolution for manifests and the catalog.
 
 /// The icon an unknown or absent name resolves to.
 pub const DEFAULT: &str = "puzzle";
 
-/// Tern's icon names as the book's table lists them (208, though its text says 207), sorted.
+/// Tern's icon names as Tern's docs list them in a table (208, though its text says 207), sorted.
 const NAMES: &[&str] = &[
     "activity",
     "align-center",
@@ -322,7 +322,7 @@ mod tests {
 
     #[test]
     fn names_are_sorted_and_aliases_resolve_to_names() {
-        // The book says 207 but its table lists 208 names (book:5904-5918); the table wins.
+        // Tern's docs say 207 but its table lists 208 names; the table wins.
         assert_eq!(NAMES.len(), 208);
         assert!(NAMES.windows(2).all(|w| w[0] < w[1]));
         for (alias, icon) in ALIASES {

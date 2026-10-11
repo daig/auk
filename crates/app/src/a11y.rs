@@ -1,4 +1,4 @@
-//! The accessibility tree (§8.3, §19), fed to AccessKit's macOS adapter: the window, the UI
+//! The accessibility tree, fed to AccessKit's macOS adapter: the window, the UI
 //! engine's roles (the chrome's tab lists and buttons; surfaces' progress bars, meters, trees,
 //! list boxes, dialogs and timers from `auk-views`), and each visible pane as a terminal whose
 //! value is its screen text, with its surfaces' nodes as children.
@@ -174,7 +174,7 @@ fn surface_node(ax: &auk_views::AxNode, next: &mut u64, out: &mut Vec<(NodeId, N
     id
 }
 
-/// The ARIA role names the UI engine's elements carry (§8.3), as AccessKit roles.
+/// The ARIA role names the UI engine's elements carry, as AccessKit roles.
 pub fn role_of(name: &str) -> Option<Role> {
     Some(match name {
         "button" => Role::Button,

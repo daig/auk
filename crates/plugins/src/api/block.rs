@@ -1,4 +1,4 @@
-//! The block cx (§9.5 "Block cx"): one per running block, kept by the block's code as it likes.
+//! The block cx: one per running block, kept by the block's code as it likes.
 //! Requests (`render`, `save`, `exit`, `frame`, `blob`) queue until the handler returns; `toast`,
 //! `open` and `copy` are effects aimed at the windows showing the pane, and aren't guarded.
 

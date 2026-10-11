@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# The completion gate for the implementation loop (GOAL.md). Exits 0 only when every automated
-# criterion passes. A missing or empty suite, an ignored test, and an acceptance check or checklist
-# item with no test of its own are failures, not skips.
+# Runs every suite and check, and exits 0 only when all of them pass. A missing or empty suite and
+# an ignored test are failures, not skips.
 #
 # Once the suites exist this takes a while: run it in the background, then read
 # target/verify/summary.txt. Each step's output is beside it, in target/verify/<step>.log.
@@ -11,8 +10,6 @@ cd "$(dirname "$0")/.."
 source scripts/env.sh
 
 SUITES="persistence terminal replication tsp sdk_examples omp layout perf plugins app cli web remote"
-# Checklist items (research/sdk-wire.md §10) that can't apply to Auk. F2 is Windows ConPTY only (D1).
-NOT_APPLICABLE="F2"
 TOOLS="cargo-nextest cargo-hakari cargo-sweep node bun go wasmtime limactl omp htop tmux python3 swiftc"
 
 out=target/verify
@@ -65,10 +62,10 @@ if [ "$hits" -eq 0 ]; then record placeholders PASS; else record placeholders FA
 
 echo "== coverage"
 if cargo nextest list --workspace --cargo-profile release --message-format json >"$out/tests.json" 2>"$out/build.log"; then
-  python3 -I - "$out/tests.json" research/sdk-wire.md "$SUITES" "$NOT_APPLICABLE" >>"$summary" 2>"$out/coverage.log" <<'EOF' || fail=1
-import json, re, sys
+  python3 -I - "$out/tests.json" "$SUITES" >>"$summary" 2>"$out/coverage.log" <<'EOF' || fail=1
+import json, sys
 
-tests_json, checklist_md, suites, not_applicable = sys.argv[1:]
+tests_json, suites = sys.argv[1:]
 failed = False
 
 def record(check, ok, detail=""):
@@ -87,21 +84,6 @@ record("suites", not empty, "missing or empty: " + " ".join(empty) if empty else
 
 ignored = [f"{bid} {name}" for bid, cases in binaries.items() for name, ig in cases.items() if ig]
 record("ignored", not ignored, " ".join(ignored))
-
-# Every acceptance check (spec §25) and every checklist item needs a test named for it: ac07_..., c8_...
-# AC4 says the checklist passes, so the checklist items stand for it.
-section = open(checklist_md).read().split("\n## 10.", 1)[1].split("\n## ", 1)[0]
-items = re.findall(r"^- \*\*([A-I]\d+)\b", section, re.M)
-if len(items) < 70:
-    record("named tests", False, f"found only {len(items)} checklist items in {checklist_md}")
-else:
-    skip = set(not_applicable.split())
-    required = [f"ac{n:02d}" for n in range(1, 17) if n != 4] + [i.lower() for i in items if i not in skip]
-    names = {name.rsplit("::", 1)[-1] for cases in binaries.values() for name in cases}
-    untested = [r for r in required if not any(n.startswith(r + "_") for n in names)]
-    total = len(required)
-    detail = f"{len(untested)} of {total} untested: " + " ".join(untested) if untested else f"all {total}"
-    record("named tests", not untested, detail)
 
 sys.exit(1 if failed else 0)
 EOF

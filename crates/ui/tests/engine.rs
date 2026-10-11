@@ -250,7 +250,7 @@ fn ancestor_selectors_and_generated_content_follow_the_ancestors() {
     assert_eq!(doc.border_box(c).unwrap().w, 10.0, "the ::after went");
 }
 
-/// Amendment A24 (H-F): `:active`, `:focus`, `:focus-visible` and `:focus-within` each match
+/// `:active`, `:focus`, `:focus-visible` and `:focus-within` each match
 /// their state, `:focus-within` also matches the focused element itself, and setting or clearing
 /// a state restyles the element and what its selectors reach (descendants, the next sibling).
 #[test]
@@ -596,7 +596,7 @@ fn transitions_and_keyframe_animations_run_on_the_document_clock() {
     assert!(!doc.animating());
 }
 
-/// A17: a finished animation stays finished through later restyles; it runs again only when
+/// A finished animation stays finished through later restyles; it runs again only when
 /// the element's animation names change or the element is inserted again.
 #[test]
 fn finished_animations_dont_replay_on_restyle() {
@@ -661,7 +661,7 @@ fn finished_animations_dont_replay_on_restyle() {
     assert!(doc.animating());
 }
 
-/// A17: an element's finished animation is forgotten on detach even while another animation
+/// An element's finished animation is forgotten on detach even while another animation
 /// still runs on it; and turning reduced motion off doesn't replay what was listed meanwhile,
 /// while a looping animation resumes.
 #[test]
@@ -708,7 +708,7 @@ fn finished_animations_beside_running_ones_and_across_reduced_motion() {
     assert!(doc.animating(), "the loop resumes");
 }
 
-/// §8.4 "Light and dark": `light-dark()` follows the appearance (the document's, or the nearest
+/// `light-dark()` follows the appearance (the document's, or the nearest
 /// `color-scheme`, which the theme sets under `data-theme`); the three supported media features
 /// match the user's preferences; `prefers-color-scheme` is rejected.
 #[test]
@@ -795,7 +795,7 @@ fn light_dark_and_the_supported_media_features_match_and_prefers_color_scheme_is
     }
 }
 
-/// §8.4 cascade step 3: plugin sheets and program sheets apply in the order each was first
+/// Plugin sheets and program sheets apply in the order each was first
 /// installed, whatever their kind; replacing a sheet's text keeps its place.
 #[test]
 fn plugin_and_program_sheets_cascade_in_first_install_order() {
@@ -892,7 +892,7 @@ fn plugin_and_program_sheets_cascade_in_first_install_order() {
     assert_eq!(color(&doc, x), RED);
 }
 
-/// §8.4 the engine's feature set: program sheets get Tern's errors for the subsequent-sibling
+/// The engine's feature set: program sheets get Tern's errors for the subsequent-sibling
 /// combinator `~` and `:has` (the whole rule dropped, "unsupported selector"), for grid areas
 /// and the line longhands ("unknown property"), and for `repeat(auto-fill | auto-fit, …)` and
 /// the areas form of `grid-template` ("invalid value"). The rest of each sheet still applies,
@@ -979,7 +979,7 @@ fn program_sheets_refuse_sibling_tilde_has_grid_areas_and_auto_fill_with_terns_e
     assert!(own.is_empty(), "{own:?}");
 }
 
-/// §8.4 units: `vw` and `vh` are viewport percentages in program sheets, and follow the
+/// Units: `vw` and `vh` are viewport percentages in program sheets, and follow the
 /// viewport when it changes.
 #[test]
 fn vw_and_vh_units_resolve_against_the_viewport_in_program_sheets() {
@@ -1005,7 +1005,7 @@ fn vw_and_vh_units_resolve_against_the_viewport_in_program_sheets() {
     assert_eq!((r.x, r.w, r.h), (102.0, 500.0, 100.0), "at 1000x400");
 }
 
-/// A7: `box-shadow` parses (inset, spread, several shadows, any component order, `var()`,
+/// `box-shadow` parses (inset, spread, several shadows, any component order, `var()`,
 /// `color-mix()`, the `currentColor` default) and computes to px and resolved colors; `none`
 /// clears it, and malformed lists are invalid.
 #[test]
@@ -1085,7 +1085,7 @@ fn box_shadow_parses_and_computes_with_vars_color_mix_and_current_color() {
     assert_eq!(errors, want, "{errors:#?}");
 }
 
-/// A7: `box-shadow` is paint-only (no relayout) and transitions shadow by shadow.
+/// `box-shadow` is paint-only (no relayout) and transitions shadow by shadow.
 #[test]
 fn box_shadow_changes_repaint_without_relayout_and_transition() {
     let mut doc = doc_with(
@@ -1127,8 +1127,8 @@ fn box_shadow_changes_repaint_without_relayout_and_transition() {
     assert_eq!(sh.spread, 10.0);
 }
 
-/// A7: Tern's engine has automatic table layout only and no captions (book:10679), and no
-/// floats (book:10796): `table-layout` and `float` are unknown properties and `display:
+/// Tern's engine has automatic table layout only and no captions, and no
+/// floats: `table-layout` and `float` are unknown properties and `display:
 /// table-caption` is an invalid value, in every sheet kind.
 #[test]
 fn table_layout_table_caption_and_float_are_rejected_as_in_tern() {

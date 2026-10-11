@@ -1,4 +1,4 @@
-// The perf suite's screen probe (GOAL.md `perf`, spec §23 S2): times what reaches the screen
+// The perf suite's screen probe: times what reaches the screen
 // for a terminal app, the same way for Auk and for Ghostty.
 //
 //   screen-probe check

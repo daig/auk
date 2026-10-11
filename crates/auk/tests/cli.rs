@@ -1,4 +1,4 @@
-//! The `cli` suite (GOAL.md, spec §11): the CLI verbs against a real daemon, the pane socket,
+//! The `cli` suite: the CLI verbs against a real daemon, the pane socket,
 //! and headless mode: the control endpoint (`auk serve`, `auk ctl`), scenario scripts with PNG
 //! and layout-JSON goldens (`auk shot`), and `surface-play`.
 //!
@@ -692,7 +692,7 @@ fn agent_panes_run_agent_command_through_the_login_shell_with_an_agent_badge() {
         .unwrap();
     let args = String::from_utf8_lossy(&args.stdout);
     assert!(args.contains("zsh -l -c echo agent-"), "{args}");
-    // Every window sees the kind in the layout, for the agent icon (§5.1).
+    // Every window sees the kind in the layout, for the agent icon.
     assert_eq!(
         l["layout"]["main"]["kinds"],
         json!({agent.to_string(): "agent"}),
@@ -787,7 +787,7 @@ fn a_locked_session_refuses_closing_its_panes_with_a_toast() {
             .find(|e| e["effect"] == "toast")
             .cloned()
     });
-    // New sessions get a generated two-word name (amendment A11).
+    // New sessions get a generated two-word name.
     let name = ls(&env)["layout"]["main"]["sessions"][0]["name"]
         .as_str()
         .unwrap()
@@ -1221,7 +1221,7 @@ fn serve_plugins_fixtures_loads_the_sdk_examples_into_the_private_daemon() {
     let env = TestEnv::new(AUK, "cli-fixtures");
     let out = env.root.join("shots");
     let serve = Serve::start(&env, &out);
-    // No plugins unless fixtures load them (§11.3).
+    // No plugins unless fixtures load them.
     let none = serve.ctl(&env, &["plugins", "list", "--json"]);
     assert_eq!(none["plugins"].as_array().map(Vec::len), Some(0), "{none}");
     let loaded = serve.ctl(&env, &["plugins", "fixtures"]);
@@ -1298,7 +1298,7 @@ fn remote_loopback_attaches_a_second_daemon_through_the_bridge() {
     let serve = Serve::start(&env, &out);
     let first = serve.ctl(&env, &["ready"])["pane"].as_u64().unwrap();
     serve.ctl(&env, &["run", "echo", "on the first host"]);
-    // It takes no address (§11.3): the host is always `loopback`.
+    // It takes no address: the host is always `loopback`.
     let control = serve.control.to_string_lossy().into_owned();
     let refused = env.cli(&[
         "ctl",

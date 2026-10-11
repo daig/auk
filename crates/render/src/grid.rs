@@ -1,4 +1,4 @@
-//! The grid pass (§18.1): cell backgrounds, glyphs from the atlases, decorations and the cursor,
+//! The grid pass: cell backgrounds, glyphs from the atlases, decorations and the cursor,
 //! with damage tracking per row.
 
 use std::collections::HashMap;
@@ -131,7 +131,7 @@ pub struct GridRenderer {
     viewport: (u32, u32),
     /// Scratch for one row's instances.
     scratch: Vec<Instance>,
-    /// The row slots (§6.2's mixed layout); `None` lays rows out uniformly.
+    /// The row slots (the mixed layout); `None` lays rows out uniformly.
     custom_slots: Option<Vec<RowSlot>>,
     /// The slot table last uploaded, as (top, height) pairs.
     uploaded_slots: Vec<[f32; 2]>,
@@ -331,7 +331,7 @@ impl GridRenderer {
         self.origin = [x, y];
     }
 
-    /// Places each row of the next snapshots: its top and height relative to the origin (§6.2:
+    /// Places each row of the next snapshots: its top and height relative to the origin (the
     /// runs of grid rows with surface blocks between them). `None` lays rows out uniformly, one
     /// cell height apart. Rows past the slice, or past [`MAX_SLOT_ROWS`], sit at their uniform
     /// position.

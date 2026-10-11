@@ -1,9 +1,9 @@
-//! Framing (§15.6): a u32 little-endian payload length, one type byte, then the payload.
+//! Framing: a u32 little-endian payload length, one type byte, then the payload.
 
 use std::fmt;
 use std::io::{self, Read, Write};
 
-/// The largest payload accepted, matching the pane socket's limit (§11.2).
+/// The largest payload accepted, matching the pane socket's limit.
 pub const MAX_PAYLOAD: usize = 256 << 20;
 
 /// Bytes before the payload: the length and the type byte.

@@ -120,7 +120,7 @@ impl selectors::SelectorImpl for Impl {
 
 pub type Selector = selectors::parser::Selector<Impl>;
 
-/// Parses selectors with Tern's supported set (§4.5): no `:has`, `:nth-child(of S)` supported.
+/// Parses selectors with Tern's supported set: no `:has`, `:nth-child(of S)` supported.
 #[derive(Debug)]
 pub struct SelectorParser;
 

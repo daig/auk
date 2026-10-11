@@ -1,4 +1,4 @@
-//! The `auk` binary (§19, §22): the macOS app, the session daemon and the CLI, as subcommands
+//! The `auk` binary: the macOS app, the session daemon and the CLI, as subcommands
 //! of one binary. `auk` alone is the app (`auk-app`); `auk daemon`, `auk headless` and the CLI
 //! verbs are in `auk-cli`; `auk web serve` is in `auk-web`; `auk doctor` is [`doctor`].
 
@@ -32,8 +32,8 @@ struct Top {
     #[arg(long, value_parser = ["none", "left", "right", "both"])]
     option_as_alt: Option<String>,
 
-    /// App: attach the windows to this host's daemon over SSH (`ssh HOST auk attach --stdio`,
-    /// §10.2); window halves still run here.
+    /// App: attach the windows to this host's daemon over SSH (`ssh HOST auk attach --stdio`);
+    /// window halves still run here.
     #[arg(long)]
     host: Option<String>,
 
@@ -47,7 +47,7 @@ struct Top {
 }
 
 fn main() -> std::process::ExitCode {
-    // `auk web serve` (§10.3) parses its own arguments.
+    // `auk web serve` parses its own arguments.
     let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
     if args.get(1).is_some_and(|a| a == "web") {
         return auk_web::serve::main(args);

@@ -1,4 +1,4 @@
-//! Starting the daemon from a client (§4.1, §14.2): the first client that finds no daemon
+//! Starting the daemon from a client: the first client that finds no daemon
 //! spawns `auk daemon` detached, in its own session and process group, with its output going to
 //! `<state>/daemon.log`.
 

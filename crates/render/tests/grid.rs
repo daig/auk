@@ -455,7 +455,7 @@ fn snapshot_from_terminal_carries_text_colors_and_cursor() {
     assert_eq!(snap.row(1)[9].bg, theme.cursor);
 }
 
-/// A13: OSC 8 link cells draw a dotted underline in a muted color; the armed (hovered) link a
+/// OSC 8 link cells draw a dotted underline in a muted color; the armed (hovered) link a
 /// solid one in the theme's link accent; `hyperlinks: off` neither. Text the program underlined
 /// keeps its own underline.
 #[test]

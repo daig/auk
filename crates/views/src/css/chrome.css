@@ -4,5 +4,5 @@
 .auk-docks { display: flex; flex-direction: column; min-width: 0; }
 .auk-screen { position: absolute; left: 0; right: 0; top: 0; bottom: 0; display: flex; flex-direction: column; background-color: var(--page); }
 /* Layers span the pane's visible area (the viewport), not its document: overlays are placed in
-   view however long the pane's content is (§7.8). */
+   view however long the pane's content is. */
 .auk-layers { position: absolute; left: 0; right: 0; top: 0; height: 100vh; pointer-events: none; }

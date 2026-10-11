@@ -1,5 +1,5 @@
-//! Command blocks drawn in the flow (§6.2, §9.6): a pane's lens blocks, each a `block` node
-//! (Tern's command-lens block, drawn internally per §8.2) at its anchor row.
+//! Command blocks drawn in the flow: a pane's lens blocks, each a `block` node
+//! (Tern's command-lens block, drawn internally) at its anchor row.
 //!
 //! The replica keeps the blocks (line, raw output, status, the current lens view); a window
 //! draws them through a [`LensLayer`]: a TSP engine of its own, never replicated, with one inline
@@ -7,7 +7,7 @@
 //! pane's flow at its anchor row the way a surface block is. Local view state (Native/Raw, folds
 //! in a lens view) lives in the layer's [`PaneView`], as for any surface.
 //!
-//! Node ids in a lens view are unstable (§9.6), so the layer gives every node of block `N` an id
+//! Node ids in a lens view are unstable, so the layer gives every node of block `N` an id
 //! under `lens<N>`; an event from inside block `N` goes to the daemon as surface `lens:N`.
 
 use std::collections::BTreeMap;
@@ -90,7 +90,7 @@ pub struct LensLayer {
     /// The frame number.
     s: u64,
     key: Option<SurfaceKey>,
-    /// Plugin sheets installed (§8.4 step 3).
+    /// Plugin sheets installed.
     sheets: Vec<(String, String)>,
 }
 
@@ -184,7 +184,7 @@ impl LensLayer {
         let body = doc.create_element("body");
         doc.append_child(root, body);
         let mut view = PaneView::new(&mut doc, settings);
-        // `el` controls don't flip in lens views (§9.6).
+        // `el` controls don't flip in lens views.
         view.inert_controls = true;
         view.command_blocks = true;
         let el = view.element();
@@ -588,7 +588,7 @@ mod tests {
         assert!(layer.element("lens0.native.0").is_some());
     }
 
-    /// §9.6: "`el` controls don't flip in lens views." A click on a checkbox, a radio or a
+    /// `el` controls don't flip in lens views. A click on a checkbox, a radio or a
     /// label in a lens view changes nothing and sends nothing; the view's own actions still go
     /// to `lens:<block>`.
     #[test]

@@ -8,7 +8,7 @@ The fake terminal:
 - can drive the program from a scenario of steps (wait for a frame, type keys, send events).
 
 Outputs, next to --out:
-- <out>.jsonl     every logical TSP message, in Tern's recording format (book:11579):
+- <out>.jsonl     every logical TSP message, in Tern's recording format:
                   {"t": unix_ms, "dir": "out"|"in", "verb": ..., "params": {...}, "body": ...}
                   plus `osc` lines for titles, cwd, shell marks and user variables, as
                   `surface-play` accepts them
@@ -59,7 +59,7 @@ FEATURES = [
     "blobs", "settle", "adopt", "dock", "program-palette", "reduce-motion", "aside", "scroll",
     "styles", "flow",
 ]
-# Environment that makes SDKs or omp think they run inside a multiplexer (spec §7.2).
+# Environment that makes SDKs or omp think they run inside a multiplexer.
 MUX_VARS = {"TMUX", "TMUX_PANE", "STY", "WMUX"}
 MUX_PREFIXES = ("ZELLIJ", "CMUX_", "WMUX_")
 PARAM = re.compile(rb"([A-Za-z0-9_-]+)=([\x21-\x3a\x3c-\x7e]*);")

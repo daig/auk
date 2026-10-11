@@ -1,4 +1,4 @@
-//! The `diff` sub-engine (§8.5): hunks from unified text or `hunks`, word-level emphasis on paired
+//! The `diff` sub-engine: hunks from unified text or `hunks`, word-level emphasis on paired
 //! lines (imara-diff over word tokens), fold rows between hunks, unified or split rows.
 
 use imara_diff::{Algorithm, Diff, Interner, Token};
@@ -137,7 +137,7 @@ pub fn parse_hunks(v: &Value) -> Vec<Hunk> {
     arr.iter()
         .filter_map(|h| {
             let o = h.as_object()?;
-            // Both default to 1 (book: diff `hunks`).
+            // Both default to 1, as in Tern.
             let start = o.get("oldStart").and_then(Value::as_u64);
             let old = start.unwrap_or(1);
             let new = o.get("newStart").and_then(Value::as_u64).unwrap_or(1);
@@ -331,7 +331,7 @@ mod tests {
     }
 
     /// `hunks`: `newStart` defaults to 1 (not to `oldStart`), and `\ No newline` lines are
-    /// skipped (book: diff).
+    /// skipped.
     #[test]
     fn hunks_default_new_start_and_skip_no_newline_markers() {
         let h = parse_hunks(

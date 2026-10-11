@@ -1,4 +1,4 @@
-//! Whether Luau's native code generator really runs in this process (§20, spike S5; `auk
+//! Whether Luau's native code generator really runs in this process (`auk
 //! doctor`).
 //!
 //! Luau compiles `@native` functions into memory it maps with `MAP_JIT`. When the process may not

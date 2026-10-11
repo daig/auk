@@ -1,4 +1,4 @@
-//! Lens captures on a worker (§9.6): `open`, `line`, `finish`, views at most once per 250 ms per
+//! Lens captures on a worker: `open`, `line`, `finish`, views at most once per 250 ms per
 //! block (and once at finish, and after every event), the last 256 captures per plugin, and
 //! rehydration from the saved command and raw output when an event arrives for a capture whose
 //! state is gone.
@@ -282,7 +282,7 @@ fn event(worker: &mut Worker, block: LensId, ev: Map<String, Json>) {
     view(worker, block);
 }
 
-/// Replays a record through `open`, `line` and `finish` (§9.6 "Rehydration").
+/// Replays a record through `open`, `line` and `finish`.
 fn rehydrate(worker: &mut Worker, block: LensId, pane: PaneId, lens: &str, record: &LensRecord) {
     let Some(command) = normalize(&record.line) else {
         return;

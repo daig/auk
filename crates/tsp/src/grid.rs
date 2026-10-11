@@ -1,11 +1,11 @@
-//! What the TSP engine needs from the pane's grid: anchor rows (§7.4), the active screen and the
+//! What the TSP engine needs from the pane's grid: anchor rows, the active screen and the
 //! width. It mirrors `auk_term::Terminal`'s anchor API, which implements it.
 
 pub use auk_term::{AnchorError, AnchorKey, Line};
 
 /// The grid side of a pane, as the TSP engine sees it.
 pub trait Grid {
-    /// Opens an anchor at the cursor (§7.4). Fails on the alternate screen.
+    /// Opens an anchor at the cursor. Fails on the alternate screen.
     fn open_anchor(&mut self, key: AnchorKey) -> Result<Line, AnchorError>;
     /// Undoes an anchor row if nothing was written below it; returns whether it was undone.
     fn undo_anchor(&mut self, key: AnchorKey) -> bool;

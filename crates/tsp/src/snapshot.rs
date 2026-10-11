@@ -1,9 +1,9 @@
-//! The TSP part of a pane snapshot (§15.3, H1): a byte stream replayed through the normal parser
+//! The TSP part of a pane snapshot: a byte stream replayed through the normal parser
 //! that rebuilds the engine's replicated state.
 //!
 //! Order: the hello; each surface, closed ones first, as a synthetic `o` (with the reserved
 //! parameters `key`, `buf`, `seeded` and `at`, its place in pane order, restored at the end of
-//! the replay, plus `restored=1` for a surface that came back after a daemon restart, §5.4);
+//! the replay, plus `restored=1` for a surface that came back after a daemon restart);
 //! its `t` and `s` sheets; one frame with the last `s` that
 //! adds the whole document, then `settle`s, `focus` and `suspend`; and `x keep:true` for closed
 //! surfaces. A chunk sequence being joined is replayed last, so the replica keeps joining it.
@@ -21,7 +21,7 @@ use crate::surface::{Mode, State, Surface};
 use crate::wire::{base36, chunks, encode_chunked, push_apc};
 
 /// Rewrites a node's props for the snapshot (the replying replica rewrites ages to snapshot
-/// time; §7.13).
+/// time).
 pub type Rewrite<'a> = dyn FnMut(&Surface, NodeRef<'_>, &mut Map<String, Value>) + 'a;
 
 struct Writer {
@@ -61,7 +61,7 @@ impl TspPane {
         };
         w.json("q", &[("seeded", "1")], &self.seed_hello());
 
-        // Closed surfaces first (§15.3); `at` restores pane order at the end of the replay.
+        // Closed surfaces first; `at` restores pane order at the end of the replay.
         let indexed = self.surfaces.iter().enumerate();
         let closed = indexed.clone().filter(|(_, s)| s.state == State::Closed);
         let live = indexed.filter(|(_, s)| s.state == State::Live);

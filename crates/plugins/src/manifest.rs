@@ -1,9 +1,9 @@
-//! `plugin.toml` (schema 1): parsing and the two validation passes of §9.1.
+//! `plugin.toml` (schema 1): parsing and its two validation passes.
 //!
 //! [`Manifest::parse`] applies the *text rules* (size, TOML, schema, key names and types, ids,
 //! name, entry and style paths, blocks and lenses). [`Manifest::check_package`] applies the
 //! *package rules* (entries exist, styles are readable and within the cap). Each reports only the
-//! first broken rule, with Tern's message (research/plugins.md §2.2).
+//! first broken rule, with Tern's message.
 
 use std::collections::BTreeSet;
 use std::path::{Component, Path};

@@ -1,4 +1,4 @@
-//! The AppKit layer (spec §19), written with objc2: the application and its main menu, windows
+//! The AppKit layer, written with objc2: the application and its main menu, windows
 //! whose content view is backed by a `CAMetalLayer` for wgpu, keyboard input through
 //! `NSTextInputClient` (IME composition, dead keys, Option-as-Alt), mouse, scroll, resize, focus
 //! and appearance events, frame pacing on the display's refresh, and the clipboard.

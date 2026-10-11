@@ -1,4 +1,4 @@
-//! A surface (§7.3): its mode, buffer, lifetime state, anchor, palette, sheets and document.
+//! A surface: its mode, buffer, lifetime state, anchor, palette, sheets and document.
 
 use crate::doc::{DocChanges, Document, Reveal, Scroll};
 use crate::grid::AnchorKey;
@@ -9,7 +9,7 @@ use crate::style::{Palette, Sheets};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SurfaceKey(pub u64);
 
-/// Where a surface sits (§7.3).
+/// Where a surface sits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Mode {
     /// Anchored at the cursor row on the main screen; owns the pane while live.
@@ -105,7 +105,7 @@ pub struct Surface {
     pub(crate) sheets: Sheets,
     pub(crate) doc: Document,
     pub(crate) last_s: Option<u64>,
-    /// Came back from the state file after a daemon restart (§5.4): closed and read-only, and
+    /// Came back from the state file after a daemon restart: closed and read-only, and
     /// the prompt rule leaves it alone, like a flow surface, until its anchor row ends.
     pub(crate) restored: bool,
     pub(crate) delivery: Tracking,
@@ -198,7 +198,7 @@ impl Surface {
         self.anchor
     }
 
-    /// Whether it came back from the state file after a daemon restart (§5.4).
+    /// Whether it came back from the state file after a daemon restart.
     pub fn restored(&self) -> bool {
         self.restored
     }

@@ -1,4 +1,4 @@
-//! A window's GPU side (§18.1): its swap chain on the view's `CAMetalLayer`, a grid renderer per
+//! A window's GPU side: its swap chain on the view's `CAMetalLayer`, a grid renderer per
 //! visible pane, and the UI layer (chrome and surfaces through Vello) composited over the grids
 //! in the same frame. Also the frame clock: how long each frame took from the start of its work
 //! to the GPU finishing it, without the wait for a drawable.

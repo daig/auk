@@ -1,6 +1,6 @@
-//! The terminal's built-in sheets (§8.4 cascade step 2): kit base, theme variables (dark and
+//! The terminal's built-in sheets: kit base, theme variables (dark and
 //! light), highlight, motion, the `surface*` sheets that give each kind its look, omp's sheets
-//! (A24: role-scoped refinements, in Tern's slot), and the pane chrome. Program sheets cascade
+//! (role-scoped refinements, in Tern's slot), and the pane chrome. Program sheets cascade
 //! after them.
 
 use auk_ui::{Document, SheetKind};
@@ -46,14 +46,14 @@ pub fn install_sheets(doc: &mut Document, dark: bool) -> Vec<String> {
     }
     set_theme(doc, dark);
     install_fonts(doc);
-    // Plugin sheets' `background-image: url(data:…)` pictures (§9.8 CSS), drawn for a Retina
+    // Plugin sheets' `background-image: url(data:…)` pictures, drawn for a Retina
     // display.
     doc.set_url_loader(Box::new(|url| crate::image::load_data_url(url, 2.0)));
     errors
 }
 
 /// Registers the bundled fonts with a document: the Nerd Fonts symbols face (family
-/// `Symbols Nerd Font Mono`) that icon spans ask for (§7.12, §18.3), so icons draw on hosts
+/// `Symbols Nerd Font Mono`) that icon spans ask for, so icons draw on hosts
 /// that don't have it installed. [`install_sheets`] does this.
 pub fn install_fonts(doc: &mut Document) {
     if !doc

@@ -27,7 +27,7 @@
 //! | `scroll LINES X Y` | a scroll-wheel event |
 //! | `focus PANE` | focuses a pane (its session and tab come forward) |
 //! | `selection` | the focused pane's selected text |
-//! | `pane-layout PANE` | the pane's flow as last drawn (§6.2): first line, blocks, dock, screen |
+//! | `pane-layout PANE` | the pane's flow as last drawn: first line, blocks, dock, screen |
 //! | `frame-stats [--reset] [--series]` | frame times: start of work to GPU and CPU done, less the drawable wait; CPU work, by phase; the surfaces' layout work |
 //! | `input-source [ID]` | the keyboard input source, or selects one |
 //! | `option-as-alt none|left|right|both` | the Option-as-Alt setting |
@@ -142,7 +142,7 @@ fn handle(line: &str) -> Value {
 }
 
 /// Posts keystrokes to this process as `CGEvent`s: the window server delivers them as it does a
-/// real keyboard's (S1). Needs the Accessibility permission.
+/// real keyboard's. Needs the Accessibility permission.
 fn post_keys(args: &[String]) -> Result<Value, String> {
     if !synth::can_post_events() {
         return Err(
@@ -655,7 +655,7 @@ fn main_command(cmd: &str, mut args: Vec<String>, win: usize) -> Result<Value, S
             Err(format!("no status segment of plugin {plugin}"))
         }
         "grid-links" => {
-            // How the pane's visible OSC 8 link cells draw (A13): the same view the frame uses.
+            // How the pane's visible OSC 8 link cells draw: the same view the frame uses.
             let pane = pane_arg(&args)?;
             Ok(json!(state.borrow().grid_link_cells(pane)?))
         }

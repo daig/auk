@@ -1,4 +1,4 @@
-//! Markdown in omp's dialect (§8.5, research/elements.md §7.1): CommonMark plus GFM tables, task
+//! Markdown in omp's dialect: CommonMark plus GFM tables, task
 //! lists, strikethrough, autolinks and callouts; math delimiters; raw HTML shown literally.
 //! Parsed per top-level block: an update re-renders only the blocks whose source changed, and a
 //! streaming append re-parses from the last block.
@@ -239,7 +239,7 @@ impl MdState {
         };
         let fig = FigCx {
             env: self.env,
-            // A fence left open while streaming stays code (book:5000).
+            // A fence left open while streaming stays code.
             open_fence: provisional && !fences_closed(&src),
             figs: &mut self.figs,
         };
@@ -343,7 +343,7 @@ struct FigCx<'f> {
 }
 
 /// A mermaid fence: `figure.mfig[data-m] > div.mfig-head (icon, "mermaid · <kind>", Open) +
-/// div.mfig-body` with the diagram at natural size (book:5018). While the diagram is drawn in
+/// div.mfig-body` with the diagram at natural size. While the diagram is drawn in
 /// the background the body shows its source; one that can't be drawn is a code block with a note.
 fn mermaid_block(dom: &mut Dom, parent: NodeId, text: &str, fig: &mut FigCx) {
     let text = text.strip_suffix('\n').unwrap_or(text);
@@ -541,7 +541,7 @@ impl Renderer<'_, '_, '_, '_> {
         *self.stack.last().expect("holder")
     }
 
-    /// A typeset formula (book: md Math).
+    /// A typeset formula.
     fn math(&mut self, tex: &str, display: bool) {
         let p = self.top();
         // Display math alone in its paragraph is a block (`div.math-display`); amid the
@@ -959,7 +959,7 @@ fn title_case(s: &str) -> String {
     }
 }
 
-/// The math delimiters pulldown-cmark doesn't know, as the ones it does (book: md Math):
+/// The math delimiters pulldown-cmark doesn't know, as the ones it does:
 /// `\(…\)` → `$…$`, `\[…\]` → `$$…$$`, and a `\begin{env}…\end{env}` starting a line →
 /// `$$\begin{env}…\end{env}$$`. Code spans and fences, `$` math and escaped characters are left
 /// as they are, as is an indented code block.

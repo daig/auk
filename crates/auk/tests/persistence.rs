@@ -1,6 +1,6 @@
-//! Persistence (GOAL.md): survival of window exit (AC1), restore after a daemon restart (AC10,
-//! §5.4, §16), the resume hook (D19), in-place upgrade (§15.7) and zsh integration (M2), against
-//! the real `auk` binary with a hermetic daemon per test.
+//! Persistence: survival of window exit, restore after a daemon restart, the resume hook,
+//! in-place upgrade and zsh integration, against the real `auk` binary with a hermetic daemon
+//! per test.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -227,7 +227,7 @@ fn exited_panes_report_their_status() {
     // The exit is a record in the stream: the replica's hash covers it.
     let (_, seq) = env.daemon_hash(pane);
     assert!(seq >= 1);
-    // A command that fails keeps its pane open, showing how it ended (§5.1).
+    // A command that fails keeps its pane open, showing how it ended.
     assert!(in_layout(&env, pane), "{}", env.daemon("ls"));
     assert_eq!(env.pane_info(pane)["exit"], 7);
     // Closing it takes it out of the layout and the table.
@@ -252,7 +252,7 @@ fn a_command_pane_closes_when_its_command_exits_0_unless_kept_open() {
     env.start_daemon();
     let keep = env.new_pane(&[]);
     env.wait(keep, "prompt");
-    // Exit 0 closes the pane (§5.1); it stays listed for `capture` and `wait`.
+    // Exit 0 closes the pane; it stays listed for `capture` and `wait`.
     let ok = env.new_pane(&["--", "echo done-$((40+2))"]);
     assert_eq!(env.wait(ok, "exit")["exit"], 0);
     wait_for("the finished pane to leave the layout", || {
@@ -517,7 +517,7 @@ fn panes_start_from_a_fresh_login_environment_not_the_daemons() {
     );
     assert!(line.contains("/usr/bin"), "the login shell's PATH: {line}");
 
-    // The pane-identity set (§5.2, Appendix B), with the TERN_ prefix swapped for AUK_ (D5).
+    // The pane-identity set, with the TERN_ prefix swapped for AUK_.
     let screen = pane_prints(
         &env,
         "print -r -- \"<$AUK_IDENTITY|$AUK_LENSES|$AUK_COMPLETE|$AUK_BLOB_DIR|${+AUK_WINDOW_SOCKET}${#AUK_WINDOW_SOCKET}|$TERM_PROGRAM_VERSION>\"",
@@ -618,7 +618,7 @@ fn first_client_starts_a_detached_daemon_and_cli_verbs_drive_it() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Restore (AC10, §5.4, §16)
+// Restore
 
 /// The daemon's text of a pane, scrollback included.
 fn scrollback(env: &TestEnv, pane: u64) -> String {
@@ -1040,7 +1040,7 @@ fn a_restored_block_restarts_at_its_last_size_on_a_blank_screen_and_needs_its_ty
     );
     wait_checkpoint(&env, &[pane]);
 
-    // With its plugin disabled (`plugins_disabled` in the settings file, §9.1), no Ready plugin
+    // With its plugin disabled (`plugins_disabled` in the settings file), no Ready plugin
     // defines the block type: the pane isn't restored, and leaves the layout.
     fs::write(
         env.state.join("settings.json"),
@@ -1221,7 +1221,7 @@ fn command_blocks_keep_their_line_cwd_raw_width_status_and_view_across_a_restart
         let b = env.daemon(&format!("lens {pane}"))["blocks"][0].clone();
         (!b["view"].is_null()).then_some(b)
     });
-    // Views come at most every 250 ms (§9.6): let the last one land before the checkpoint.
+    // Views come at most every 250 ms: let the last one land before the checkpoint.
     std::thread::sleep(std::time::Duration::from_millis(600));
     wait_checkpoint(&env, &[pane]);
     let before = env.daemon(&format!("lens {pane}"))["blocks"][0].clone();
@@ -1259,7 +1259,7 @@ fn command_blocks_keep_their_line_cwd_raw_width_status_and_view_across_a_restart
 }
 
 // ---------------------------------------------------------------------------------------------
-// The resume hook (D19, Q13)
+// The resume hook
 
 fn b64(text: &str) -> String {
     base64::engine::general_purpose::STANDARD.encode(text)
@@ -1313,8 +1313,8 @@ fn resume_user_variable_relaunches_the_program_in_the_new_shell() {
 #[test]
 fn resume_hook_relaunches_omp_with_its_session_file() {
     let env = env("ompres");
-    // A stand-in `omp` on the shell's PATH says how it was started. Q13 (live omp 18.8.4, in
-    // PROGRESS.md): omp sets `omp_session_file` only when TERM_PROGRAM is `tern`, so here a
+    // A stand-in `omp` on the shell's PATH says how it was started. A live omp 18.8.4
+    // sets `omp_session_file` only when TERM_PROGRAM is `tern`, so here a
     // stand-in program sets it as omp would there.
     let bin = env.root.join("bin");
     executable(
@@ -1353,7 +1353,7 @@ fn resume_hook_relaunches_omp_with_its_session_file() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// In-place upgrade (§15.7)
+// In-place upgrade
 
 /// The highest `tick-N` in a pane's text.
 fn last_tick(text: &str) -> Option<u64> {
@@ -1473,7 +1473,7 @@ fn a_newer_client_attaching_upgrades_the_daemon() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// A graceful stop (§5.4: "after a quit, crash or reboot"), and blobs across a restart (§4.4)
+// A graceful stop (restore follows a quit, a crash or a reboot), and blobs across a restart
 
 /// Waits until the daemon whose log is `daemon.log` says it stopped.
 fn wait_stopped(env: &TestEnv) {

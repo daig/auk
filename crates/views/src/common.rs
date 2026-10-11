@@ -1,4 +1,4 @@
-//! Props every node takes (§8.1, research/elements.md §1.4) and small prop readers.
+//! Props every node takes and small prop readers.
 
 use serde_json::{Map, Value};
 

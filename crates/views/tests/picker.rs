@@ -1,4 +1,4 @@
-//! `picker` (T2, amendment A23; book:6274-6528, research/elements.md §2.4, §6.4): omp's modal
+//! `picker` (T2): omp's modal
 //! sheet drawn from its props: the head with a drawn search line, scopes, tabs, fixed-height rows
 //! with facts, the preview, the strip above the action bar and the bar; pointer input as
 //! `select`, `activate` and `action` events; keys stay the program's. Checked on synthetic sheets
@@ -1140,7 +1140,7 @@ fn omp_model_hub_and_dropdown_replay_as_picker_sheets() {
     );
 }
 
-/// `confirm` (book): a strip over the selected row with a trash icon, the text, a danger
+/// `confirm`: a strip over the selected row with a trash icon, the text, a danger
 /// button (default "Delete", sending `confirm.act` or "confirm") and Keep (`cancel`); the list
 /// is `.pk-spacer.confirming` meanwhile. It follows the selection, survives virtualization, and
 /// goes with the prop.
@@ -1211,7 +1211,7 @@ fn picker_confirm_strip_sits_over_the_selected_row() {
 }
 
 /// Column heads ride on every group header, so whichever group sticks at the top of the list
-/// shows them (book: Column `head`), not only the first.
+/// shows them, not only the first.
 #[test]
 fn picker_column_heads_ride_on_every_group_header() {
     let mut h = harness(160);
@@ -1470,7 +1470,7 @@ fn omp_tree_and_copy_pickers_draw_their_layouts() {
     );
 }
 
-/// Tree rows (book: `depth` draws indent guides, `open` a chevron rotated when true, unset a
+/// Tree rows (`depth` draws indent guides, `open` a chevron rotated when true, unset a
 /// leaf; `dot: "accent"` lights the guides) and timeline nodes, on a synthetic sheet.
 #[test]
 fn picker_tree_guides_and_chevrons_follow_depth_and_open() {
@@ -1516,7 +1516,7 @@ fn picker_tree_guides_and_chevrons_follow_depth_and_open() {
     }
 }
 
-/// The bar folds as it narrows (book: Action bar folding): the Escape action moves into the
+/// The bar folds as it narrows: the Escape action moves into the
 /// head's esc (`.fold-esc`), then secondary buttons drop their keycaps (`.fold-keys`); with no
 /// Escape action the keycaps go first. It unfolds when there is room again.
 #[test]

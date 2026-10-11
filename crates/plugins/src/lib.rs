@@ -1,4 +1,4 @@
-//! The Luau plugin runtime (§9, §20): manifests, discovery and the catalog; lens claims and
+//! The Luau plugin runtime: manifests, discovery and the catalog; lens claims and
 //! capture; sandboxed Luau VMs with per-call budgets, the 256 MiB cap and native codegen; one
 //! worker thread per host half running hooks, blocks and lenses; the window half's runtime; the
 //! `tern.*` API surface (with `auk` as its alias); reloading on change; and the backing functions

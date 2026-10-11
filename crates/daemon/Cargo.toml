@@ -1,10 +1,11 @@
 [package]
 name = "auk-daemon"
-description = "The session daemon: pane table, PTYs, shell integration, state file, restore, upgrade, sessions and the control endpoint (spec §14, §15, §16)."
+description = "The session daemon: pane table, PTYs, shell integration, state file, restore, upgrade, sessions and the control endpoint."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 auk-plugins = { version = "0.0.0", path = "../plugins" }

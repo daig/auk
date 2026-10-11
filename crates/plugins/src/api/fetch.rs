@@ -1,4 +1,4 @@
-//! `tern.fetch` (§9.9, research/plugins.md §11.4): one HTTP/1.1 request on its own thread; 30 s
+//! `tern.fetch`: one HTTP/1.1 request on its own thread; 30 s
 //! default timeout covering redirects; up to 10 redirects; a 16 MiB body; network failures never
 //! raise. The system trust store and the `*_PROXY` variables are used.
 

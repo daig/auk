@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 cssparser = "0.38"
@@ -15,7 +16,7 @@ vello = "0.11"
 skrifa = "0.44"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
-# On Linux (the daemon, D7), load fontconfig at run time instead of linking it, so building needs
+# On Linux (the daemon), load fontconfig at run time instead of linking it, so building needs
 # no fontconfig headers; the daemon parses CSS but never enumerates fonts.
 [target.'cfg(target_os = "linux")'.dependencies]
 fontique = { version = "0.11", features = ["fontconfig-dlopen"] }

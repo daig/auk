@@ -1,4 +1,4 @@
-//! Spike S5 measurements: interrupt and per-call budget overheads, trip latency, native codegen
+//! Measurements: interrupt and per-call budget overheads, trip latency, native codegen
 //! speedup, and worker round trips. Run in release:
 //!
 //! ```text

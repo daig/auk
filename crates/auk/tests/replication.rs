@@ -1,5 +1,5 @@
-//! Replication (GOAL.md, §15): replicas agree (AC2), clients mirror each other (AC8), late
-//! attaches get the live state, and mismatched versions are refused (X9).
+//! Replication: replicas agree, clients mirror each other, late attaches get the live state,
+//! and mismatched versions are refused.
 
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
@@ -147,7 +147,7 @@ fn ac08_key_typed_in_one_client_appears_in_the_other() {
     env.wait(pane, "prompt");
     assert_eq!(converge(&env, &a, pane), converge(&env, &b, pane));
 
-    // The client that typed is the pane's primary (§15.5); typing in B moves it.
+    // The client that typed is the pane's primary; typing in B moves it.
     let primary = |w: &Headless| {
         w.request("panes")["panes"].as_array().and_then(|p| {
             p.iter()
@@ -450,7 +450,7 @@ fn only_the_primary_clients_acks_count_and_client_facts_follow_the_primary() {
     let bodies = probe.fence_tsp();
     assert!(acks(&bodies).is_empty(), "{bodies:?}");
 
-    // A client that isn't the pane's primary acks: the program hears nothing (§4.5, §7.10).
+    // A client that isn't the pane's primary acks: the program hears nothing.
     y.send(&ClientMsg::Ack {
         pane,
         sf: "s1".into(),
@@ -880,7 +880,7 @@ fn presence_lists_the_attached_clients_with_their_identity() {
     env.start_daemon();
     let x = RawClient::attach(&env, ClientFacts::default());
     let y = RawClient::attach(&env, ClientFacts::default());
-    // Every client hears who is attached to the host, itself included (§10.1).
+    // Every client hears who is attached to the host, itself included.
     let seen = x.presence(|c| c.len() == 2 && c.iter().all(|c| c.window_key.is_some()));
     let ids: Vec<u64> = seen.iter().map(|c| c.id).collect();
     assert_eq!(ids, [x.id, y.id]);

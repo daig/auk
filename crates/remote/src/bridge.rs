@@ -1,14 +1,14 @@
-//! `auk attach --stdio` (§10.2): the remote end of an SSH link.
+//! `auk attach --stdio`: the remote end of an SSH link.
 //!
 //! It makes sure the host's daemon is running (starting it detached if none answers, as a window
-//! would, §4.1), connects to its socket and writes one preamble line to stdout:
+//! would), connects to its socket and writes one preamble line to stdout:
 //!
 //! ```text
 //! AUK-BRIDGE 1 {"user":"dai","host":"build-box","os":"linux",…}
 //! ```
 //!
 //! Every byte after that line is the daemon's: the bridge copies stdin to the socket and the
-//! socket to stdout, so the replication protocol (§15.6) runs over SSH unchanged. The preamble
+//! socket to stdout, so the replication protocol runs over SSH unchanged. The preamble
 //! lets the local side skip anything a login script printed first, and tells it who it is
 //! acting as on the host. When the bridge can't reach a daemon it writes `AUK-BRIDGE-ERROR` and
 //! a reason instead.

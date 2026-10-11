@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 const STYLE_SUBTREE: u16 = 64;
 
-/// One DOM + CSS + layout pipeline (§18.2).
+/// One DOM + CSS + layout pipeline.
 pub struct Document {
     pub(crate) nodes: Vec<Option<Node>>,
     free: Vec<u32>,
@@ -743,7 +743,7 @@ impl Document {
             None => scope,
         };
         // A virtualized container's children out of view wait for layout to bring them into
-        // view (§7.10, §8.3): `style_in_view` styles them then. Unless all its children
+        // view: `style_in_view` styles them then. Unless all its children
         // restyle, it visits the ones marked since its last restyle.
         let virtualized = self.node(id).virtual_estimate.is_some();
         let children = match self.node_mut(id).style_kids.take() {
@@ -1063,7 +1063,7 @@ impl Document {
 
     /// How many times layout has run. With [`Document::laid_out_since`], a measure loop
     /// revisits only the boxes laid out since its last pass: a box layout skipped (virtualized
-    /// out of view, §8.3) or took from its cache has the same size as when last measured.
+    /// out of view) or took from its cache has the same size as when last measured.
     pub fn layout_count(&self) -> u64 {
         self.layout_runs
     }
@@ -1120,7 +1120,7 @@ impl Document {
         }
     }
 
-    /// A measure-then-layout loop (§8.3): update, then let `adjust` read the layout and change
+    /// A measure-then-layout loop: update, then let `adjust` read the layout and change
     /// the document; repeat while it reports a change, at most `max_passes` times. Returns the
     /// number of layout passes run.
     pub fn update_with(
@@ -1349,7 +1349,7 @@ impl Document {
         self.motion.values().any(|m| m.moving(now))
     }
 
-    /// Runs transitions and animations over an element's new cascaded style (§8.4): returns the
+    /// Runs transitions and animations over an element's new cascaded style: returns the
     /// style to show.
     fn animate(
         &mut self,
@@ -1451,7 +1451,7 @@ impl Document {
     }
 
     /// The installed sheets in cascade order, as `(name, rules)`: the control `css` command's
-    /// listing (§7.15), where program sheets show as `tsp:<scope>:<name>`.
+    /// listing, where program sheets show as `tsp:<scope>:<name>`.
     pub fn sheets(&self) -> Vec<(String, usize)> {
         self.stylist
             .sheets

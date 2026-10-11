@@ -1,4 +1,4 @@
-//! Kinds as components (§8.2, research/elements.md §2): each kind renders its node element's
+//! Kinds as components: each kind renders its node element's
 //! classes, attributes and generated parts, and routes its children into slots.
 
 pub(crate) mod agent;
@@ -20,8 +20,7 @@ use crate::view::{Cx, Look, Mount, Mounts};
 use auk_tsp::NodeRef;
 use auk_ui::NodeId;
 
-/// The kinds this crate draws and the hello advertises (§8.2): T0, T1 and the T2 kinds drawn so far
-/// (A23).
+/// The kinds this crate draws and the hello advertises: T0, T1 and the T2 kinds drawn so far.
 pub const KINDS: &[&str] = &[
     "col",
     "row",
@@ -76,7 +75,7 @@ pub(crate) enum Route {
     Slot(usize),
 }
 
-/// Inline kinds render as spans (research/elements.md §1.11).
+/// Inline kinds render as spans.
 pub(crate) fn is_inline(kind: &str) -> bool {
     matches!(
         kind,
@@ -141,7 +140,7 @@ pub(crate) fn route(node: NodeRef, child: NodeRef) -> Route {
         }
         "seg" | "overlay" | "list" | "tool" | "agent" | "image" | "picker" => Route::Slot(0),
         "prefs" => Route::Slot(prefs::route(child)),
-        // The native child, else the raw one (§9.6): the block mounts only the one it shows.
+        // The native child, else the raw one: the block mounts only the one it shows.
         "block" => Route::Slot(usize::from(block::is_raw(node, child))),
         _ => Route::Direct,
     }
@@ -181,7 +180,7 @@ pub(crate) fn slot(cx: &mut Cx, m: &mut Mount, i: usize, tag: &str, class: &str)
     s
 }
 
-/// Virtualize a long container (§8.3) with an estimated child height, or stop. Containers that
+/// Virtualize a long container with an estimated child height, or stop. Containers that
 /// an ancestor scrolls get their visible window from the measure pass.
 pub(crate) fn virtualize(cx: &mut Cx, id: &str, el: NodeId, estimate: Option<f32>) {
     let had = cx.st.virt.get(id).copied();
@@ -291,7 +290,7 @@ pub(crate) fn after_children(cx: &mut Cx, node: NodeRef, kind: &str, _el: NodeId
     if kind == "tool" {
         agent::mark_kind_changes(cx, node, mounts);
     }
-    // Chains of thoughts among the children (decorations, book:11583). Without a thinking child
+    // Chains of thoughts among the children (decorations). Without a thinking child
     // there is no chain to sum or unsum (`thought_chains` only touches thinking sections), so a
     // long list of other entries costs one look at each kind.
     if node.children().any(crate::deco::is_thought) {
@@ -299,7 +298,7 @@ pub(crate) fn after_children(cx: &mut Cx, node: NodeRef, kind: &str, _el: NodeId
     }
 }
 
-/// Clock-driven updates of a node (§7.13). Returns whether it still needs the clock.
+/// Clock-driven updates of a node. Returns whether it still needs the clock.
 pub(crate) fn tick(cx: &mut Cx, node: NodeRef, m: &mut Mount) -> bool {
     match node.kind() {
         "spinner" | "shimmer" | "elapsed" | "rate" | "progress" | "meter" => {

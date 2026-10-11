@@ -3,7 +3,7 @@
 //! A port of `alacritty_terminal` 0.26's `grid/resize.rs` (Apache-2.0, Copyright (c) 2020 The
 //! Alacritty Project), so that reflow matches the reference grid. Two changes:
 //!
-//! - **Anchor rows** (§7.4, §17) never join a wrapped line: before reflowing, an anchor row and
+//! - **Anchor rows** never join a wrapped line: before reflowing, an anchor row and
 //!   the row above it lose their wrap flags, so cells never move into or out of an anchor row;
 //!   an anchor row that is too long is cut, not wrapped. Rows that leave the buffer end their
 //!   anchors.

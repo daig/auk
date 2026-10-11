@@ -1,4 +1,4 @@
-//! Per-call budgets on Luau's interrupt (§9.2 "Budgets per call", §20).
+//! Per-call budgets on Luau's interrupt.
 //!
 //! Each call into a VM pushes a [`Frame`] with a deadline: its own budget from now, or the
 //! enclosing call's deadline if that is earlier ("a nested call keeps the earlier deadline").

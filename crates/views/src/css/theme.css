@@ -1,4 +1,4 @@
-/* Theme variables (research/elements.md §4.8). Light by default; dark under data-theme. */
+/* Theme variables. Light by default; dark under data-theme. */
 :root {
   color-scheme: light;
   --page: #fbfbfc; --panel: #f3f3f6; --card: #ffffff; --raise: #ffffff;

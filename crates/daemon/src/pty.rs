@@ -1,5 +1,5 @@
-//! PTYs (§5.2): opening a pair, spawning a program as a session leader with the PTY as its
-//! controlling terminal, resizing, and the tty mode gate (§12.1, X1).
+//! PTYs: opening a pair, spawning a program as a session leader with the PTY as its
+//! controlling terminal, resizing, and the tty mode gate.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -42,7 +42,7 @@ pub struct TtyMode {
 }
 
 impl TtyMode {
-    /// Whether the terminal may write TSP input (§12.1): only in raw mode, non-canonical with
+    /// Whether the terminal may write TSP input: only in raw mode, non-canonical with
     /// echo off, so nothing lands on a shell's command line.
     pub fn accepts_tsp_input(self) -> bool {
         !self.canonical && !self.echo
@@ -123,7 +123,7 @@ impl Master {
         self.fd
     }
 
-    /// A master handed over by an in-place upgrade (§15.7).
+    /// A master handed over by an in-place upgrade.
     pub fn from_fd(fd: OwnedFd) -> Self {
         Master {
             fd,
@@ -132,7 +132,7 @@ impl Master {
     }
 
     /// Whether output is still on its way to the replica: unread bytes in the PTY, or bytes the
-    /// reader holds. Timeouts that measure the program's silence (§7.1's chunk timeout) wait for
+    /// reader holds. Timeouts that measure the program's silence (the chunk timeout) wait for
     /// this to clear, so a daemon that falls behind never mistakes its own backlog for silence.
     pub fn output_pending(&self) -> bool {
         use std::sync::atomic::Ordering;
@@ -159,7 +159,7 @@ impl AsFd for Master {
     }
 }
 
-/// The mode gate's reading of a PTY (§12.1): `tcgetattr` on the master.
+/// The mode gate's reading of a PTY: `tcgetattr` on the master.
 pub fn tty_mode(fd: BorrowedFd<'_>) -> io::Result<TtyMode> {
     let attrs = termios::tcgetattr(fd)?;
     Ok(TtyMode {

@@ -1,4 +1,4 @@
-//! The browser client's connection state (§15): the handshake, a follower replica per pane of
+//! The browser client's connection state: the handshake, a follower replica per pane of
 //! the attached window key, the layout, and what the client sends. Pure, so it runs and is
 //! tested natively; the wasm glue feeds it WebSocket messages and drains its outbox.
 
@@ -20,7 +20,7 @@ pub enum Status {
     Connecting,
     /// Welcomed and attached to the window key.
     Attached,
-    /// The daemon runs another version (X9): reload after upgrading.
+    /// The daemon runs another version: reload after upgrading.
     Refused(String),
     /// The connection ended.
     Closed(String),
@@ -41,7 +41,7 @@ impl Status {
 #[derive(Debug)]
 pub struct PaneState {
     pub replica: Replica,
-    /// Whether this client is the pane's primary (§15.5).
+    /// Whether this client is the pane's primary.
     pub primary: bool,
     /// The process's exit status, once it ended.
     pub exit: Option<i32>,
@@ -53,7 +53,7 @@ pub struct PaneState {
     pub changes: Vec<auk_tsp::Changes>,
     /// A snapshot replaced the replica: the client's view of its surfaces starts over.
     pub reset: bool,
-    /// Blobs already asked for (§7.12).
+    /// Blobs already asked for.
     pub blobs_asked: BTreeSet<String>,
 }
 
@@ -89,11 +89,11 @@ pub struct Session {
     pub panes: BTreeMap<PaneId, PaneState>,
     /// The attached window key's sessions.
     pub window: Window,
-    /// The plugin catalog (§9.4): the web client runs no Lua and learns block types, lens claims
-    /// and plugin styles from it (§10.3).
+    /// The plugin catalog: the web client runs no Lua and learns block types, lens claims
+    /// and plugin styles from it.
     pub catalog: serde_json::Value,
-    /// The Ready plugins' manifest styles from the catalog, as `(plugin id, css)` in id order
-    /// (§9.4, §10.3): the client installs them as plugin sheets in every pane's document.
+    /// The Ready plugins' manifest styles from the catalog, as `(plugin id, css)` in id order:
+    /// the client installs them as plugin sheets in every pane's document.
     pub styles: Vec<(String, String)>,
     /// Bumped whenever [`Session::styles`] changes.
     pub styles_serial: u64,
@@ -107,7 +107,7 @@ pub struct Session {
     outbox: Vec<u8>,
     /// Panes whose primary status we asked for by focusing.
     focused: Option<PaneId>,
-    /// Lens views that arrived before their block (§9.6: replicas retry an early view for 5 s):
+    /// Lens views that arrived before their block (replicas retry an early view for 5 s):
     /// pane, block, view, arrival time.
     early_views: Vec<(PaneId, u64, Option<serde_json::Value>, f64)>,
     /// The clock, in seconds ([`Session::set_time`]).
@@ -116,7 +116,7 @@ pub struct Session {
     pending_facts: Option<ClientFacts>,
 }
 
-/// How long an early lens view waits for its block (§9.6).
+/// How long an early lens view waits for its block.
 pub const EARLY_VIEW_SECS: f64 = 5.0;
 
 impl Session {
@@ -185,7 +185,7 @@ impl Session {
         self.early_views.len()
     }
 
-    /// Takes a new catalog: its Ready plugins' styles replace the installed ones (§9.4).
+    /// Takes a new catalog: its Ready plugins' styles replace the installed ones.
     fn set_catalog(&mut self, catalog: serde_json::Value) {
         let styles: Vec<(String, String)> = if catalog.is_null() {
             Vec::new()
@@ -225,7 +225,7 @@ impl Session {
     }
 
     /// A view event from a pane's surface or command block (`lens:<block>`), sent as the
-    /// daemon's view-event message (§7.8, §9.6).
+    /// daemon's view-event message.
     pub fn view_event(&mut self, pane: PaneId, sf: &str, event: serde_json::Value) {
         if self.status == Status::Attached && self.panes.contains_key(&pane) {
             self.send(&ClientMsg::ViewEvent {
@@ -296,7 +296,7 @@ impl Session {
             // The browser client sends no requests.
             DaemonMsg::Reply { .. } => {}
             DaemonMsg::Snapshot { pane, snapshot } => {
-                // The views' sheet checker, as a drawing window's replica has (§8.4).
+                // The views' sheet checker, as a drawing window's replica has.
                 let tsp = auk_tsp::TspPane::with(
                     auk_replica::tsp_config(&snapshot.settings),
                     auk_views::sheet_checker(),
@@ -453,11 +453,11 @@ impl Session {
             .filter(|s| !s.is_empty())
     }
 
-    /// The tab bar the shared chrome draws (D3, §13.1) for the tab holding `pane` (else the
+    /// The tab bar the shared chrome draws for the tab holding `pane` (else the
     /// first): every session of the window key (the one shown marked, for the session chip and
     /// its menu) and the shown session's tabs, each named by its own title, else its pane's, with
-    /// the agent icon (§5.1) and the program's badge while a listening surface is open (§7.2,
-    /// §12.2). The browser views and switches only: it creates nothing (no `+`). Sizes, dividers
+    /// the agent icon and the program's badge while a listening surface is open.
+    /// The browser views and switches only: it creates nothing (no `+`). Sizes, dividers
     /// and the focus ring are the caller's.
     pub fn chrome_bar(&self, pane: Option<PaneId>, focused: Option<PaneId>) -> BarModel {
         let shown = self.tab(pane).map(|t| t.id);
@@ -522,7 +522,7 @@ impl Session {
         }
     }
 
-    /// Encodes a key for the pane's current modes and sends it (§15.4).
+    /// Encodes a key for the pane's current modes and sends it.
     pub fn key(&mut self, pane: PaneId, ev: &KeyEvent) {
         let Some(p) = self.panes.get(&pane) else {
             return;
@@ -556,7 +556,7 @@ impl Session {
         }
     }
 
-    /// Focuses a pane, which makes this client its primary (§15.5).
+    /// Focuses a pane, which makes this client its primary.
     pub fn focus(&mut self, pane: PaneId) {
         if self.panes.contains_key(&pane) && self.status == Status::Attached {
             self.focused = Some(pane);
@@ -578,7 +578,7 @@ impl Session {
     }
 
     /// After a frame that drew `pane` was presented: acks each live listening surface's last
-    /// frame, as the pane's primary only (§7.10, §15.5).
+    /// frame, as the pane's primary only.
     pub fn drew(&mut self, pane: PaneId) {
         let Some(p) = self.panes.get_mut(&pane) else {
             return;
@@ -713,7 +713,7 @@ mod tests {
         .to_bytes()
     }
 
-    /// §4.5: facts that change while the hello is out (the page's clock or look) reach the
+    /// Facts that change while the hello is out (the page's clock or look) reach the
     /// daemon once it welcomes the client; later changes go at once.
     #[test]
     fn facts_changed_before_the_welcome_are_sent_with_it() {
@@ -1029,7 +1029,7 @@ mod tests {
         );
     }
 
-    /// A12: the browser's tab bar is the shared chrome's model: the shown session's tabs (the
+    /// The browser's tab bar is the shared chrome's model: the shown session's tabs (the
     /// one holding the pane active), every session for the chip and its menu, and no `+`.
     #[test]
     fn the_chrome_bar_shows_the_shown_sessions_tabs_and_every_session() {
@@ -1043,7 +1043,7 @@ mod tests {
         )
         .unwrap();
         let other = l.new_session("main", Some("ops"), 3);
-        // Pane 2 is an agent pane: its tab shows the agent icon (§5.1).
+        // Pane 2 is an agent pane: its tab shows the agent icon.
         assert!(l.set_kind(2, auk_mirror::layout::PaneTag::Agent));
         s.on_message(
             &DaemonMsg::Layout {

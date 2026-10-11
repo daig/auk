@@ -1,4 +1,4 @@
-//! Measure-then-layout loops (§8.3): card and tool preview clamps ("N more lines"), text cuts,
+//! Measure-then-layout loops: card and tool preview clamps ("N more lines"), text cuts,
 //! table column fitting, status segment dropping, overlay anchoring, follow-tail, field caret
 //! scrolling, and `reveal`/`scroll` requests.
 
@@ -271,7 +271,7 @@ impl PaneView {
         }
         // Clamps, cuts and column fits depend only on their element's laid-out size: revisit
         // just what layout computed since the last pass. A box layout skipped (virtualized out
-        // of view, §7.10, §8.3) or took from its cache is as it was last measured, so a load or
+        // of view) or took from its cache is as it was last measured, so a load or
         // a stream costs in proportion to what changed and what's in view.
         let since = self.measure_mark;
         self.measure_mark = doc.layout_count();
@@ -631,7 +631,7 @@ impl PaneView {
             }
         }
         // The toast layer rises to 12px above the dock while the dock shows something (a
-        // composer), so a notice never covers the input (book:9547-9553).
+        // composer), so a notice never covers the input.
         let lift = match (dom.doc.border_box(pane_el), dom.doc.border_box(docks_el)) {
             (Some(p), Some(d)) if d.h > 0.5 => format!(
                 "bottom: {}px",
@@ -746,7 +746,7 @@ impl PaneView {
                 let Some(m) = sv.mounts.get(&s.id) else {
                     continue;
                 };
-                // An inline surface's `main` ignores it (§7.6): a region steps only itself, and
+                // An inline surface's `main` ignores it: a region steps only itself, and
                 // only a screen surface's `main` is a scroll container. It never reaches into a
                 // scroller inside it.
                 let sc = if m.region {

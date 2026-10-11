@@ -294,7 +294,7 @@ pub(crate) type VirtKey = (u64, u32, Option<u32>, u32, u32, bool);
 /// A virtualized container's layout state across passes: a row per layout child with what
 /// its layout reads of the child and where the child went, so a pass reads one small array
 /// instead of every child's node, and starts where something changed or what's in view begins
-/// rather than at the first child (§7.10 cost: in proportion to what changed and what's shown).
+/// rather than at the first child (cost in proportion to what changed and what's shown).
 #[derive(Debug, Default)]
 pub(crate) struct VirtState {
     pub rows: Vec<VirtRow>,

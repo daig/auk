@@ -1,4 +1,4 @@
-//! The `tern.*` API surface (§9.9, research/plugins.md §4.9).
+//! The `tern.*` API surface.
 //!
 //! [`install`] builds the `tern` table for one VM: the shared members first ([`shared`]), then
 //! the context's own ([`host`] or [`window`]). A member of the other context is absent (nil), so

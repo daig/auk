@@ -1,4 +1,4 @@
-//! A test window that draws surfaces (§8.3, §18.2): it attaches to the daemon like the app, keeps
+//! A test window that draws surfaces: it attaches to the daemon like the app, keeps
 //! a follower replica per pane with the views' sheet checker, and projects each pane's TSP state
 //! through `auk-views` into an `auk-ui` document, as a window does before painting. Suites read the
 //! laid-out boxes, the classes the views wrote, and the page `auk-views` exports for WebKit.
@@ -74,7 +74,7 @@ pub struct SurfaceWindow {
     stream: UnixStream,
     replicas: BTreeMap<PaneId, Replica>,
     projections: BTreeMap<PaneId, Projection>,
-    /// Blobs asked of the daemon, or sent by it after a snapshot (§7.12), per pane.
+    /// Blobs asked of the daemon, or sent by it after a snapshot, per pane.
     asked: BTreeMap<PaneId, BTreeSet<String>>,
     settings: ViewSettings,
     start: Instant,

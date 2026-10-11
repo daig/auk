@@ -1,11 +1,11 @@
-//! The daemon's control-endpoint commands (§11.1, §11.3). One line in, one JSON line out; words
+//! The daemon's control-endpoint commands. One line in, one JSON line out; words
 //! are split like a shell's (`shlex`).
 //!
 //! | Command | Does |
 //! | --- | --- |
 //! | `ping`, `version` | liveness and the daemon's versions |
 //! | `ls` | panes and the layout |
-//! | `new [session\|tab] [--window K] [--session ID] [--name N] [--cwd DIR] [--size CxR] [--agent] [--keep-open] [-- CMD…]` | spawns a pane: a login shell, a command, or with `--agent` an agent pane (§5.1) |
+//! | `new [session\|tab] [--window K] [--session ID] [--name N] [--cwd DIR] [--size CxR] [--agent] [--keep-open] [-- CMD…]` | spawns a pane: a login shell, a command, or with `--agent` an agent pane |
 //! | `split TARGET right\|down [--cwd DIR] [--agent] [--keep-open] [-- CMD…]` | splits a pane |
 //! | `lock SESSION [on\|off\|toggle]` | locks or unlocks a session (default: toggles); SESSION is an id, a name or `@focused` |
 //! | `run TARGET WORD…` | types the words and Enter |
@@ -13,22 +13,22 @@
 //! | `capture TARGET [--ansi\|--html] [--scrollback] [--surfaces]` | the pane's content (`capture.rs`) |
 //! | `wait TARGET --until prompt\|exit\|idle=MS [--timeout S]` | waits (`"timeout":true` on timeout) |
 //! | `state-hash TARGET` | the authoritative replica's hash and sequence number |
-//! | `marks TARGET` | the shell's command marks (§5.3) |
-//! | `tty-mode TARGET` | the mode gate's reading (§12.1) |
+//! | `marks TARGET` | the shell's command marks |
+//! | `tty-mode TARGET` | the mode gate's reading |
 //! | `resize TARGET COLS ROWS`, `clear-scrollback TARGET`, `reset TARGET` | sequenced records |
 //! | `clients` | attached clients and the panes they are primary for |
-//! | `snapshot TARGET` | the pane's snapshot (§15.3): its stream position and bytes, base64 |
-//! | `tsp TARGET` | the authoritative replica's TSP state (§7) and the mode gate's counts |
-//! | `settings [--native-surfaces on\|off] [--command-lenses on\|off] [--t2-kinds on\|off] [--scrollback N] [--retention BYTES]` | host settings (§15.2); changes reach every pane as a record |
-//! | `surface-play [--pane TARGET] FILE [from N] [until N] [paced [TIMES]]` | plays a TSP recording into a pane (§7.15) |
+//! | `snapshot TARGET` | the pane's snapshot: its stream position and bytes, base64 |
+//! | `tsp TARGET` | the authoritative replica's TSP state and the mode gate's counts |
+//! | `settings [--native-surfaces on\|off] [--command-lenses on\|off] [--t2-kinds on\|off] [--scrollback N] [--retention BYTES]` | host settings; changes reach every pane as a record |
+//! | `surface-play [--pane TARGET] FILE [from N] [until N] [paced [TIMES]]` | plays a TSP recording into a pane |
 //! | `effect [--window K] toast\|open\|copy TEXT` | asks the windows showing a window key to perform an effect |
 //! | `close TARGET` | closes a pane as a user does: refused with a toast while its session is locked |
 //! | `kill TARGET` | hangs up and closes a pane, lock or not |
 //! | `open PATH [--window K]` | asks the windows showing the window key to open a file (their `route.open`, then their opener); `delivered` 0 means no window took it |
 //! | `events [--filter k,…]` | turns the connection into an event stream (`events.rs`) |
-//! | `checkpoint` | writes the state file now (§16) |
+//! | `checkpoint` | writes the state file now |
 //! | `state` | the state file, its last checkpoint, and the in-place upgrades so far |
-//! | `upgrade [--exe PATH]` | hands the daemon to a new build in place (§15.7) |
+//! | `upgrade [--exe PATH]` | hands the daemon to a new build in place |
 //! | `shutdown` | writes the state file and stops the daemon |
 //!
 //! Targets: `@focused`, a pane id, an exact title, a title in any case, or a program name. Among
@@ -204,7 +204,7 @@ impl Daemon {
         json!(clients)
     }
 
-    /// Resolves a target (§11.1).
+    /// Resolves a target.
     fn target(&self, word: Option<&String>) -> Result<PaneId, String> {
         let word = word.ok_or("missing target")?;
         let st = self.state();
@@ -349,7 +349,7 @@ impl Daemon {
         Ok(json!({"pane": id}))
     }
 
-    /// `lock SESSION [on|off|toggle]`: a locked session refuses closing (§4.3).
+    /// `lock SESSION [on|off|toggle]`: a locked session refuses closing.
     fn cmd_lock(&self, args: &[String]) -> Reply {
         let word = args.first().ok_or("lock: expected a session")?;
         let session = {

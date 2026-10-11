@@ -1,4 +1,4 @@
-//! The window half's runtime (§9.8, M9): commands, binds, overrides, routes, chrome formatters,
+//! The window half's runtime: commands, binds, overrides, routes, chrome formatters,
 //! CSS and window events, with the SDK's `longrun`, `workspaces` (except Edit), `jsonx` and
 //! `review-queue` window entries, against a window host that records what they ask for.
 
@@ -638,9 +638,9 @@ fn order_plugin(root: &Root, dir: &str, id: &str) {
     );
 }
 
-/// §9.2 "Order and numbers": across window plugins, overrides, routes, formatters and window
+/// Order and numbers: across window plugins, overrides, routes, formatters and window
 /// events go in id order (not folder order), then registration order within a plugin; and
-/// window callbacks (handlers and timers) each get a fresh cx (§9.2 "No re-entrancy").
+/// window callbacks (handlers and timers) each get a fresh cx.
 #[test]
 fn window_plugins_go_in_id_then_registration_order_each_with_a_fresh_cx() {
     let root = Root::new();

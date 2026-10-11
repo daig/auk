@@ -1,7 +1,7 @@
-//! The `remote` suite (GOAL.md; spec §10.2, §12.5, §15.6, M12, AC16): local headless windows
+//! The `remote` suite: local headless windows
 //! attach over SSH (`ssh … auk attach --stdio`) to a daemon on the Lima VM `auk-linux`, which
 //! runs the Linux build of `auk` that each run builds in the VM. So this suite is also the Linux
-//! check (D7).
+//! check.
 //!
 //! The VM is reached with Lima's generated SSH config; the suite starts it if it's stopped and
 //! fails, saying what to do, if Lima or the VM is missing (`auk_conformance::remote`).
@@ -301,7 +301,7 @@ fn presence_shows_every_window_of_the_host_with_its_ssh_hop() {
     let w2 = r.window("w2");
     wait_label(&w1, "connected");
     wait_label(&w2, "connected");
-    // Each window hears who else is attached to the host, with their identity (§10.1).
+    // Each window hears who else is attached to the host, with their identity.
     let seen = wait_for("both windows in the presence list", || {
         let p = w1.request("presence");
         (p.as_array()?.len() == 2).then_some(p)
@@ -409,7 +409,7 @@ fn the_bridge_carries_the_replication_protocol_unchanged() {
     let pane = r.new_pane(&[]);
     r.run(pane, "echo over-the-bridge");
 
-    // A plain mirror client, speaking §15.6 over ssh's stdio.
+    // A plain mirror client, speaking the mirror protocol over ssh's stdio.
     let (mut child, stream) = raw_bridge(&r);
     let hello = Hello::new(ClientKind::Remote, ClientFacts::default());
     let (mut client, welcome) = Client::handshake(stream, &hello).expect("handshake");
@@ -437,7 +437,7 @@ fn the_bridge_carries_the_replication_protocol_unchanged() {
     drop(client);
     let _ = child.wait();
 
-    // A client of another version is refused through the bridge too (X9).
+    // A client of another version is refused through the bridge too.
     let (mut child, stream) = raw_bridge(&r);
     let mut hello = Hello::new(ClientKind::Remote, ClientFacts::default());
     hello.versions.protocol += 1;
@@ -484,7 +484,7 @@ fn loads(r: &RemoteEnv) -> u64 {
         .unwrap_or(0)
 }
 
-/// §9.3 "Watching" on Linux: the daemon watches the plugins folder with inotify, 8 levels deep.
+/// Watching on Linux: the daemon watches the plugins folder with inotify, 8 levels deep.
 /// Editing a file 8 levels below the folder reloads the plugins; editing one 9 levels down
 /// doesn't.
 #[test]
@@ -552,7 +552,7 @@ fn gate_counts(r: &RemoteEnv, pane: u64) -> (u64, u64) {
     }
 }
 
-/// §12.1 on Linux, where the gate reads the tty's modes from the PTY master: while the program
+/// The mode gate on Linux, where it reads the tty's modes from the PTY master: while the program
 /// has the tty canonical or echoing, the daemon drops its TSP replies; with both off, the reply
 /// reaches the program.
 #[test]

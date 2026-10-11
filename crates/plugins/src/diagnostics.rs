@@ -1,6 +1,6 @@
 //! Where the runtime's own diagnostics go. The host and window runtimes report through `tracing`
-//! (a spawn filter's late answer, a hook disabled for its budget, a plugin that failed to load,
-//! §9.2, §9.7); [`to_stderr`] makes a process print them, so the daemon's log keeps them.
+//! (a spawn filter's late answer, a hook disabled for its budget, a plugin that failed to load);
+//! [`to_stderr`] makes a process print them, so the daemon's log keeps them.
 
 use std::fmt::Write as _;
 

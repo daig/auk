@@ -2,16 +2,16 @@
 
 ## `tsp/`: recorded TSP sessions
 
-Each `.jsonl` file uses Tern's recording format (book:11579): one message per line, `{"t","dir","verb","params","body"}`. `out` lines are what the program wrote; `in` lines are what the terminal answered. `.pty` files hold the raw bytes the program wrote, and `.meta.json` files hold the command, size, environment and per-verb counts.
+Each `.jsonl` file uses Tern's recording format: one message per line, `{"t","dir","verb","params","body"}`. `out` lines are what the program wrote; `in` lines are what the terminal answered. `.pty` files hold the raw bytes the program wrote, and `.meta.json` files hold the command, size, environment and per-verb counts.
 
 | Fixture | Source |
 | --- | --- |
-| `docs-ask` | The book's canonical CLI session (book:10827-10871), taken by `tools/docs_fixtures.py`. The `s` and `f` bodies come from the blocks that spell out the elided CSS and form. |
-| `docs-ls` | The book's `listen:false` table (book:11134-11149). |
-| `docs-regions` | The book's inline surface with `main`, `dock` and `layer` (book:11205-11221). The `o` is implied by the book and added. |
-| `docs-frames` | The book's two frames to a flow surface (book:11298-11314). The `o` is implied by the book and added. |
+| `docs-ask` | The canonical CLI session printed in Tern's protocol docs, transcribed exactly. The `s` and `f` bodies come from the blocks that spell out the elided CSS and form. |
+| `docs-ls` | The docs' `listen:false` table. |
+| `docs-regions` | The docs' inline surface with `main`, `dock` and `layer`. The `o` is implied by the docs and added. |
+| `docs-frames` | The docs' two frames to a flow surface. The `o` is implied by the docs and added. |
 | `python-{table,ask,progress,chat}` | The tern-sdk Python examples at `19658cb`, run under `tools/tsp_record.py` with the scenarios in `scenarios/`. |
-| `omp-session` | omp 18.8.5 (re-recorded 2026-10-08; the 18.8.4 recording is in git history at `75f3bb6`), three prompts (an overview, an edit with a diff, a shell command) in a scratch copy of tern-sdk, under `tools/tsp_record.py` with `scenarios/omp-session.json`. About 91 s and 541 frames. |
+| `omp-session` | omp 18.8.5 (recorded 2026-10-08), three prompts (an overview, an edit with a diff, a shell command) in a scratch copy of tern-sdk, under `tools/tsp_record.py` with `scenarios/omp-session.json`. About 91 s and 541 frames. |
 | `omp-settings` | omp 18.8.5's `/settings` under the recorder's hello (every kind, `aside` among the features), no prompts: `tools/tsp_record.py --raw` with `scenarios/omp-settings.json`, `HOME` the user's own (omp's login; a fresh `HOME` lands in the sign-in screen). Two ↓ move the focus ring, ⏎ opens the Symbol Preset menu and ↓ moves its highlight, Esc closes it, a `page` action opens Shell, an `activate` edits a text row (an empty draft), Esc, Esc. Nothing was changed: `~/.omp/agent/config.yml` hashed the same before and after. 15 frames on `s:1`; the `prefs` node is `v` in `layer`. |
 | `omp-settings-theme` | omp 18.8.5's `/settings` (recorded 2026-10-09) under the recorder's hello, no prompts: `tools/tsp_record.py --raw` with `scenarios/omp-settings-theme.json`, `HOME` the user's own. ⏎ on Dark Theme (focused when the sheet opens; 102 themes, over omp's 12) opens its submenu as an md `picker` child (`w`) of the `prefs` node `v`, drawn in the editor card; Esc closes it, Esc the sheet. Nothing applied: `~/.omp/agent/config.yml` hashed the same before and after. 9 frames on `s:1`. |
 | `omp-picker-sessions` | omp 18.8.5 (recorded 2026-10-09), no prompts: `omp --no-title --session-dir <scratch> --resume` under `tools/tsp_record.py --raw` with `scenarios/omp-picker-sessions.json`, the session dir a scratch copy of the two sessions the `omp-session` recording saved, cwd their folder. The session picker opens at start as a `screen` sheet of `cards` (side preview, a Today group, `when`/`size` columns); ↓, `over` typed (hits, an `itemsAdd` with a "history" badge, then one without), four backspaces, Esc quits. 9 frames on `s:2`. |
@@ -40,7 +40,7 @@ htop and tmux show the time, so re-recording gives different bytes; the committe
 ## `scenarios/`
 
 - `*.json`: step lists for `tools/tsp_record.py --scenario` (see the tool's docstring).
-- `*.auk`: scenario scripts for `auk shot` (spec §11.3; syntax in `crates/cli/src/scenario.rs`). The `cli` suite runs each in a hermetic HOME (the test shell config, plus `sdk`, `python3` and `w/` for `sdk-table`) and compares every `shot` with `goldens/`.
+- `*.auk`: scenario scripts for `auk shot` (syntax in `crates/cli/src/scenario.rs`). The `cli` suite runs each in a hermetic HOME (the test shell config, plus `sdk`, `python3` and `w/` for `sdk-table`) and compares every `shot` with `goldens/`.
 
 ## `goldens/`
 

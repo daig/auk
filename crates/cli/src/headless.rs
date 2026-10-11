@@ -1,7 +1,7 @@
-//! The headless window (§11.3, §21): a client that attaches to the daemon like an app window,
+//! The headless window: a client that attaches to the daemon like an app window,
 //! keeps a follower replica per pane (TSP included), and serves its own control endpoint so tests
 //! and scripts can read what it shows. When it is a pane's primary it acks the frames it has
-//! applied as drawn (§7.10); drawing surfaces headlessly arrives with the views, at the same point.
+//! applied as drawn.
 //!
 //! Control commands: `ping`, `version`, `panes`, `layout`, `state-hash PANE`,
 //! `capture PANE [--scrollback]`, `send PANE text|paste WORD…`, `send PANE keys KEY…`,
@@ -9,7 +9,7 @@
 //! `click PANE SF NODE [--double] [--menu ACT] [--mods shift,ctrl,alt,meta]`, `facts JSON`,
 //! `effects`, `catalog`, `lens PANE`, `remote`, `clear-scrollback PANE`, `quit`.
 //!
-//! It also draws (`draw.rs`) and takes the scenario commands of §11.3 (`script.rs`): harness
+//! It also draws (`draw.rs`) and takes the scenario commands (`script.rs`): harness
 //! commands (`size`, `appearance`, `wait`, `freeze-anims`, `thaw`, `motion-at`, `key`, `type`,
 //! `paste`, `shot`), control commands (`tree`, `state`, `css`, `dump`, `perf`) and terminal
 //! commands (`ready`, `run`, `expect`, `split`, `new`, `close`, `focus`, `feed`, `surface-play`,
@@ -17,7 +17,7 @@
 //! position, the shown panes have the size the window gives them, and the stream goes quiet.
 //!
 //! With [`Options::remote`] the window attaches to a remote host's daemon over SSH
-//! (`auk-remote`, §10.2): the link reconnects and resyncs after a drop, holding typing meanwhile,
+//! (`auk-remote`): the link reconnects and resyncs after a drop, holding typing meanwhile,
 //! and `remote` reports its state and the host's identity chain.
 
 use std::collections::BTreeMap;
@@ -58,7 +58,7 @@ pub struct Options {
     pub scenario: Option<Scenario>,
 }
 
-/// A deterministic headless window's setup (§11.3).
+/// A deterministic headless window's setup.
 #[derive(Clone)]
 pub struct Scenario {
     pub spec: draw::WindowSpec,
@@ -91,10 +91,10 @@ struct View {
     effects: Vec<Value>,
     /// Stream errors seen (out-of-order items); a correct daemon never causes any.
     errors: Vec<String>,
-    /// The host's plugin catalog (§9.4), from the welcome and later `catalog` messages.
+    /// The host's plugin catalog, from the welcome and later `catalog` messages.
     catalog: Value,
-    /// Lens views that arrived before this window's replica had their block, retried for 5 s
-    /// (§9.6): `(pane, block, view, when)`.
+    /// Lens views that arrived before this window's replica had their block, retried for 5 s:
+    /// `(pane, block, view, when)`.
     early_views: Vec<EarlyView>,
     /// TSP changes not yet drawn, per pane, in order (the draw thread's views take them).
     pending: BTreeMap<PaneId, Vec<auk_tsp::Changes>>,
@@ -104,9 +104,9 @@ struct View {
     last_message: Option<Instant>,
     /// Panes whose replica was rebuilt from a snapshot: their drawn views start over.
     reset: std::collections::BTreeSet<PaneId>,
-    /// Blobs asked of the daemon, or sent by it after a snapshot (§7.12), per pane.
+    /// Blobs asked of the daemon, or sent by it after a snapshot, per pane.
     asked: BTreeMap<PaneId, std::collections::BTreeSet<String>>,
-    /// The clients attached to the host, from the daemon's last presence message (§10.1).
+    /// The clients attached to the host, from the daemon's last presence message.
     presence: Vec<auk_mirror::ClientInfo>,
 }
 
@@ -208,7 +208,7 @@ impl Headless {
         let mut draw = None;
         match msg {
             DaemonMsg::Snapshot { pane, snapshot } => {
-                // The views' sheet checker, as a drawing window's replica has (§8.4).
+                // The views' sheet checker, as a drawing window's replica has.
                 let tsp = auk_tsp::TspPane::with(
                     auk_replica::tsp_config(&snapshot.settings),
                     auk_views::sheet_checker(),
@@ -245,7 +245,7 @@ impl Headless {
                 {
                     view.focused = Some(first);
                     // A scenario window focuses like an app window; a plain headless window
-                    // only focuses when told (focus makes it the pane's primary, §15.5).
+                    // only focuses when told (focus makes it the pane's primary).
                     if self.deterministic {
                         let _ = self.send(&ClientMsg::Focus { pane: first });
                     }
@@ -256,7 +256,7 @@ impl Headless {
             }
             DaemonMsg::Primary { pane, you } => {
                 view.primary.insert(pane, you);
-                // A new primary draws the current documents and acks them (E4).
+                // A new primary draws the current documents and acks them.
                 draw = Some((pane, true));
             }
             DaemonMsg::Effect(effect) => view.effects.push(json!(effect)),
@@ -347,7 +347,7 @@ impl Headless {
                 None => Err("facts: expected a JSON object".into()),
             },
             "effects" => Ok(json!(self.view().effects)),
-            // The clients attached to the host, with their identities (§10.1).
+            // The clients attached to the host, with their identities.
             "presence" => Ok(json!(self.view().presence)),
             "catalog" => Ok(self.view().catalog.clone()),
             "lens" => self.with_replica(args, |r| {
@@ -379,7 +379,7 @@ impl Headless {
                 },
                 _ => Err("resize: expected a pane, columns and rows".into()),
             },
-            // The window's Clear Scrollback (§5.5), as the app's ⌘K sends it.
+            // The window's Clear Scrollback, as the app's ⌘K sends it.
             "clear-scrollback" => {
                 pane_id(args).and_then(|pane| self.sent(&ClientMsg::ClearScrollback { pane }))
             }
@@ -435,7 +435,7 @@ impl Headless {
             .ok_or_else(|| format!("no replica of pane {pane}"))?)
     }
 
-    /// Encodes input from this window's replica's modes (§15.4) and sends it.
+    /// Encodes input from this window's replica's modes and sends it.
     fn cmd_send(&self, args: &[String]) -> Result<Value, String> {
         let pane = pane_id(args)?;
         let (mode, rest) = match args.get(1..) {
@@ -482,7 +482,7 @@ impl Headless {
         })
     }
 
-    /// A pointer gesture on a node (§7.8): resolves it as a window does, flips local state, and
+    /// A pointer gesture on a node: resolves it as a window does, flips local state, and
     /// sends the event it gives, if any. Returns the event (or null).
     fn cmd_click(&self, args: &[String]) -> Result<Value, String> {
         let pane = pane_id(args)?;
@@ -538,7 +538,7 @@ impl Headless {
         }
     }
 
-    /// Sends a message; the reply says when the link held it until a resync (§10.1).
+    /// Sends a message; the reply says when the link held it until a resync.
     fn sent(&self, msg: &ClientMsg) -> Result<Value, String> {
         match self.link().send(msg) {
             Ok(auk_remote::Delivery::Held) => Ok(json!({"held": true})),
@@ -548,7 +548,7 @@ impl Headless {
     }
 }
 
-/// How long an early lens view waits for its block (§9.6: replicas retry an early view for 5 s).
+/// How long an early lens view waits for its block (replicas retry an early view for 5 s).
 const EARLY_VIEW_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// An early lens view: `(pane, block, view, when it arrived)`.
@@ -591,10 +591,9 @@ fn apply(view: &mut View, pane: PaneId, seq: u64, item: Item<'_>) {
     }
 }
 
-/// Where a window draws a pane after the replica changed, and then acks what it drew (§7.10):
+/// Where a window draws a pane after the replica changed, and then acks what it drew:
 /// only the pane's primary acks, each live listening surface's last frame once it has been
-/// drawn. Headless rendering of surfaces arrives with the views; the ack point stays here. Blobs
-/// the pane's documents name and the window lacks are asked for here too (§7.12).
+/// drawn. Blobs the pane's documents name and the window lacks are asked for here too.
 fn draw_pane(view: &mut View, pane: PaneId, all: bool) -> Vec<ClientMsg> {
     let primary = view.primary.get(&pane).copied().unwrap_or(false);
     let View {
@@ -803,7 +802,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
     println!("ready {}", opts.control.display());
     let headless = window.headless.clone();
     let result = window.join();
-    // A remote window whose link failed stays up, showing `failed` (§10.1), until `quit`.
+    // A remote window whose link failed stays up, showing `failed`, until `quit`.
     if let Err(err) = &result
         && opts.remote.is_some()
         && headless.link().status().label.starts_with("failed")

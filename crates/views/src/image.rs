@@ -1,4 +1,4 @@
-//! Images (§8.5, §12.3; research/elements.md §2 and §7.3 `image`): blobs decoded into pictures for
+//! Images: blobs decoded into pictures for
 //! the UI engine's replaced boxes, the sanitized SVG path, the frame clock of animations, and the
 //! images the terminal ships (`builtin`).
 //!
@@ -10,7 +10,7 @@
 //!   ([`sanitize_svg`]) and drawn by resvg at the display's density.
 //! - Decoded pictures are shared by every view in the process, keyed by blob id (and density for
 //!   vector pictures), least recently used first out past 256 MiB.
-//! - Big rasters decode off the frame path ([`request_blob`], amendment A9): natively on a
+//! - Big rasters decode off the frame path ([`request_blob`]): natively on a
 //!   decoding thread, in the browser a picture per clock tick ([`pump`]); the views show a
 //!   "decoding" card until the picture is cached, then redraw the node.
 
@@ -28,9 +28,9 @@ use image::{AnimationDecoder, DynamicImage, ImageFormat, ImageReader, RgbaImage}
 use resvg::usvg::{self, roxmltree};
 use vello::peniko::{Blob, ImageAlphaType, ImageData, ImageFormat as PixelFormat};
 
-/// The largest raster image, per side (§8.5, §12.3).
+/// The largest raster image, per side.
 pub const MAX_SIDE: u32 = 4096;
-/// The largest SVG blob (§8.5).
+/// The largest SVG blob.
 pub const MAX_SVG: usize = 256 << 10;
 /// Animations with more frames show their first frame, still.
 pub const MAX_FRAMES: usize = 1024;
@@ -281,7 +281,7 @@ fn content(img: RgbaImage, density: f32, natural: Option<(f32, f32)>) -> ImageCo
 // ---------------------------------------------------------------------------------------------
 // SVG
 
-/// Elements an SVG keeps (book:5951).
+/// Elements an SVG keeps.
 const SVG_ELEMENTS: [&str; 11] = [
     "svg",
     "g",
@@ -377,7 +377,7 @@ const SVG_ATTRIBUTES: &[&str] = &[
 
 const SVG_NS: &str = "http://www.w3.org/2000/svg";
 
-/// Rebuilds an SVG from the allowlist (§12.3; book:5951): only [`SVG_ELEMENTS`] (anything else is
+/// Rebuilds an SVG from the allowlist: only [`SVG_ELEMENTS`] (anything else is
 /// dropped with its subtree: `script`, `foreignObject`, `image`, `use`, `title`, `style`…), only
 /// [`SVG_ATTRIBUTES`] (no `style`, handlers, `href` or namespaced attributes), `url()` only as a
 /// local `url(#id)`, and every `id` (and each reference to one) prefixed with `prefix` so copies
@@ -621,7 +621,7 @@ pub(crate) fn render_svg(svg: &str, density: f32) -> Result<(ImageContent, (f32,
 // ---------------------------------------------------------------------------------------------
 // Images the terminal ships
 
-/// The images `builtin` names (book:5961): only `"omp"`, omp's animated gradient mark. Ours is
+/// The images `builtin` names: only `"omp"`, omp's animated gradient mark. Ours is
 /// drawn here: a rounded square whose gradient turns, with a ring and a dot.
 pub const BUILTINS: [&str; 1] = ["omp"];
 
@@ -757,7 +757,7 @@ pub const INLINE_BYTES: usize = 256 << 10;
 /// Rasters of at most this many pixels (512×512) decode on the caller's thread.
 pub const INLINE_PIXELS: u64 = 512 * 512;
 
-/// A blob's picture, without making the caller wait for a big one (amendment A9, §8.5): SVGs,
+/// A blob's picture, without making the caller wait for a big one: SVGs,
 /// small rasters (at most [`INLINE_BYTES`] encoded and [`INLINE_PIXELS`] pixels) and ones that
 /// can't show (their header says why: unreadable, or over [`MAX_SIDE`]) are decoded now, as [`load_blob`] does, so they never
 /// flash a placeholder; a bigger raster decodes in the background and is [`Poll::Pending`]
@@ -1010,7 +1010,7 @@ pub fn data_url(url: &str) -> Option<(Vec<u8>, Option<String>)> {
     Some((bytes, mime))
 }
 
-/// The picture of a `data:` URL, for a plugin sheet's `background-image` (§9.8 CSS): PNG, JPEG,
+/// The picture of a `data:` URL, for a plugin sheet's `background-image`: PNG, JPEG,
 /// GIF, WebP (their first frame) or sanitized SVG drawn at `density`, at most 4096 px a side.
 pub fn load_data_url(url: &str, density: f32) -> Option<ImageContent> {
     let (bytes, mime) = data_url(url)?;

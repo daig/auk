@@ -1,4 +1,4 @@
-//! One app window (§4.2, §4.3): a window key's sessions, shown through follower replicas over
+//! One app window: a window key's sessions, shown through follower replicas over
 //! the window's own daemon connection. Layout is daemon state, replicated to every window; focus,
 //! the shown session and tab, scrolling and selection belong to the window.
 
@@ -50,7 +50,7 @@ enum Pending {
     Split(PaneId),
 }
 
-/// Per-pane view state (§4.4): never replicated.
+/// Per-pane view state: never replicated.
 #[derive(Clone, Debug, Default)]
 pub struct PaneView {
     pub scroll: Scroll,
@@ -125,7 +125,7 @@ pub struct WinState {
     pub active_tab: BTreeMap<SessionId, TabId>,
     pub tab_focus: BTreeMap<TabId, PaneId>,
     pub views: BTreeMap<PaneId, PaneView>,
-    /// Each pane's surfaces (§6.2), kept for every pane the window follows, shown or not.
+    /// Each pane's surfaces, kept for every pane the window follows, shown or not.
     pub surfaces: BTreeMap<PaneId, PaneSurfaces>,
     /// The surfaces painted something last frame, so the UI layer has them to clear.
     surfaces_painted: bool,
@@ -160,7 +160,7 @@ pub struct WinState {
     /// The focused pane's text and the chrome, as the accessibility tree last saw them.
     a11y_seen: Option<(u64, u64)>,
     pub a11y_generation: u64,
-    /// The window half of every plugin (§9.8), and what it shows.
+    /// The window half of every plugin, and what it shows.
     pub plugins: plugins::PluginState,
     /// The palette, context menu and image viewer.
     pub overlays: overlays::Overlays,
@@ -170,9 +170,9 @@ pub struct WinState {
     pub(crate) viewer_svg: bool,
     /// Bumped whenever the chrome document is rebuilt, for the accessibility tree.
     chrome_updates: u64,
-    /// Find (§6.2): the bar, the matches and the current one.
+    /// Find: the bar, the matches and the current one.
     pub find: Option<find::Find>,
-    /// The target of the link under the pointer, shown while hovering (§7.14, §12.2).
+    /// The target of the link under the pointer, shown while hovering.
     pub hover_link: Option<String>,
     /// The title the window shows.
     pub title_shown: Option<String>,
@@ -183,12 +183,12 @@ pub struct WinState {
     /// The pointer shape last set.
     pub pointer_shape: auk_platform_macos::PointerShape,
     /// The `title` tooltip of the surface node under the pointer, and where the pointer is, in
-    /// window points (§8.1).
+    /// window points.
     pub hover_title: Option<(String, f64, f64)>,
     /// Where the pointer last moved over the window, in window points (none once it left): the
     /// hover readouts follow what changes under a pointer that stays still.
     pointer_at: Option<(f64, f64)>,
-    /// A drag selecting in a program field: the pane and the offset it started at (§7.9).
+    /// A drag selecting in a program field: the pane and the offset it started at.
     field_drag: Option<(PaneId, u64)>,
     /// The pane whose `prefs` ordered list item is being dragged by its grip.
     reorder_drag: Option<PaneId>,
@@ -199,7 +199,7 @@ pub struct WinState {
     presence_shown: Option<String>,
     /// The replica generation each pane's command blocks were last drawn from.
     lens_seen: BTreeMap<PaneId, u64>,
-    /// The settings file, as last read (§7.8, §7.9, §7.12, §7.13, §9.8).
+    /// The settings file, as last read.
     pub settings: crate::settings::Settings,
 }
 
@@ -340,7 +340,7 @@ impl WinState {
                 window.request_frame();
             }
             Event::SystemSettings => {
-                // The 12-hour clock or Reduce Motion may have changed (§4.5, §7.13).
+                // The 12-hour clock or Reduce Motion may have changed.
                 self.ui_dirty = true;
                 self.send_facts();
                 window.request_frame();
@@ -362,7 +362,7 @@ impl WinState {
                 }
             }
             Event::Preedit(preedit) => {
-                // A focused program field draws the composition at its caret (§7.9).
+                // A focused program field draws the composition at its caret.
                 let in_field = self.focused_pane().is_some_and(|pane| {
                     let (text, cursor) = preedit.as_ref().map_or((String::new(), 0), |p| {
                         (
@@ -378,7 +378,7 @@ impl WinState {
                 window.request_frame();
             }
             Event::ModifiersChanged(mods) => {
-                // ⌘ arms the link under the pointer (A13).
+                // ⌘ arms the link under the pointer.
                 if self.track_grid_link(window, None, mods.meta) {
                     window.request_frame();
                 }
@@ -557,8 +557,8 @@ impl WinState {
                 shared.closed.clone(),
             )
         };
-        // A link that gave up keeps its window open, showing `failed` and why in the status line
-        // (§10.1); a detach or a local daemon that went away closes it.
+        // A link that gave up keeps its window open, showing `failed` and why in the status line;
+        // a detach or a local daemon that went away closes it.
         let failed = matches!(
             self.conn.link_status().state,
             auk_remote::State::Failed { .. }
@@ -605,7 +605,7 @@ impl WinState {
     }
 
     /// Sends an edit that adds a pane (a session, a tab, a split) as a request, so the pane it
-    /// adds is known to be this window's when the answer comes (§9.8 `pane_created`).
+    /// adds is known to be this window's when the answer comes (for `pane_created`).
     pub fn create(&mut self, edit: LayoutEdit) {
         match self.conn.request_async(edit) {
             Some(id) => self.plugins_creating(id),
@@ -614,7 +614,7 @@ impl WinState {
     }
 
     /// Focuses a pane in this window (its session and tab come forward) and makes this window
-    /// its primary (§15.5).
+    /// its primary.
     pub fn focus_pane(&mut self, pane: PaneId) -> bool {
         let sessions = self.sessions();
         let Some((session, tab)) = sessions.sessions.iter().find_map(|s| {
@@ -762,7 +762,7 @@ impl WinState {
         // An armed link's pointing hand outlives AppKit resetting the cursor (a menu bar
         // rebuilt on a settings reload, a window change): put it back.
         self.reassert_pointer(window);
-        // The image viewer's picture, once its background decode is done (A9).
+        // The image viewer's picture, once its background decode is done.
         if self.poll_viewer() {
             window.request_frame();
         }
@@ -795,7 +795,7 @@ impl WinState {
         let mut animating = false;
         let mut find_synced = false;
         let mut surfaces_changed = false;
-        // The grid link a click would open now draws solid (A13).
+        // The grid link a click would open now draws solid.
         let armed = self.armed_link();
         let link_style = self.settings.hyperlinks;
         let mut phase = Phase::default();
@@ -837,9 +837,9 @@ impl WinState {
                     find_synced |= self.find.as_ref().is_some_and(|f| f.pane == *pane);
                 }
                 sf.configure(tsp, settings.clone(), scale as f32);
-                // Plugin sheets cascade after the built-in ones (§8.4 step 3).
+                // Plugin sheets cascade after the built-in ones.
                 sf.set_plugin_sheets(&self.plugins.sheets);
-                // Command blocks (§9.6), when the replica changed.
+                // Command blocks, when the replica changed.
                 if self.lens_seen.get(pane) != Some(&data.generation) {
                     self.lens_seen.insert(*pane, data.generation);
                     let blocks = lens_inputs(&data.replica);
@@ -871,7 +871,7 @@ impl WinState {
                 view.grid_origin = origin;
                 let px = |v: f64| (v * scale).round();
 
-                // The pane's flow (§6.2): grid rows, and surface blocks at their anchor rows.
+                // The pane's flow: grid rows, and surface blocks at their anchor rows.
                 let sf = self.surfaces.get_mut(&pane).expect("synced above");
                 let pane_focused = self.key_window && Some(pane) == focused;
                 phase.lap("sync");
@@ -924,7 +924,7 @@ impl WinState {
                 let mut snap =
                     GridSnapshot::from_lines(term, &self.theme, &render_view, composed.first, rows);
                 find::tint(self.find.as_ref(), pane, composed.first, &mut snap);
-                // The input method's composition draws over the cursor's cells (§19).
+                // The input method's composition draws over the cursor's cells.
                 let cursor = term.cursor();
                 let cursor_line = term.history_len() + usize::from(cursor.row);
                 if Some(pane) == focused
@@ -975,7 +975,7 @@ impl WinState {
                     });
                 }
                 phase.lap("grid");
-                // Acks (§7.10, §15.5): the surfaces this frame draws, only as the pane's primary.
+                // Acks: the surfaces this frame draws, only as the pane's primary.
                 if data.primary {
                     for s in data.replica.tsp().surfaces() {
                         if s.listens()
@@ -1089,7 +1089,7 @@ impl WinState {
             }
             v.push(n as f64);
         }
-        // Window events go to plugins after each render (§9.8).
+        // Window events go to plugins after each render.
         self.plugins_after_frame();
     }
 
@@ -1245,7 +1245,7 @@ impl WinState {
     }
 
     fn key(&mut self, window: &Window, key: KeyInput) {
-        // Overlays first, then the plugin keymap layer (§9.8 "Binds").
+        // Overlays first, then the plugin keymap layer.
         if self.overlay_key(window, &key) || self.find_key(&key) || self.plugin_key(&key) {
             window.request_frame();
             return;
@@ -1253,7 +1253,7 @@ impl WinState {
         let Some(pane) = self.focused_pane() else {
             return;
         };
-        // Native editing in a program field (§7.9).
+        // Native editing in a program field.
         if self.field_key_input(window, pane, &key) {
             return;
         }
@@ -1267,7 +1267,7 @@ impl WinState {
     }
 
     /// Runs a command however it was started (menu, key, palette, status line, plugin):
-    /// plugin overrides first, which may skip the built-in (§9.8 "Overrides").
+    /// plugin overrides first, which may skip the built-in.
     pub fn command(&mut self, window: &Window, cmd: Cmd) {
         if self.run_override(cmd) {
             window.request_frame();
@@ -1355,14 +1355,14 @@ impl WinState {
                 }
             }
             Cmd::Copy => {
-                // A program field's native selection first (§7.9), then the grid's.
+                // A program field's native selection first, then the grid's.
                 let field = focused.and_then(|pane| self.field_selection_text(pane));
                 if let Some(text) = field.or_else(|| self.selection_text()) {
                     crate::app::clipboard_set(&text);
                 }
             }
             Cmd::Paste => {
-                // Into a program field with a native selection, a paste is an `edit` (§7.9).
+                // Into a program field with a native selection, a paste is an `edit`.
                 if let (Some(pane), Some(text)) = (focused, crate::app::clipboard_get())
                     && !self.surface_text(window, pane, &text)
                 {
@@ -1417,7 +1417,7 @@ impl WinState {
                 }
             }
             Cmd::ClearScrollback => {
-                // A pane operation (§5.5): the daemon records it in-band, so every replica clears
+                // A pane operation: the daemon records it in-band, so every replica clears
                 // and surfaces anchored in the scrollback end.
                 if let Some(pane) = focused {
                     if let Some(v) = self.views.get_mut(&pane) {
@@ -1432,7 +1432,7 @@ impl WinState {
             Cmd::RenameSession => self.open_session_rename(),
             Cmd::ReloadPlugins => self.plugins_reload(),
             Cmd::ReloadSettings => self.reload_settings(),
-            // Locks the shown session, or unlocks it (§4.3).
+            // Locks the shown session, or unlocks it.
             Cmd::LockSession => {
                 if let Some(s) = self.session(&sessions) {
                     self.edit(LayoutEdit::LockSession {
@@ -1491,7 +1491,7 @@ impl WinState {
                 let Some(pane) = self.tab_layout.pane_at(m.x, m.y) else {
                     return;
                 };
-                // A secondary press over a surface opens its context menu (§7.8).
+                // A secondary press over a surface opens its context menu.
                 if button == MouseButton::Right && self.context_menu_at(pane, &m) {
                     window.request_frame();
                     return;
@@ -1501,7 +1501,7 @@ impl WinState {
                 } else {
                     let _ = self.conn.send(&ClientMsg::Focus { pane });
                 }
-                // A press on an ordered list's grip drags its item (book: prefs).
+                // A press on an ordered list's grip drags its item (as in Tern's prefs).
                 if button == MouseButton::Left && m.clicks <= 1 && self.reorder_press(pane, &m) {
                     window.request_frame();
                     return;
@@ -1520,7 +1520,7 @@ impl WinState {
                     return;
                 }
                 // ⌘-click opens a link or a printed path (routes first).
-                // With "links_plain_click", a plain click on a link opens it too (§7.8).
+                // With "links_plain_click", a plain click on a link opens it too.
                 if button == MouseButton::Left
                     && let Some((p, line, col)) = self.cell_at(m.x, m.y)
                     && p == pane
@@ -1637,7 +1637,7 @@ impl WinState {
     }
 
     /// A press over a surface (a block, the dock, a screen surface or a layer) goes to the pane's
-    /// view (§7.8): local flips apply at once and events go to the daemon. Returns whether a
+    /// view: local flips apply at once and events go to the daemon. Returns whether a
     /// surface took it.
     fn surface_click(
         &mut self,
@@ -1681,7 +1681,7 @@ impl WinState {
             },
         };
         let outcomes = if lens_at.is_some() {
-            // A command block (§9.6): Native/Raw and Copy are local; lens view events go to
+            // A command block: Native/Raw and Copy are local; lens view events go to
             // `lens:<block>`.
             sf.lens_click(ev)
         } else {
@@ -1699,7 +1699,7 @@ impl WinState {
     }
 
     /// Text typed while a program field has focus and a native selection goes into the field as an
-    /// `edit` (§7.9); otherwise it is keys.
+    /// `edit`; otherwise it is keys.
     fn surface_text(&mut self, window: &Window, pane: PaneId, text: &str) -> bool {
         let Some(sf) = self.surfaces.get_mut(&pane) else {
             return false;
@@ -1736,7 +1736,7 @@ impl WinState {
                 Outcome::Copy(text) => {
                     crate::app::clipboard_set(&text);
                 }
-                // Paths and links a surface opens go through the routes (§9.8).
+                // Paths and links a surface opens go through the routes.
                 Outcome::Open(target) => self.open_from_surface(pane, &target),
                 Outcome::Zoom(zoom) => self.show_viewer(pane, *zoom),
                 Outcome::Keys | Outcome::Redraw => {}
@@ -1828,7 +1828,7 @@ impl WinState {
         // Pixels: trackpads report points, wheels report lines.
         let dy = if s.precise { s.dy * scale } else { s.dy * ch };
         // Over a surface, its scroll containers take the wheel first: a screen surface's `main`
-        // takes the pane's height and scrolls itself (§7.5), as do lists and fields that scroll.
+        // takes the pane's height and scrolls itself, as do lists and fields that scroll.
         // A screen surface covers the grid, so the wheel never scrolls the hidden grid under it.
         if let Some((dx, sy)) = self.surface_point(pane, s.x, s.y) {
             let moved = self.surfaces.get_mut(&pane).is_some_and(|sf| {
@@ -1976,7 +1976,7 @@ fn cycle<T: Copy + PartialEq>(ids: &[T], current: Option<T>, forward: bool) -> O
 }
 
 /// A pane's title: the program's (OSC 0/2), else its cwd's last component.
-/// A replica's command blocks as the views draw them (§9.6).
+/// A replica's command blocks as the views draw them.
 fn lens_inputs(replica: &auk_replica::Replica) -> Vec<auk_views::LensInput> {
     replica
         .lens_blocks()

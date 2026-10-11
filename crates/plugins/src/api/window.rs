@@ -1,6 +1,6 @@
-//! Window-only registration (§9.8): `tern.on` with the window events, `tern.command`,
+//! Window-only registration: `tern.on` with the window events, `tern.command`,
 //! `tern.bind`, `tern.override`, `tern.route.open`/`link`, `tern.chrome.*` and `tern.css`.
-//! Nothing here can reach a block's frames (AC14): blocks live in host workers.
+//! Nothing here can reach a block's frames: blocks live in host workers.
 
 use std::rc::Rc;
 

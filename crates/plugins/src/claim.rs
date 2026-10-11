@@ -1,4 +1,4 @@
-//! Lens claims (§9.6 "Claiming a command" and "Matching"): reading a command line as a simple
+//! Lens claims: reading a command line as a simple
 //! command, and matching it against the catalog's lens globs.
 //!
 //! Pure Rust with no Luau, so every replica (windows, the web tab) makes the same decision from
@@ -6,7 +6,7 @@
 
 use crate::catalog::Catalog;
 
-/// Wrapper programs skipped before the real program, with their options (§9.6).
+/// Wrapper programs skipped before the real program, with their options.
 pub const WRAPPERS: &[&str] = &[
     "sudo",
     "doas",
@@ -464,7 +464,7 @@ pub fn file_glob_match(pattern: &str, name: &str) -> bool {
     glob_match(&pattern.to_ascii_lowercase(), &name.to_ascii_lowercase())
 }
 
-/// What the replica knows when a command starts (§9.6 "Preconditions").
+/// What the replica knows when a command starts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Preconditions {
     /// Shell integration reported the command line.
@@ -564,7 +564,6 @@ mod tests {
 
     #[test]
     fn normalization_table() {
-        // research/plugins.md §7.2 (book:1057-1076).
         assert_eq!(
             text("sudo -u root du -sh /var").as_deref(),
             Some("du -sh /var")

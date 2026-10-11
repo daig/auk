@@ -1,4 +1,4 @@
-//! Hostile and random input (§12.1 robustness): mangled recordings and random op streams never
+//! Hostile and random input: mangled recordings and random op streams never
 //! panic, and the state stays replicable (a snapshot rebuilds an equal state).
 
 mod common;

@@ -1,4 +1,4 @@
-//! The reference grid for the `terminal` suite (spec §6, §17, §21): recordings of real programs
+//! The reference grid for the `terminal` suite: recordings of real programs
 //! (`fixtures/terminal/*.vt.jsonl`, made by `tools/vt_record.py`), and `alacritty_terminal` fed
 //! the same bytes and resizes as an Auk grid, compared cell by cell.
 //!

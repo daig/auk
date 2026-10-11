@@ -1,5 +1,5 @@
-//! `block`: the command-lens block (§8.2 T2, §9.6, research/elements.md §2 `block`). Tern draws
-//! it around a lens view; programs get it too (advertised with the T2 kinds, amendment A23).
+//! `block`: the command-lens block (T2). Tern draws it around a lens
+//! view; programs get it too (advertised with the T2 kinds).
 //!
 //! The block shows `native` when there is one, else `raw`. Native/Raw is a local choice kept by
 //! the node's state key (its `key` among its siblings, else its id); only the shown child is in
@@ -14,7 +14,7 @@ use crate::state::state_key;
 use crate::view::{Cx, Look, Mount};
 use auk_tsp::NodeRef;
 
-/// Wrappers the lens label skips, as the claim does (§9.6).
+/// Wrappers the lens label skips, as the claim does.
 const WRAPPERS: [&str; 15] = [
     "sudo",
     "doas",
@@ -76,7 +76,7 @@ pub(crate) fn view_key(node: NodeRef) -> String {
     format!("{}\u{1f}raw-view", state_key(node))
 }
 
-/// Whether the block has a raw child (book: the one with id `raw`, else the last `ansi` child).
+/// Whether the block has a raw child (the one with id `raw`, else the last `ansi` child).
 fn has_raw(node: NodeRef) -> bool {
     node.children().any(|c| is_raw(node, c))
 }
@@ -160,7 +160,7 @@ pub(crate) fn block(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
     }
     let ic = cx.dom.child(label, "span", "sf-block-ic");
     cx.dom.attr(ic, "aria-hidden", "true");
-    // The lens picks the icon (book: `lens`), not an overriding `role`; plugin lenses get the
+    // The lens picks the icon, not an overriding `role`; plugin lenses get the
     // terminal icon.
     let icon_name = if lens.starts_with("plugin.") {
         "terminal"

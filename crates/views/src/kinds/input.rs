@@ -1,4 +1,4 @@
-//! `editor` and `input`: program-owned text fields (§7.9, research/elements.md §6). The view
+//! `editor` and `input`: program-owned text fields. The view
 //! draws text, caret, selection, decorations, ghost, placeholder and IME preedit; keys stay keys.
 
 use super::{begin, part};
@@ -80,7 +80,7 @@ pub(crate) fn field(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look) 
     let max_lines = num_prop(p, "maxLines").filter(|n| *n > 0.0 && is_editor);
     let nowrap = bool_prop(p, "nowrap") || !is_editor;
     let mode = str_prop(p, "mode");
-    // omp's composer draws its Markdown inline (book:9198-9201); a code field stays code.
+    // omp's composer draws its Markdown inline; a code field stays code.
     let markdown = is_editor && !code && in_omp_editor(node);
     look.class_if(markdown, "markdown");
     look.class_if(focused, "focused");

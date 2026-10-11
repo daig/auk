@@ -1,5 +1,5 @@
 //! The app's main-thread state: its options, the GPU device, and the open windows. Windows are
-//! restored from daemon state (§19): one per window key with sessions.
+//! restored from daemon state: one per window key with sessions.
 
 use std::cell::RefCell;
 use std::rc::Rc;

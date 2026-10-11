@@ -1,4 +1,4 @@
-//! The spawn filter's data: the spec a filter sees and how its answer is applied (§9.7).
+//! The spawn filter's data: the spec a filter sees and how its answer is applied.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

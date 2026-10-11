@@ -1,5 +1,4 @@
-//! `el`: HTML elements from a fixed tag list with an attribute allowlist (§7.14,
-//! research/elements.md §2.9).
+//! `el`: HTML elements from a fixed tag list with an attribute allowlist.
 
 use super::begin;
 use crate::common::{bool_prop, str_prop};
@@ -9,7 +8,7 @@ use auk_tsp::NodeRef;
 use auk_ui::ElementState;
 use serde_json::Value;
 
-/// The 42 tags `el` builds; the replica owns the list and reports unknown tags (§7.7).
+/// The 42 tags `el` builds; the replica owns the list and reports unknown tags.
 pub use auk_tsp::EL_TAGS as TAGS;
 
 /// Attributes the terminal owns; `attrs` can't set them.
@@ -39,7 +38,7 @@ pub(crate) fn control_type(node: NodeRef) -> Option<&'static str> {
     match str_prop(node.props(), "type") {
         Some("radio") => Some("radio"),
         Some("checkbox") => Some("checkbox"),
-        // Any other type, or none, draws as an empty `div` (book:8622).
+        // Any other type, or none, draws as an empty `div`.
         _ => None,
     }
 }
@@ -77,7 +76,7 @@ fn attr_allowed(name: &str, control: bool) -> bool {
     }
 }
 
-/// A control's shown checked state, with the local flip (§7.8).
+/// A control's shown checked state, with the local flip.
 pub(crate) fn checked(st: &mut SurfaceState, node: NodeRef) -> bool {
     SurfaceState::flip(&mut st.checks, node.id(), node.prop("checked"), false)
 }

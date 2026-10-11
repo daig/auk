@@ -1,4 +1,4 @@
-//! Portable chrome widgets (§22 `views`: "chrome widgets", D3): the tab bar with its session
+//! Portable chrome widgets: the tab bar with its session
 //! chip and session menu, split dividers and the focus ring, the status line and the command
 //! palette, built by the UI engine into any document; and [`ChromeDoc`], the document a host
 //! draws them in. The macOS app and the browser client draw their chrome with these, so both
@@ -14,7 +14,7 @@ pub const BAR_HEIGHT: f64 = 30.0;
 /// Width of the line between split panes, in points.
 pub const DIVIDER: f64 = 1.0;
 
-/// The status line's height, in points (§9.8 "Chrome formatters").
+/// The status line's height, in points.
 pub const STATUS_HEIGHT: f64 = 22.0;
 
 /// Palette rows shown at once.
@@ -80,7 +80,7 @@ html.light #statusline .sl-plugin { color: #2a2d31; }
 }
 html.light .tab .tab-agent { background-color: #e4d8f7; color: #4a2d7a; }
 .backdrop { position: absolute; left: 0; top: 0; }
-/* The scrim behind sheets (book: --dim). */
+/* The scrim behind sheets (Tern's --dim). */
 .backdrop.dim { background-color: rgba(0, 0, 0, 0.55); }
 html.light .backdrop.dim { background-color: rgba(244, 244, 241, 0.5); }
 .palette {
@@ -135,10 +135,10 @@ pub struct TabItem {
     pub title: String,
     pub active: bool,
     pub zoomed: bool,
-    /// The program its focused pane reports (the hello's `app`, §7.2), shown as the tab's icon
+    /// The program its focused pane reports (the hello's `app`), shown as the tab's icon
     /// while a listening surface is open.
     pub app: Option<String>,
-    /// Its focused pane is an agent pane (§5.1): the tab shows the agent icon.
+    /// Its focused pane is an agent pane: the tab shows the agent icon.
     pub agent: bool,
 }
 
@@ -160,8 +160,8 @@ pub struct StatusItem {
 /// The palette as drawn: the query and the shown rows `(label, group)`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PaletteView {
-    /// The program the focused pane reports (the hello's `app`, §7.2), named in the palette's
-    /// header while a listening surface is open (§12.2).
+    /// The program the focused pane reports (the hello's `app`), named in the palette's
+    /// header while a listening surface is open.
     pub app: Option<String>,
     pub query: String,
     pub rows: Vec<(String, String)>,
@@ -287,7 +287,7 @@ pub fn tab_bar(
             None => doc.set_attribute(e, "aria-label", &t.title),
         }
         if t.agent {
-            // An agent pane's tab carries the agent icon (§5.1).
+            // An agent pane's tab carries the agent icon.
             doc.set_attribute(e, "data-kind", "agent");
             let badge = child(doc, e, "span", "tab-agent", Some(AGENT_GLYPH));
             doc.set_attribute(badge, "role", "img");
@@ -606,7 +606,7 @@ pub struct BarModel {
     pub width: f64,
     pub height: f64,
     pub dark: bool,
-    /// The media features plugin sheets match (§8.4): reduced motion, reduced transparency,
+    /// The media features plugin sheets match: reduced motion, reduced transparency,
     /// more contrast.
     pub media: (bool, bool, bool),
     /// Every session of the window key, the shown one `active`.
@@ -629,7 +629,7 @@ pub struct BarModel {
 pub struct ChromeDoc {
     pub doc: Document,
     body: NodeId,
-    /// Installed plugin sheets `(name, css)`, in order (§9.8 "CSS").
+    /// Installed plugin sheets `(name, css)`, in order.
     sheets: Vec<(String, String)>,
     shown: Option<BarModel>,
 }
@@ -654,7 +654,7 @@ impl ChromeDoc {
             debug_assert!(errors.is_empty(), "{errors:?}");
         }
         doc.set_device_scale(scale);
-        // The chip's glyphs, and plugins' chrome styles may set Nerd Font icons (§9.8).
+        // The chip's glyphs, and plugins' chrome styles may set Nerd Font icons.
         crate::install_fonts(&mut doc);
         let root = doc.root();
         let body = doc.create_element("body");

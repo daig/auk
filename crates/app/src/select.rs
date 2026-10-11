@@ -1,4 +1,4 @@
-//! Text selection in a pane (§6.2): by cell in buffer coordinates, extended by word or line on
+//! Text selection in a pane: by cell in buffer coordinates, extended by word or line on
 //! double and triple clicks, and the selected text for the clipboard.
 
 use auk_term::{Flags, Line, Terminal};

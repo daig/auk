@@ -1,4 +1,4 @@
-//! TeX math (§8.5, §18.4, amendment A23; book: `math`, md Math): the engine on common TeX, its
+//! TeX math: the engine on common TeX, its
 //! errors, determinism and cost; the `math` kind and md math through the TSP engine, the views and
 //! the UI engine; and the formulas painted offscreen in `currentColor` in both themes.
 
@@ -164,7 +164,7 @@ fn typesetting_is_cheap_and_cached() {
 // ---------------------------------------------------------------------------------------------
 // The kind and md math in the views
 
-/// A harness whose engine accepts `math` (T2, advertised once A23 lands).
+/// A harness whose engine accepts `math` (T2).
 fn harness(dark: bool) -> Harness {
     let mut config = auk_tsp::Config::default();
     config.kinds.push("math".into());
@@ -627,7 +627,7 @@ fn formulas_paint_in_current_color_in_both_themes_and_follow_a_sheet() {
 }
 
 /// `$$…$$` amid a paragraph's text is `span.math.display` (inline-level in the `p`, drawn as a
-/// centered line); alone in its paragraph it is `div.math-display` (book: md Math).
+/// centered line); alone in its paragraph it is `div.math-display`.
 #[test]
 fn display_math_amid_text_is_a_span_and_alone_a_div() {
     let mut h = harness(true);

@@ -1,5 +1,5 @@
 //! One plugin VM: sandbox, `require`, the `tern` surface, budgets, the memory cap and native
-//! codegen (§9.2, §20; spike S5).
+//! codegen.
 
 use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};

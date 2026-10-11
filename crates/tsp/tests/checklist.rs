@@ -1,4 +1,4 @@
-//! The TSP conformance checklist (`research/sdk-wire.md` §10) at the library level, one test per
+//! The TSP conformance checklist at the library level, one test per
 //! item, named by its ID. Items that live in another layer (the VT parser's APC framing and DA1,
 //! the daemon's PTY writes, Windows) are covered there; the library side of each is here.
 
@@ -456,9 +456,9 @@ fn b6_advertises_exactly_what_is_drawn() {
     kinds.sort_unstable();
     want.sort_unstable();
     assert_eq!(kinds, want);
-    // `image` joined T1 (D24).
+    // `image` joined T1.
     assert!(kinds.contains(&"image"));
-    // Every T2 kind is drawn and advertised (A23, D26).
+    // Every T2 kind is drawn and advertised.
     for t2 in ["math", "chart", "picker", "prefs", "effort", "block"] {
         assert!(kinds.contains(&t2), "{t2} is advertised");
     }
@@ -2064,7 +2064,7 @@ fn f8_pointer_actions_map_to_events() {
 #[test]
 fn f9_form_values() {
     let mut h = Harness::new();
-    // The book's canonical form (docs-ask), as recorded.
+    // The canonical form in Tern's docs (docs-ask), as recorded.
     let recs =
         auk_conformance::load(&auk_conformance::fixtures_dir().join("docs-ask.jsonl")).unwrap();
     for r in recs.iter().filter(|r| {
@@ -2121,7 +2121,7 @@ fn f9_form_values() {
 #[test]
 fn f10_keys_are_never_events() {
     // Every event the engine can emit is one of the 16; only edit/undo/send stand in for keys,
-    // each behind its feature (B10). There is no key event to send.
+    // each behind its feature. There is no key event to send.
     let mut h = Harness::new();
     h.hello(&["edit", "undo", "send"]);
     h.open(
@@ -2682,7 +2682,7 @@ fn h2_restore_after_a_crash() {
 
 #[test]
 fn a_modal_or_full_overlay_or_a_picker_in_the_layer_covers_the_surface() {
-    // `picker` is T2 (advertised once drawn, D22): accept it here.
+    // `picker` is T2 (advertised once drawn): accept it here.
     let mut config = Config::default();
     config.kinds.push("picker".into());
     let mut h = Harness::with(config);

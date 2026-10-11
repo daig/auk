@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 auk-term = { path = "../term" }
@@ -14,7 +15,7 @@ unicode-width = "0.2"
 pollster = "0.4"
 raw-window-handle = "0.6.2"
 wgpu = "30.0.1"
-# The UI layer: auk-ui paints surfaces and chrome into a Vello scene (§18.1).
+# The UI layer: auk-ui paints surfaces and chrome into a Vello scene.
 vello = "0.11"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 

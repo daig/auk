@@ -1,4 +1,4 @@
-//! Pointer actions, forms and native editing (§7.8, §7.9): view input becomes local flips and
+//! Pointer actions, forms and native editing: view input becomes local flips and
 //! [`ViewEvent`]s. Keys are never events, except `edit`, `undo` and `send` behind the program's
 //! features; everything else returns [`Outcome::Keys`] so the host sends PTY bytes.
 
@@ -49,7 +49,7 @@ pub enum Outcome {
     Redraw,
 }
 
-/// What the image viewer shows (book:5957): the clicked image and, when its parent holds other
+/// What the image viewer shows: the clicked image and, when its parent holds other
 /// blob images (a message's attachments), all of them in order, starting at `index`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Zoom {
@@ -143,7 +143,7 @@ impl PaneView {
             .is_some_and(|c| c.split(' ').any(|x| x == class))
     }
 
-    /// A pointer press (§7.8). Local flips apply at once; the returned outcomes tell the host
+    /// A pointer press. Local flips apply at once; the returned outcomes tell the host
     /// what to send or do.
     pub fn click(&mut self, doc: &mut Document, pane: &TspPane, ev: PointerEvent) -> Vec<Outcome> {
         // A press takes keyboard focus off a node Tab reached; as in Safari, it doesn't focus
@@ -151,7 +151,7 @@ impl PaneView {
         self.blur_nav(doc, pane);
         let under = auk_ui::hit_test(doc, ev.x, ev.y);
         // A modal backdrop takes the pointer: the press reaches nothing beneath and sends no
-        // event (book: overlay "Keys").
+        // event.
         if under.is_some_and(|el| self.class_has(el, "sf-ov-dim")) {
             return vec![Outcome::Redraw];
         }
@@ -169,7 +169,7 @@ impl PaneView {
         self.press_hits(doc, pane, hits, ev)
     }
 
-    /// A press inside a `div.sf-deco.sf-work-head` (book:9939-9945): its run folds or unfolds.
+    /// A press inside a `div.sf-deco.sf-work-head`: its run folds or unfolds.
     fn press_work_head(
         &mut self,
         doc: &mut Document,
@@ -326,7 +326,7 @@ impl PaneView {
                 self.refresh(doc, pane, key, &[node.id().to_owned()]);
                 return Some(vec![Outcome::Redraw]);
             }
-            // A lens block's Native/Raw control and Copy (§9.6): local, no events.
+            // A lens block's Native/Raw control and Copy: local, no events.
             if has("sf-block-opt") && node.kind() == "block" {
                 let raw = doc.attribute(p, "data-view") == Some("raw");
                 let k = crate::kinds::block::view_key(node);
@@ -352,7 +352,7 @@ impl PaneView {
                     &text, cols,
                 ))]);
             }
-            // A mermaid figure's Open (book:5026): the diagram large, in the image viewer.
+            // A mermaid figure's Open: the diagram large, in the image viewer.
             if has("mfig-open") {
                 let id = doc.attribute(p, "data-mfig")?.to_owned();
                 let title = doc
@@ -401,7 +401,7 @@ impl PaneView {
         None
     }
 
-    /// A press on a `picker` part (book:6383-6395): rows select, and activate on the selected
+    /// A press on a `picker` part: rows select, and activate on the selected
     /// row, the row clicked last or a double click (once, never when disabled); buttons, scopes,
     /// tabs, strip chips and the backdrop send `action`; the narrow scope button opens its menu.
     fn picker_press(
@@ -489,7 +489,7 @@ impl PaneView {
         }
     }
 
-    /// Form `values` for an event from inside an `el` form (§7.8), with local flips.
+    /// Form `values` for an event from inside an `el` form, with local flips.
     fn values(&self, surface: &Surface, id: &str) -> Option<Map<String, Value>> {
         let sv = self.surfaces.iter().find(|s| s.key == surface.key())?;
         let checks = &sv.st.checks;
@@ -519,7 +519,7 @@ impl PaneView {
             None
         };
         if let Some(ctl) = control {
-            // Lens views are the plugin's to change: their controls don't flip (§9.6).
+            // Lens views are the plugin's to change: their controls don't flip.
             if !surface.interactive() || self.inert_controls || bool_prop(ctl.props(), "disabled") {
                 return Some(Vec::new());
             }
@@ -581,7 +581,7 @@ impl PaneView {
         Some(self.run_action(doc, pane, surface, node, &act, ev.mods))
     }
 
-    /// Run an action name on a node (§7.8 table).
+    /// Run an action name on a node.
     fn run_action(
         &mut self,
         doc: &mut Document,
@@ -1076,7 +1076,7 @@ impl PaneView {
 
     /// A wheel or trackpad scroll at a point: the innermost scroll container under it that can
     /// still move that way scrolls `up` points toward its start (negative: toward its end). A
-    /// screen surface's `main` takes the height and scrolls itself this way (§7.5); inline and
+    /// screen surface's `main` takes the height and scrolls itself this way; inline and
     /// flow `main`s aren't scroll containers, so they leave the wheel to the pane. Returns
     /// whether something scrolled.
     pub fn wheel(&mut self, doc: &mut Document, x: f32, y: f32, up: f32) -> bool {
@@ -1143,7 +1143,7 @@ impl PaneView {
         }]
     }
 
-    /// Run a menu pick on the node under a point (no modifiers, §7.7).
+    /// Run a menu pick on the node under a point (no modifiers).
     pub fn menu_pick(
         &mut self,
         doc: &mut Document,
@@ -1196,7 +1196,7 @@ fn first_control(node: NodeRef) -> Option<NodeRef> {
 }
 
 impl PaneView {
-    /// What `copy` copies (§7.8): a block's raw output, an `ansi` node's text as drawn (no
+    /// What `copy` copies: a block's raw output, an `ansi` node's text as drawn (no
     /// escapes), md source, raw code, the `href`, or the node's text.
     fn copy_text(&self, node: NodeRef) -> String {
         let ansi = |n: NodeRef| {
@@ -1220,7 +1220,7 @@ impl PaneView {
     }
 
     /// The UTF-16 offset in the focused field nearest a document point, when the point is over
-    /// that field: where a drag that selects in the field (§7.9) has got to.
+    /// that field: where a drag that selects in the field has got to.
     pub fn field_offset_at(&self, doc: &Document, pane: &TspPane, x: f32, y: f32) -> Option<u64> {
         let (surface, node) = self.focused_field(pane)?;
         let el = self.node_element(surface.key(), node.id())?;
@@ -1317,8 +1317,8 @@ fn zoom(surface: &Surface, node: NodeRef) -> Option<Zoom> {
     })
 }
 
-/// A key in the focused program field that native editing may take (§7.9; `research/sdk-wire.md`
-/// §2.5): selecting keys, caret moves between drawn lines, Home and End, deletes with a selection.
+/// A key in the focused program field that native editing may take: selecting keys, caret moves
+/// between drawn lines, Home and End, deletes with a selection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FieldKey {
     Left,
@@ -1415,7 +1415,7 @@ impl PaneView {
         self.focused_field(pane).is_some()
     }
 
-    /// A key in the focused field (§7.9). With native editing it moves the local selection
+    /// A key in the focused field. With native editing it moves the local selection
     /// (`shift`), moves the caret between drawn lines and to their ends, or deletes the
     /// selection, as `edit` events; otherwise the key is the program's ([`Outcome::Keys`]).
     pub fn field_key(

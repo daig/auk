@@ -1,4 +1,4 @@
-//! The CoreText rasterizer: the app's native look (§18.3).
+//! The CoreText rasterizer: the app's native look.
 //!
 //! Each cluster is set as a `CTLine` in the face fontique chose, so CoreText shapes combining
 //! marks and emoji sequences itself, and draws into a CoreGraphics bitmap: alpha-only for text,

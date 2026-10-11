@@ -1,5 +1,5 @@
 //! Serialize a projected surface (its DOM plus every sheet that applies) to a standalone HTML page,
-//! so the layout suite can lay the same DOM and CSS out in WebKit (GOAL.md `layout`).
+//! so the layout suite can lay the same DOM and CSS out in WebKit.
 
 use crate::dom::Written;
 use auk_ui::{Document, NodeId};

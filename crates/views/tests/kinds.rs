@@ -1,5 +1,5 @@
 //! Every T0 and T1 kind renders through the TSP engine into the views and the UI engine, with its
-//! props, children and terminal-owned behavior (research/elements.md §2). The surface is shared
+//! props, children and terminal-owned behavior. The surface is shared
 //! with the `layout` suite (`crates/conformance/probes/kinds.json`).
 
 mod common;
@@ -50,7 +50,7 @@ fn every_t0_t1_kind_renders() {
         used.insert(n.kind().to_owned());
         stack.extend(n.children());
     }
-    // T2 kinds have their own suites (A23); the shared probe surface stays T0+T1.
+    // T2 kinds have their own suites; the shared probe surface stays T0+T1.
     for &k in KINDS.iter().filter(|k| !auk_tsp::T2_KINDS.contains(k)) {
         assert!(used.contains(k), "the test covers {k}");
     }
@@ -167,7 +167,7 @@ fn text_and_span_kinds() {
     let icon = h.find_class(tx2, "sf-t-icon");
     assert_eq!(icon.len(), 1);
     assert!(h.class(icon[0]).contains("sf-t-muted"));
-    // The icon run lays out in the bundled Nerd Fonts face (§18.3), not a fallback's box.
+    // The icon run lays out in the bundled Nerd Fonts face, not a fallback's box.
     assert_eq!(
         h.doc.text_font_families(icon[0]),
         [auk_text::NERD_SYMBOLS_FAMILY],
@@ -437,7 +437,7 @@ fn el_attribute_allowlist_and_unknown_tags() {
     assert_eq!(h.text(e), "hellobold");
     let u = h.el("s1", "el2");
     assert_eq!(h.doc.node(u).element().unwrap().tag.as_str(), "div");
-    // The replica reports the unknown tag to the program at op time (§7.7): once per node
+    // The replica reports the unknown tag to the program at op time: once per node
     // version, so a redraw or a change elsewhere sends nothing and a change to the node sends it
     // again.
     let tag_errors = |h: &Harness| -> Vec<serde_json::Value> {
@@ -547,7 +547,7 @@ fn mark_prop_sets_data_mark_pick_draws_a_bar_and_drop_dims() {
     assert!(!bar(h.doc.computed_style(p).unwrap()));
 }
 
-/// §8.5 Markdown (omp's dialect): GFM strikethrough, GFM tables with their alignments drawn as
+/// Markdown (omp's dialect): GFM strikethrough, GFM tables with their alignments drawn as
 /// table layout, and math delimiters (inline `$…$` and display `$$…$$`) kept as their TeX.
 #[test]
 fn md_gfm_strikethrough_tables_and_math_delimiters() {
@@ -633,7 +633,7 @@ fn md_gfm_strikethrough_tables_and_math_delimiters() {
         align(td[1])
     );
     assert!(align(td[2]).contains("center"), "{}", align(td[2]));
-    // Math delimiters: the TeX kept in `data-tex` around the typeset formula (A23; tests/math.rs
+    // Math delimiters: the TeX kept in `data-tex` around the typeset formula (tests/math.rs
     // covers the drawing), inline and display.
     let inline = h.find_class(md, "math");
     assert_eq!(inline.len(), 1);
@@ -648,7 +648,7 @@ fn md_gfm_strikethrough_tables_and_math_delimiters() {
     assert!(!h.text(md).contains('$'), "the delimiters aren't shown");
 }
 
-/// §8.5 Diff: with `mode` absent or `auto`, the Edits setting decides (unified by default; with
+/// Diff: with `mode` absent or `auto`, the Edits setting decides (unified by default; with
 /// Split, side by side only when the block is wider than 112 cells, re-deciding as the width
 /// changes); an explicit mode wins. The pane is `cols` cells of 8px wide here (the view's width
 /// follows the window, as a host resizes both).
@@ -693,7 +693,7 @@ fn diff_mode_absent_or_auto_follows_the_edits_setting() {
     }
 }
 
-/// §8.1 props every node takes: `hidden` hides the node (no box, not painted, not in the
+/// Props every node takes: `hidden` hides the node (no box, not painted, not in the
 /// accessibility tree) until it's cleared; `title` becomes the element's tooltip (`title`);
 /// `aria` becomes `aria-label` (the accessible name); `shrink` and a fractional `basis` are flex
 /// sizing written as inline style, and the boxes come out at those sizes.
@@ -745,7 +745,7 @@ fn hidden_title_aria_shrink_and_a_fractional_basis_take_effect() {
     let shown = h.doc.border_box(gone).expect("drawn once unhidden");
     assert!(shown.h > 0.0);
     let tip_y2 = h.doc.border_box(h.el("s1", "tip")).unwrap().y;
-    // (by its height and the 16px block gap between `main`'s children, §8.3)
+    // (by its height and the 16px block gap between `main`'s children)
     assert!(
         (tip_y2 - (tip_y + shown.h + 16.0)).abs() < 0.5,
         "the next node moves down past it: {tip_y} -> {tip_y2} ({})",
@@ -812,7 +812,7 @@ fn line_height(h: &mut Harness) -> f32 {
     h.doc.border_box(h.el("lh", "one")).expect("laid out").h
 }
 
-/// Amendment A22: text in a row keeps its words whole; the wide sibling shrinks and clips.
+/// Text in a row keeps its words whole; the wide sibling shrinks and clips.
 #[test]
 fn a_label_beside_wide_tabs_keeps_its_word() {
     let mut h = Harness::new();
@@ -850,7 +850,7 @@ fn a_label_beside_wide_tabs_keeps_its_word() {
     );
 }
 
-/// Amendment A22: icons are inline boxes 1.2em wide, so a line with no spaces breaks beside
+/// Icons are inline boxes 1.2em wide, so a line with no spaces breaks beside
 /// them, not inside words (omp's role lines).
 #[test]
 fn a_line_of_words_and_icons_breaks_only_at_the_icons() {

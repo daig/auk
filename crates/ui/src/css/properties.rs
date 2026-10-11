@@ -252,7 +252,7 @@ const ACCEPTED_UNUSED: &[&str] = &[
     "content-visibility",
 ];
 
-/// Properties dropped without an error (book:10112-10120).
+/// Properties dropped without an error, as in Tern.
 const SILENTLY_DROPPED: &[&str] = &[
     "-moz-osx-font-smoothing",
     "text-rendering",
@@ -373,7 +373,7 @@ impl DeclError {
     }
 }
 
-/// Rules that only apply to program sheets (§7.12).
+/// Rules that only apply to program sheets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Restrictions {
     pub no_url: bool,
@@ -454,7 +454,7 @@ pub fn parse_declaration(
         return Err(DeclError::Silent);
     }
     // Grid areas, auto tracks and the line longhands are missing from Tern's engine, and using
-    // them logs "unknown property" (book:10367, 10796). Our own sheets keep them.
+    // them logs "unknown property". Our own sheets keep them.
     if r.tern_units && TERN_MISSING_GRID.contains(&name) {
         return Err(DeclError::UnknownProperty);
     }
@@ -942,7 +942,7 @@ fn parse_track_list<'i>(p: &mut Parser<'i>) -> PResult<TrackListSpec> {
                         int_value: Some(n), ..
                     } if n > 0 => RepeatCount::Count(n.min(10000) as u16),
                     // Tern repeats a whole number of times only: no `repeat(auto-fill | auto-fit,
-                    // …)` in program and plugin sheets (book:10367, 10797).
+                    // …)` in program and plugin sheets.
                     Token::Ident(ref s) if s.eq_ignore_ascii_case("auto-fill") && !tern_rules() => {
                         RepeatCount::AutoFill
                     }
@@ -1758,7 +1758,7 @@ pub fn parse_longhand<'i>(prop: Prop, p: &mut Parser<'i>) -> PResult<SV> {
             }
             // `url()` reaches here only from sheets that may load (plugin and built-in sheets;
             // program sheets drop it earlier), and only `data:` URLs: plugin files are inlined
-            // as `data:` when the sheet is installed (§9.8 CSS).
+            // as `data:` when the sheet is installed.
             if let Ok(url) = p.try_parse(|p| p.expect_url().map(|u| u.to_string())) {
                 return if url
                     .get(..5)

@@ -3,7 +3,7 @@
 ## `SymbolsNerdFontMono-Regular.ttf`
 
 The Nerd Fonts symbols face (family `Symbols Nerd Font Mono`), which draws Nerd Font icons
-(Private Use Area codepoints) in surfaces' icon spans and in the grid (spec §18.3, §7.12).
+(Private Use Area codepoints) in surfaces' icon spans and in the grid.
 `auk_text::NERD_SYMBOLS` embeds it.
 
 - Source: `NerdFontsSymbolsOnly.zip` from the Nerd Fonts v3.4.0 release,
@@ -24,5 +24,3 @@ The Nerd Fonts symbols face (family `Symbols Nerd Font Mono`), which draws Nerd 
   (MIT), Pomicons and Weather Icons (OFL 1.1), Powerline Symbols (free license), Font Logos
   (unlicensed). CC BY 4.0 asks for attribution, which this file and `LICENSE-NerdFonts.md`
   give.
-
-Auk is a private project (D9); this is recorded so the terms are known if that changes.

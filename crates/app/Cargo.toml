@@ -1,10 +1,11 @@
 [package]
 name = "auk-app"
-description = "The macOS app (spec §19, §22): windows on daemon sessions, the sessions UI, input routing and the automation endpoint."
+description = "The macOS app: windows on daemon sessions, the sessions UI, input routing and the automation endpoint."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 auk-daemon = { path = "../daemon" }

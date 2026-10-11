@@ -1,4 +1,4 @@
-//! Find (§6.2, §8.3) and prompt navigation (§5.3), both view state of the window.
+//! Find and prompt navigation, both view state of the window.
 //!
 //! **Find** searches the focused pane's whole buffer (scrollback included, soft-wrapped rows
 //! joined) and the text of its surfaces' documents. It reads the replica's documents, not the
@@ -692,7 +692,7 @@ impl WinState {
         again
     }
 
-    /// Prompt navigation (§5.3): scrolls the focused pane so the previous (or next) prompt row
+    /// Prompt navigation: scrolls the focused pane so the previous (or next) prompt row
     /// is at the top of the view; past the last prompt, the view follows the tail again.
     pub(super) fn jump_to_prompt(&mut self, forward: bool) {
         let Some(pane) = self.focused_pane() else {

@@ -1,5 +1,5 @@
-/* omp's settings (research/omp-stylesheets.md §6): role-scoped refinements of the kit prefs
-   page and sheet for omp's /settings. Amendment A24.
+/* omp's settings: role-scoped refinements of the kit prefs
+   page and sheet for omp's /settings.
    The prefs look stays in surface-prefs.css, which also frames a picker in the editor card and
    makes the kit's accents follow the program's under .sf-pal; this sheet doesn't restate either.
    Rows, the nav and control geometry are the kit's: rows patch in place and switches slide. */
@@ -15,7 +15,7 @@
   background-color: var(--sf-status-bg, var(--panel)); border-radius: 6px;
 }
 
-/* The editor column in the glass card: omp's components are terminal content (Q-X4), and the
+/* The editor column in the glass card: omp's components are terminal content, and the
    card is their frame, so a card inside it drops its own. */
 .pf-editor > .sf-col[data-role='omp.prefs.editor'] {
   gap: var(--sf-inner-gap); min-height: 0; font-family: var(--tv-font, var(--mono));

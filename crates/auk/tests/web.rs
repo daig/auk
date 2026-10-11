@@ -1,8 +1,8 @@
-//! The web client (GOAL.md `web`, §10.3, §12.5, M11): `auk web serve` serves the wasm client,
+//! The web client: `auk web serve` serves the wasm client,
 //! trades the URL's token for a cookie, binds loopback only unless told otherwise, and bridges
-//! the replication protocol over a WebSocket (refusing other versions, X9). In Safari, driven
+//! the replication protocol over a WebSocket (refusing other versions). In Safari, driven
 //! through safaridriver, the client attaches to a live pane, draws it over WebGPU and types
-//! into the shell. And wasm replicas reach the native state hashes on fuzzed streams (AC2).
+//! into the shell. And wasm replicas reach the native state hashes on fuzzed streams.
 //!
 //! The client, its JS glue (the pinned wasm-bindgen CLI) and the wasm32-wasip1 replica driver
 //! are built fresh in each run (`auk_conformance::web::Builds`).
@@ -502,7 +502,7 @@ fn web_client_in_safari_attaches_draws_over_webgpu_and_types() {
     // As the pane's primary, the page's size applies to the pane.
     let p = pane_state(&state, pane).unwrap();
     assert_eq!(p["primary"], true, "{p}");
-    // §4.5: the page reports the browser's 12/24-hour clock, read here through Intl in the page.
+    // The page reports the browser's 12/24-hour clock, read here through Intl in the page.
     let cycle = safari.execute(
         "return new Intl.DateTimeFormat(undefined, {hour: 'numeric'}).resolvedOptions().hourCycle;",
     );
@@ -671,7 +671,7 @@ fn daemon_node(env: &TestEnv, pane: u64, prefix: &str) -> Option<(String, String
     })
 }
 
-/// §10.3, §10.4 in the browser: a program's surface, a lens view (with the plugin's manifest
+/// In the browser: a program's surface, a lens view (with the plugin's manifest
 /// style and its effects) and a plugin block are drawn, and clicks on them reach their owners.
 fn safari_surfaces_lens_views_and_blocks(safari: &Safari, env: &TestEnv, pane: u64) {
     // A program's surface in the flow.
@@ -739,7 +739,7 @@ fn safari_surfaces_lens_views_and_blocks(safari: &Safari, env: &TestEnv, pane: u
     let (sf, id) = wait_for("the block's view in the daemon", || {
         daemon_node(env, block, "block-panel 0")
     });
-    // A12: the tab bar is the app's chrome drawn on the canvas. A second session brings the
+    // The tab bar is the app's chrome drawn on the canvas. A second session brings the
     // session chip; its menu's row for the block's session shows the block.
     let session = wait_for("the block's session", || {
         env.daemon("ls")["panes"]
@@ -844,8 +844,8 @@ fn screen_ink(safari: &Safari, rect: &Value) -> (u32, u32, u32) {
     (ink, reddish, greenish)
 }
 
-/// Fuzzed cases: the native AC2 shape (records among byte soup, a late snapshot follower) with
-/// TSP traffic mixed in.
+/// Fuzzed cases: the native agreement tests' shape (records among byte soup, a late snapshot
+/// follower) with TSP traffic mixed in.
 fn fuzz_cases() -> Vec<Case> {
     (1..=40u64)
         .map(|seed| {
@@ -921,7 +921,7 @@ fn ac02_wasm_replicas_reach_the_native_state_hashes_under_fuzzing() {
     }
 }
 
-/// §4.2, §10.3, §10.4: the browser runs no Lua at all. The wasm client's dependency graph has
+/// The browser runs no Lua at all. The wasm client's dependency graph has
 /// no Luau (no `mlua`, `mlua-sys` or `luau*` crate) and takes `auk-plugins` without its
 /// `runtime` feature; and the built client, wasm and JS glue, carries no Luau or mlua symbol, so
 /// it hosts no window half.
@@ -1002,7 +1002,7 @@ fn web_client_builds_without_lua() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Plugins in the web client (§9.4, §10.3, §10.4): the catalog's manifest styles, plugin blocks,
+// Plugins in the web client: the catalog's manifest styles, plugin blocks,
 // lens views and effects. The client runs no Lua; all of it comes from the serving daemon.
 
 /// A plugin with a lens on `webdemo-cmd *` whose view has a clickable node (`go`, which copies
@@ -1311,7 +1311,7 @@ fn web_session_gets_manifest_styles_lens_views_blocks_and_effects_through_the_so
     let (sf, id) = c.until("the block's view", |s| {
         node_with_text(s.panes.get(&block)?.replica.tsp(), "block-panel 0")
     });
-    // A12: the client's tab bar is the app's chrome widgets: the block's session shown (its one
+    // The client's tab bar is the app's chrome widgets: the block's session shown (its one
     // tab), the chip for two sessions, whose menu lists both, and nothing that creates.
     let mut bar = c.s.chrome_bar(Some(block), None);
     (bar.width, bar.height, bar.dark) = (800.0, 500.0, true);

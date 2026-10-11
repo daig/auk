@@ -1,4 +1,4 @@
-//! The shared API (§9.9; research/plugins.md §8.2, §8.8, §11): `tern.json`, `tern.base64`,
+//! The shared API: `tern.json`, `tern.base64`,
 //! `tern.kv`, `tern.fs`, `tern.process.run`, `tern.fetch`, `tern.sleep` and awaitables,
 //! `tern.ui` and `tern.parse`; plus lens claims on replicas and reloading on change.
 

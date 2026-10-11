@@ -1,5 +1,4 @@
-//! `tern.json`, `tern.base64` and the native half of `tern.parse.json_tree` (§9.9,
-//! research/plugins.md §8.8, §11.5).
+//! `tern.json`, `tern.base64` and the native half of `tern.parse.json_tree`.
 
 use base64::Engine as _;
 use mlua::{Lua, Table, Value};

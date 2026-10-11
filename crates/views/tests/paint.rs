@@ -1,5 +1,5 @@
 //! The built-in sheets and real programs' sheets drawn: the views' documents painted with Vello
-//! and rendered offscreen with wgpu, then pixels checked (amendment A7, `box-shadow`).
+//! and rendered offscreen with wgpu, then pixels checked (`box-shadow`).
 
 mod common;
 
@@ -141,7 +141,7 @@ fn lens_block(state: &str, exit: i64) -> LensInput {
     }
 }
 
-/// A7 / §9.6: the lens block's 2px state stripe (`box-shadow: inset 2px 0 0 …` in
+/// The lens block's 2px state stripe (`box-shadow: inset 2px 0 0 …` in
 /// surface-lens.css) is drawn: `--live` while running, `--sf-bad` (`--bad`) after a failing
 /// exit, a faint `--t3` mix when done.
 #[test]
@@ -189,7 +189,7 @@ fn lens_block_draws_its_state_stripe() {
     assert!(near(past, [255, 255, 255]), "2px wide: {past:?}");
 }
 
-/// A7: the SDK `ask` example's card (fixtures/tsp/docs-ask.jsonl; the same sheet in all four
+/// The SDK `ask` example's card (fixtures/tsp/docs-ask.jsonl; the same sheet in all four
 /// SDKs' `ask` examples) draws its 1px ring, `box-shadow: inset 0 0 0 1px var(--l2)`, over
 /// `--card`.
 #[test]
@@ -233,7 +233,7 @@ fn sdk_ask_card_draws_its_ring() {
     );
 }
 
-/// A split diff drawn (§8.5): the removed half tinted with `--bad`, the added half with `--ok`,
+/// A split diff drawn: the removed half tinted with `--bad`, the added half with `--ok`,
 /// and the blank side of an unpaired line shaded with `--sf-shade` over the diff's `--code-bg`.
 #[test]
 fn split_diff_draws_its_halves_and_the_blank_side() {
@@ -293,7 +293,7 @@ fn kit_harness(dark: bool) -> common::Harness {
     h
 }
 
-/// K4 (research/omp-stylesheets.md §2.5): a toned badge draws its 10% fill inside a 22% ring,
+/// A toned badge draws its 10% fill inside a 22% ring,
 /// in light and dark.
 #[test]
 fn a_badge_draws_its_tone_ring() {
@@ -337,7 +337,7 @@ fn a_badge_draws_its_tone_ring() {
     }
 }
 
-/// K5: an inline tool's body draws its --l2 hairline, in light and dark.
+/// An inline tool's body draws its --l2 hairline, in light and dark.
 #[test]
 fn an_inline_tool_draws_its_hairline() {
     for dark in [false, true] {
@@ -369,7 +369,7 @@ fn an_inline_tool_draws_its_hairline() {
     }
 }
 
-/// K7: the overlay card casts its drop shadow below it, and in dark its --glass-hi top
+/// The overlay card casts its drop shadow below it, and in dark its --glass-hi top
 /// highlight lightens its first row.
 #[test]
 fn an_overlay_card_casts_its_glass_shadow() {
@@ -423,9 +423,9 @@ fn an_overlay_card_casts_its_glass_shadow() {
     }
 }
 
-/// T2.1 (research/omp-stylesheets.md §16.3): omp's user bubble at its first prompt (F:17)
+/// omp's user bubble at its first prompt (F:17)
 /// paints a fill that shows against the page, in light and dark: with no ring at its edge, and
-/// with omp's palette (Q-T2) a whisper ring.
+/// with omp's palette a whisper ring.
 #[test]
 fn an_omp_user_bubble_paints_a_fill_ringed_only_under_a_palette() {
     for palette in [false, true] {
@@ -459,7 +459,7 @@ fn an_omp_user_bubble_paints_a_fill_ringed_only_under_a_palette() {
                     "{at}: the fill {fill:?} shows on the page {page:?}"
                 );
                 if palette {
-                    // Q-T2: titanium's fill is about 1.02:1 on the page, so a palette keeps a
+                    // Titanium's fill is about 1.02:1 on the page, so a palette keeps a
                     // whisper ring, which shows against the fill.
                     // Inside the card's transparent 1px border.
                     let edge = pixel(&px, w, r.x + r.w / 2.0, r.y + 1.5);
@@ -491,7 +491,7 @@ fn an_omp_user_bubble_paints_a_fill_ringed_only_under_a_palette() {
     }
 }
 
-/// T2.9 (§16.3): an omp marker draws a hairline on each side of its label.
+/// An omp marker draws a hairline on each side of its label.
 #[test]
 fn an_omp_marker_draws_hairlines_either_side() {
     for dark in [false, true] {

@@ -1,4 +1,4 @@
-/* list, item, tabs (book:6038-6240). */
+/* list, item, tabs. */
 .sf-list { display: flex; flex-direction: column; min-width: 0; }
 .sf-list-scroll { min-width: 0; }
 .sf-list-scroll.max { overflow-y: auto; }

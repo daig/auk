@@ -1,4 +1,4 @@
-//! The `image` kind (§8.5, §12.3, §7.12; book:5925-5969): each raster format and animation,
+//! The `image` kind: each raster format and animation,
 //! sanitized SVG, the placeholder until a blob arrives and the redraw when it does, the built-in
 //! picture, sizing, Reduce Motion and the zoom action, through the TSP engine, the views and the
 //! UI engine.
@@ -292,7 +292,7 @@ fn a_blob_that_arrives_after_the_frame_redraws_the_node() {
         Some("The image data has not arrived")
     );
     assert!(h.text(card).ends_with("Late"), "{:?}", h.text(card));
-    // The blob arrives with no change to the node: it draws anyway (§7.12).
+    // The blob arrives with no change to the node: it draws anyway.
     send_blob(&mut h, &bytes, Some("image/png"));
     h.frame();
     drawn(&h, "late");
@@ -740,7 +740,7 @@ fn big_animated_gif(w: u32, h: u32) -> Vec<u8> {
     out
 }
 
-/// Amendment A9: a picture over 512×512 pixels decodes off the frame path. The node shows the
+/// A picture over 512×512 pixels decodes off the frame path. The node shows the
 /// busy placeholder ("Decoding the image") while it decodes, then draws at its natural size
 /// with no further TSP traffic; two nodes naming it share one decode.
 #[test]

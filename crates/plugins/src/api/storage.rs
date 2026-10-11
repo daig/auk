@@ -1,4 +1,4 @@
-//! `tern.kv` and `tern.fs` (§9.9, research/plugins.md §11.1, §11.2).
+//! `tern.kv` and `tern.fs`.
 //!
 //! `tern.kv` is one `<data>/kv.json` per plugin per machine, shared by every VM of the plugin:
 //! each VM caches the map and reads the file again when its mtime or length changes; every `set`

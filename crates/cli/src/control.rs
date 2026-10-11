@@ -1,4 +1,4 @@
-//! A control-endpoint client: one command line out, one JSON line back (§11.3).
+//! A control-endpoint client: one command line out, one JSON line back.
 
 use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;

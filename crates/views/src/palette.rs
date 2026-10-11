@@ -1,4 +1,4 @@
-//! Program palettes (§7.12, book:9955-10010): `--sf-p-*` variables, semantic and tone overrides,
+//! Program palettes: `--sf-p-*` variables, semantic and tone overrides,
 //! `Bg` fills as 60% tints, and contrast correction (4.5:1 body, 3:1 quiet tokens) against the
 //! surface background and every tint over it.
 
@@ -202,9 +202,9 @@ pub fn variables(p: &Palette, dark: bool) -> String {
     if let Some(c) = get("text") {
         out.push_str(&format!("--sf-text: {c}; "));
     }
-    // The kit's accents for `prefs` (book: prefs Variables, "follow the program's accent under
-    // .sf-pal"): the accent for rings and tints, as text corrected to 4.5:1 on the surface, and
-    // as a fill darkened until white reads on it at 4.5:1 (book: Kit tokens, `--accent-fill`).
+    // The kit's accents for `prefs` (they follow the program's accent under
+    // .sf-pal): the accent for rings and tints, as text corrected to 4.5:1 on the surface, and
+    // as a fill darkened until white reads on it at 4.5:1 (`--accent-fill`).
     if let Some(raw) = variant
         .iter()
         .find(|(k, _)| k == "accent")

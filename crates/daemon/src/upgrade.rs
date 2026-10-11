@@ -1,11 +1,11 @@
-//! In-place upgrade (§15.7, Unix): the daemon execs a new build of itself without ending any
+//! In-place upgrade (Unix): the daemon execs a new build of itself without ending any
 //! program.
 //!
 //! 1. **Quiesce.** Every PTY reader waits in [`wait_readable`] (poll on the master and a wake
 //!    pipe), never inside `read`. An upgrade raises the gate and writes to the wake pipe; each
 //!    reader parks before reading again, so no output is read that the snapshots won't hold.
 //!    What programs write meanwhile waits in the kernel for the new daemon.
-//! 2. **Hand over.** The state, in the state file's format (§16) plus each live process pane's
+//! 2. **Hand over.** The state, in the state file's format plus each live process pane's
 //!    pid and PTY master descriptor and the two listening sockets, goes into an unlinked file
 //!    whose descriptor the new daemon inherits ([`UPGRADE_FD_ENV`]). Those descriptors lose
 //!    close-on-exec; everything else (clients, pane sockets, the lock) closes on exec.
@@ -14,12 +14,12 @@
 //! 4. **The new daemon** ([`Daemon::adopt`]) keeps listening on the inherited sockets, rebuilds
 //!    each pane's replica from its snapshot (no restore record: the program is still running),
 //!    reads its PTY again and waits for its process by pid. Clients reconnect and get fresh
-//!    snapshots (§15.3).
+//!    snapshots.
 //!
 //! Triggers: the control command `upgrade [--exe PATH]` (`auk daemon upgrade`), and a client of a
 //! newer release saying hello with its binary's path (Tern since 0.5.2): that client is refused
 //! with `upgrading` set, the daemon execs the client's binary once it answers `--version` with
-//! the client's release, and the client reconnects. Any other version mismatch is refused (X9).
+//! the client's release, and the client reconnects. Any other version mismatch is refused.
 
 use std::fs;
 use std::io::{self, Read, Seek, Write};
@@ -427,7 +427,7 @@ fn handoff_file(state_dir: &Path, handoff: &Handoff) -> io::Result<fs::File> {
 // The new daemon
 
 impl Daemon {
-    /// Takes over the old daemon's panes (§15.7): running processes keep their PTYs; blocks
+    /// Takes over the old daemon's panes: running processes keep their PTYs; blocks
     /// restart from their last `save`.
     pub(crate) fn adopt(self: &Arc<Self>, state: DaemonState) {
         self.persist.set_upgrades(state.upgrades);

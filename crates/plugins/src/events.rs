@@ -1,4 +1,4 @@
-//! Host events (`tern.on` in a host half, §9.7) and the window event names (§9.8).
+//! Host events (`tern.on` in a host half) and the window event names.
 
 use serde_json::{Value, json};
 
@@ -29,7 +29,7 @@ pub const WINDOW_EVENTS: &[&str] = &[
     "title",
 ];
 
-/// A pane as `tern.pane.list` reports it (§9.7): every pane on the host whose program hasn't
+/// A pane as `tern.pane.list` reports it: every pane on the host whose program hasn't
 /// exited, as its owner last reported it. A plugin block's `program` is its kind.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaneInfo {

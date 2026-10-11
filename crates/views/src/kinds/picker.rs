@@ -1,4 +1,4 @@
-//! `picker` (book:6274-6528, research/elements.md §2.4, §6.4): omp's data-first modal sheet. The
+//! `picker`: omp's data-first modal sheet. The
 //! program sends the catalog and what to show; the view draws the glass sheet: a head with a
 //! drawn search line (no real field: `query` with a caret at `cursor`; keys stay the program's),
 //! an optional scope column, a tab row, fixed-height rows with fact columns, a preview pane (the
@@ -22,9 +22,9 @@ use std::hash::{Hash, Hasher};
 const SHEET_IN_MS: f64 = 220.0;
 /// Rows past which the list is virtualized.
 const VIRTUAL_AFTER: usize = 200;
-/// Rows that stagger in at most, per render (book:7938-7939).
+/// Rows that stagger in at most, per render.
 const ARRIVING: usize = 8;
-/// A label keeps this much room before fact columns hide (book:6288).
+/// A label keeps this much room before fact columns hide.
 const LABEL_MIN: f32 = 260.0;
 
 /// One picker's view state, by node id.
@@ -364,7 +364,7 @@ fn columns(p: &Map<String, Value>) -> Vec<Column> {
     out
 }
 
-/// Row height by layout (book:6285).
+/// Row height by layout.
 fn row_h(layout: &str, it: Option<&Map<String, Value>>) -> f32 {
     match layout {
         "cards" => 54.0,
@@ -444,7 +444,7 @@ pub(crate) fn hash_value(v: &Value, h: &mut impl Hasher) {
     }
 }
 
-/// A number shown compact: `272k`, `1.6M` (book:6339). The unit is picked after rounding, so
+/// A number shown compact: `272k`, `1.6M`. The unit is picked after rounding, so
 /// 999 950 is `1M`, not `1000k`.
 pub(crate) fn compact(n: f64) -> String {
     const UNITS: [(f64, &str); 4] = [(1.0, ""), (1e3, "k"), (1e6, "M"), (1e9, "B")];
@@ -629,7 +629,7 @@ pub(crate) fn picker(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
         .filter(|s| s.get("id").is_some())
         .collect();
 
-    // Width states (book:6281-6282).
+    // Width states.
     let w = sheet_width(cx, node, size);
     let narrow = w < 760.0;
     let pv_below_auto = preview == "side" && w < 980.0;
@@ -750,7 +750,7 @@ pub(crate) fn picker(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
     };
     cx.dom.child_text(head, "span", "pk-count", &count);
     let esc_act = acts.iter().find(|a| a.esc());
-    // Action bar folding (book:6290): estimated from the labels, the Escape action moves into
+    // Action bar folding: estimated from the labels, the Escape action moves into
     // the head's `esc` first, then secondary buttons drop their keycaps.
     let btn_w = |a: &Action, keys: bool| {
         let label = spans::spans_text(&spans::parse_spans(Some(&a.label)));
@@ -830,7 +830,7 @@ pub(crate) fn picker(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
         }
     }
 
-    // Fact columns that fit (book:6288): the list's width, less the lead, the label's 260px and
+    // Fact columns that fit: the list's width, less the lead, the label's 260px and
     // the check slot; lowest priority hides first. A text column grows to its widest value.
     let mut cols = columns(p);
     for c in cols.iter_mut().filter(|c| c.format == "text") {
@@ -1018,9 +1018,9 @@ pub(crate) fn picker(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
                             )
                         }
                     };
-                    // Rows that weren't drawn before stagger in (book:7938-7940): the first
+                    // Rows that weren't drawn before stagger in: the first
                     // eight, 24ms apart, by `--i`. A row that stays keeps its element, so its
-                    // finished animation never replays (A17); arrivals alternate `arr-a` and
+                    // finished animation never replays; arrivals alternate `arr-a` and
                     // `arr-b` from one render to the next.
                     if arriving && arrived < ARRIVING {
                         let class = format!(
@@ -1048,7 +1048,7 @@ pub(crate) fn picker(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
             cx.dom.doc.remove(el);
         }
     }
-    // The confirm strip (book: `confirm`): over the selected row, a trash icon, the text, a
+    // The confirm strip: over the selected row, a trash icon, the text, a
     // danger button sending `confirm.act` (default "confirm") and Keep sending `cancel`.
     if let Some(old) = cx.st.pickers.get_mut(&id).and_then(|s| s.confirm.take())
         && cx.dom.doc.try_node(old).is_some()
@@ -1104,7 +1104,7 @@ pub(crate) fn picker(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
         (want.len() > VIRTUAL_AFTER).then_some(row_h(layout, None)),
     );
 
-    // States (book:6305): loading skeletons, the error card, the empty texts.
+    // States: loading skeletons, the error card, the empty texts.
     if state == "loading" {
         let st = cx.dom.child(main, "div", "pk-state loading");
         for _ in 0..8 {
@@ -1230,7 +1230,7 @@ pub(crate) fn picker(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Look)
         bar_button(cx, bar, a, a.primary || !fold_keys);
     }
 
-    // Keep the selection in view (book:6286): on open, on a layout change, when `selected`
+    // Keep the selection in view: on open, on a layout change, when `selected`
     // changes, and when rows change while the selection was visible.
     let order_hash = keys_hash.finish();
     let ps = cx.st.pickers.entry(id.clone()).or_default();
@@ -1622,7 +1622,7 @@ fn item_row(
                 Some(v) => {
                     let text = spans::spans_text(&spans::parse_spans(Some(v)));
                     spans_into(cx, e, Some(v));
-                    // A value still cut short shows whole as the tooltip (book: Fact columns),
+                    // A value still cut short shows whole as the tooltip,
                     // by the estimate the column widths use (7px a character, 12px padding).
                     if text.chars().count() as f32 * 7.0 + 12.0 > c.w {
                         cx.dom.attr(e, "title", &text);

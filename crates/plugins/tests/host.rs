@@ -1,5 +1,5 @@
 //! The daemon side: workers, the catalog, events and effects, isolation, the spawn filter,
-//! timers and reload (§4.1, §9.2–§9.4, §9.7, §20; spike S5).
+//! timers and reload.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -1324,7 +1324,7 @@ fn after_the_block_ends_render_save_exit_frame_and_blob_are_ignored() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Lens state limits (§9.6 "State"): the worker keeps 256 captures per plugin, the host 4096
+// Lens state limits: the worker keeps 256 captures per plugin, the host 4096
 // lens owners.
 
 /// A lens whose `open` numbers the captures it opened, so a view tells a kept capture (its old
@@ -1487,7 +1487,7 @@ fn the_host_remembers_4096_lens_owners_and_forgets_the_oldest() {
     assert_eq!(text, "n4097 e");
 }
 
-/// §9.2 "No re-entrancy": work requested through `cx` applies after the handler returns (nothing
+/// No re-entrancy: work requested through `cx` applies after the handler returns (nothing
 /// a handler asks for is out before it ends), and host callbacks (timers, awaitables) get no `cx`.
 #[test]
 fn host_cx_work_applies_after_the_handler_returns_and_host_callbacks_get_no_cx() {

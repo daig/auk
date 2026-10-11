@@ -104,7 +104,7 @@ fn fixtures_replay_without_errors() {
             .collect();
         if name == "omp-long-model.jsonl" {
             // omp's bug, not ours: its Switch Model overlay (s 542) reuses the id `w` of an
-            // assistant column still in main, and ids are unique per surface (§7.6).
+            // assistant column still in main, and ids are unique per surface.
             let msgs: Vec<&str> = errors.iter().filter_map(|e| e["msg"].as_str()).collect();
             assert_eq!(
                 msgs,

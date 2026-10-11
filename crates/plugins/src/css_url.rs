@@ -1,4 +1,4 @@
-//! `url()` in plugin sheets (§9.8 CSS, book:3057-3067): a plugin file's `url()` resolves against
+//! `url()` in plugin sheets: a plugin file's `url()` resolves against
 //! the plugin's directory when the sheet is installed and is inlined as a `data:` URL, so the UI
 //! engine only ever loads `data:` pictures. `data:` URLs pass everywhere, remote sheets included;
 //! `url(#id)` references are kept as written.
@@ -14,7 +14,7 @@ use std::sync::{Mutex, OnceLock};
 
 use base64::Engine as _;
 
-/// The largest file a `url()` inlines (a blob's limit, §7.14).
+/// The largest file a `url()` inlines (a blob's limit).
 const MAX_FILE: u64 = 16 << 20;
 
 /// `css` with each plugin file `url()` inlined as a `data:` URL, and a message for each refused

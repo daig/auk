@@ -1,4 +1,4 @@
-//! Frame cost of the views (§18.1 budget: 8.3 ms per frame): replaying the whole omp session
+//! Frame cost of the views (budget: 8.3 ms per frame): replaying the whole omp session
 //! (project + measure loops + layout + paint per frame), and a streaming `md` append into a long
 //! transcript. Numbers print with `--nocapture`; the budget is asserted in release builds.
 

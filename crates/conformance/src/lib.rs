@@ -1,7 +1,7 @@
-//! Conformance suites (spec §21).
+//! Conformance suites.
 //!
-//! M0 provides the recording format and fixture validation. The TSP checklist
-//! (`research/sdk-wire.md` §10) and the SDK and omp runs build on these in M3 and M5.
+//! This crate provides the recording format and fixture validation. The TSP checklist
+//! and the SDK and omp runs build on these.
 
 pub mod app;
 pub mod fuzz;
@@ -33,7 +33,7 @@ pub enum Dir {
     In,
 }
 
-/// One line of a TSP recording in Tern's format (book:11579):
+/// One line of a TSP recording in Tern's format:
 /// `{"t":ms,"dir":"out"|"in","verb":"f","params":{…},"body":{…}}`.
 ///
 /// `surface-play` also accepts hand-written `osc` and `pty` lines, so `t` and `params`
@@ -49,13 +49,13 @@ pub struct Record {
     pub body: Value,
 }
 
-/// The frame ops of TSP v1 (spec §7.6).
+/// The frame ops of TSP v1.
 pub const OPS: [&str; 12] = [
     "add", "set", "text", "splice", "move", "del", "settle", "focus", "reveal", "scroll",
     "suspend", "resume",
 ];
 
-/// The terminal-to-program events of TSP v1 (spec §7.7).
+/// The terminal-to-program events of TSP v1.
 pub const EVENTS: [&str; 16] = [
     "ack", "resize", "theme", "motion", "visible", "toggle", "select", "activate", "action",
     "change", "focus", "edit", "undo", "send", "error", "gone",

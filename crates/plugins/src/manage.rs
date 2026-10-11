@@ -1,4 +1,4 @@
-//! The backing functions of `auk plugin …` (§9.11, research/plugins.md §12.3). None of them runs
+//! The backing functions of `auk plugin …`. None of them runs
 //! Lua or starts a daemon; the CLI asks the daemon to reload after a change.
 //!
 //! ```text

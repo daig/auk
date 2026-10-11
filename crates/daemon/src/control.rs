@@ -1,4 +1,4 @@
-//! The control endpoint (spec §11.3): one command per line in, one JSON line out.
+//! The control endpoint: one command per line in, one JSON line out.
 //!
 //! Replies take Tern's shape: `{"ok":true}`, `{"ok":true,"value":…}` or
 //! `{"ok":false,"error":"…"}`. [`handle`] answers the commands every endpoint shares, `ping`

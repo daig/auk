@@ -1,16 +1,16 @@
-//! The window's settings (§7.8, §7.9, §7.12, §7.13, §9.8): read from `<config>/settings.json`
-//! (the file plugins' `plugins` and `plugins_disabled` live in, research/plugins.md §2.4) when a
+//! The window's settings: read from `<config>/settings.json`
+//! (the file plugins' `plugins` and `plugins_disabled` live in) when a
 //! window opens and on "Reload Settings".
 //!
 //! | Key | Default | Effect |
 //! | --- | --- | --- |
-//! | `program_colors` | `true` | "Use program colors": apply program palettes (§7.12) |
-//! | `native_editing` | `true` | native editing in program fields (§7.9) |
-//! | `links_plain_click` | `false` | a plain click opens links (otherwise ⌘-click, §7.8) |
+//! | `program_colors` | `true` | "Use program colors": apply program palettes |
+//! | `native_editing` | `true` | native editing in program fields |
+//! | `links_plain_click` | `false` | a plain click opens links (otherwise ⌘-click) |
 //! | `hyperlinks` | `"dotted"` | grid links: `"dotted"` underline, only on `"hover"`, or `"off"` |
-//! | `edits` | `"inline"` | diffs (§8.5): `"inline"` (unified) or `"split"` (side by side wider than 112 cells) |
-//! | `reduce_motion` | `"system"` | `true`, `false`, or follow the system setting (§7.13) |
-//! | `keymap` | none | a preset layer: `"tmux"` (§9.8 keymap layers) |
+//! | `edits` | `"inline"` | diffs: `"inline"` (unified) or `"split"` (side by side wider than 112 cells) |
+//! | `reduce_motion` | `"system"` | `true`, `false`, or follow the system setting |
+//! | `keymap` | none | a preset layer: `"tmux"` |
 //! | `keymap_prefix` | `"ctrl+b"` | the preset's prefix |
 //! | `keybinds` | `{}` | the user layer: chord → action, a list of actions, or `"unbind"` |
 
@@ -200,7 +200,7 @@ impl Settings {
         }
     }
 
-    /// The preset layer (§9.8): `(chord, action)`, under the prefix.
+    /// The preset layer: `(chord, action)`, under the prefix.
     pub fn preset(&self) -> Vec<(Chord, String)> {
         let Some(name) = &self.keymap else {
             return Vec::new();
@@ -287,7 +287,7 @@ mod tests {
         assert_eq!(bad.problems.len(), 1);
     }
 
-    /// Fold tool calls: off by default (book:9939).
+    /// Fold tool calls: off by default, as in Tern.
     #[test]
     fn reads_the_fold_tool_calls_setting() {
         assert!(!Settings::default().fold_work);

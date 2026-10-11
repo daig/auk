@@ -1,4 +1,4 @@
-/* Syntax colors: the 11 tk-* classes (book:5123-5134). Under .sf-pal, syntax* palette tokens. */
+/* Syntax colors: the 11 tk-* classes. Under .sf-pal, syntax* palette tokens. */
 :root {
   --tk-comment: #6e7781; --tk-keyword: #cf222e; --tk-function: #8250df; --tk-variable: #1b1c20;
   --tk-string: #0a3069; --tk-number: #0550ae; --tk-type: #953800; --tk-operator: #cf222e;

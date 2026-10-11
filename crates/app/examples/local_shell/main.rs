@@ -1,6 +1,6 @@
-//! The S1/S2 development harness: one window running a local login shell in a PTY, parsed by
+//! The development harness: one window running a local login shell in a PTY, parsed by
 //! `auk_term::Terminal`, drawn by the grid renderer, with keys encoded by `auk_term::input`.
-//! The real app talks to the daemon instead (§14); this exists to exercise the platform layer,
+//! The real app talks to the daemon instead; this exists to exercise the platform layer,
 //! text stack and renderer end to end.
 //!
 //! `cargo run -p auk-app --example local_shell [--option-as-alt left|right|both]`

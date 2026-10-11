@@ -1,4 +1,4 @@
-//! Focus and press states (amendment A24: H-F and K3): `:focus`, `:focus-visible` and
+//! Focus and press states: `:focus`, `:focus-visible` and
 //! `:focus-within` follow the program's field focus and Tab, `:active` follows a primary press,
 //! clickable nodes are buttons and Tab stops, and keys stay the program's while one runs.
 

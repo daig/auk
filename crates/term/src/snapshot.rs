@@ -1,4 +1,4 @@
-//! Snapshots (§15.3): VT bytes that rebuild the state on a fresh terminal of the same size and
+//! Snapshots: VT bytes that rebuild the state on a fresh terminal of the same size and
 //! configuration, so that its `state_hash` is equal.
 //!
 //! Plain VT rebuilds the cells, modes and reports; a few facts plain VT can't set go through

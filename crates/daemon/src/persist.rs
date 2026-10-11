@@ -1,10 +1,10 @@
-//! The state file (§16) and restore after a daemon restart (§5.4).
+//! The state file and restore after a daemon restart.
 //!
 //! `<state>/daemon.state` is one JSON document ([`DaemonState`]): the host settings, the
 //! sessions and layout, and per live pane its kind (with a plugin block's kind, args and last
-//! `save`), cwd, size, window key, the pane's snapshot (§15.3, which carries the closed surfaces
+//! `save`), cwd, size, window key, the pane's snapshot (which carries the closed surfaces
 //! and the lens records with their last views), the shell's command marks and the program's
-//! resume variables (D19). The same document, plus the inherited descriptors, is what an
+//! resume variables. The same document, plus the inherited descriptors, is what an
 //! in-place upgrade hands the new daemon ([`crate::upgrade`]).
 //!
 //! **When it is written.** A checkpointer looks at a cheap fingerprint of that state every
@@ -13,14 +13,14 @@
 //! written when the daemon stops (SIGTERM, SIGINT, `shutdown`) and on the control command
 //! `checkpoint`. Writes are atomic: a temporary file, fsync, rename, fsync of the directory.
 //!
-//! **Restore** ([`Daemon::restore`]) runs at start, after plugins load (§4.1):
+//! **Restore** ([`Daemon::restore`]) runs at start, after plugins load:
 //! - a shell or command pane comes back as a new login shell in its saved cwd, over its old
 //!   scrollback. The replica is rebuilt from the snapshot, then [`Record::Restore`] closes its
 //!   inline and flow surfaces and command blocks as restored (read-only, past the prompt rule)
 //!   and drops screen surfaces; the modes a full-screen program left on are reset, and the new
 //!   shell starts below the old content;
 //! - a pane whose program set `resume` (or omp's `omp_session_file`) since the last prompt runs
-//!   that command at the new shell's first prompt (D19);
+//!   that command at the new shell's first prompt;
 //! - a plugin block restarts from its last `save` through the plugin host
 //!   ([`Daemon::restore_block`]); one whose block type no Ready plugin defines is dropped;
 //! - view state isn't saved, so nothing of it comes back.
@@ -45,7 +45,7 @@ use crate::pane::{CommandMark, Pane, PaneKind, PaneRecord, default_facts};
 use crate::server::{Daemon, lock};
 use crate::tsp;
 
-/// The state file's name in the state dir (Tern's, §16).
+/// The state file's name in the state dir (Tern's).
 pub const STATE_FILE: &str = "daemon.state";
 
 /// The state file's format version.
@@ -78,7 +78,7 @@ pub struct DaemonState {
     pub settings: Settings,
     pub layout: Layout,
     pub panes: Vec<SavedPane>,
-    /// In-place upgrades this daemon has been through (§15.7).
+    /// In-place upgrades this daemon has been through.
     #[serde(default)]
     pub upgrades: u64,
 }
@@ -89,12 +89,12 @@ pub struct SavedPane {
     /// Kind, cwd, window key, size and snapshot (whose bytes are in `bytes`).
     #[serde(flatten)]
     pub record: PaneRecord,
-    /// The snapshot's bytes (§15.3), base64.
+    /// The snapshot's bytes, base64.
     #[serde(with = "b64")]
     pub bytes: Vec<u8>,
     #[serde(default)]
     pub shell: SavedShell,
-    /// The resume variables the program set since the last prompt (D19).
+    /// The resume variables the program set since the last prompt.
     #[serde(default)]
     pub vars: ResumeVars,
     /// An upgrade's inherited process: its pid and PTY master descriptor. Never in the file.
@@ -111,14 +111,14 @@ impl SavedPane {
     }
 }
 
-/// A process an upgrade hands over (§15.7).
+/// A process an upgrade hands over.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Inherited {
     pub pid: u32,
     pub fd: i32,
 }
 
-/// The shell integration's state (§5.3) worth keeping.
+/// The shell integration's state worth keeping.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct SavedShell {
     #[serde(default)]
@@ -131,7 +131,7 @@ pub struct SavedShell {
     pub running: bool,
 }
 
-/// The user variables a restore relaunches with (D19), as set since the shell's last prompt:
+/// The user variables a restore relaunches with, as set since the shell's last prompt:
 /// a prompt means the program that set them has ended. An empty or missing value unsets one
 /// (omp sends `SetUserVar=omp_session_file` with no value when its session is cleared).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -431,7 +431,7 @@ impl Daemon {
         })
     }
 
-    /// Restores the panes of the state file at start (§5.4). Runs after plugins load, before
+    /// Restores the panes of the state file at start. Runs after plugins load, before
     /// clients are served.
     pub(crate) fn restore(self: &Arc<Self>) {
         let path = state_path(&self.state_dir);
@@ -485,7 +485,7 @@ impl Daemon {
     }
 
     /// A shell or command pane comes back as a new login shell in its saved cwd, over its old
-    /// scrollback (§5.4).
+    /// scrollback.
     fn restore_shell(self: &Arc<Self>, saved: &SavedPane) -> Result<(), String> {
         let record = saved.full_record();
         let id = record.id;
@@ -497,7 +497,7 @@ impl Daemon {
         let mut replica = self.replica_from(&record);
         replica.set_facts(default_facts());
         // A command pane comes back as a shell; an agent pane keeps its kind (and badge), and
-        // resumes through the shell when its program said how (D19).
+        // resumes through the shell when its program said how.
         let kind = match &record.kind {
             PaneKind::Agent { line } => PaneKind::Agent { line: line.clone() },
             _ => PaneKind::Shell,
@@ -544,7 +544,7 @@ impl Daemon {
     }
 }
 
-/// Types `line` and Enter at the pane's first prompt, as a user would (D19).
+/// Types `line` and Enter at the pane's first prompt, as a user would.
 fn type_at_first_prompt(pane: Arc<Mutex<Pane>>, line: String) {
     tokio::spawn(async move {
         let mut changed = lock(&pane).watch();

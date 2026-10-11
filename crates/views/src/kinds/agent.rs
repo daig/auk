@@ -1,4 +1,4 @@
-//! Agent kinds: `tool`, `agent`, `checklist` (research/elements.md §2.8).
+//! Agent kinds: `tool`, `agent`, `checklist`.
 
 use super::layout::{preview_lines, tool_icon};
 use super::{begin, icon, part, slot, spans_into};
@@ -547,7 +547,7 @@ pub(crate) fn checklist(cx: &mut Cx, node: NodeRef, m: &mut Mount, look: &mut Lo
     let mode = str_prop(p, "mode").unwrap_or("full");
     look.class(mode);
     look.attr("role", "group");
-    // The `toggle` action folds the whole list to its phase heads (§7.8); `collapsed` sets it.
+    // The `toggle` action folds the whole list to its phase heads; `collapsed` sets it.
     let collapsed = cx.st.fold(node, false);
     look.class_if(collapsed, "collapsed");
     look.class_if(cx.st.unfolding(node, collapsed), "sf-unfold");

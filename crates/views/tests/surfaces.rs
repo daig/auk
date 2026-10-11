@@ -1,4 +1,4 @@
-//! A pane's surfaces arranged with the real terminal (§6.2, §7.3): the shared compositor every
+//! A pane's surfaces arranged with the real terminal: the shared compositor every
 //! window uses ([`PaneSurfaces`]), fed by `auk-term` and the `auk-tsp` engine in stream order.
 
 use auk_term::{Event, Terminal};

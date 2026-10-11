@@ -1,4 +1,4 @@
-//! Terminal-to-program messages (§7.7): the outgoing queue's entries and the view events a client
+//! Terminal-to-program messages: the outgoing queue's entries and the view events a client
 //! originates.
 
 use serde_json::{Map, Value};
@@ -62,14 +62,13 @@ impl Mods {
     }
 }
 
-/// An event a client originates from the view (§7.7, §7.8, §7.9). Keys are never events: typed
+/// An event a client originates from the view. Keys are never events: typed
 /// text reaches the program as PTY bytes; only `Edit`, `Undo` and `Send` stand in for keys, each
 /// behind its program feature.
 /// How a [`ViewEvent::Action`]'s `act` and `value` come from its `action`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum ActValue {
-    /// `action` is a node's action name: it splits at its first `=` into `act` and `value`
-    /// (§7.8).
+    /// `action` is a node's action name: it splits at its first `=` into `act` and `value`.
     #[default]
     Split,
     /// `action` is the view's own act, sent as is (`=` and all), with this value if any: a

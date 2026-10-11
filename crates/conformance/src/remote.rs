@@ -1,4 +1,4 @@
-//! The Linux VM for the `remote` suite (GOAL.md, spec §10.2, D7): a Lima VM, `auk-linux`, that
+//! The Linux VM for the `remote` suite: a Lima VM, `auk-linux`, that
 //! builds and runs the Linux `auk`, reached with Lima's generated SSH config.
 //!
 //! - [`Vm::get`] checks that Lima and the VM exist (failing with what to do when they don't),

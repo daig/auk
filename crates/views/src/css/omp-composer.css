@@ -1,8 +1,8 @@
-/* omp's composer dock (research/omp-stylesheets.md §9): the editor frame, its bar (model, effort,
-   usage, stop), the HUD and queue. Amendment A24.
+/* omp's composer dock: the editor frame, its bar (model, effort,
+   usage, stop), the HUD and queue.
    The meter's own rules stay in the kit (surface-data); omp.btn, omp.errorBanner, omp.hint.retry
    and omp.loader are omp.css's. The dock keeps the region's side padding, as the transcript does:
-   it follows the transcript's measure (Q-C1), which only the Chat skins set. */
+   it follows the transcript's measure, which only the Chat skins set. */
 
 /* Frame: a ring, no fill (the mockup's composer), scoped to the dock; an ask dialog's
    omp.editor in the layer stays bare. The ring takes the accent while the composer's field has
@@ -42,8 +42,8 @@
   background-color: color-mix(in srgb, var(--tv-cur, var(--accent)) 70%, transparent);
 }
 
-/* Context: a 2px hairline along the frame's top edge, its share a legend cut into the edge
-   (Q-C2). The total and the compaction mark's icon are in the tooltip. */
+/* Context: a 2px hairline along the frame's top edge, its share a legend cut into the edge.
+   The total and the compaction mark's icon are in the tooltip. */
 .sf-meter[data-role='omp.composer.context'] {
   position: absolute; top: -3px; left: 12px; right: 12px; height: 8px; gap: 0;
 }
@@ -110,8 +110,8 @@
 .sf-row[data-role='omp.queue.item'] > .sf-icon { color: var(--t4); }
 .sf-row[data-role='omp.queue.edit'] { color: var(--t3); }
 
-/* Unfocused, the composer folds to its field's first line (book: .sf-unfocused); the HUD and
-   the working row stay (Q-C5). */
+/* Unfocused, the composer folds to its field's first line; the HUD and the working
+   row stay. */
 .sf-dock.sf-unfocused .sf-meter[data-role='omp.composer.context'],
 .sf-dock.sf-unfocused .sf-row[data-role='omp.composer.bar'],
 .sf-dock.sf-unfocused .sf-row[data-role='omp.composer.chips'],
@@ -119,7 +119,7 @@
 .sf-dock.sf-unfocused .sf-col[data-role^='omp.editor'] { padding: 3px 8px; box-shadow: inset 0 0 0 1px var(--l1); }
 .sf-dock.sf-unfocused .sf-row[data-role='omp.composer.line'] > .sf-editor { padding-top: 0; padding-bottom: 0; }
 .sf-dock.sf-unfocused .sf-row[data-role='omp.composer.line'] .sf-ed-scroll { max-height: var(--sf-lh); overflow: hidden; }
-/* The folded caption (book:11584): the view puts div.sf-deco.sf-caption first in the composer
+/* The folded caption: the view puts div.sf-deco.sf-caption first in the composer
    col; unfocused, it stands in for the field's line: the session's name, then the draft, the
    name dimmed when there is one. */
 .sf-col > .sf-deco.sf-caption { display: none; }
@@ -131,7 +131,7 @@
 .sf-deco.sf-caption > .sf-caption-draft { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .sf-deco.sf-caption.sf-drafted > .sf-caption-name { color: var(--t3); }
 
-/* Inline Markdown (book:9198-9201): the field draws .markdown with md-* spans over its own text.
+/* Inline Markdown: the field draws .markdown with md-* spans over its own text.
    Every marker stays where it is, dimmed, and nothing changes a character's width (no size,
    spacing or face change), so the caret and selection sit as in a plain field. */
 .sf-editor.markdown .md-h { color: var(--sf-p-mdHeading, var(--t1)); font-weight: 600; }
@@ -165,5 +165,5 @@
 }
 .sf-text[data-role='omp.status.hook'], .sf-text[data-role='omp.footer.extensions'] { color: var(--omp-meta); }
 
-/* Autocomplete: wider than a caret anchor's default, for the commands' details (Q-C3). */
+/* Autocomplete: wider than a caret anchor's default, for the commands' details. */
 .sf-overlay[data-role='omp.autocomplete'] .sf-ov-card { width: 480px; }

@@ -1,4 +1,4 @@
-//! Effects: requests host Lua makes of the windows showing a pane (§9.7 "Effect cx").
+//! Effects: requests host Lua makes of the windows showing a pane.
 
 use std::rc::Rc;
 

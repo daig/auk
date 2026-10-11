@@ -1,4 +1,4 @@
-//! The identity chain (§10.1): each host shows the hops that reached it. A hop is a principal,
+//! The identity chain: each host shows the hops that reached it. A hop is a principal,
 //! a method (`local`, `ssh-key`, or `tailscale` later), the machine it came from, and the user it
 //! acts as on the host, as in "can@github via tailscale from laptop as can@build-box".
 

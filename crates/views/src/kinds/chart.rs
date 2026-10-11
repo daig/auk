@@ -1,7 +1,7 @@
-//! `chart` (T2, §8.5, A23): series data drawn as DOM+CSS, a heatmap (a calendar-style grid of
-//! cells), a bar chart or a sparkline of thin bars (book:6975-7075, research/elements.md §7.3).
+//! `chart` (T2): series data drawn as DOM+CSS, a heatmap (a calendar-style grid of
+//! cells), a bar chart or a sparkline of thin bars.
 //!
-//! The whole chart is rebuilt when any prop changes (book:6977), so its arrivals (`omp-cell`,
+//! The whole chart is rebuilt when any prop changes, so its arrivals (`omp-cell`,
 //! `omp-bar`, built-in CSS) replay then; a render with the same props (a theme or settings
 //! change) keeps its elements, so nothing replays.
 
@@ -32,7 +32,7 @@ pub fn chart_size(p: &Map<String, Value>) -> &'static str {
 }
 
 /// A heatmap cell's level (`data-l`): `≤ 0` → 0, `≤ 0.25` → 1, `≤ 0.5` → 2, `≤ 0.75` → 3, above
-/// → 4; a non-number or a missing cell is `n` (book:6993).
+/// → 4; a non-number or a missing cell is `n`.
 pub fn level(v: Option<&Value>) -> &'static str {
     match v.and_then(Value::as_f64).filter(|f| f.is_finite()) {
         None => "n",
@@ -44,7 +44,7 @@ pub fn level(v: Option<&Value>) -> &'static str {
     }
 }
 
-/// The fill color a `token` names, as `--chart-c` (book:6986, 9945, 10030): `accent` (and no
+/// The fill color a `token` names, as `--chart-c`: `accent` (and no
 /// token) uses the program palette's accent if it has one; a semantic token naming a color is
 /// `var(--sf-c-<t>)`; any other token (a program token, or a semantic one without a color such
 /// as `strong`) is `var(--sf-p-<t>, <the accent>)`. A token that isn't a

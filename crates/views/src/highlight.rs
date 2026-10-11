@@ -1,4 +1,4 @@
-//! Syntax highlighting into the 11 coarse `tk-*` classes (§8.5, §18.4): syntect with the
+//! Syntax highlighting into the 11 coarse `tk-*` classes: syntect with the
 //! two-face grammar set, incremental by line (a changed line re-highlights from there on; an
 //! append keeps the highlighting of unchanged lines), and in the background ([`Background`]): a
 //! render highlights at most a screenful of changed lines and a worker thread does the rest,
@@ -7,7 +7,7 @@
 use std::sync::OnceLock;
 use syntect::parsing::{ParseState, Scope, ScopeStack, ScopeStackOp, SyntaxReference, SyntaxSet};
 
-/// The 11 token classes (book:5123-5134).
+/// The 11 token classes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Tk {
     Comment,
@@ -312,8 +312,8 @@ pub const RENDER_LINES: usize = 120;
 /// Lines one render pass (a sync, a re-render) lets `code` nodes highlight themselves, across
 /// the nodes it renders, past the first one's [`RENDER_LINES`]: about a screenful (an
 /// 800-point pane at the default font). A pass that brings in a long stretch of transcript at
-/// once (a load, a late attach) pays for about a screenful, not for every block (§7.10 cost,
-/// §18.1); the rest highlights in the background.
+/// once (a load, a late attach) pays for about a screenful, not for every block; the rest
+/// highlights in the background.
 pub const PASS_LINES: usize = 48;
 /// Lines a frame may highlight itself to finish texts coming into view that the background
 /// hasn't finished yet (the rest draws in a frame or so later, as it does).
@@ -322,7 +322,7 @@ pub const FINISH_LINES: usize = 4;
 /// finish a text that came into view).
 const WORKER_CHUNK: usize = 32;
 
-/// A text highlighted in the background (§8.5 "background, incremental"). [`Background::update`]
+/// A text highlighted in the background, incrementally. [`Background::update`]
 /// runs on the render path and does at most [`RENDER_LINES`] lines; a worker thread highlights
 /// the rest a chunk at a time, and the view draws them in on its clock ([`Background::lines`]).
 /// Without threads (the browser) [`Background::pump`] does the chunks from the view's clock.

@@ -1,4 +1,4 @@
-//! A headless window's scenario commands (§11.3): harness, control and terminal commands. Each
+//! A headless window's scenario commands: harness, control and terminal commands. Each
 //! settles before it answers; waits on real work (a prompt, expected text, a replica catching
 //! up) give up after 20 s.
 //!
@@ -819,7 +819,7 @@ impl Headless {
     }
 
     /// `remote loopback`: a second private daemon becomes this window's host, attached the way
-    /// a remote host is (§10.2): `auk attach --stdio` over a pipe, through `auk-remote`'s link,
+    /// a remote host is: `auk attach --stdio` over a pipe, through `auk-remote`'s link,
     /// with a stand-in for `ssh` that runs the remote command here. No network is involved.
     fn cmd_remote(self: &Arc<Self>, args: &[String]) -> Result<Value, String> {
         match args {
@@ -900,7 +900,7 @@ impl Headless {
         };
         let result = match args.first().map(String::as_str) {
             Some("fixtures") => {
-                // The SDK's example plugins, from the fixture root (§21: `plugins fixtures`).
+                // The SDK's example plugins, from the fixture root (`plugins fixtures`).
                 let root = fixture_root()?;
                 let dir = root.join("third_party/tern-sdk/plugins/examples");
                 let entries =

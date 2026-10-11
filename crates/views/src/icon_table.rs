@@ -1,4 +1,4 @@
-//! Tern's icon set (book:5904-5921): 207 names plus aliases, drawn with Nerd Font glyphs.
+//! Tern's icon set: 207 names plus aliases, drawn with Nerd Font glyphs.
 //! Generated from Nerd Fonts v3.4.0 `glyphnames.json`; each entry names the glyph it uses.
 
 /// `(name, codepoint, nerd font glyph name)`, sorted by name.

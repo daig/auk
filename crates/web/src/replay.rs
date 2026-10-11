@@ -1,5 +1,5 @@
-//! Replicas driven through streams of output and records (§15.2), for the determinism check
-//! (AC2, S4): the same streams through the same code, natively and compiled to wasm, must give
+//! Replicas driven through streams of output and records, for the determinism check:
+//! the same streams through the same code, natively and compiled to wasm, must give
 //! the same state hashes.
 //!
 //! A run feeds each [`Case`] to an authoritative replica (which numbers the items), two

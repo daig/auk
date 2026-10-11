@@ -1,11 +1,11 @@
-//! The window chrome (D3): the tab bar with its session chip and menu, pane dividers and the
+//! The window chrome: the tab bar with its session chip and menu, pane dividers and the
 //! focus ring, drawn by our UI engine as one document per window. The panes' areas stay
 //! transparent so the grids show through.
 
 use auk_ui::{Document, NodeId};
 
 // The portable widgets and their document (tab bar, session menu, dividers and focus ring,
-// status line, palette) live in auk-views so the browser client draws the same ones (§22, D3);
+// status line, palette) live in auk-views so the browser client draws the same ones;
 // this module adds the app's own overlays.
 use auk_views::chrome::{self as widgets, ChromeDoc};
 pub use auk_views::chrome::{
@@ -42,8 +42,8 @@ html.light .card { background-color: #fbfbfa; color: #1b1d20; }
 .ctxmenu .ctx-item.selected { background-color: #34507e; color: #ffffff; }
 html.light .ctxmenu { background-color: #fbfbfa; border-color: #d5d5d2; }
 html.light .ctxmenu .ctx-item { color: #1b1d20; }
-/* The image viewer (§7.10): the picture and its title on an opaque card over the scrim
-   (book: --card #161619 / #ffffff, --l1 hairline). Around the card, presses reach the scrim. */
+/* The image viewer: the picture and its title on an opaque card over the scrim
+   (Tern's --card #161619 / #ffffff, --l1 hairline). Around the card, presses reach the scrim. */
 .viewer {
   position: absolute; left: 0; top: 0; display: flex; align-items: center; justify-content: center;
   padding: 24px 40px; box-sizing: border-box; pointer-events: none;
@@ -97,13 +97,13 @@ pub struct ChromeModel {
     pub viewer: Option<ViewerView>,
     /// The focused pane's reporting program, in the status line.
     pub pane_app: Option<String>,
-    /// The target of the link under the pointer (§7.14).
+    /// The target of the link under the pointer.
     pub hover_link: Option<String>,
     /// The `title` tooltip of the surface node under the pointer, shown below the pointer at
-    /// that window point (§8.1).
+    /// that window point.
     pub tooltip: Option<(String, f64, f64)>,
     pub find: Option<FindView>,
-    /// A problem card with a retry ("Could not start the block", §9.5).
+    /// A problem card with a retry ("Could not start the block").
     pub card: Option<CardView>,
 }
 
@@ -133,7 +133,7 @@ pub struct ToastItem {
     pub sub: Option<String>,
 }
 
-/// A context menu (§7.8 `menu` actions) at a point, in points.
+/// A context menu (for `menu` actions) at a point, in points.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MenuView {
     pub x: f64,
@@ -158,7 +158,7 @@ pub struct ViewerView {
 }
 
 /// The scale the viewer shows a picture of `size` (CSS px) at in a window `window` points big:
-/// it fits the card's room; a raster never grows past its own size, an SVG does (§7.10).
+/// it fits the card's room; a raster never grows past its own size, an SVG does.
 pub fn viewer_fit(window: (f64, f64), size: (f64, f64), svg: bool) -> f64 {
     // The viewer's padding, the card's padding and border, and the title bar above the picture.
     let (aw, ah) = ((window.0 - 106.0).max(1.0), (window.1 - 130.0).max(1.0));
@@ -631,7 +631,7 @@ mod tests {
         panic!("no [{attr}={value}]")
     }
 
-    /// Amendment A20: a transparent SVG zoomed over bright content shows on the opaque card,
+    /// A transparent SVG zoomed over bright content shows on the opaque card,
     /// scaled up to fit, with its title on the card too, over a scrim of the appearance's color.
     #[test]
     fn the_viewer_shows_a_transparent_svg_on_an_opaque_card() {

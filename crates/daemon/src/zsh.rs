@@ -1,4 +1,4 @@
-//! zsh integration (§5.3, D13), injected through `ZDOTDIR`.
+//! zsh integration, injected through `ZDOTDIR`.
 //!
 //! A pane's zsh starts with `ZDOTDIR` pointing at a daemon-owned directory whose `.zshenv`
 //! restores the user's own `ZDOTDIR` (passed as `AUK_USER_ZDOTDIR`, or unset to mean `$HOME`),
@@ -40,7 +40,7 @@ fi
 }
 "#;
 
-const INTEGRATION: &str = r#"# Auk shell integration hooks: OSC 133 marks, OSC 7 cwd and titles (spec §5.3).
+const INTEGRATION: &str = r#"# Auk shell integration hooks: OSC 133 marks, OSC 7 cwd and titles.
 [[ -n ${_auk_loaded-} ]] && return
 typeset -g _auk_loaded=1
 typeset -gi _auk_running=0

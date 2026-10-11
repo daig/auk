@@ -1,4 +1,4 @@
-//! Inline Markdown in omp's composer (book:9198-9201): an `editor` inside an `omp.editor*` role
+//! Inline Markdown in omp's composer: an `editor` inside an `omp.editor*` role
 //! draws its Markdown in place, as `md-*` spans over the text it already shows. Nothing is hidden
 //! or replaced: every character, markers included, stays where it is, so the caret, selections,
 //! clicks and what the program receives map exactly as in a plain editor. The spans only style.

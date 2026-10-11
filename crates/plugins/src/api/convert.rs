@@ -1,4 +1,4 @@
-//! Lua ⇄ JSON, with Tern's rules (research/plugins.md §11.5). The same conversion carries view
+//! Lua ⇄ JSON, with Tern's rules. The same conversion carries view
 //! trees, block state, `tern.kv` values, events and `tern.json`.
 //!
 //! - A table with keys exactly 1..n (n > 0), or one tagged with `tern.json.array`, is an array;

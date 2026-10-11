@@ -1,4 +1,4 @@
-# A split layout: three shells, focus moving between them (§4.3).
+# A split layout: three shells, focus moving between them.
 size 800x400
 ready
 run "echo left"

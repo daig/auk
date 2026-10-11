@@ -1,4 +1,4 @@
-//! Differential tests against `alacritty_terminal` 0.26, the reference grid (§21): the same bytes
+//! Differential tests against `alacritty_terminal` 0.26, the reference grid: the same bytes
 //! and resizes go to both, and the visible cells (text, colors, attributes, links, wide-character
 //! kinds, wrap flags), the cursor and the scrollback must match.
 //!

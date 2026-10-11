@@ -1,4 +1,4 @@
-//! Chords (§9.8 "Binds"), the grammar `tern.bind`, command `keys` and the user's `keybinds`
+//! Chords, the grammar `tern.bind`, command `keys` and the user's `keybinds`
 //! share: `+`-joined modifiers and one key (`ctrl+shift+2`, `cmd+plus`, `cmd+digit_1`), `>`
 //! between the steps of a sequence (`ctrl+a>c`), and a lone modifier as a tap in a sequence of
 //! taps (`cmd>cmd`).

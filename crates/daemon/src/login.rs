@@ -1,6 +1,6 @@
-//! The fresh login environment panes start from (§5.2): HOME, USER, SHELL and the PATH the login
+//! The fresh login environment panes start from: HOME, USER, SHELL and the PATH the login
 //! shell builds, not the daemon's environment. Tern gets it by probing `$SHELL` [O]; so do we,
-//! once, when the daemon starts (the daemon keeps the environment it started with, §4.1).
+//! once, when the daemon starts (the daemon keeps the environment it started with).
 
 use std::collections::BTreeMap;
 use std::ffi::CStr;
@@ -59,7 +59,7 @@ pub struct LoginEnv {
     /// `user@host`, for `AUK_IDENTITY`.
     pub identity: String,
     /// The user's own ZDOTDIR, when the daemon was started with one. Shells source their zsh
-    /// files from here (§5.3); tests point it at a test directory.
+    /// files from here; tests point it at a test directory.
     pub user_zdotdir: Option<PathBuf>,
 }
 

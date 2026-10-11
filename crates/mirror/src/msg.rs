@@ -1,4 +1,4 @@
-//! The messages of §15.6 and their frames.
+//! The protocol's messages and their frames.
 
 use std::collections::BTreeMap;
 
@@ -16,15 +16,15 @@ use crate::{PaneId, Versions};
 pub enum ClientKind {
     /// A macOS app window.
     App,
-    /// A headless window (§11.3).
+    /// A headless window.
     Headless,
-    /// A browser tab (§10.3).
+    /// A browser tab.
     Web,
-    /// A window attached over the remote transport (§10.2).
+    /// A window attached over the remote transport.
     Remote,
 }
 
-/// Facts a program sees from its pane's primary client (§15.5).
+/// Facts a program sees from its pane's primary client.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientFacts {
     /// Cell size in pixels: width, height.
@@ -66,7 +66,7 @@ impl ClientFacts {
     }
 }
 
-/// A client's theme colors (§15.5): default foreground, background and cursor, and the 16 ANSI
+/// A client's theme colors: default foreground, background and cursor, and the 16 ANSI
 /// colors, as RGB.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThemeColors {
@@ -108,11 +108,11 @@ pub struct Hello {
     pub kind: ClientKind,
     #[serde(default)]
     pub facts: ClientFacts,
-    /// The client's own binary. A daemon of an older release execs it to upgrade in place
-    /// (§15.7); `None` where there is none (the browser).
+    /// The client's own binary. A daemon of an older release execs it to upgrade in place;
+    /// `None` where there is none (the browser).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exe: Option<std::path::PathBuf>,
-    /// How the client reached the daemon, for presence (§10.1): a remote link names its SSH hop.
+    /// How the client reached the daemon, for presence: a remote link names its SSH hop.
     /// Empty for a client on the daemon's machine, which the daemon shows as a `local` hop.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub identity: Vec<Hop>,
@@ -131,18 +131,18 @@ impl Hello {
     }
 }
 
-/// The daemon's answer to a client whose versions differ (X9). The client offers an upgrade.
+/// The daemon's answer to a client whose versions differ. The client offers an upgrade.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Refusal {
     pub reason: String,
     /// The daemon's versions, so the client can say what to upgrade to.
     pub daemon: Versions,
-    /// The daemon is upgrading itself to this client's release (§15.7): connect again shortly.
+    /// The daemon is upgrading itself to this client's release: connect again shortly.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub upgrading: bool,
 }
 
-/// A layout edit a window asks for (§4.3). M4 completes the multi-window editing.
+/// A layout edit a window asks for.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "edit", rename_all = "snake_case")]
 pub enum LayoutEdit {
@@ -177,14 +177,14 @@ pub enum LayoutEdit {
         session: SessionId,
         locked: bool,
     },
-    /// Opens an agent pane (§5.1): `agent_command` through the login shell, split right of
+    /// Opens an agent pane: `agent_command` through the login shell, split right of
     /// `pane` (the window's focused pane), or in a new session when there is none.
     Agent {
         pane: Option<PaneId>,
     },
-    /// Opens a plugin block pane (§9.5) of `kind` (`<plugin>.<block>`) with launch `args`: split
+    /// Opens a plugin block pane of `kind` (`<plugin>.<block>`) with launch `args`: split
     /// off `split`'s pane, else a new tab in `session`, else a new session in the client's window
-    /// key. A remote window opens its host's block types this way (§10.4); a local one may too.
+    /// key. A remote window opens its host's block types this way; a local one may too.
     Block {
         kind: String,
         args: Vec<String>,
@@ -192,15 +192,15 @@ pub enum LayoutEdit {
         session: Option<SessionId>,
         cwd: Option<String>,
     },
-    /// Opens a pane running `launch` at `place` (§9.8 `layout:new_tab`, `split`, `tab` and
+    /// Opens a pane running `launch` at `place` (`layout:new_tab`, `split`, `tab` and
     /// `cx:new_block`). Sent as a [`ClientMsg::Request`], it is answered with `{pane}`, plus
     /// `failed` when a block couldn't start.
     Open {
         place: OpenPlace,
         launch: Launch,
     },
-    /// Moves `pane` to `side` of `target`, or swaps the two when `side` is absent (§9.8
-    /// `layout:move`). Answered with whether anything moved: not for a missing pane, or one in
+    /// Moves `pane` to `side` of `target`, or swaps the two when `side` is absent
+    /// (`layout:move`). Answered with whether anything moved: not for a missing pane, or one in
     /// another window key.
     Move {
         pane: PaneId,
@@ -208,7 +208,7 @@ pub enum LayoutEdit {
         side: Option<Side>,
     },
     /// Moves `pane`'s nearest divider on `side` by `delta` thousandths of its split, toward
-    /// `side` when positive (§9.8 `layout:resize`). Answered with whether it moved.
+    /// `side` when positive (`layout:resize`). Answered with whether it moved.
     Resize {
         pane: PaneId,
         side: Side,
@@ -234,7 +234,7 @@ pub enum OpenPlace {
     },
 }
 
-/// What a pane opened with [`LayoutEdit::Open`] runs (§9.8 `Launch`): a block of `block` with
+/// What a pane opened with [`LayoutEdit::Open`] runs (`Launch`): a block of `block` with
 /// `args`, else `command` through the login shell, else an interactive shell. `cwd` defaults to
 /// the split target's directory, or home.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -259,7 +259,7 @@ pub enum ClientMsg {
     Attach {
         window_key: String,
     },
-    /// Bytes for the pane's PTY, already encoded for its modes (§15.4). Sent as a binary frame.
+    /// Bytes for the pane's PTY, already encoded for its modes. Sent as a binary frame.
     #[serde(skip)]
     Input {
         pane: PaneId,
@@ -281,7 +281,7 @@ pub enum ClientMsg {
         cols: u16,
         rows: u16,
     },
-    /// The client focused the pane, which makes it the pane's primary (§15.5).
+    /// The client focused the pane, which makes it the pane's primary.
     Focus {
         pane: PaneId,
     },
@@ -298,13 +298,13 @@ pub enum ClientMsg {
         id: u64,
         edit: LayoutEdit,
     },
-    /// Blobs the pane's documents name that this client doesn't hold (§7.12): the daemon answers
+    /// Blobs the pane's documents name that this client doesn't hold: the daemon answers
     /// with a [`DaemonMsg::Blob`] for each one it has.
     Blobs {
         pane: PaneId,
         ids: Vec<String>,
     },
-    /// Clears the pane's scrollback (§5.5): a pane operation the daemon records in-band, so it
+    /// Clears the pane's scrollback: a pane operation the daemon records in-band, so it
     /// reaches every replica and ends every surface anchored in the scrollback. Taken only from a
     /// client that shows the pane.
     ClearScrollback {
@@ -317,7 +317,7 @@ pub enum ClientMsg {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "effect", rename_all = "snake_case")]
 pub enum Effect {
-    /// Two lines; `level` is `info`, `success` or `error` (§9.7).
+    /// Two lines; `level` is `info`, `success` or `error`.
     Toast {
         #[serde(default = "info")]
         level: String,
@@ -327,7 +327,7 @@ pub enum Effect {
     },
     /// Open a path or URL. `origin` is absent for `auk open` (the windows route it with origin
     /// `cli`), and `link` for a host plugin's `cx:open` (`route.link`, then `route.open` with
-    /// origin `link`, §9.7).
+    /// origin `link`).
     Open {
         target: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -342,19 +342,19 @@ fn info() -> String {
     "info".to_owned()
 }
 
-/// An attached client, as presence reports it (§10.1).
+/// An attached client, as presence reports it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientInfo {
     pub id: u64,
     pub kind: ClientKind,
     pub window_key: Option<String>,
-    /// Who the client is: its identity chain, nearest hop last (§10.1). A local client has one
+    /// Who the client is: its identity chain, nearest hop last. A local client has one
     /// `local` hop.
     #[serde(default)]
     pub identity: Vec<Hop>,
 }
 
-/// One hop of an identity chain (§10.1): a principal reached by a method from a machine, acting
+/// One hop of an identity chain: a principal reached by a method from a machine, acting
 /// as a user, as in "can@github via tailscale from laptop as can@build-box". The same shape as
 /// `auk_remote::Hop`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -378,7 +378,7 @@ pub enum DaemonMsg {
     /// The answer to an accepted hello.
     Welcome {
         versions: Versions,
-        /// The plugin catalog (M7); `null` until plugins exist.
+        /// The plugin catalog; `null` until plugins exist.
         catalog: Value,
         /// Every window key's sessions.
         sessions: Layout,
@@ -387,7 +387,7 @@ pub enum DaemonMsg {
     },
     /// The answer to a hello with other versions; the connection closes after it.
     Refused(Refusal),
-    /// A pane's state at a stream position (§15.3). Sent as a binary frame.
+    /// A pane's state at a stream position. Sent as a binary frame.
     #[serde(skip)]
     Snapshot {
         pane: PaneId,
@@ -405,7 +405,7 @@ pub enum DaemonMsg {
         seq: u64,
         record: Record,
     },
-    /// A lens block's current view (§15.1): it replaces the last one whole; `null` shows the raw
+    /// A lens block's current view: it replaces the last one whole; `null` shows the raw
     /// output. `block` is the block's number in the pane.
     LensView {
         pane: PaneId,
@@ -429,7 +429,7 @@ pub enum DaemonMsg {
         pane: PaneId,
         status: i32,
     },
-    /// Whether this client is now the pane's primary (§15.5).
+    /// Whether this client is now the pane's primary.
     Primary {
         pane: PaneId,
         you: bool,
@@ -442,7 +442,7 @@ pub enum DaemonMsg {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
-    /// A blob of the pane (§7.12), outside the stream: snapshots don't carry blobs, so the daemon
+    /// A blob of the pane, outside the stream: snapshots don't carry blobs, so the daemon
     /// sends those the pane's documents name after a snapshot, and any a client asks for. Blob
     /// bytes are storage, not replicated state. Sent as a binary frame.
     #[serde(skip)]

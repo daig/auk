@@ -1,4 +1,4 @@
-//! Reloading on change (§9.3 "Watching"): FSEvents on macOS and inotify on Linux, with a 2 s
+//! Reloading on change: FSEvents on macOS and inotify on Linux, with a 2 s
 //! poll of a tree fingerprint (paths, sizes, mtimes; 8 levels; 10,000 entries) as the fallback.
 //! Changes are batched over 300 ms, and any change reloads every plugin in the watching context.
 //! The plugins folder and every linked or symlinked package outside it are watched.

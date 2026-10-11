@@ -1,8 +1,8 @@
-//! The `perf` suite (GOAL.md, spec §18.1, §23 S2). It runs alone, after every other suite
+//! The `perf` suite. It runs alone, after every other suite
 //! (`scripts/verify.sh`), in release builds, so nothing else skews its numbers. Each test prints
-//! its numbers; `PROGRESS.md` records them.
+//! its numbers.
 //!
-//! **Frame budget (§18.1).** The real app (`auk`, no subcommand) on a test daemon, its window
+//! **Frame budget.** The real app (`auk`, no subcommand) on a test daemon, its window
 //! sized to 1200×800 points at the display's scale (2× here). Two loads:
 //! - `omp-session` (`fixtures/tsp/omp-session.jsonl`) played with `surface-play … paced` (its
 //!   recorded timing, gaps capped at 2 s by the daemon) into a pane the app shows;
@@ -19,7 +19,7 @@
 //! spent in `get_current_texture` waiting for a drawable, which is vsync pacing, not work. The
 //! budget is p95 ≤ 8.3 ms over every frame drawn during the load.
 //!
-//! **Against Ghostty (S2).** The same measurement for both terminals, through the screen probe
+//! **Against Ghostty.** The same measurement for both terminals, through the screen probe
 //! (`crates/conformance/screen/probe.swift`, built fresh with `swiftc`), which watches the
 //! terminal's window with ScreenCaptureKit (every composed frame, with its display time in host
 //! time):
@@ -58,9 +58,9 @@ use auk_conformance::perf::{
 };
 use serde_json::Value;
 
-/// The frame budget (§18.1): 120 Hz.
+/// The frame budget: 120 Hz.
 const BUDGET_MS: f64 = 8.3;
-/// Auk's number may be at most this many times Ghostty's (§23 S2).
+/// Auk's number may be at most this many times Ghostty's.
 const GHOSTTY_FACTOR: f64 = 1.5;
 /// `cat` runs per terminal.
 const RUNS: usize = 5;
@@ -199,7 +199,7 @@ fn frame_budget_scrolling_a_10000_entry_transcript() {
     assert_budget(&stats, "10,000-entry transcript scroll");
 }
 
-/// The load check (amendment A10, §7.10 cost, §18.1): the 10,000-entry omp-style transcript
+/// The load check: the 10,000-entry omp-style transcript
 /// arriving as a program would stream it, 50 entries per 16 ms frame (`surface-play … paced`,
 /// about 3.2 s of input), into a pane the app shows. Every frame drawn during the load stays in
 /// the frame budget at p95, and the window has drawn the last entry within 1.5× the input's
@@ -260,7 +260,7 @@ fn frame_budget_loading_a_10000_entry_transcript() {
         .as_array()
         .map(|a| a.iter().filter_map(Value::as_f64).collect())
         .unwrap_or_default();
-    // How per-frame work changes as the transcript grows (§7.10: in proportion to the ops, not
+    // How per-frame work changes as the transcript grows (in proportion to the ops, not
     // to the document): each phase's median over each fifth of the load's frames.
     let fifths = |v: &[f64]| -> String {
         let n = v.len() / 5;
@@ -302,7 +302,7 @@ fn frame_budget_loading_a_10000_entry_transcript() {
     );
 }
 
-/// Amendment A9: a big picture decodes off the frame path. A 4096×4096 JPEG arrives in a pane
+/// A big picture decodes off the frame path. A 4096×4096 JPEG arrives in a pane
 /// the app shows and is drawn, and no frame from its arrival to its drawing takes as long as
 /// the decode itself (timed here, in this process, with the views' decoder): none waited for
 /// it.
@@ -341,7 +341,7 @@ fn image_decoding_never_stalls_a_frame() {
     );
 }
 
-// Against Ghostty (S2).
+// Against Ghostty.
 
 /// Fails naming each missing permission.
 fn require(perms: &Permissions, need_keys: bool) {

@@ -1,4 +1,4 @@
-//! Encoding input for the program (§15.4, §19): keys, paste, focus and mouse, for the pane's
+//! Encoding input for the program: keys, paste, focus and mouse, for the pane's
 //! current modes (legacy xterm, application cursor/keypad, kitty keyboard flags, bracketed paste,
 //! SGR mouse). Windows and the browser client both encode with this module.
 //!

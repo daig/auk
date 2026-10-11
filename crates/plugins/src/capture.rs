@@ -1,4 +1,4 @@
-//! Lens capture (§9.6 "Aborting" and the line rules of `LensDef.line`): a claimed command's
+//! Lens capture (with the line rules of `LensDef.line`): a claimed command's
 //! output is diverted into an 8-row scratch screen, and each row that scrolls off becomes a
 //! [`LensLine`]: colors stripped, `\r` rewrites resolved, soft wraps joined, trailing blanks
 //! trimmed, with its OSC 8 links.

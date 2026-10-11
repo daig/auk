@@ -1,4 +1,4 @@
-//! Callbacks that run later on the VM's owner thread (§9.2 "No re-entrancy"): `tern.timer`,
+//! Callbacks that run later on the VM's owner thread: `tern.timer`,
 //! `tern.sleep`, `tern.process.run` and `tern.fetch` callbacks, and awaitables.
 //!
 //! Work on other threads (processes, requests) sends a [`Completion`] over a channel and wakes
@@ -127,7 +127,7 @@ impl Completer {
     }
 
     fn send(self, outcome: Outcome) {
-        // The receiver lives as long as the VM; a send after it is gone is dropped (§9.3: the
+        // The receiver lives as long as the VM; a send after it is gone is dropped (the
         // work runs to completion, its callback never runs).
         if self
             .tx

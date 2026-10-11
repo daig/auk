@@ -1,6 +1,6 @@
-//! The catalog: the one piece of plugin state every replica shares (§9.4).
+//! The catalog: the one piece of plugin state every replica shares.
 //!
-//! Its JSON form is that of `tern plugin list --json` (book:23007-23042). Replicas (windows, the
+//! Its JSON form is that of `tern plugin list --json`. Replicas (windows, the
 //! web tab) learn block types, lens claims and plugin styles from it without running Lua. This
 //! module has no Luau dependency, so it builds wherever the replica does.
 

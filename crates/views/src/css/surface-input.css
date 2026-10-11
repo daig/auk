@@ -1,4 +1,4 @@
-/* editor, input, status, seg (book:7156-7600). */
+/* editor, input, status, seg. */
 .sf-editor, .sf-input {
   position: relative; display: flex; align-items: flex-start; gap: 6px; min-width: 0; padding: 6px 10px;
   border-radius: var(--r-ctl); background-color: var(--well); border: 1px solid var(--well-line);

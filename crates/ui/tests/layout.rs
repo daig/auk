@@ -1,5 +1,5 @@
 //! Probe pages laid out by our engine and by WebKit (through `webkit-boxes`), set in Ahem, must
-//! agree on every element's border box within 1 CSS px (GOAL.md, `layout`). The pages and the
+//! agree on every element's border box within 1 CSS px. The pages and the
 //! comparison are shared with the `layout` suite (`auk_conformance::layout`); `PROBE_DIFF=1` prints
 //! every box off by more than 0.05 px.
 
@@ -40,7 +40,7 @@ fn probe_overflow() {
     common::assert_probe("overflow");
 }
 
-/// Real fonts: within 2 CSS px or 2% of the box's size, whichever is larger (GOAL.md).
+/// Real fonts: within 2 CSS px or 2% of the box's size, whichever is larger.
 #[test]
 fn probe_real_fonts() {
     common::assert_page("realfont", auk_conformance::webkit::real_font_tolerance);

@@ -1,10 +1,11 @@
 [package]
 name = "auk-remote"
-description = "Remote hosts over SSH (spec §10.2): the `auk attach --stdio` bridge, and a reconnecting mirror link with connection states and the identity chain."
+description = "Remote hosts over SSH: the `auk attach --stdio` bridge, and a reconnecting mirror link with connection states and the identity chain."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 auk-daemon = { version = "0.0.0", path = "../daemon" }

@@ -33,7 +33,7 @@ pub struct DeclBlock {
     pub decls: Vec<Decl>,
 }
 
-/// A media query from Tern's accepted subset (§4.5).
+/// A media query from Tern's accepted subset.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MediaQuery {
     pub max_width: Option<f32>,

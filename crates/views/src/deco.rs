@@ -1,4 +1,4 @@
-//! Decorations: elements Tern adds that are not nodes (book:11571-11585), each `.sf-deco`.
+//! Decorations: elements Tern adds that are not nodes, each `.sf-deco`.
 //!
 //! - `.sf-deco.sf-caption` (`.sf-drafted`, `.sf-caption-name`, `.sf-caption-draft`): the folded
 //!   composer's caption, the first child of an `omp.editor*` col. Sheets show it in an unfocused
@@ -6,7 +6,7 @@
 //! - `span.sf-deco.sf-thought-sum`: the summary on the first head of a chain of thoughts (two or
 //!   more consecutive `omp.thinking*` sections): how many, and their summed `took`.
 //! - `div.sf-deco.sf-work-head`: under the "Fold tool calls" setting, the head of a run of two or
-//!   more consecutive work blocks among `main`'s children (book:9939-9945). The blocks of a run
+//!   more consecutive work blocks among `main`'s children. The blocks of a run
 //!   get `.sf-work`, folded ones `.sf-folded`.
 //!
 //! `div.sf-deco.sf-brand` (omp's app mark) is drawn by the `image` kind around its `omp` builtin.

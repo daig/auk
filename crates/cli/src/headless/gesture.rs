@@ -1,5 +1,5 @@
 //! A headless window's view state for a pane's surfaces: local folds and control flips, pointer
-//! gestures resolved into events as a window resolves them (§7.8, F8, F9), and which frames it
+//! gestures resolved into events as a window resolves them, and which frames it
 //! has acked.
 
 use std::collections::BTreeMap;

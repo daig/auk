@@ -1,4 +1,4 @@
-//! The window half's runtime (§9.8): one VM per plugin per window, on the window's UI thread,
+//! The window half's runtime: one VM per plugin per window, on the window's UI thread,
 //! behind the [`WindowHost`] trait the app implements.
 //!
 //! [`WindowPlugins`] loads the window entries (manifest styles first), and gives the app what it
@@ -13,7 +13,7 @@
 //! open, without overrides or routes.
 //!
 //! **Window cx.** Each handler gets a fresh cx, valid only during the call; using a kept one
-//! raises. It has no way to write a block's frames (AC14): blocks live in host workers.
+//! raises. It has no way to write a block's frames: blocks live in host workers.
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
@@ -291,7 +291,7 @@ pub enum RouteDecision {
     Handled,
 }
 
-/// A window event (§9.8 "Window events"), queued by the session and delivered after each render.
+/// A window event, queued by the session and delivered after each render.
 #[derive(Debug, Clone, PartialEq)]
 pub enum WindowEvent {
     /// The focused pane of the active tab changed.
@@ -392,7 +392,7 @@ impl WindowEvent {
     }
 }
 
-/// What the app provides to window plugin code (the window cx, §9.8 "Window cx").
+/// What the app provides to window plugin code (the window cx).
 ///
 /// Pane and tab ids are the window's. Errors are the message the cx call raises.
 pub trait WindowHost {
@@ -523,7 +523,7 @@ struct WindowPlugin {
     name: String,
     vm: Vm,
     css: String,
-    /// The plugin's directory, which its sheets' `url()`s resolve against (§9.8 CSS).
+    /// The plugin's directory, which its sheets' `url()`s resolve against.
     dir: PathBuf,
 }
 
@@ -1157,7 +1157,7 @@ impl WindowPlugins {
         o
     }
 
-    /// Rebuilds every VM (§9.3 "Window reload"). `window_start` then runs only for plugins that
+    /// Rebuilds every VM. `window_start` then runs only for plugins that
     /// haven't run it in this window.
     pub fn reload(&mut self, host: &mut dyn WindowHost) {
         self.load_all(host);
@@ -1642,7 +1642,7 @@ impl WindowPlugins {
     /// then its `tern.css` sheets (`plugin:local:<id>:<name>`).
     pub fn sheets(&self) -> Vec<(String, String)> {
         let mut out = Vec::new();
-        // A plugin file's `url()` becomes a `data:` URL here, at install (§9.8 CSS).
+        // A plugin file's `url()` becomes a `data:` URL here, at install.
         let inline = |css: &str, p: &WindowPlugin| {
             crate::css_url::inline_urls_logged(css, Some(&p.dir), &p.id)
         };

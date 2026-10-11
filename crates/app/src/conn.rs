@@ -1,6 +1,6 @@
-//! A window's connection to the daemon (§15.6): the handshake, `attach` for the window key, a
+//! A window's connection to the daemon: the handshake, `attach` for the window key, a
 //! reader thread that applies the stream to the window's follower replicas, and the sending
-//! side. Each window is one client, so the primary-replica policy (§15.5) ranks windows.
+//! side. Each window is one client, so the primary-replica policy ranks windows.
 //!
 //! The replicas live in [`Shared`], behind a mutex: the reader thread applies output as it
 //! arrives (so a fast producer never waits for a frame), and the main thread reads them to draw.
@@ -26,7 +26,7 @@ pub struct PaneData {
     pub replica: Replica,
     /// The process's exit status, once it ended.
     pub exit: Option<i32>,
-    /// Whether this window is the pane's primary (§15.5).
+    /// Whether this window is the pane's primary.
     pub primary: bool,
     /// Bumped whenever the replica changes, for redraws.
     pub generation: u64,
@@ -34,13 +34,13 @@ pub struct PaneData {
     pub bell: bool,
     /// A snapshot replaced the replica: the window's view of its surfaces starts over.
     pub reset: bool,
-    /// Blobs already asked for (§7.12).
+    /// Blobs already asked for.
     pub asked: std::collections::BTreeSet<String>,
-    /// Shell integration news since the window last looked, for window plugin events (§9.8).
+    /// Shell integration news since the window last looked, for window plugin events.
     pub notes: Vec<PaneNote>,
 }
 
-/// Something the pane's stream reported that window plugins hear about (§9.8 "Window events").
+/// Something the pane's stream reported that window plugins hear about.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PaneNote {
     /// A command started: the line as typed, else as the shell reported it.
@@ -69,14 +69,14 @@ pub struct Shared {
     pub closed: Option<String>,
     /// Effects the daemon asked this window to perform, oldest first.
     pub effects: Vec<Effect>,
-    /// The host's plugin catalog (§9.4), as last sent; `null` before plugins.
+    /// The host's plugin catalog, as last sent; `null` before plugins.
     pub catalog: serde_json::Value,
     /// Bumped whenever the catalog arrives.
     pub catalog_generation: u64,
-    /// Lens views that arrived before this window's replica had their block (§9.6): retried for
+    /// Lens views that arrived before this window's replica had their block: retried for
     /// 5 s as the stream catches up.
     pub early_views: Vec<(PaneId, u64, Option<serde_json::Value>, std::time::Instant)>,
-    /// The clients attached to the host, as presence last reported them (§10.1).
+    /// The clients attached to the host, as presence last reported them.
     pub presence: Vec<auk_mirror::ClientInfo>,
     /// Bumped whenever presence arrives.
     pub presence_generation: u64,
@@ -123,7 +123,7 @@ impl Shared {
     fn on_message(&mut self, msg: DaemonMsg) {
         match msg {
             DaemonMsg::Snapshot { pane, snapshot } => {
-                // The views' sheet checker, as a drawing window's replica has (§8.4).
+                // The views' sheet checker, as a drawing window's replica has.
                 let tsp = auk_tsp::TspPane::with(
                     auk_replica::tsp_config(&snapshot.settings),
                     auk_views::sheet_checker(),
@@ -171,7 +171,7 @@ impl Shared {
                 }
             }
             DaemonMsg::Effect(effect) => self.effects.push(effect),
-            // A blob the pane's documents name, sent after a snapshot (§7.12); nodes naming it
+            // A blob the pane's documents name, sent after a snapshot; nodes naming it
             // redraw from the replica's changes.
             DaemonMsg::Blob {
                 pane,
@@ -189,7 +189,7 @@ impl Shared {
                 self.catalog = catalog;
                 self.catalog_generation += 1;
             }
-            // A lens view replaces the block's last one whole (§9.6); `null` shows the raw output.
+            // A lens view replaces the block's last one whole; `null` shows the raw output.
             DaemonMsg::LensView { pane, block, node } => {
                 if let Ok(block) = block.parse::<u64>() {
                     let node = (!node.is_null()).then_some(node);
@@ -241,11 +241,11 @@ impl Shared {
     }
 }
 
-/// How long a lens view that arrived before its block waits for it (§9.6).
+/// How long a lens view that arrived before its block waits for it.
 const EARLY_VIEW_WAIT: Duration = Duration::from_secs(5);
 
 /// A window's connection: an `auk-remote` link to the local daemon, which reconnects and
-/// resyncs after the daemon upgrades in place (§15.7).
+/// resyncs after the daemon upgrades in place.
 #[derive(Debug)]
 pub struct Connection {
     pub window_key: String,
@@ -270,7 +270,7 @@ impl Connection {
         Connection::open_target(Target::Local(socket.to_owned()), facts)
     }
 
-    /// Connects to the local daemon or, over SSH, a remote host's (§10.2): the window's halves
+    /// Connects to the local daemon or, over SSH, a remote host's: the window's halves
     /// stay here and see the remote panes.
     pub fn open_target(target: Target, facts: ClientFacts) -> io::Result<(Connection, Welcome)> {
         let (name, host) = match &target {
@@ -301,7 +301,7 @@ impl Connection {
     }
 
     /// Shows `window_key`'s sessions on this connection: the daemon answers with the layout, a
-    /// snapshot per pane, then live output (§15.3).
+    /// snapshot per pane, then live output.
     pub fn attach(&mut self, window_key: &str) -> io::Result<()> {
         self.window_key = window_key.to_owned();
         self.send(&ClientMsg::Attach {
@@ -310,7 +310,7 @@ impl Connection {
     }
 
     /// Starts the reader thread. `wake` runs after each batch of messages (from that thread),
-    /// and whenever the link's state changes (§10.1), so the window redraws it.
+    /// and whenever the link's state changes, so the window redraws it.
     pub fn start(&self, wake: impl Fn() + Send + Sync + 'static) {
         let Some(mut reader) = self.reader.lock().unwrap_or_else(|e| e.into_inner()).take() else {
             return;
@@ -357,7 +357,7 @@ impl Connection {
     }
 
     /// Sends a layout edit to the window's own host's daemon, local or remote, and waits for
-    /// its answer (§15.6 requests). The daemon replies after the edit's layout went out, so the
+    /// its answer. The daemon replies after the edit's layout went out, so the
     /// window's layout already shows the change when this returns.
     pub fn request(&self, edit: LayoutEdit) -> Result<serde_json::Value, String> {
         let id = self.next_request.fetch_add(1, Ordering::Relaxed) + 1;
@@ -408,7 +408,7 @@ impl Connection {
         self.link.state().to_string()
     }
 
-    /// The link's state, identity chain, ssh process and held input (§10.1).
+    /// The link's state, identity chain, ssh process and held input.
     pub fn link_status(&self) -> auk_remote::Status {
         self.link.status()
     }
@@ -469,7 +469,7 @@ mod tests {
         daemon
     }
 
-    /// §9.6: a lens view that outruns its block's output waits in the window's replica and
+    /// A lens view that outruns its block's output waits in the window's replica and
     /// lands once the block appears; one whose block never comes is dropped after 5 s.
     #[test]
     fn early_lens_views_wait_for_their_block_up_to_5_s() {

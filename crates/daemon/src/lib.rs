@@ -1,4 +1,4 @@
-//! The session daemon (spec §14, §15): one per user per machine (§4.1). It owns the pane table
+//! The session daemon: one per user per machine. It owns the pane table
 //! and each pane's PTY and authoritative replica, the sessions and layout, the attached clients
 //! with the primary-replica policy, zsh integration, and the control endpoint.
 //!
@@ -7,7 +7,7 @@
 //! - [`paths`] says where the sockets, state and logs live.
 //! - [`spawn`] starts a detached daemon for a client that found none.
 //!
-//! The pane table is built for the state file (§16, M6): [`pane::Pane::record`] gives each
+//! The pane table is built for the state file: [`pane::Pane::record`] gives each
 //! pane's kind, cwd and window with its snapshot, and the layout serializes as it is.
 
 pub mod capture;

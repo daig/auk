@@ -1,11 +1,11 @@
-/* omp's tool calls (research/omp-stylesheets.md §8): role-scoped refinements of the kit tool
-   kind for omp's tools, its shell commands, checklists and agents. Amendment A24. The tool,
-   agent and checklist looks stay in surface-agent.css, so a plugin's roleless tool is unchanged
-   (T3.8); never restated here: the status tints, .sf-tool-hr, the nested-frame strip, collapse
+/* omp's tool calls: role-scoped refinements of the kit tool
+   kind for omp's tools, its shell commands, checklists and agents. The tool,
+   agent and checklist looks stay in surface-agent.css, so a plugin's roleless tool is unchanged;
+   never restated here: the status tints, .sf-tool-hr, the nested-frame strip, collapse
    and preview, .fast, the head's hover actions. Every rule leads with its kind class, so
    omp.tool.* roles on other kinds (omp.tool.file rows) don't take the frame. */
 
-/* Frame (§8.2, Q-K2): the bubble's radius, and a ring instead of the border, so a status tint
+/* Frame: the bubble's radius, and a ring instead of the border, so a status tint
    reads as a fill. An error restores its ring as a shadow; a nested tool loses it (the kit strips
    only border and fill), after the error rule so a nested error loses it too. */
 .sf-tool[data-role^='omp.tool.'] { border-radius: var(--r-card); }
@@ -21,7 +21,7 @@
 .sf-tool[data-role^='omp.tool.'].collapsible > .sf-tool-head:hover { background-color: var(--l1); border-radius: var(--r-card); }
 .sf-tool[data-role^='omp.tool.'].collapsible > .sf-tool-head:focus-visible { outline: var(--omp-focus); outline-offset: -2px; }
 
-/* Files and chips (§8.3). A toned icon keeps its tone. */
+/* Files and chips. A toned icon keeps its tone. */
 .sf-col[data-role='omp.tool.files'] { gap: 0; }
 .sf-row[data-role='omp.tool.files'] { gap: 4px; }
 .sf-row[data-role='omp.tool.file'] { gap: 6px; min-height: var(--sf-lh); }
@@ -35,7 +35,7 @@
   background-color: var(--l1); border-radius: var(--r-chip);
 }
 
-/* Search, sources, reads, diagnostics (§8.3). */
+/* Search, sources, reads, diagnostics. */
 .sf-col[data-role='omp.tool.search.file'], .sf-col[data-role='omp.tool.find.hit'] { gap: 4px; }
 .sf-row[data-role='omp.tool.source'] { gap: 6px; }
 .sf-card[data-role='omp.tool.read.preview'] { border-radius: var(--r-ctl); }
@@ -54,7 +54,7 @@
 .sf-row[data-role='omp.tool.answer'], .sf-row[data-role='omp.tool.answer.off'] { gap: 6px; }
 .sf-row[data-role='omp.tool.answer.off'] { color: var(--t3); }
 
-/* Eval cells, processes and IRC (§8.3). The prompt glyph is two cells (no ch unit, G5). */
+/* Eval cells, processes and IRC. The prompt glyph is two cells (no ch unit). */
 .sf-col[data-role='omp.tool.eval.cell'] { gap: 4px; }
 .sf-col[data-role='omp.tool.eval.cell'][data-tone='error'] { box-shadow: inset 2px 0 0 var(--bad); padding-left: 6px; }
 .sf-text[data-role='omp.tool.eval.caption'], .sf-text[data-role='omp.tool.eval.status'],
@@ -68,14 +68,14 @@
 .sf-list[data-role='omp.tool.proc.table'], .sf-list[data-role='omp.tool.proc.cancelled'],
 .sf-list[data-role='omp.tool.irc.receipts'] { font-size: 12px; }
 
-/* Think, task, wait and vibe (§8.3). */
+/* Think, task, wait and vibe. */
 .sf-md[data-role='omp.think'] { color: var(--omp-think); font-style: italic; }
 .sf-md[data-role='omp.task.assignment'] { padding-left: 10px; border-left: 1px solid var(--l2); color: var(--t2); }
 .sf-col[data-role='omp.wait.job'] { gap: 4px; }
 .sf-row[data-role='omp.wait.agent'] { gap: 6px; }
 .sf-text[data-role='omp.vibe.composer'] { font-family: var(--mono); }
 
-/* The user's own shell commands (§8.4; not recorded yet): placed like the user's bubble. */
+/* The user's own shell commands (not recorded yet): placed like the user's bubble. */
 .sf-tool[data-role='omp.bash'], .sf-tool[data-role='omp.eval'] {
   align-self: flex-end; max-width: var(--omp-bubble-max); border-color: transparent; border-radius: var(--r-card);
   box-shadow: inset 0 0 0 1px var(--l2); background-color: var(--sf-tint-user, var(--l1));

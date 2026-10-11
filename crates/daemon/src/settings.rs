@@ -1,4 +1,4 @@
-//! The user's settings file, `<config>/settings.json` (§9.1; research/product.md §7): one JSON
+//! The user's settings file, `<config>/settings.json`: one JSON
 //! object holding only the keys the user changed. `$AUK_CONFIG_DIR` names the config dir, as it
 //! does for `plugins/`. Each machine reads its own; nothing syncs between hosts.
 //!
@@ -6,9 +6,9 @@
 //!
 //! | Key | Default | Read |
 //! | --- | --- | --- |
-//! | `plugins` | `true` | at start and at every plugin reload (§9.3): `false` loads no plugin |
+//! | `plugins` | `true` | at start and at every plugin reload: `false` loads no plugin |
 //! | `plugins_disabled` | `[]` | likewise: listed ids stay installed but Disabled |
-//! | `agent_command` | `"omp"` | when an agent pane opens (§5.1); existing panes keep theirs |
+//! | `agent_command` | `"omp"` | when an agent pane opens; existing panes keep theirs |
 //!
 //! A missing file means every default. A file that isn't a JSON object is reported and ignored;
 //! a key of the wrong type keeps its default. Keys the daemon doesn't use are left alone.

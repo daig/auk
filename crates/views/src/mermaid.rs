@@ -1,4 +1,4 @@
-//! Mermaid diagrams in `md` fences (§8.5, §18.4, amendment A23; book:5018, 5026, 5065).
+//! Mermaid diagrams in `md` fences.
 //!
 //! The engine is [merman](https://crates.io/crates/merman), a headless Rust implementation of
 //! Mermaid (parse, layout, SVG) that needs no JavaScript runtime or browser, so the same code
@@ -44,7 +44,7 @@ pub const KINDS: [&str; 7] = [
 /// The largest source drawn as a diagram, in bytes.
 pub const MAX_SOURCE: usize = 32 << 10;
 
-/// The diagram text size in px at the 13px design size (regions zoom it, §8.3).
+/// The diagram text size in px at the 13px design size (regions zoom it).
 const FONT_PX: f32 = 13.0;
 
 /// What a fence's first statement says it is: `Ok(kind)` for a kind drawn ([`KINDS`]), or

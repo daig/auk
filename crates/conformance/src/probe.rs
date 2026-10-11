@@ -332,7 +332,7 @@ impl Input {
 }
 
 /// Splits what the terminal wrote into TSP messages, DA1 answers and other bytes. A TSP message
-/// must end with ST (F1); one that doesn't stays in the other bytes.
+/// must end with ST; one that doesn't stays in the other bytes.
 pub fn split_input(bytes: &[u8]) -> Vec<Input> {
     let mut out = Vec::new();
     let mut other = Vec::new();

@@ -1,4 +1,4 @@
-/* omp (amendment A24; research/omp-stylesheets.md §3.2, §4): the base the other omp sheets share.
+/* omp: the base the other omp sheets share.
    The omp tokens on omp's regions, the quiet control and button idioms, and the roles used on more
    than one omp surface. This sheet alone owns the roles below; no other omp sheet restates them
    (omp.divider draws as the transcript's markers, in omp-transcript).
@@ -17,7 +17,7 @@
   --omp-bubble-max: min(85%, calc(96 * var(--sf-cw)));
 }
 
-/* Quiet control: a clickable seg's look (book: status strip segs) for omp's small controls.
+/* Quiet control: a clickable seg's look (Tern's status strip segs) for omp's small controls.
    Owning sheets set each member's colour or fill. */
 .sf-text[data-role='omp.user.tool'], .sf-row[data-role='omp.error.action'],
 .sf-row[data-role='omp.working.stop'], .sf-row[data-role='omp.queue.edit'],
@@ -63,7 +63,7 @@
 .sf-row.sf-act[data-role='omp.btn']:active { background-color: var(--l3); }
 .sf-row.sf-act[data-role='omp.btn']:focus-visible { outline: var(--omp-focus); outline-offset: 1px; }
 .sf-row[data-role='omp.btn'] .kbd { border-color: transparent; background-color: transparent; color: var(--t3); }
-/* The book gives accent fills, not their ink: white on the fill is deliberate. */
+/* Tern's docs give accent fills, not their ink: white on the fill is deliberate. */
 .sf-row[data-role='omp.btn'][data-tone='accent'] { color: #fff; background-color: var(--accent-fill); box-shadow: none; }
 .sf-row.sf-act[data-role='omp.btn'][data-tone='accent']:hover { background-color: color-mix(in srgb, var(--accent-fill) 88%, #fff); }
 .sf-row[data-role='omp.btn'][data-tone='accent'] .kbd { color: color-mix(in srgb, #fff 75%, transparent); }

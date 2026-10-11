@@ -1,6 +1,6 @@
 {
   "argv": [
-    "/Users/dai/.local/bin/omp",
+    "~/.local/bin/omp",
     "ps"
   ],
   "cwd": "/private/tmp/claude-501/-Users-dai-code-tern-clone/31364f1a-19f4-408f-a94a-d692aa417101/scratchpad/a24rec/gitrepo",

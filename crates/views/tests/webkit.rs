@@ -1,6 +1,6 @@
 //! The `el`-plus-stylesheet fixtures (the docs' and the Python SDK's recorded frames) laid out by
 //! our engine and by WebKit from the same serialized page: every element box within 2 CSS px or
-//! 2% of its size, whichever is larger (GOAL.md `layout`). The WebKit tool and the comparison are
+//! 2% of its size, whichever is larger. The WebKit tool and the comparison are
 //! `auk_conformance::webkit`; the `layout` suite runs the same fixtures through the daemon.
 
 mod common;

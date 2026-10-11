@@ -1,19 +1,20 @@
 [package]
 name = "auk-views"
-description = "TSP kinds as UI components, chrome widgets and the built-in stylesheets (spec §8, §18.4)."
+description = "TSP kinds as UI components, chrome widgets and the built-in stylesheets."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 auk-ui = { path = "../ui" }
 auk-tsp = { path = "../tsp" }
 auk-term = { path = "../term" }
-# The bundled Nerd Fonts symbols face that draws icon spans (§18.3).
+# The bundled Nerd Fonts symbols face that draws icon spans.
 auk-text = { path = "../text" }
 serde_json = { workspace = true, features = ["preserve_order"] }
-# `data:` URLs in plugin sheets' `background-image` (§9.8 CSS).
+# `data:` URLs in plugin sheets' `background-image`.
 base64 = "0.23.1"
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 syntect = { version = "5", default-features = false, features = ["default-fancy"] }
@@ -22,11 +23,11 @@ imara-diff = "0.2"
 vello = "0.11"
 # Making a supplied font every generic family, where there are no system fonts (the browser).
 parley = "0.11"
-# `image` (§8.5, §18.4): PNG (and APNG), JPEG, GIF and WebP, animated frames included.
+# `image`: PNG (and APNG), JPEG, GIF and WebP, animated frames included.
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 # Sanitized SVG: parsed and filtered to the allowlist (usvg's roxmltree), drawn by resvg.
 resvg = { version = "0.48.1", default-features = false, features = ["text", "system-fonts"] }
-# `math` and md math (§8.5, §18.4, amendment A23): KaTeX-compatible TeX parsing and layout in pure
+# `math` and md math: KaTeX-compatible TeX parsing and layout in pure
 # Rust, glyph outlines from the KaTeX fonts it embeds.
 ratex-parser = "0.1.14"
 ratex-layout = "0.1.14"
@@ -36,7 +37,7 @@ ratex-katex-fonts = "0.1.14"
 # The KaTeX fonts compiled in for debug builds too (rust-embed reads them from disk otherwise,
 # which the browser can't).
 rust-embed = { version = "8.11", default-features = false, features = ["debug-embed"] }
-# Mermaid fences in `md` (§8.5, §18.4, A23): parse, layout and SVG in Rust, drawn by resvg.
+# Mermaid fences in `md`: parse, layout and SVG in Rust, drawn by resvg.
 merman = { version = "=0.8.0", default-features = false, features = ["svg", "diagram-flowchart", "diagram-sequence", "diagram-class", "diagram-state", "diagram-er", "diagram-gantt", "diagram-pie"] }
 # Glyph outlines of the KaTeX fonts, and advances of the face mermaid diagram text draws with
 # (already in the tree through the UI engine).

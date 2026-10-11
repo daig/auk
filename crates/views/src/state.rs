@@ -1,4 +1,4 @@
-//! View state of one surface in one window (§7.8, research/elements.md §1.9): folds, control
+//! View state of one surface in one window: folds, control
 //! flips, "N more lines" expansions, tree items, field selections and IME preedit. Never
 //! replicated and never in snapshots.
 
@@ -8,7 +8,7 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
 /// A local flip of a controlling prop. Resending the same prop value keeps the user's choice; a
-/// different value resets it (§7.8).
+/// different value resets it.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Flip {
     /// The prop value last seen.
@@ -17,7 +17,7 @@ pub(crate) struct Flip {
     pub local: bool,
 }
 
-/// A field's native selection, in UTF-16 offsets (§7.9).
+/// A field's native selection, in UTF-16 offsets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Selection {
     pub anchor: u64,
@@ -47,7 +47,7 @@ pub(crate) struct SurfaceState {
     /// Folds of card, section, tool, agent and checklist phases, by state key.
     pub folds: HashMap<String, Flip>,
     /// Folds as last drawn, by state key: whether collapsed, and whether it is unfolding
-    /// (opened since, drawn with the fold transition, §7.13).
+    /// (opened since, drawn with the fold transition).
     pub drawn_folds: HashMap<String, (bool, bool)>,
     /// The surface has been drawn once.
     pub drawn: bool,
@@ -113,7 +113,7 @@ pub(crate) struct SurfaceState {
     /// One-shot scrolls after layout: `(scroller, element, to the top)`, else to the nearest
     /// edge (a `prefs` focus ring).
     pub reveal_els: Vec<(NodeId, NodeId, bool)>,
-    /// Decorations (book:11571-11585, [`crate::deco`]): the folded composer's caption, by its
+    /// Decorations ([`crate::deco`]): the folded composer's caption, by its
     /// `omp.editor*` col's id.
     pub captions: HashMap<String, NodeId>,
     /// Thinking sections' heads, by section id, and the chain summaries shown on them.
@@ -125,8 +125,7 @@ pub(crate) struct SurfaceState {
     pub work: HashMap<String, bool>,
 }
 
-/// The key local view state is remembered by: the node's `key` under the same parent, or its id
-/// (research/elements.md §1.3).
+/// The key local view state is remembered by: the node's `key` under the same parent, or its id.
 pub(crate) fn state_key(node: NodeRef) -> String {
     let parent = node.parent().map(|p| p.id()).unwrap_or("");
     match node.prop("key") {
@@ -199,7 +198,7 @@ impl SurfaceState {
 
     /// A node's state went away with it. Folds are kept by key so a re-added node keeps them.
     pub fn forget(&mut self, id: &str) {
-        // A node re-added under the same id anchors its timers fresh (§7.13).
+        // A node re-added under the same id anchors its timers fresh.
         for path in crate::motion::AGE_PATHS {
             self.anchors.remove(&crate::motion::anchor_key(id, path));
         }

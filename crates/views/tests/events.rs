@@ -1,4 +1,4 @@
-//! View state and input (§7.8, §7.9): folds and control flips with the "same value keeps the
+//! View state and input: folds and control flips with the "same value keeps the
 //! user's choice" rule, form values, pointer actions mapped to events, native editing and IME.
 
 mod common;
@@ -434,7 +434,7 @@ fn hover_sets_state_on_the_chain() {
     assert!(!st.contains(auk_ui::ElementState::HOVER));
 }
 
-/// §7.9: "The terminal draws the text, caret, selection, decorations and IME preedit." A field's
+/// The terminal draws the text, caret, selection, decorations and IME preedit. A field's
 /// program `decor` ranges (UTF-16 offsets) are drawn as styled runs, and a new `decor` redraws.
 #[test]
 fn a_fields_program_decor_decorations_are_drawn() {
@@ -494,7 +494,7 @@ fn a_fields_program_decor_decorations_are_drawn() {
     );
 }
 
-/// §7.8: "Copy is appended unless the list names it": a menu that names `copy` keeps it where it
+/// Copy is appended unless the list names it: a menu that names `copy` keeps it where it
 /// put it, once, under the program's place, and running it copies (nothing reaches the program).
 #[test]
 fn a_menu_that_names_copy_keeps_its_own_entry_and_gets_no_second_copy() {
@@ -537,7 +537,7 @@ fn a_menu_that_names_copy_keeps_its_own_entry_and_gets_no_second_copy() {
     );
 }
 
-/// §7.8 `toggle` folds or unfolds a collapsible card, section, tool, agent or checklist: the
+/// `toggle` folds or unfolds a collapsible card, section, tool, agent or checklist: the
 /// section, tool and agent fold locally at once (their bodies go), report `toggle`, and unfold
 /// on the next one. A kind that can't fold, or one that isn't collapsible, does nothing.
 #[test]
@@ -595,7 +595,7 @@ fn the_toggle_action_folds_sections_tools_and_agents_and_reports_toggle() {
     assert!(shown(&h, "fixed.body"));
 }
 
-/// §7.8: "A link click opens the link instead of running click", for a link span inside a node
+/// A link click opens the link instead of running click, for a link span inside a node
 /// with a `click` action: ⌘-click on the link opens it; a plain click runs click, until
 /// `links_plain_click` makes the plain click a link gesture too (after a settings change, which
 /// re-renders every node).

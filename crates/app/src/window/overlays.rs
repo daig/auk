@@ -1,6 +1,6 @@
 //! What the window draws over its panes and the input that goes to it: the command palette,
-//! context menus for surface `menu` actions (§7.8), the image viewer for `zoom`, toasts and the
-//! status line; and the program-field keys native editing takes (§7.9).
+//! context menus for surface `menu` actions, the image viewer for `zoom`, toasts and the
+//! status line; and the program-field keys native editing takes.
 
 use auk_mirror::PaneId;
 use auk_platform_macos::{KeyInput, MouseButton, MouseEvent, Window};
@@ -29,7 +29,7 @@ pub struct ContextMenu {
 pub struct Viewer {
     pub pane: PaneId,
     pub zoom: Zoom,
-    /// The shown picture is decoding in the background (amendment A9): frames look again.
+    /// The shown picture is decoding in the background: frames look again.
     pub decoding: bool,
 }
 
@@ -71,7 +71,7 @@ impl WinState {
                 sub: c.error.clone(),
                 retry: "card:retry".to_owned(),
             });
-        // Presence (§10.1): who else is attached to the host.
+        // Presence: who else is attached to the host.
         if let Some(text) = self.presence_shown.clone() {
             model.status.push(crate::chrome::StatusItem {
                 plugin: "auk.presence".to_owned(),
@@ -81,7 +81,7 @@ impl WinState {
                 command: None,
             });
         }
-        // The host's identity chain and the link's state (§10.1).
+        // The host's identity chain and the link's state.
         model.status.extend(self.link_segments());
         model.status_title = self
             .focused_pane()
@@ -148,7 +148,7 @@ impl WinState {
                 });
             }
         }
-        // "New <title> block" for each Ready plugin's palette block types (§9.5).
+        // "New <title> block" for each Ready plugin's palette block types.
         self.plugins_catalog();
         for (p, b) in self.plugins.catalog.block_types() {
             if b.palette {
@@ -357,7 +357,7 @@ impl WinState {
         took
     }
 
-    /// A key in the focused pane's program field (§7.9): native editing takes selecting keys,
+    /// A key in the focused pane's program field: native editing takes selecting keys,
     /// caret moves and deletes with a selection as `edit` events. Returns whether it did.
     pub(super) fn field_key_input(
         &mut self,
@@ -484,7 +484,7 @@ impl WinState {
         let overlay = self.overlays.any();
         let in_bars = m.y < BAR_HEIGHT || m.y > height - STATUS_HEIGHT;
         let toast = matches!(action, Some(ChromeAction::Toast(_)));
-        // The block card's buttons (§9.5).
+        // The block card's buttons.
         let card = matches!(&action, Some(ChromeAction::Run(n)) if n.starts_with("card:"));
         if !(overlay || in_bars || toast || card) {
             return false;
@@ -587,7 +587,7 @@ impl WinState {
             .lens_point(&view.arranged, px, py, scale as f32)
     }
 
-    /// A secondary press over a surface opens its context menu (§7.8 `menu`). Returns whether
+    /// A secondary press over a surface opens its context menu. Returns whether
     /// one opened.
     pub(super) fn context_menu_at(&mut self, pane: PaneId, m: &MouseEvent) -> bool {
         let Some((dx, dy)) = self.surface_point(pane, m.x, m.y) else {
@@ -672,7 +672,7 @@ impl WinState {
             let Some(sf) = self.surfaces.get_mut(&pane) else {
                 continue;
             };
-            // Command blocks show their toolbar on hover (§9.6).
+            // Command blocks show their toolbar on hover.
             changed |= sf.lens_hover(lens_point);
             let (doc, pv) = sf.parts();
             let (hx, hy) = point.unwrap_or((-1.0e6, -1.0e6));

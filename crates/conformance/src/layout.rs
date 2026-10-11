@@ -1,4 +1,4 @@
-//! The UI engine's side of the layout comparison (GOAL.md `layout`, spec §18.2): probe pages read
+//! The UI engine's side of the layout comparison: probe pages read
 //! into an `auk_ui::Document`, laid out, and their element boxes keyed like `webkit-boxes`.
 //!
 //! The probe pages live in `crates/conformance/probes`; each exercises one layout mode in the Ahem

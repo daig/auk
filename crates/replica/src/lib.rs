@@ -1,16 +1,16 @@
-//! One pane replica (spec §15.1, §22): the pane's terminal plus the sequenced stream that drives
-//! it. The stream is the pane's output bytes with records (§15.2) inserted at exact positions;
+//! One pane replica: the pane's terminal plus the sequenced stream that drives
+//! it. The stream is the pane's output bytes with records inserted at exact positions;
 //! every item carries a sequence number, and a replica applies items strictly in order.
 //!
 //! The daemon's replica is authoritative: it numbers the items and is the only one whose answers
-//! (DA1, CPR, TSP replies) reach the program (§14.2). Client replicas follow: they apply the same
-//! items, start from a snapshot taken at a sequence number (§15.3), and drop every answer.
+//! (DA1, CPR, TSP replies) reach the program. Client replicas follow: they apply the same
+//! items, start from a snapshot taken at a sequence number, and drop every answer.
 //!
-//! Every replica runs the same TSP engine (`auk-tsp`, §7) on the same stream: TSP strings, the
+//! Every replica runs the same TSP engine (`auk-tsp`) on the same stream: TSP strings, the
 //! prompt mark, RIS, the alternate screen, cleared screens and ended anchors reach it in stream
 //! order, as do the records it depends on (process exit, the chunk timeout, settings). Only the
 //! authoritative replica's answers reach the program; acks, view events and client facts come
-//! from the daemon on behalf of the pane's primary client (§15.5) and touch no replicated state.
+//! from the daemon on behalf of the pane's primary client and touch no replicated state.
 //!
 //! Builds for wasm32: the browser client runs the same replica.
 
@@ -31,13 +31,13 @@ pub use auk_term::Event;
 mod lens;
 pub use lens::{ANCHOR_BASE, LensBlock, LensNote, LensSnapshot, SF_PREFIX, claim_catalog};
 
-/// The parsing behavior every replica of a host must share (§15.2). Clients whose parser version
-/// differs from the daemon's are refused at attach (X9). It names this crate's version, which the
+/// The parsing behavior every replica of a host must share. Clients whose parser version
+/// differs from the daemon's are refused at attach. It names this crate's version, which the
 /// whole workspace shares (so it covers `auk-term`, its Unicode width tables and `auk-tsp`), plus
 /// a revision bumped whenever parsing changes between releases.
 pub const PARSER_VERSION: &str = concat!("auk-replica/", env!("CARGO_PKG_VERSION"), "+r3");
 
-/// Host settings that change parsing (§15.2, §5.5). They change only through
+/// Host settings that change parsing. They change only through
 /// [`Record::Settings`], so every replica switches at the same stream position.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Settings {
@@ -47,9 +47,9 @@ pub struct Settings {
     pub native_surfaces: bool,
     /// Lens claims on or off (`command_lenses`).
     pub command_lenses: bool,
-    /// The per-pane retention budget for surface documents, in bytes (§7.10).
+    /// The per-pane retention budget for surface documents, in bytes.
     pub retention: u64,
-    /// The hello advertises the T2 kinds drawn (A23). Off, it lists only T0 and T1 (and no
+    /// The hello advertises the T2 kinds drawn. Off, it lists only T0 and T1 (and no
     /// `aside`), which is how a program's T2 fallback is checked.
     #[serde(default = "on")]
     pub t2_kinds: bool,
@@ -79,7 +79,7 @@ impl Settings {
     }
 }
 
-/// A sequenced record (§15.2): a change to replicated state that isn't pane output.
+/// A sequenced record: a change to replicated state that isn't pane output.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Record {
@@ -93,24 +93,24 @@ pub enum Record {
         settings: Settings,
     },
     /// The pane's process ended (its code, or 128 plus the signal). Inline and flow surfaces
-    /// close as if kept (§7.3), at this position on every replica.
+    /// close as if kept, at this position on every replica.
     Exit {
         status: i32,
     },
-    /// The daemon's 1 s chunk timeout passed (§7.1): the chunk sequence being joined is dropped
+    /// The daemon's 1 s chunk timeout passed: the chunk sequence being joined is dropped
     /// here on every replica.
     ChunkTimeout,
-    /// The plugin catalog changed (§15.2): lens claims at later command starts use this one.
+    /// The plugin catalog changed: lens claims at later command starts use this one.
     /// It carries only what claims read ([`claim_catalog`]).
     Catalog {
         catalog: auk_plugins::Catalog,
     },
-    /// The daemon measured a command block's duration, from `C` to `D` (§5.3).
+    /// The daemon measured a command block's duration, from `C` to `D`.
     LensTook {
         block: u64,
         took_ms: u64,
     },
-    /// The pane came back from the state file after a daemon restart, with a new process (§5.4):
+    /// The pane came back from the state file after a daemon restart, with a new process:
     /// inline and flow surfaces become closed, read-only and restored, screen surfaces go, and
     /// an earlier exit is forgotten.
     Restore,
@@ -132,7 +132,7 @@ pub enum Role {
     Follower,
 }
 
-/// A replica's state as a byte stream replayed through the normal parser (§15.3), at the stream
+/// A replica's state as a byte stream replayed through the normal parser, at the stream
 /// position `seq`. Replaying it into a new replica of the same size and settings gives an equal
 /// [`Replica::state_hash`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -146,11 +146,10 @@ pub struct Snapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit: Option<i32>,
     /// VT bytes, then the replica's own state as OSC sequences, then TSP, then the bytes of any
-    /// sequence the parser is in the middle of (§15.3).
+    /// sequence the parser is in the middle of.
     #[serde(skip)]
     pub bytes: Vec<u8>,
-    /// The lens claim catalog, command blocks with their current views, and a running capture
-    /// (§15.3).
+    /// The lens claim catalog, command blocks with their current views, and a running capture.
     #[serde(default, skip_serializing_if = "LensSnapshot::is_empty")]
     pub lens: LensSnapshot,
 }
@@ -175,7 +174,7 @@ impl fmt::Display for SeqError {
 impl std::error::Error for SeqError {}
 
 /// An answer for the program, in stream order. The daemon writes terminal answers as they come
-/// and TSP messages only through the tty mode gate (§12.1).
+/// and TSP messages only through the tty mode gate.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Answer {
     /// Terminal answers: DA1, CPR, color queries and the like.
@@ -192,7 +191,7 @@ impl Answer {
     }
 }
 
-/// The TSP engine's replicated config for these settings (§15.2).
+/// The TSP engine's replicated config for these settings.
 pub fn tsp_config(settings: &Settings) -> TspConfig {
     let mut config = TspConfig {
         enabled: settings.native_surfaces,
@@ -251,7 +250,7 @@ impl Replica {
     }
 
     /// Rebuilds a replica from a snapshot. Live items continue at `snapshot.seq + 1`. Nothing the
-    /// replay would answer is kept (§15.3). `tsp` is the engine to rebuild into (its config is
+    /// replay would answer is kept. `tsp` is the engine to rebuild into (its config is
     /// replaced by the snapshot's settings); `None` builds the default one.
     pub fn from_snapshot(snapshot: &Snapshot, role: Role, tsp: Option<TspPane>) -> Self {
         let settings = snapshot.settings.clone();
@@ -271,7 +270,7 @@ impl Replica {
         replica.replies.clear();
         replica.lens = lens::Lenses::restore(&snapshot.lens);
         // The engine counts the finished command blocks from the start, as the live replica's
-        // does (§7.10); the state fits its budget already, so nothing is evicted here.
+        // does; the state fits its budget already, so nothing is evicted here.
         replica.enforce_retention();
         replica.seq = snapshot.seq;
         replica
@@ -324,7 +323,7 @@ impl Replica {
         &self.term
     }
 
-    /// The pane's TSP state (§7): surfaces, documents, the program's hello.
+    /// The pane's TSP state: surfaces, documents, the program's hello.
     pub fn tsp(&self) -> &TspPane {
         &self.tsp
     }
@@ -340,26 +339,26 @@ impl Replica {
         self.tsp.take_changes()
     }
 
-    /// Client facts for answers (§15.5). Not replicated.
+    /// Client facts for answers. Not replicated.
     pub fn set_facts(&mut self, facts: auk_term::Facts) {
         self.term.set_facts(facts);
     }
 
-    /// The primary client's facts for TSP (§15.5): the hello's `cell`, `dark`, `reduceMotion`
+    /// The primary client's facts for TSP: the hello's `cell`, `dark`, `reduceMotion`
     /// and `hour12`, and `theme`, `motion`, `resize` and `visible` events as they change.
     pub fn set_tsp_facts(&mut self, facts: TspFacts) {
         self.tsp.set_facts(&self.term, facts);
         self.collect_tsp(false);
     }
 
-    /// The primary drew surface `sf` up to frame `s` (§7.10): queues the `ack` (and the
+    /// The primary drew surface `sf` up to frame `s`: queues the `ack` (and the
     /// first-draw `resize`) for the program.
     pub fn ack(&mut self, sf: &str, s: u64) {
         self.tsp.ack(&self.term, sf, s);
         self.collect_tsp(false);
     }
 
-    /// An event a client built from its view (§15.4), checked against the documents.
+    /// An event a client built from its view, checked against the documents.
     pub fn view_event(&mut self, sf: &str, event: ViewEvent) -> Result<Delivery, Refused> {
         let result = self.tsp.view_event(&self.term, sf, event);
         self.collect_tsp(false);
@@ -380,7 +379,7 @@ impl Replica {
         self.cwd.as_deref()
     }
 
-    /// OSC 1337 user variables (§5.4 `resume`), decoded.
+    /// OSC 1337 user variables (`resume`), decoded.
     pub fn user_vars(&self) -> &BTreeMap<String, Vec<u8>> {
         &self.user_vars
     }
@@ -429,13 +428,13 @@ impl Replica {
         h.finalize().into()
     }
 
-    /// The snapshot at the current stream position (§15.3).
+    /// The snapshot at the current stream position.
     pub fn snapshot(&self) -> Snapshot {
         self.snapshot_with(&mut |_, _, _| {})
     }
 
     /// The snapshot, with each TSP node's props passed through `rewrite` (the daemon rewrites
-    /// ages to snapshot time, §7.13).
+    /// ages to snapshot time).
     pub fn snapshot_with(&self, rewrite: &mut Rewrite<'_>) -> Snapshot {
         // The terminal's state leaves the parser in the ground state, so the replica's own
         // sequences and TSP's parse as such; the sequence the parser is in the middle of comes
@@ -521,7 +520,7 @@ impl Replica {
             match event {
                 Some(event) => {
                     // The rest of this byte's events. RIS ends anchors as it resets; surfaces are
-                    // cleared silently by the reset, not ended one by one with `gone` (§7.3).
+                    // cleared silently by the reset, not ended one by one with `gone`.
                     let mut batch = vec![event];
                     batch.extend(self.term.take_events());
                     if let Some(i) = batch.iter().position(|e| *e == Event::Reset) {

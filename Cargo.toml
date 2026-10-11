@@ -1,13 +1,14 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
-exclude = ["spikes", "third_party"]
+exclude = ["third_party"]
 
 [workspace.package]
 version = "0.0.0"
 edition = "2024"
 rust-version = "1.99"
 publish = false
+license = "MIT"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -36,7 +37,7 @@ opt-level = 2
 [profile.release]
 debug = "line-tables-only"
 
-# Mermaid (A23) is off the frame path: build its engine for size, not speed (about half its
+# Mermaid is off the frame path: build its engine for size, not speed (about half its
 # code in the browser client).
 [profile.release.package.merman-core]
 opt-level = "s"

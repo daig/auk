@@ -1,11 +1,11 @@
-//! The terminal core (spec §17): VT parser, grid, scrollback, main and alternate screens, anchor
+//! The terminal core: VT parser, grid, scrollback, main and alternate screens, anchor
 //! rows, modes and reports. Deterministic: the same bytes and calls give the same state on every
-//! platform, wasm32 included (§15.2).
+//! platform, wasm32 included.
 //!
 //! The public API below is the contract other crates build against.
 //!
-//! Built on a parser vendored from `vte` (with APC strings for TSP, §6.1) and a grid whose
-//! semantics follow `alacritty_terminal`, the reference grid (§21); `tests/differential.rs`
+//! Built on a parser vendored from `vte` (with APC strings for TSP) and a grid whose
+//! semantics follow `alacritty_terminal`, the reference grid; `tests/differential.rs`
 //! checks the two against each other and lists the deliberate differences.
 
 mod core;
@@ -18,10 +18,10 @@ mod reflow;
 mod screen;
 mod snapshot;
 
-/// Replicated settings that change parsing (§15.2). They change only through sequenced records.
+/// Replicated settings that change parsing. They change only through sequenced records.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
-    /// Scrollback length in rows (a host setting, §5.5).
+    /// Scrollback length in rows (a host setting).
     pub scrollback: usize,
 }
 
@@ -31,7 +31,7 @@ impl Default for Config {
     }
 }
 
-/// Answers that depend on a client (§14.2, §15.5): colors for OSC 4/10/11/12 queries and the
+/// Answers that depend on a client: colors for OSC 4/10/11/12 queries and the
 /// cell size for `CSI 14/16/18 t`. Not replicated state; only the answering replica uses them.
 /// `Facts::default()` is xterm's colors and an 8×16 cell, for before any client has said.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,7 +58,7 @@ pub enum Color {
     Rgb(Rgb),
 }
 
-/// OSC 133 marks (§5.3).
+/// OSC 133 marks.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Mark {
     PromptStart,
@@ -80,7 +80,7 @@ pub enum Mark {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
     /// A complete `ESC _ tsp;…` string: the bytes after `ESC _`, without the terminator. Other
-    /// APC strings are consumed and dropped (§6.1).
+    /// APC strings are consumed and dropped.
     Tsp(Vec<u8>),
     Mark(Mark),
     /// OSC 7, as sent (usually a `file://host/path` URL).
@@ -97,16 +97,16 @@ pub enum Event {
     Reset,
     /// The alternate screen was entered (`true`) or left.
     AltScreen(bool),
-    /// The active screen was cleared by `ED 2`/`ED 3` (the screen surface rule, §7.3).
+    /// The active screen was cleared by `ED 2`/`ED 3` (the screen surface rule).
     ScreenCleared,
     /// An anchor row ended: erased, scrolled out of a scroll region or out of the scrollback,
-    /// cleared with the scrollback, or dropped by RIS (§7.4).
+    /// cleared with the scrollback, or dropped by RIS.
     AnchorGone(AnchorKey),
     /// An answer was added to the queue that `take_replies` drains (one event per answer).
     Replies,
 }
 
-/// The identity of an anchor row (§7.4, §15.3 `key`). Chosen by the caller, unique per pane.
+/// The identity of an anchor row (a snapshot's `key`). Chosen by the caller, unique per pane.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct AnchorKey(pub u64);
 
@@ -190,9 +190,9 @@ pub struct Row {
     pub cells: Vec<Cell>,
     /// The row continues on the next one (soft wrap).
     pub wrapped: bool,
-    /// Set when the row is an anchor row (§7.4).
+    /// Set when the row is an anchor row.
     pub anchor: Option<AnchorKey>,
-    /// A prompt started on this row (OSC 133 `A`, §5.3): prompt navigation jumps between these.
+    /// A prompt started on this row (OSC 133 `A`): prompt navigation jumps between these.
     /// Erasing the whole row clears it.
     pub prompt: bool,
 }
@@ -274,7 +274,7 @@ impl Terminal {
 
     /// Answers the program asked for (DA1, DA2, DSR, CPR, DECRQM, kitty flag queries, XTVERSION,
     /// OSC color queries, window size reports), in order. Only the answering replica forwards
-    /// them to the PTY (§14.2); others drain and drop them.
+    /// them to the PTY; others drain and drop them.
     pub fn take_replies(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.core.replies)
     }
@@ -291,9 +291,9 @@ impl Terminal {
         self.core.accept_anchor_sequences = accept;
     }
 
-    // Records (§15.2): replicated changes that arrive in-band, in stream order.
+    // Records: replicated changes that arrive in-band, in stream order.
 
-    /// Resizes with reflow (§17: anchor rows never join a wrapped line). The main screen
+    /// Resizes with reflow (anchor rows never join a wrapped line). The main screen
     /// reflows; the alternate screen is cut or padded. Rows lost end their anchors (queued as
     /// `AnchorGone`).
     pub fn resize(&mut self, cols: u16, rows: u16) {
@@ -334,16 +334,16 @@ impl Terminal {
         self.core.set_config(config);
     }
 
-    // Anchors (§7.4).
+    // Anchors.
 
-    /// Opens an anchor at the cursor per §7.4: ends the cursor's row if it holds anything, makes
+    /// Opens an anchor at the cursor: ends the cursor's row if it holds anything, makes
     /// the row the anchor, and moves the cursor to the start of the next row. Fails on the
     /// alternate screen.
     pub fn open_anchor(&mut self, key: AnchorKey) -> Result<Line, AnchorError> {
         self.core.open_anchor(key)
     }
 
-    /// Undoes an anchor row if nothing was written below it (the prompt rule, §7.3): the row is
+    /// Undoes an anchor row if nothing was written below it (the prompt rule): the row is
     /// removed and the cursor returns to it. Returns whether it was undone.
     pub fn undo_anchor(&mut self, key: AnchorKey) -> bool {
         self.core.undo_anchor(key)
@@ -379,7 +379,7 @@ impl Terminal {
         self.core.screen().buf.get(line).map(|slot| &slot.row)
     }
 
-    /// The active screen's lines where a prompt started (OSC 133 `A`), oldest first (§5.3 prompt
+    /// The active screen's lines where a prompt started (OSC 133 `A`), oldest first (for prompt
     /// navigation).
     pub fn prompt_lines(&self) -> Vec<Line> {
         self.core
@@ -516,7 +516,7 @@ impl Terminal {
         hash::state_hash(&self.core, &self.parser)
     }
 
-    /// VT bytes that rebuild this state (§15.3): fed to `Terminal::new(cols, rows, config)`
+    /// VT bytes that rebuild this state: fed to `Terminal::new(cols, rows, config)`
     /// they give an equal `state_hash`, anchors (keys included) as well. Anchor rows are
     /// written with Auk's private `OSC 6464 ; anchor ; <key> ST`; a few other facts plain VT
     /// can't set use other `OSC 6464` sequences.

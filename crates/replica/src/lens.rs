@@ -1,17 +1,17 @@
-//! Command lenses in a replica (§5.3, §9.6, §15.1, §15.2): every replica claims commands on its
+//! Command lenses in a replica: every replica claims commands on its
 //! own, from the catalog the daemon sequences into the stream, and diverts a claimed command's
 //! output into a command block (kind `block`) in scrollback instead of the grid.
 //!
 //! - The claim is made at OSC 133 `C` with [`Catalog::claim`], the runtime-free half of
 //!   `auk-plugins`: no Lua and no window half takes part, so every replica decides the same.
-//! - The block sits at an anchor row opened at the cursor, like a flow surface (§7.4). It keeps
+//! - The block sits at an anchor row opened at the cursor, like a flow surface. It keeps
 //!   the line, cwd, raw output, capture width, exit status and the duration the daemon measured
 //!   (sequenced as [`Record::LensTook`](crate::Record::LensTook)).
 //! - While the command runs, output goes to the capture's scratch screen
 //!   ([`auk_plugins::capture::Capture`]); `D` (or a prompt without one) ends it, and the bytes
 //!   after the mark go back to the grid. A capture that turns interactive or passes 16 MiB
 //!   aborts: the block is dropped and everything captured is replayed into the grid.
-//! - The lens view is a side message (§15.1): it is kept with the block and travels in
+//! - The lens view is a side message: it is kept with the block and travels in
 //!   snapshots, but it isn't stream state and isn't hashed.
 //!
 //! Only the answering replica (the daemon's) queues [`LensNote`]s for the plugin host.
@@ -68,12 +68,12 @@ pub struct LensBlock {
 }
 
 impl LensBlock {
-    /// The block's role, `lens.plugin.<plugin>.<lens>` (§9.6, CSS `data-role`).
+    /// The block's role, `lens.plugin.<plugin>.<lens>` (CSS `data-role`).
     pub fn role(&self) -> String {
         format!("lens.plugin.{}.{}", self.plugin, self.lens)
     }
 
-    /// The block's retention cost (§7.10), as the TSP engine estimates a node: a fixed overhead
+    /// The block's retention cost, as the TSP engine estimates a node: a fixed overhead
     /// plus its text. The view, a side message that replicas get at different times, doesn't
     /// count, so every replica evicts the same blocks.
     pub fn cost(&self) -> u64 {
@@ -98,7 +98,7 @@ impl LensBlock {
         format!("{SF_PREFIX}{}", self.id)
     }
 
-    /// The block as a `block` node (research/elements.md): its props, then `native` (the lens
+    /// The block as a `block` node: its props, then `native` (the lens
     /// view, when there is one) and `raw` (the output as an `ansi` node). Views draw this.
     pub fn node(&self, raw: &[u8]) -> Value {
         let id = format!("lens{}", self.id);
@@ -152,7 +152,7 @@ pub enum LensNote {
     Drop { block: u64 },
 }
 
-/// The lens part of a snapshot (§15.3): the claim catalog, the blocks with their views, and the
+/// The lens part of a snapshot: the claim catalog, the blocks with their views, and the
 /// running capture's block (whose `raw` then holds the output so far).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LensSnapshot {
@@ -312,7 +312,7 @@ pub(crate) fn new_block(
     (block, run)
 }
 
-/// The part of a catalog a replica claims from (§9.4, §15.2): Ready plugins that declare lenses,
+/// The part of a catalog a replica claims from: Ready plugins that declare lenses,
 /// with their lens rules. Block types, styles and problems don't change parsing.
 pub fn claim_catalog(catalog: &Catalog) -> Catalog {
     Catalog {
@@ -348,7 +348,7 @@ mod b64 {
 }
 
 impl crate::Replica {
-    /// OSC 133 `C`: claims the command from the catalog (§9.6) and, when a lens claims it, opens
+    /// OSC 133 `C`: claims the command from the catalog and, when a lens claims it, opens
     /// a command block at the cursor and starts capturing.
     pub(crate) fn claim(&mut self, cmdline: Option<&str>, typed: Option<&str>) {
         if self.lens.running.is_some() {
@@ -407,7 +407,7 @@ impl crate::Replica {
             }
         }
         if step.abort.is_some() {
-            // Everything captured goes to the grid instead (§9.6 "Aborting").
+            // Everything captured goes to the grid instead.
             let raw = capture.raw().to_vec();
             self.lens.running = None;
             if let Some(i) = self.lens.index(id) {
@@ -484,7 +484,7 @@ impl crate::Replica {
         self.lens.blocks.remove(i);
     }
 
-    /// Retention (§7.10): finished command blocks share the pane's budget with its surface
+    /// Retention: finished command blocks share the pane's budget with its surface
     /// documents, and go whole, oldest first, with the closed surfaces. Runs after every item.
     pub(crate) fn enforce_retention(&mut self) {
         let running = self.lens.running.as_ref().map(|(id, _)| *id);
@@ -543,7 +543,7 @@ impl crate::Replica {
         self.lens.catalog.as_ref()
     }
 
-    /// A lens view arrived (§15.1 side message): it replaces the block's view whole. Returns
+    /// A lens view arrived (a side message): it replaces the block's view whole. Returns
     /// false when this replica has no such block (yet).
     pub fn set_lens_view(&mut self, block: u64, view: Option<Value>) -> bool {
         match self.lens.index(block) {

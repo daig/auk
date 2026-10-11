@@ -1,4 +1,4 @@
-//! The plugin host in the daemon (§4.1, §9, §14.2, §15.1–§15.3, §20): host halves load at start,
+//! The plugin host in the daemon: host halves load at start,
 //! before panes are restored; host events, the spawn filter, block panes and lens captures go to
 //! the workers of `auk-plugins`; their output (block bytes, saves, lens views, effects, pane
 //! writes) comes back into the pane table.
@@ -17,7 +17,7 @@
 //! back as side messages: kept in the daemon's replica (so snapshots carry them) and sent to
 //! every client showing the pane.
 //!
-//! For the state file (M6): a block pane's kind, args and last `save` are in its [`PaneKind`],
+//! For the state file: a block pane's kind, args and last `save` are in its [`PaneKind`],
 //! and [`Daemon::restore_block`] restarts one; [`Daemon::sync_catalog`] brings restored panes'
 //! claim catalog up to date.
 
@@ -43,7 +43,7 @@ use crate::pane::{Pane, PaneKind, default_facts, osc7_path};
 use crate::server::{DEFAULT_SIZE, DEFAULT_WINDOW_KEY, Daemon, lock};
 use crate::{pty, tsp};
 
-/// The pane-identity variables (§5.2) whose `AUK_` names the spawn filter sees as `TERN_`.
+/// The pane-identity variables whose `AUK_` names the spawn filter sees as `TERN_`.
 const IDENTITY: [&str; 8] = [
     "IDENTITY",
     "PANE",
@@ -59,7 +59,7 @@ const IDENTITY: [&str; 8] = [
 /// this bounds the wait while a reload holds the plugin thread.
 const SPAWN_LIMIT: Duration = Duration::from_secs(10);
 
-/// How long `auk plugin reload` may wait (§9.11: 124 after 60 s).
+/// How long `auk plugin reload` may wait (it exits 124 after 60 s).
 const RELOAD_LIMIT: Duration = Duration::from_secs(60);
 
 /// A host-unique lens block id: the pane in the high half, the block's number in the low half.
@@ -132,21 +132,21 @@ impl std::fmt::Debug for Cmd {
     }
 }
 
-/// Where plugins live: `<config>/plugins` (§9.1; `$AUK_CONFIG_DIR` overrides the config dir).
+/// Where plugins live: `<config>/plugins` (`$AUK_CONFIG_DIR` overrides the config dir).
 pub fn plugins_dir() -> PathBuf {
     auk_plugins::paths::plugins_dir(&auk_plugins::paths::config_dir())
 }
 
 impl Plugins {
-    /// Loads every allowed host half (§4.1 start order: before panes are restored). All workers
-    /// start at once and this waits for each entry, as §9.3 allows.
+    /// Loads every allowed host half (before panes are restored). All workers
+    /// start at once and this waits for each entry.
     pub fn start(state_dir: PathBuf) -> Plugins {
         let plugins_dir = plugins_dir();
         let panes = Arc::new(PaneTable::default());
         let config = HostConfig {
             plugins_dir: plugins_dir.clone(),
             state_dir,
-            // `plugins` and `plugins_disabled` from the settings file (§9.1), read at every load.
+            // `plugins` and `plugins_disabled` from the settings file, read at every load.
             settings: crate::settings::read().plugins,
             waker: None,
             log: Arc::new(|r: &auk_plugins::LogRecord<'_>| {
@@ -208,7 +208,7 @@ impl Plugins {
         let _ = lock(&self.tx).send(cmd);
     }
 
-    /// The catalog every client receives (§9.4).
+    /// The catalog every client receives.
     pub fn catalog(&self) -> Catalog {
         lock(&self.catalog).clone()
     }
@@ -228,7 +228,7 @@ impl Plugins {
         }
     }
 
-    /// Runs the spawn filter (§9.7) over a process pane's spec: plugins see the pane-identity set
+    /// Runs the spawn filter over a process pane's spec: plugins see the pane-identity set
     /// under `TERN_` names, in order, and their answer replaces the program, args, directory and
     /// that set. Fails open.
     pub fn filter_spawn(&self, spec: &mut pty::SpawnSpec) {
@@ -364,7 +364,7 @@ fn serve_host(
     }
 }
 
-/// A block that couldn't start (§9.5): its pane shows a card saying so, with Retry.
+/// A block that couldn't start: its pane shows a card saying so, with Retry.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FailedBlock {
     /// The card's surface.
@@ -437,7 +437,7 @@ pub enum BlockPlace {
     },
 }
 
-/// A request for a block pane (§9.5 "Opening").
+/// A request for a block pane.
 #[derive(Clone, Debug)]
 pub struct NewBlock {
     /// `<plugin>.<block>`.
@@ -449,7 +449,7 @@ pub struct NewBlock {
 }
 
 impl Daemon {
-    /// A replica for a new pane, with the current claim catalog sequenced first (§15.2).
+    /// A replica for a new pane, with the current claim catalog sequenced first.
     fn block_replica(&self, cols: u16, rows: u16) -> Replica {
         let settings = self.settings();
         let mut replica = Replica::with_tsp(
@@ -464,7 +464,7 @@ impl Daemon {
     }
 
     /// Opens a block pane: a daemon pane with no process whose output is the block worker's TSP
-    /// bytes (§9.5, §15.1). When the block can't start (no Ready plugin defines its type, say),
+    /// bytes. When the block can't start (no Ready plugin defines its type, say),
     /// the pane still opens and shows a "Could not start the block" card with Retry; the answer
     /// then carries the reason in `failed`.
     pub fn new_block_pane(self: &Arc<Self>, req: NewBlock) -> Result<PaneId, String> {
@@ -622,7 +622,7 @@ impl Daemon {
         }
     }
 
-    /// Restarts a block pane from the state file (§5.4, §9.5 "Survival"): same pane id, same
+    /// Restarts a block pane from the state file: same pane id, same
     /// args, from its last `save`, at its last size, on a blank screen. Not placed in the layout
     /// (the restored layout already names it). Fails, and nothing is added, when no Ready plugin
     /// defines the block type.
@@ -670,7 +670,7 @@ impl Daemon {
         Ok(())
     }
 
-    /// Brings a pane's claim catalog up to date with a sequenced record (§15.2). New panes get it
+    /// Brings a pane's claim catalog up to date with a sequenced record. New panes get it
     /// at creation; a catalog change reaches every live pane; restored panes should be synced once
     /// they are in the table.
     pub fn sync_catalog(&self, p: &mut Pane) {
@@ -698,7 +698,7 @@ impl Daemon {
         }
     }
 
-    /// The catalog changed after a reload: every client gets it (§9.3), and every live pane gets
+    /// The catalog changed after a reload: every client gets it, and every live pane gets
     /// the claim part in its stream.
     fn catalog_changed(&self, catalog: &Catalog) {
         let frame = Bytes::from(
@@ -806,7 +806,7 @@ impl Daemon {
     }
 
     /// A view event on a command block (`lens:<n>`) goes to the lens's worker, with the block's
-    /// record for rehydration (§9.6).
+    /// record for rehydration.
     pub(crate) fn lens_view_event(
         &self,
         client: crate::client::ClientId,
@@ -1035,7 +1035,7 @@ impl Daemon {
 }
 
 impl Pane {
-    /// After the replica took an item: host events from shell integration (§9.7), the pane
+    /// After the replica took an item: host events from shell integration, the pane
     /// directory, and the replica's lens notes for the plugin host.
     pub(crate) fn plugin_after(&mut self, events: &[auk_replica::Event], record: Option<&Record>) {
         let Some(link) = self.plugin.as_mut() else {
@@ -1194,7 +1194,7 @@ impl Pane {
     }
 
     /// Input for a pane without a PTY: a block pane's keys and terminal answers go to its
-    /// worker (§15.4). Returns false when there is no block to take them.
+    /// worker. Returns false when there is no block to take them.
     pub(crate) fn block_input(&self, bytes: Vec<u8>) -> bool {
         match (&self.kind, &self.plugin, self.exit) {
             (PaneKind::Block { .. }, Some(link), None) => {
@@ -1204,8 +1204,8 @@ impl Pane {
         }
     }
 
-    /// Sends each command block's current view to a client that just got the snapshot (§15.3
-    /// attach order).
+    /// Sends each command block's current view to a client that just got the snapshot, in
+    /// attach order.
     pub(crate) fn send_lens_views(&self, tx: &ClientTx) {
         for b in self.replica.lens_blocks() {
             if let Some(view) = &b.view {

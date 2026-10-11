@@ -49,7 +49,7 @@ pub(crate) struct Mount {
     /// Attributes the last render wrote (to remove the ones that stop applying).
     pub attrs: Vec<String>,
     pub extra: Extra,
-    /// The node needs the clock (§7.13).
+    /// The node needs the clock.
     pub clock: bool,
     pub region: bool,
     /// The sync pass that created it.
@@ -185,7 +185,7 @@ pub struct PaneView {
     pub(crate) visible: bool,
     pub(crate) focused: bool,
     pub(crate) hover: Vec<NodeId>,
-    /// `:focus*` and `:active` (amendment A24).
+    /// `:focus*` and `:active`.
     pub(crate) focus: crate::focus::FocusStates,
     /// An ordered `prefs` list item being dragged by its grip.
     pub(crate) reorder: Option<crate::kinds::prefs::Reorder>,
@@ -202,15 +202,14 @@ pub struct PaneView {
     /// What the last measure loop settled on: the document's generation and the inputs the
     /// measure pass reads besides it (viewport, view rect, cell size).
     pub(crate) measured: Option<(u64, crate::measure::MeasureInputs)>,
-    /// The CSS motion clock's pause (§7.13: motion pauses while the pane is hidden): time spent
+    /// The CSS motion clock's pause (motion pauses while the pane is hidden): time spent
     /// hidden, and since when it is hidden.
     pub(crate) paused_ms: f64,
     pub(crate) hidden_at: Option<f64>,
-    /// `el` controls never flip (a lens layer's view, §9.6).
+    /// `el` controls never flip (a lens layer's view).
     pub(crate) inert_controls: bool,
     /// A `block`'s Copy copies its raw child's output: true only for the command blocks' own
-    /// view (§9.6). A program's `block` isn't a command block, so its Copy copies an empty string
-    /// (book:8346, amendment A23).
+    /// view. A program's `block` isn't a command block, so its Copy copies an empty string.
     pub(crate) command_blocks: bool,
     /// What the last layout did (frame statistics), and the measure targets visited since.
     pub(crate) work: crate::measure::LayoutWork,
@@ -249,7 +248,7 @@ impl PaneView {
         // Load the grammars off the main thread before the first code block needs them.
         crate::highlight::warm();
         // Reduce Motion reaches sheets (`prefers-reduced-motion`) and the CSS motion engine; the
-        // other two preferences reach sheets (§8.4).
+        // other two preferences reach sheets.
         settings.apply_media(doc);
         PaneView {
             settings,
@@ -392,7 +391,7 @@ impl PaneView {
                 .scrolls
                 .extend(sc.scrolls.iter().cloned());
         }
-        // Blobs that arrived redraw the images naming them (§7.12), whenever they arrive.
+        // Blobs that arrived redraw the images naming them, whenever they arrive.
         if !changes.blobs.is_empty() {
             let arrived: HashSet<String> = changes
                 .blobs
@@ -466,7 +465,7 @@ impl PaneView {
         self.toasts.forget_surface(key);
     }
 
-    /// Program sheets, scoped to the surface (§7.12), in the order first sent.
+    /// Program sheets, scoped to the surface, in the order first sent.
     fn sync_sheets(&mut self, doc: &mut Document, i: usize, surface: &Surface) {
         let sv = &mut self.surfaces[i];
         let want: Vec<(String, String)> = surface
@@ -494,7 +493,7 @@ impl PaneView {
         sv.sheets = want;
     }
 
-    /// Region element attributes, classes and variables (§7.5, §8.3, §7.12).
+    /// Region element attributes, classes and variables.
     pub(crate) fn write_regions_pub(&mut self, doc: &mut Document, pane: &TspPane, i: usize) {
         self.write_regions(doc, pane, i)
     }
@@ -659,7 +658,7 @@ impl PaneView {
             }
         }
         let doc_t = surface.document();
-        // A top-level `age` that arrived restarts its timer, even unchanged (§7.13). Re-anchored
+        // A top-level `age` that arrived restarts its timer, even unchanged. Re-anchored
         // here, before anything renders, so a node added in this drain anchors once, at `now`.
         for id in &dc.ages {
             if let Some(age) = doc_t.get(id).and_then(|n| n.prop("age"))
@@ -755,7 +754,7 @@ impl PaneView {
             }
         }
         // The work fold follows main's blocks: a tool's title or took, a message turning
-        // thinking-only (book:9939-9945).
+        // thinking-only.
         if settings.fold_work
             && let Some(main) = doc_t.region("main")
             && mounts.contains_key("main")
@@ -781,7 +780,7 @@ impl PaneView {
                 }
             }
         }
-        // Later overlays open with their transition (§7.13); what the first draw shows doesn't.
+        // Later overlays open with their transition; what the first draw shows doesn't.
         cx.st.drawn = true;
     }
 
@@ -1106,7 +1105,7 @@ fn apply_look(cx: &mut Cx, m: &mut Mount, node: NodeRef, look: Look) {
         }
     }
     // A clickable node that isn't a field or a form control is a button: a Tab stop with the
-    // button role (K3), unless its kind gave it a role.
+    // button role, unless its kind gave it a role.
     if actions.clickable()
         && !matches!(kind, "editor" | "input")
         && kinds::el::control_type(node).is_none()
@@ -1160,7 +1159,7 @@ pub(crate) fn place_children(
             _ => {}
         }
     }
-    // The work fold's heads go among main's children (book:9939-9945).
+    // The work fold's heads go among main's children.
     if node.id() == "main" && mounts.get("main").is_some_and(|m| m.region) {
         crate::deco::fold_work(cx, node, mounts, &mut direct);
     }
@@ -1178,7 +1177,7 @@ pub(crate) fn place_children(
     let el = m.el;
     let kind = m.kind.clone();
     let region = m.region;
-    // Long `main` and `col` virtualize (§8.3: `col` over 64 children, unless it wraps or
+    // Long `main` and `col` virtualize (`col` over 64 children, unless it wraps or
     // justifies).
     if region && node.id() == "main" || kind == "col" {
         let p = node.props();
