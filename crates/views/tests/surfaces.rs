@@ -14,6 +14,8 @@ struct Pane {
     tsp: TspPane,
     sf: PaneSurfaces,
     now: f64,
+    /// Whether the pane has keyboard focus (`.sf-unfocused` otherwise).
+    focused: bool,
 }
 
 impl Pane {
@@ -34,6 +36,7 @@ impl Pane {
             tsp,
             sf: PaneSurfaces::new(ViewSettings::default(), 1.0),
             now: 1_000_000.0,
+            focused: true,
         }
     }
 
@@ -56,7 +59,7 @@ impl Pane {
     fn arrange(&mut self) -> Arranged {
         let h = f32::from(self.term.rows()) * CELL;
         self.sf
-            .layout(&self.term, &self.tsp, (640.0, h), true, self.now);
+            .layout(&self.term, &self.tsp, (640.0, h), self.focused, self.now);
         self.sf
             .arrange(&self.term, &self.tsp, CELL, h, 1.0, Scroll::default())
     }
@@ -65,7 +68,7 @@ impl Pane {
     fn arrange_shown(&mut self) -> Arranged {
         let h = f32::from(self.term.rows()) * CELL;
         self.sf
-            .layout(&self.term, &self.tsp, (640.0, h), true, self.now);
+            .layout(&self.term, &self.tsp, (640.0, h), self.focused, self.now);
         self.sf
             .arrange_shown(&self.term, &self.tsp, CELL, h, 1.0, Scroll::default())
     }
@@ -256,6 +259,60 @@ fn overlays_sit_in_the_visible_pane_over_long_content_and_their_lists_lay_out() 
     }
     assert!(p.sf.doc().scroll_offset(body).1 < CELL, "back at the top");
     assert!(!p.sf.view().end_windows_left_view(p.sf.doc()));
+}
+
+#[test]
+fn an_overlay_anchored_to_a_caret_sits_by_its_field_in_an_unfocused_pane_too() {
+    // omp's slash menu is anchored to its composer's caret. An unfocused pane (the window behind,
+    // or the browser beside it) draws no caret; the menu still sits by the field, not at the top.
+    let rows = 30;
+    let mut p = Pane::with_rows(rows);
+    p.apc(
+        "q",
+        &json!({"q": "hello", "v": [1], "app": "t", "features": ["dock"]}),
+    );
+    p.apc("o", &json!({"id": "s1", "mode": "inline"}));
+    p.apc(
+        "f",
+        &json!({"sf": "s1", "s": 1, "ops": [
+            ["add", "main", "s1", null, {"id": "main", "k": "col", "c": [
+                {"id": "t", "k": "text", "p": {"text": "hello"}}
+            ]}],
+            // omp's composer: unfocused, its sheet hides the field's line (caret and all) and
+            // shows a one-line caption instead.
+            ["add", "dock", "s1", null, {"id": "dock", "k": "col", "c": [
+                {"id": "ed", "k": "col", "p": {"role": "omp.editor"}, "c": [
+                    {"id": "line", "k": "row", "p": {"role": "omp.composer.line"}, "c": [
+                        {"id": "in", "k": "input", "p": {"text": "/mod", "cursor": 4}}
+                    ]}
+                ]}
+            ]}],
+            ["add", "layer", "s1", null, {"id": "layer", "k": "col", "c": [
+                {"id": "ov", "k": "overlay", "p": {"anchor": {"caret": "in"}}, "c": [
+                    {"id": "hint", "k": "text", "p": {"text": "model\nmodelpreset"}}
+                ]}
+            ]}]
+        ]}),
+    );
+    let card_box = |p: &mut Pane| {
+        p.arrange_shown();
+        let ov = p.el("s1", "ov");
+        let card = p.sf.doc().element_children(ov)[0];
+        p.sf.doc().border_box(card).unwrap()
+    };
+    p.focused = false;
+    let unfocused = card_box(&mut p);
+    p.focused = true;
+    let focused = card_box(&mut p);
+    let vh = f32::from(rows) * CELL;
+    assert!(
+        focused.y > vh / 2.0,
+        "above the docked field, at the bottom: {focused:?}"
+    );
+    assert!(
+        (unfocused.y - focused.y).abs() < CELL,
+        "unfocused, still by the field: {unfocused:?}, focused {focused:?}"
+    );
 }
 
 #[test]

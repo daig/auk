@@ -561,6 +561,9 @@ impl PaneView {
                     })
                 });
                 let Some(target) = target else { continue };
+                // A target a sheet hides (omp's composer line, caret and all, folds away in an
+                // unfocused pane) has no box of its own: the card goes by what shows of it.
+                let target = displayed(dom.doc, target);
                 let Some(tr) = dom.doc.border_box(target) else {
                     continue;
                 };
@@ -797,6 +800,19 @@ fn layer_view(doc: &Document, el: NodeId, layers: NodeId) -> Option<auk_ui::Rect
         cur = doc.parent(p);
     }
     None
+}
+
+/// `el`, or its nearest ancestor that shows when `el` or an ancestor of it is `display: none`.
+fn displayed(doc: &Document, el: NodeId) -> NodeId {
+    let hidden = |e: NodeId| {
+        doc.computed_style(e)
+            .is_some_and(|s| s.display == auk_ui::style::Display::None)
+    };
+    let chain: Vec<NodeId> = std::iter::successors(Some(el), |&e| doc.parent(e)).collect();
+    match chain.iter().rposition(|&e| hidden(e)) {
+        Some(i) => chain.get(i + 1).copied().unwrap_or(el),
+        None => el,
+    }
 }
 
 fn inside(doc: &Document, el: NodeId, ancestor: NodeId) -> bool {
